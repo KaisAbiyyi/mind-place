@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import "katex/dist/katex.min.css";
 import "./style.css";
+import "./security.css";
 import { mountReader, type Invoke } from "./reader.js";
 import { mountSecurityGate } from "./security.js";
 
