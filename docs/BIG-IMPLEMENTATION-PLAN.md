@@ -302,11 +302,154 @@ Hosted clients use a narrow HTTPS tunnel. Local agents can use direct local MCP.
 
 ## 7. BIG roadmap
 
-The user-facing unit below is an **implementation invocation**: one substantial instruction to the coding agent such as `implement fase 3A`. These counts are planning guidance, not an artificial requirement to split work when one capable agent can safely finish more.
+Mind Place development is **cloud-first**. ChatGPT/Codex or another capable coding agent should do implementation in a cloud development environment backed by GitHub. The local Windows machine is primarily a qualification target for behavior that genuinely depends on the user's device, browser profile, provider account, WebView2/Tauri runtime, filesystem semantics, keychain, tunnel reachability, or representative private corpus.
+
+The user should not need to babysit cloud implementation. The intended rhythm is:
+
+```text
+give cloud agent one bounded unit
+        |
+        v
+agent implements + tests + pushes GitHub
+        |
+        v
+CI green + cloud handoff
+        |
+        +---- more cloud units in this phase ----+
+        |                                         |
+        v                                         |
+phase cloud-complete                              |
+        |                                         |
+        v                                         |
+handoff to user                                   |
+        |                                         |
+        v                                         |
+pull exact SHA locally                            |
+        |                                         |
+        v                                         |
+local qualification agent                        |
+        |
+        +--- FAIL ---> evidence handoff ---> cloud fix unit ---> new SHA ---> retest
+        |
+        v
+PASS
+        |
+        +--- user acceptance required? ---> user tests only the irreducibly human flow
+        |
+        v
+next phase
+```
+
+### 7.1 One cloud development unit
+
+One cloud unit is deliberately smaller than one product phase. It should normally own **one coherent subsystem or one vertical integration boundary**, including its tests, migrations/contracts, and documentation changes. A unit is sized so a strong agent can understand the relevant code without needing to reconstruct the whole project or rely on context compaction to finish safely.
+
+Default rule:
+
+- one cloud unit = one explicit instruction such as `implement phase 4C`;
+- keep `main` or the phase integration branch CI-green at the handoff boundary;
+- prefer a short-lived branch/PR and merge on green rather than accumulating a giant unreviewable phase branch;
+- each unit may contain several commits if useful, but should expose one reviewable outcome;
+- no local-only workaround becomes the canonical implementation;
+- if a cloud unit discovers that its scope was underestimated, finish the coherent subset, push it, and hand off the remainder as the next named unit rather than rushing an unsafe mega-patch.
+
+### 7.2 Cloud handoff contract
+
+Every cloud unit should finish with a compact handoff containing:
+
+```text
+UNIT
+branch / PR / merge status
+final commit SHA
+
+CHANGES
+what was implemented
+schema/protocol/migration decisions
+
+VALIDATION
+exact cloud/CI checks and results
+benchmark results where relevant
+
+LOCAL REQUIRED
+no | phase gate only | immediate
+why local qualification is needed
+
+KNOWN LIMITS
+anything intentionally deferred
+
+NEXT
+the exact next cloud unit or local gate
+```
+
+The final cloud unit of a phase additionally produces a **phase handoff** summarizing every merged unit and the exact SHA local qualification must pull.
+
+### 7.3 Local qualification contract
+
+Local qualification starts only after the user has the cloud handoff. The local agent should:
+
+1. pull/checkout the exact approved GitHub SHA;
+2. verify the tree is clean and identify the machine/runtime used;
+3. run only the device-dependent qualification assigned to that gate;
+4. collect logs, screenshots/receipts and benchmark evidence when relevant;
+5. return `PASS`, `FAIL`, `PARTIAL` or `BLOCKED` with exact evidence;
+6. **not silently turn the local checkout into the main implementation branch**.
+
+If local qualification exposes a product bug, the default route is:
+
+```text
+local failure handoff
+        -> user
+        -> cloud fix unit
+        -> GitHub SHA
+        -> local retest
+```
+
+Small diagnostic edits are fine when needed to prove the cause, but the product fix should return to the cloud source of truth unless the user explicitly authorizes local implementation.
+
+### 7.4 Manual user testing contract
+
+The user's own testing time is reserved for things an automated local agent cannot honestly establish, such as:
+
+- signing into the user's real hosted AI account or approving connector permissions;
+- deciding whether retrieval quality feels correct on real personal/project questions;
+- checking whether a UX interaction is understandable rather than merely functional;
+- approving destructive privacy/forget/restore behavior;
+- verifying a provider-specific live flow that cannot be safely automated with fixtures.
+
+Manual acceptance should come **after** automated local qualification is green. Each manual gate should be a short checklist prepared by the agent, not an open-ended debugging session.
+
+### 7.5 Planned workload notation
+
+Each phase below lists:
+
+- **C** — planned cloud development units;
+- **L** — planned local qualification sessions;
+- **U** — planned manual user acceptance sessions.
+
+Fix/retry units created after a failed gate are intentionally not counted in the base plan.
+
+Base planning matrix:
+
+| Phase | Cloud development | Local qualification | User acceptance | Why local/user exists |
+| --- | ---: | ---: | ---: | --- |
+| 0 — Current foundation | 0 | 0 | 0 | already qualified |
+| 1 — Durable brain storage | 4 | 0 | 0 | backend + Windows CI are sufficient |
+| 2 — Retrieval kernel | 4 | 0 | 0 | deterministic/headless |
+| 3 — MCP + tunnel | 5 | 2 | 1 | real Windows client + real hosted connector/account |
+| 4 — Documents/folders | 6 | 2 | 1 | NTFS/watcher/parser corpus + folder UX |
+| 5 — Memory truth | 4 | 0 | 0 | synthetic conflict/history corpus can prove semantics; UX waits for Phase 8 |
+| 6 — Graph/Graphify | 5 | 0 | 0 | cloud repos/fixtures can prove graph engine; real UX waits for Phase 8/10 |
+| 7 — Multi-provider | 5 | 2 | 2 | real Claude/Gemini account/browser behavior |
+| 8 — Knowledge OS UI | 6 | 2 | 2 | packaged WebView + subjective daily/Hive UX |
+| 9 — Privacy/portability | 6 | 2 | 2 | Windows keychain + destructive/recovery UX |
+| 10 — v1.0 qualification | 5 | 3 | 2 | target hardware/install/update/full real E2E |
+| **Mandatory total** | **50** | **13** | **10** | |
+
+These are a **safe ceiling for planned handoff boundaries**, not a target for bureaucracy. Adjacent low-risk cloud units may be combined after the earlier unit is green and the agent still has healthy context. Do not combine schema, security, filesystem authorization, provider live behavior, or destructive-data work merely to reduce the prompt count.
 
 ### Phase 0 — Current archive foundation — DONE
 
-Agent invocations remaining: **0**.
+Planned remaining workload: **C0 / L0 / U0**.
 
 Already proven:
 
@@ -323,71 +466,132 @@ This becomes the compatibility baseline. New phases should extend it rather than
 
 ### Phase 1 — Durable brain storage core
 
-Recommended agent invocations: **2** (`1A`, `1B`).
+Planned workload: **C4 / L0 / U0**.
 
-**1A — authority + schema foundation**
+**Cloud 1A — authoritative state database**
 
 - introduce `state.sqlite3` with migrations/backups;
-- stable provider-neutral source IDs;
 - memory claim schema, root ACL/tombstone schema, project/tag/scope primitives;
-- define `index.sqlite3` as disposable;
 - pin/bundle the SQLite runtime used by Rust.
 
-**1B — derived catalog + benchmark harness**
+**Cloud 1B — stable identity and state durability**
 
+- stable provider-neutral source IDs and deterministic/persisted identity mapping;
+- migration rollback/backup behavior;
+- state recovery tests;
+- prove authoritative references cannot depend on disposable random index IDs.
+
+**Cloud 1C — derived index + FTS**
+
+- introduce disposable `index.sqlite3`;
 - index existing immutable ChatGPT archive into derived source/chunk rows;
 - FTS5 external-content index;
 - rebuild command;
+- incremental update path.
+
+**Cloud 1D — storage qualification harness**
+
 - benchmark representative 10K/100K/1M chunk corpora;
 - prove deleting `index.sqlite3` loses no canonical information.
+- run Windows GitHub Actions coverage for migration/rebuild and bundled SQLite/runtime integration so no local gate is needed by default.
+
+No local or manual gate is required unless cloud Windows CI exposes a platform-only uncertainty that cannot be reproduced there.
 
 Exit: the current chat archive is searchable through the new engine with stable IDs and predictable latency.
 
 ### Phase 2 — Universal retrieval kernel
 
-Recommended agent invocations: **2** (`2A`, `2B`).
+Planned workload: **C4 / L0 / U0**.
 
-**2A — progressive research primitives**
+**Cloud 2A — search request model + structured filters**
 
 - multi-query search;
 - structured filtering;
 - BM25/exact ranking;
+- stable compact search-result contract.
+
+**Cloud 2B — progressive fetch + budgets**
+
 - message/window/revision fetch;
 - token/byte/latency budgets;
 - result truncation/freshness metadata.
 
-**2B — context and observability**
+**Cloud 2C — context builder + retrieval policies**
 
 - context builder;
 - overlap dedupe;
 - grouping/diversity;
 - retrieval presets (`fast`, `balanced`, `source_first`, `challenge`, `historical`);
+
+**Cloud 2D — observability + retrieval qualification**
+
 - local retrieval traces and score/provenance inspector data.
+- deterministic regression corpus and ranking tests;
+- performance regression gates against the Phase 1 benchmark harness.
+
+No phase-local session is mandatory: this phase is deliberately headless and can be qualified completely in cloud CI/synthetic corpora. Real-device retrieval quality is exercised when MCP and personal sources become available in later phases.
 
 Exit: a model can research years of chat history without loading whole conversations.
 
 ### Phase 3 — Shared-brain MCP and hosted tunnel
 
-Recommended agent invocations: **2** (`3A`, `3B`).
+Planned workload: **C5 / L2 / U1**.
 
-**3A — local MCP**
+**Cloud 3A — protocol-independent integration core**
 
 - protocol-independent core adapter;
 - read MCP tools;
 - batching;
+
+**Cloud 3B — client authorization**
+
 - enforced client identities/capabilities and immediate revocation;
 - minimum read/write/admin separation before any external client is connected;
 - local API/MCP authorization audit;
+
+**Cloud 3C — local MCP transport**
+
+- Streamable HTTP/local transport compatibility;
+- lifecycle/drain/error semantics;
+- request/body/result bounds;
 - direct local setup for Codex/Claude Code/other agents.
 
-**3B — hosted AI connectivity**
+**Cloud 3D — hosted tunnel + setup flow**
 
 - loopback HTTP MCP;
 - secure HTTPS tunnel lifecycle;
 - separate capability-scoped endpoints;
-- tunnel/public-surface security audit before publication;
 - ChatGPT setup UI + request proof;
 - reusable connector setup patterns for other hosted products that support remote MCP.
+
+**Cloud 3E — security and E2E cloud qualification**
+
+- tunnel/public-surface security audit before publication;
+- stale/revoked credential tests;
+- read-client escalation tests;
+- automated MCP conformance and simulated tunnel tests;
+- phase handoff with exact local connector procedures.
+
+**Local 3L1 — direct local MCP qualification**
+
+- packaged Tauri/core process on Windows;
+- real Codex/Claude Code or equivalent local MCP client;
+- search/fetch/context flows over an actual existing archive;
+- disconnect/restart/revocation behavior.
+
+**Local 3L2 — real hosted-tunnel qualification**
+
+- actual outbound HTTPS tunnel from the user's Windows/network environment;
+- public endpoint cannot reach admin/write surfaces;
+- request proof from a real hosted-client-compatible route;
+- restart/token rotation/revocation behavior.
+
+**User 3U — hosted AI acceptance**
+
+- connect the user's real ChatGPT account/connector;
+- ask a small set of known project-history questions;
+- verify source/provenance navigation is believable;
+- revoke the client and confirm the next request loses access.
 
 Exit: a new AI client with no conversation history can recover project context through Mind Place alone.
 
@@ -395,178 +599,426 @@ Security exit condition: a revoked client loses access on its next request, the 
 
 ### Phase 4 — Personal documents and approved folders
 
-Recommended agent invocations: **2** (`4A`, `4B`).
+Planned workload: **C6 / L2 / U1**.
 
-**4A — filesystem source engine**
+**Cloud 4A — approved-root state + virtual namespace**
 
 - approved-folder UI and canonical security boundary;
 - virtual paths;
+
+**Cloud 4B — filesystem authorization hardening**
+
 - handle-level TOCTOU protection;
+- traversal/symlink/junction/reparse and root-replacement tests;
+- Windows/path edge-case fixtures.
+
+**Cloud 4C — scanner/watcher/reconciliation**
+
 - scanner/watcher/reconciliation;
 - include/exclude/retention policies;
 - immediate authorization filtering on search and fetch.
 
-**4B — document history + extraction**
+**Cloud 4D — document versions + object store**
 
 - content-addressed versions/dedup;
 - metadata fast-path for unchanged files;
+
+**Cloud 4E — extraction + bounded parsers**
+
 - text/source/Markdown/PDF/OOXML extraction with resource limits;
 - structure-aware chunks;
+
+**Cloud 4F — search/UI integration**
+
 - incremental FTS updates;
 - one-off file import.
+- revoked-root filtering across search/graph/context/cache paths;
+- phase-scale filesystem/index benchmark fixtures.
+
+**Local 4L1 — real Windows filesystem security qualification**
+
+- approved roots on NTFS;
+- actual junction/symlink/reparse/rename/root replacement cases;
+- watcher event loss/reconciliation;
+- revoke a root while indexing/searching and verify zero result leakage.
+
+**Local 4L2 — real document corpus qualification**
+
+- index a representative user-approved folder with source code, Markdown, PDF and Office files;
+- record initial scan, no-op rescan and changed-file latency;
+- validate parser limits on harmless stress fixtures;
+- confirm preserved document versions/dedup on real storage.
+
+**User 4U — folder UX acceptance**
+
+- add a real folder from the UI;
+- inspect what Mind Place says it can read and exclude;
+- search/fetch a few known documents;
+- revoke it and verify the behavior is understandable.
 
 Exit: chat and personal documents are one searchable evidence universe.
 
 ### Phase 5 — Memory truth engine
 
-Recommended agent invocations: **2** (`5A`, `5B`).
+Planned workload: **C4 / L0 / U0**.
 
-**5A — claims and conflict semantics**
+**Cloud 5A — claim transitions + historical state**
 
 - append-oriented memory claims;
 - supersession/dispute/retraction/uncertainty/history;
 - evidence references;
-- claim relations (`supports`, `contradicts`, `supersedes`, `refines`);
 - `as_of` state reconstruction;
-- ranking that distinguishes authority, scope, recency and inference confidence.
 
-**5B — memory workflow and UI**
+**Cloud 5B — conflict resolution + ranking**
+
+- claim relations (`supports`, `contradicts`, `supersedes`, `refines`);
+- ranking that distinguishes authority, scope, recency and inference confidence.
+- `balanced`, `source_first`, `challenge`, historical/current behavior;
+- conflict-aware context serialization;
+- regression cases where an old/wrong memory must not override current/raw evidence.
+
+**Cloud 5C — memory write/update/delete/forget workflows**
 
 - search-before-write;
 - user/model memory create/update flows;
+- capability checks and idempotent write behavior;
+- safe deletion/forget cascade.
+
+**Cloud 5D — provenance/history/conflict UI**
+
 - memory diff/history;
 - conflict viewer;
 - pin/manual correction;
 - "why is this remembered?" provenance inspection;
-- safe deletion/forget cascade.
+- synthetic temporal/conflict fixtures that explicitly prove obsolete or disputed claims cannot silently override current/raw evidence.
+
+No local/manual gate is required here. The semantics should be proven deterministically in cloud tests; subjective memory UX and real-project acceptance are deliberately deferred to Phase 8 and the final Phase 10 continuity test.
 
 Exit: wrong memories can exist without silently poisoning the AI, and better models can re-evaluate old evidence.
 
 ### Phase 6 — Knowledge graph and Graphify
 
-Recommended agent invocations: **2** (`6A`, `6B`).
+Planned workload: **C5 / L0 / U0**.
 
-**6A — deterministic graph**
+**Cloud 6A — graph schema + deterministic edges**
 
 - graph adjacency tables in `index.sqlite3`;
 - projects/topics/files/conversations/memories/entities;
 - deterministic contains/references/version/import/symbol relationships;
+
+**Cloud 6B — graph retrieval + scale strategy**
+
 - graph-neighborhood retrieval;
 - community aggregation for large graphs.
 
-**6B — agent-assisted Graphify**
+**Cloud 6C — generation manifests + incremental rebuild**
 
 - graph generation manifests;
 - incremental invalidation by file/content/structure hash;
 - staging + atomic activation;
+
+**Cloud 6D — scoped Graphify maintenance protocol**
+
 - short-lived scoped maintenance jobs;
+- idempotent/sequence-checked batches;
+- generation/root/revision authorization;
+
+**Cloud 6E — prompt generator + Graphify qualification**
+
 - ready-to-paste `Codebase`, `Documents`, `Mixed` graphification prompts;
 - confidence/provenance on inferred edges.
+- synthetic Graphify/evidence coverage evaluation and large-graph lazy/community tests.
+
+No local/manual gate is required by default. Cloud repositories/fixtures can exercise the graph engine and maintenance protocol; real project usefulness and graph UX are intentionally evaluated once the Knowledge OS UI exists in Phase 8 and again in Phase 10.
 
 Exit: the graph improves navigation and recall but remains a derived map, never canonical truth.
 
 ### Phase 7 — Multi-provider capture
 
-Recommended agent invocations: **2** (`7A`, `7B`).
+Planned workload: **C5 / L2 / U2**.
 
-**7A — provider-neutral capture framework + Claude**
+**Cloud 7A — provider-neutral contract + ChatGPT regression refactor**
 
 - formal provider adapter contract;
 - move ChatGPT capture behind the same normalized interface;
+- preserve all current ChatGPT capture/privacy semantics under the adapter framework;
+- fixture/regression coverage proving no archive behavior regression.
+
+**Cloud 7B — Claude adapter**
+
 - Claude conversation adapter/import path;
 - provider/model/branch/regeneration metadata normalization.
 
-**7B — Gemini + generic imports**
+**Cloud 7C — Gemini adapter**
 
 - Gemini adapter/import path;
+
+**Cloud 7D — generic provider import framework**
+
 - portable JSON/HTML/Markdown provider import framework;
+
+**Cloud 7E — provider capability matrix + regression suite**
+
 - provider capability matrix;
 - regression fixtures so a provider UI change cannot corrupt existing archives.
+
+**Local 7L1 — live Claude qualification**
+
+- real signed-in Claude browser flow/import surface available to the user;
+- manual/automatic behavior only where the provider safely supports it;
+- duplicate/revision/private conversation semantics;
+- normalized archive roundtrip.
+
+**User 7U1 — Claude acceptance**
+
+- save/import one known Claude conversation;
+- confirm transcript, model/provider metadata and revision behavior.
+
+**Local 7L2 — live Gemini qualification**
+
+- equivalent real Gemini flow;
+- provider-specific URL/DOM/privacy and regeneration behavior.
+
+**User 7U2 — Gemini acceptance**
+
+- save/import one known Gemini conversation and verify it is usable through the same retrieval/MCP path as ChatGPT/Claude.
 
 Exit: "one brain" is no longer synonymous with ChatGPT capture.
 
 ### Phase 8 — Knowledge OS UI
 
-Recommended agent invocations: **2** (`8A`, `8B`).
+Planned workload: **C6 / L2 / U2**.
 
-**8A — daily library**
+**Cloud 8A — information architecture + large-data UI foundation**
+
+- navigation/data contracts;
+- virtualization/lazy loading primitives;
+- responsive/error/loading states.
+
+**Cloud 8B — conversations/files/search library**
 
 - unified Conversations / Files / Memories / Projects / People / Topics library;
 - advanced search playground;
 - context preview;
 - source/version inspector;
+
+**Cloud 8C — memories/projects/entities workspace**
+
+- memory/project/person/topic detail flows;
+- timelines and source relationships;
+
+**Cloud 8D — retrieval/health workspace**
+
 - capture/index/connector health.
 
-**8B — Hive / graph playground**
+- retrieval inspector;
+- context cost/provenance/debug flow.
+
+**Cloud 8E — Hive / graph playground**
 
 - semantic zoom;
 - lazy graph expansion;
 - timeline;
 - direct relationship editing;
 - memory conflict UI;
-- retrieval debugger showing queries, graph hops, selected evidence and token cost.
+
+**Cloud 8F — UI integration/performance/accessibility**
+
+- end-to-end desktop navigation tests;
+- large-library rendering budgets;
+- keyboard/accessibility pass;
+- error/recovery states;
+- final phase integration polish without redesigning proven backend contracts.
+
+**Local 8L1 — packaged desktop functional qualification**
+
+- packaged Tauri app against a real archive/index;
+- all primary library/search/memory/health flows;
+- Windows/WebView2 behavior and startup/restart.
+
+**Local 8L2 — real-scale UI performance qualification**
+
+- representative large library and graph;
+- scrolling/virtualization/semantic-zoom responsiveness;
+- memory growth and repeated navigation/retrieval inspector use.
+
+**User 8U1 — daily-library UX acceptance**
+
+- perform normal daily navigation/search/context-preview tasks without developer instructions;
+- report confusing labels/flows only after functionality is green.
+
+**User 8U2 — Hive UX acceptance**
+
+- explore a real project graph, timeline and source drill-down;
+- judge whether the visual hierarchy helps thinking rather than creating decorative noise.
 
 Exit: ordinary maintenance and debugging no longer require raw database tools.
 
 ### Phase 9 — Privacy, portability and resilience
 
-Recommended agent invocations: **2** (`9A`, `9B`).
+Planned workload: **C6 / L2 / U2**.
 
-**9A — privacy/security**
+**Cloud 9A — encryption design + measured prototype**
 
 - encrypted-at-rest strategy and keychain UX after benchmarking;
+- benchmark state/index/object encryption choices before committing migrations;
+
+**Cloud 9B — key management + encrypted storage integration**
+
+- OS keychain/key lifecycle;
+- locked/unlocked/recovery behavior;
+
+**Cloud 9C — privacy policy + destructive semantics**
+
 - private scopes / source redaction;
 - advanced permission UX and policy profiles on top of the minimum controls already required by Phases 3-4;
 - secure destructive delete/forget semantics for retained canonical data;
+
+**Cloud 9D — isolation + mature-surface security hardening**
+
 - bounded parser/maintenance-job isolation;
 - repeat/fuzz the tunnel and local API security audit against the mature feature set.
 
-**9B — backup and portability**
+**Cloud 9E — backup/restore/integrity**
 
 - atomic backup/restore;
-- portable archive export/import;
 - integrity verification;
+
+**Cloud 9F — portability + migration compatibility**
+
+- portable archive export/import;
 - rebuild derived indexes after restore;
 - migration/version compatibility tests.
+
+**Local 9L1 — Windows keychain/encryption qualification**
+
+- real Windows credential/keychain behavior;
+- app restart, locked/unlocked, backup and recovery paths;
+- verify performance impact on representative data.
+
+**Local 9L2 — destructive backup/restore qualification**
+
+- operate only on controlled copies of a real archive;
+- backup, restore, migrate, rebuild index and verify hashes/source counts;
+- exercise delete/forget cascades with recovery evidence.
+
+**User 9U1 — unlock/key-recovery acceptance**
+
+- evaluate first unlock, restart/lock behavior and recovery messaging;
+- confirm the key-management UX is understandable without implementation knowledge.
+
+**User 9U2 — destructive/recovery acceptance**
+
+- evaluate backup/restore/forget prompts;
+- explicitly approve whether destructive and recovery semantics are understandable enough for v1.0.
 
 Exit: Mind Place can safely become long-lived personal infrastructure rather than a single-machine experiment.
 
 ### Phase 10 — Intelligence bake-off, scale qualification and v1.0
 
-Recommended agent invocations: **2 mandatory**, **+1 optional**.
+Planned mandatory workload: **C5 / L3 / U2**.
 
-**10A — retrieval bake-off**
+Optional semantic/search branch if justified: **+C2 / +L1 / U0 by default**.
+
+**Cloud 10A — benchmark corpus + gold questions**
 
 - build a representative personal benchmark suite;
+- define retrieval/support-quality metrics and reproducible gold cases.
+
+**Cloud 10B — retrieval bake-off + tuning**
+
 - measure lexical, structured, graph and hybrid recall/latency;
 - measure context-token cost and answer support quality;
 - identify actual misses instead of assuming embeddings solve them.
 
-**10B — v1.0 hardening**
+**Cloud 10C — scale/performance qualification**
 
 - 1M+ chunk / 100K-file scale tests;
 - startup/reconciliation benchmarks;
+
+**Cloud 10D — failure/recovery qualification**
+
 - corruption/rebuild tests;
+- crash/interrupted-write recovery;
+- backup/migration compatibility matrix.
+
+**Cloud 10E — release engineering + immutable v1.0 RC**
+
 - cross-provider continuity acceptance scenarios;
 - installer/update/migration qualification;
 - performance budgets and regression gates.
+- close remaining release-blocking gaps;
+- final documentation/support matrix;
+- produce one immutable RC SHA and exact local/manual acceptance handoff.
 
-**10C — OPTIONAL semantic layer, only if 10A proves it useful**
+**Local 10L1 — representative-hardware performance qualification**
+
+- cold/warm startup;
+- 1M-chunk/100K-file or largest practical qualified fixture;
+- retrieval latency, background indexing, UI responsiveness and resource usage.
+
+**Local 10L2 — installer/update/migration qualification**
+
+- clean install;
+- upgrade from the last public pre-v1 release;
+- state/index migration and rollback/recovery evidence;
+- packaged extension/native-host registration.
+
+**Local 10L3 — full one-brain E2E qualification**
+
+- at least two hosted/local AI clients;
+- chat + document + memory + graph retrieval;
+- client revoke;
+- app restart;
+- provider continuity scenario on the same project.
+
+**User 10U1 — real continuity acceptance**
+
+- begin with a fresh AI conversation/model;
+- ask it to recover one real ongoing project using Mind Place only;
+- judge whether important state is recovered without misleading memory dominating the answer.
+
+**User 10U2 — release acceptance**
+
+- use the RC as a normal user across the critical daily flows;
+- explicitly approve the release or return a short blocking list.
+
+**Optional Cloud 10S1 — semantic retrieval experiment/integration**
 
 - benchmark `sqlite-vec` or another local derived vector implementation;
 - simple hybrid fusion with lexical/graph scores;
-- Tantivy bake-off if FTS5 itself is the measured bottleneck;
+- integrate the measured winner behind the replaceable retrieval interface only if it wins the benchmark;
 - preserve a zero-embedding fully functional mode.
+
+**Optional Cloud 10S2 — Tantivy bake-off only if FTS5 itself is the bottleneck**
+
+- Tantivy bake-off if FTS5 itself is the measured bottleneck;
+
+**Optional Local 10SL — semantic/search winner qualification**
+
+- reproduce the claimed gain on representative local hardware/corpus before the optional layer becomes a default recommendation.
 
 Exit: **Mind Place v1.0 = model-independent one-brain continuity system**, with evidence-aware memory instead of a giant unquestioned prompt.
 
-### Total expected implementation invocations from the current state
+### Total expected sessions from the current state
 
-Mandatory guidance: **20 substantial agent invocations** across Phases 1-10.
+Base plan:
 
-Optional semantic/vector work: **+1** only if benchmarks justify it.
+| Work type | Planned sessions |
+| --- | ---: |
+| Cloud development units | **50** |
+| Local automated/device qualification | **13** |
+| Manual user acceptance | **10** |
 
-This is intentionally much coarser than the earlier Luna-oriented plans. If a strong coding agent can safely complete `4A` and `4B` together with good tests and review, there is no product reason to force two chats.
+Optional semantic/search branch, only if Phase 10 measurements justify it:
+
+- **+2 cloud units**;
+- **+1 local qualification**;
+- normally **no additional manual user gate** unless it materially changes retrieval behavior visible in the release candidate.
+
+The 50 cloud units are safe handoff boundaries, not a requirement to waste 50 separate calendar days. Once earlier architecture is stable, adjacent low-risk units can realistically collapse the actual cloud prompt count toward roughly **35-40** without increasing risk. A capable cloud agent may continue into the next unit in the same run **only when the current unit is merged/green, enough context remains, and the user's instruction explicitly allows continuing**. For unattended overnight work, one named cloud unit per instruction is the safest default because the user wakes up to a bounded diff and a deterministic handoff.
+
+Manual user work is deliberately much smaller than cloud work. The target is that the user mainly approves real-account/provider behavior and subjective product quality, while agents handle implementation, CI, local diagnostics and reproducible qualification evidence.
 
 ## 8. Potential feature universe
 
