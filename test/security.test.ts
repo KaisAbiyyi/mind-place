@@ -26,7 +26,7 @@ const lockedConfigured: SecurityStatus = {
   retry_after_ms: 0,
 };
 
-test("first run creates a secret before opening the reader", async () => {
+test("first run confirms and creates a secret before opening the reader", async () => {
   const { dom, root } = domRoot();
   const calls: Array<{ command: string; args?: Record<string, unknown> }> = [];
   let opened = 0;
@@ -44,16 +44,42 @@ test("first run creates a secret before opening the reader", async () => {
   assert.match(root.textContent ?? "", /does not yet claim to encrypt existing raw archive files/i);
 
   const input = root.querySelector<HTMLInputElement>("#security-secret")!;
+  const confirm = root.querySelector<HTMLInputElement>("#security-secret-confirm")!;
   input.value = "correct horse battery staple";
+  confirm.value = "correct horse battery staple";
   root.querySelector<HTMLFormElement>("#security-form")!.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
   await delay(0);
 
   assert.equal(opened, 1);
   assert.equal(input.value, "");
+  assert.equal(confirm.value, "");
   assert.deepEqual(calls.at(-1), {
     command: "initialize_security",
     args: { secret: "correct horse battery staple" },
   });
+});
+
+test("first run refuses mismatched confirmation without invoking initialization", async () => {
+  const { dom, root } = domRoot();
+  const calls: string[] = [];
+  const invoke: Invoke = async <T>(command: string) => {
+    calls.push(command);
+    if (command === "get_security_status") return lockedUnconfigured as T;
+    throw new Error(`unexpected ${command}`);
+  };
+
+  await mountSecurityGate({ root, invoke, onUnlocked: () => assert.fail("must remain locked") });
+  const input = root.querySelector<HTMLInputElement>("#security-secret")!;
+  const confirm = root.querySelector<HTMLInputElement>("#security-secret-confirm")!;
+  input.value = "correct horse battery staple";
+  confirm.value = "correct horse battery stapler";
+  root.querySelector<HTMLFormElement>("#security-form")!.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+  await delay(0);
+
+  assert.deepEqual(calls, ["get_security_status"]);
+  assert.equal(input.value, "");
+  assert.equal(confirm.value, "");
+  assert.match(root.querySelector("#security-error")?.textContent ?? "", /confirmation does not match/i);
 });
 
 test("configured startup stays locked after an invalid secret", async () => {
