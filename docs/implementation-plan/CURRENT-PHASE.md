@@ -1,0 +1,62 @@
+# Current implementation sequence
+
+This file is the small execution-order pointer for cloud agents. Strategy lives in `../BIG-IMPLEMENTATION-PLAN.md`; detailed design notes live beside this file. If older phase labels conflict with this file, follow this file for the current execution order.
+
+## Baseline
+
+- **Phase 0 — current archive foundation: DONE / qualified compatibility floor.**
+- GitHub/cloud is implementation source of truth.
+- Local Windows is a qualification target only when a phase explicitly requires device/browser/account behavior.
+
+## Phase 1 — durable brain foundation
+
+Current execution order after the security-first reprioritization:
+
+1. **Phase 1A — security root and fail-closed unlock architecture** — IN PROGRESS in PR #1.
+   - versioned local security state;
+   - memory-hard secret verifier;
+   - locked-by-default process startup;
+   - unlock epoch/lease invalidation contract;
+   - privileged Tauri archive/setup commands gated before disclosure and revalidated before response;
+   - first-run secret confirmation and fail-closed unlock UI;
+   - no claim of encryption-at-rest yet.
+2. **Phase 1B — authoritative `state.sqlite3`**.
+   - migrations/backups;
+   - authoritative mutable state;
+   - root ACL/tombstones;
+   - memory-claim/project/topic/scope foundations;
+   - durable security/client state that belongs in the authority store.
+3. **Phase 1C — stable identity and authority durability**.
+   - provider-neutral IDs;
+   - deterministic/persisted identity mapping;
+   - migration rollback/recovery;
+   - authoritative references independent of disposable indexes.
+4. **Phase 1D — rebuildable `index.sqlite3` + FTS5**.
+   - archive adapter;
+   - source/chunk catalog;
+   - FTS5 external-content index;
+   - incremental update + rebuild.
+5. **Phase 1E — storage/performance qualification**.
+   - 10K/100K/1M fixtures;
+   - delete/rebuild invariants;
+   - Windows cloud CI and performance evidence.
+
+Phase 1 remains cloud-only by default (`L0 / U0`). Do not pull local merely to continue feature implementation.
+
+## Phase 1A explicit boundary
+
+Phase 1A establishes the **local process security root**. It intentionally does not yet complete:
+
+- encryption of existing raw archives at rest;
+- Windows auto-start / Windows Hello / OS credential wrapping;
+- persistent security state that belongs in `state.sqlite3` (Phase 1B);
+- browser capture-host cross-process lock enforcement;
+- MCP/tunnel connector startup and credential lifecycle, which is qualified with the connector phase.
+
+Do not weaken Phase 1A to fake those later guarantees. UI/documentation must state the boundary accurately.
+
+## Handoff rule
+
+A cloud unit is complete only when its PR/branch is CI-green and its final SHA is reported. If a cloud-discovered bug is fixed, rerun the relevant checks before merge. The next normal instruction after Phase 1A is:
+
+`implement phase 1B`
