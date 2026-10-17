@@ -1,0 +1,37 @@
+name: Phase 1A lockfile refresh
+
+on:
+  push:
+    branches:
+      - phase-1a-security-root
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: windows-2025
+    env:
+      CARGO_BUILD_JOBS: 1
+      CARGO_INCREMENTAL: 0
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: phase-1a-security-root
+          fetch-depth: 0
+      - name: Setup Rust 1.90
+        shell: pwsh
+        run: |
+          rustup toolchain install 1.90.0 --profile minimal --no-self-update
+          rustup default 1.90.0
+      - name: Resolve security dependencies and self-remove helper
+        shell: pwsh
+        run: |
+          cargo check -p mind-place-security
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.lock
+          git rm .github/workflows/phase-1a-lockfile-refresh.yml
+          git commit -m "build: lock Phase 1A security dependencies"
+          git push origin HEAD:phase-1a-security-root
