@@ -84,7 +84,7 @@ jobs:
           "version=$version" >> $env:GITHUB_OUTPUT
 
       - name: Upload workflow artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: mind-place-windows-${{ steps.assets.outputs.version }}
           path: release-assets/*
