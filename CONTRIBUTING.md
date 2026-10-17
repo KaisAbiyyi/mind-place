@@ -39,3 +39,5 @@ The final build is required when desktop, native host, extension packaging, or r
 ## Commits and pull requests
 
 Use Conventional Commits where practical, keep unrelated changes separate, and explain user-visible behavior plus verification in the pull request. Avoid committing generated build output, local archives, release artifacts, or credentials.
+
+By submitting a contribution to this repository, you agree that your contribution is licensed under the repository's GNU Affero General Public License v3.0-or-later terms. Do not submit code that cannot legally be distributed under those terms, and preserve required third-party notices when incorporating compatible open-source work.

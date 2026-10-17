@@ -1,6 +1,7 @@
 {
   "name": "mind-place",
   "private": true,
+  "license": "AGPL-3.0-or-later",
   "version": "0.2.5",
   "type": "module",
   "scripts": {

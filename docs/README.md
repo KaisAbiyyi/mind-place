@@ -27,4 +27,8 @@ The documents below describe the larger provider-neutral vision. They are design
 9. [MCP and local API design](./09-mcp-and-api.md)
 10. [Roadmap and open questions](./10-roadmap-and-open-questions.md)
 
+## Active implementation plans
+
+- [MCP personal knowledge and allowed-folder indexing](./implementation-plan/2026-10-18-mcp-personal-knowledge-v1.md) — executable architecture for unified chat/document retrieval, approved folders, a ChatGPT MCP tunnel, rich fetch configuration, and agent-assisted Graphify generations.
+
 The core long-term principle is stable: models are replaceable, while a user's accumulated context should remain durable, inspectable, portable, and under the user's control.

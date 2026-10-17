@@ -1,7 +1,7 @@
 # Mind Place
 
 [![CI](https://github.com/KaisAbiyyi/mind-place/actions/workflows/ci.yml/badge.svg)](https://github.com/KaisAbiyyi/mind-place/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+[![License: AGPL v3+](https://img.shields.io/badge/License-AGPL_v3%2B-blue.svg)](./LICENSE)
 
 Mind Place is a local-first archive for AI conversations. It saves ChatGPT conversations into an immutable local archive, then lets you read, search, inspect revisions, copy, and export them from a small desktop app.
 
@@ -139,6 +139,8 @@ See [CHANGELOG.md](./CHANGELOG.md) for release notes.
 
 Contributions are welcome. Read [CONTRIBUTING.md](./CONTRIBUTING.md) before changing capture permissions, archive persistence, automatic saving, or packaging behavior.
 
+Mind Place builds on lessons from the open-source AI tooling ecosystem, especially [Chat On Steroids](https://github.com/totec448-spec/chat-on-steroids). See [ACKNOWLEDGEMENTS.md](./ACKNOWLEDGEMENTS.md) for project credits and architectural influence.
+
 ## License
 
-Mind Place is released under the [MIT License](./LICENSE).
+Mind Place is released under the [GNU Affero General Public License v3.0 or later](./LICENSE). Distributed modified versions must remain under the same copyleft terms, and AGPL section 13 also requires Corresponding Source to be offered to users who interact with a modified version over a network. Private modifications that are neither distributed nor offered as a network service are not forced public by the AGPL.

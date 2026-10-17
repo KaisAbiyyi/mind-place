@@ -11,10 +11,14 @@ const tauri = readJson('src-tauri/tauri.conf.json');
 const extension = readJson('extension/manifest.json');
 const cargo = fs.readFileSync(path.join(root, 'Cargo.toml'), 'utf8');
 const cargoVersion = cargo.match(/^version\s*=\s*"([^"]+)"/m)?.[1];
+const cargoLicense = cargo.match(/^license\s*=\s*"([^"]+)"/m)?.[1];
 
 if (!cargoVersion) throw new Error('Cannot read workspace version from Cargo.toml');
 if (product.version !== cargoVersion || product.version !== tauri.version) {
   throw new Error(`Version mismatch: package=${product.version}, cargo=${cargoVersion}, tauri=${tauri.version}`);
+}
+if (product.license !== 'AGPL-3.0-or-later' || cargoLicense !== product.license) {
+  throw new Error(`License mismatch: package=${product.license}, cargo=${cargoLicense}`);
 }
 
 if (extension.manifest_version !== 3) throw new Error('Capture extension must use Manifest V3');

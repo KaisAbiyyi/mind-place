@@ -102,7 +102,10 @@ Goal: make conversations and documents part of one context universe.
 
 Build:
 
-- drag and drop ingestion;
+- explicit user-approved directory sources with virtual root identities;
+- incremental scanning and revocation-aware filesystem permission checks;
+- document version history for configured sources;
+- optional drag and drop ingestion for one-off files;
 - content-addressed object store;
 - file metadata;
 - text extraction adapters;
@@ -113,6 +116,8 @@ Build:
 Exit criteria:
 
 - a model can retrieve both a chat excerpt and relevant file evidence in one research flow.
+
+The detailed implementation sequence for this phase, the MCP tunnel, retrieval configuration, and Graphify workflow is maintained in [`implementation-plan/2026-10-18-mcp-personal-knowledge-v1.md`](./implementation-plan/2026-10-18-mcp-personal-knowledge-v1.md).
 
 ### Phase 5 - Curated memory
 
