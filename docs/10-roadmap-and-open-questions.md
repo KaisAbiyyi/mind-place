@@ -1,5 +1,7 @@
 # Roadmap and Open Questions
 
+> Historical design note: this document records the original pre-product roadmap and open questions. The current implementation authority is [`BIG-IMPLEMENTATION-PLAN.md`](./BIG-IMPLEMENTATION-PLAN.md). Phases below that describe creating the initial storage/capture foundation have already been overtaken by the shipping Rust/Tauri archive. Current raw conversation authority remains the immutable JSONL capture archive; future SQLite files are sidecars for authoritative mutable state and rebuildable indexes, not a mandate to rewrite L0 evidence.
+
 ## 1. Implementation philosophy
 
 The project can become enormous if it begins with every advanced idea at once.
@@ -18,13 +20,13 @@ Graph intelligence, semantic vectors, autonomous maintenance, and polished visua
 
 ### Phase 0 - Canonical storage foundation
 
-Goal: establish a stable local representation.
+Historical goal: establish a stable local representation. The shipping product now satisfies this with immutable file-backed capture revisions; do not migrate them into a new canonical SQLite conversation store merely to match this old phase description.
 
-Build:
+Original proposal:
 
 - repository structure;
 - TypeScript core;
-- SQLite database;
+- structured local metadata store (the current direction now splits authoritative `state.sqlite3` from rebuildable `index.sqlite3` while preserving raw JSONL evidence);
 - migrations;
 - conversation schema;
 - message schema;
@@ -41,7 +43,7 @@ Exit criteria:
 
 ### Phase 1 - Browser capture
 
-Goal: automatically preserve ordinary conversations.
+Historical goal: automatically preserve ordinary conversations. ChatGPT capture is already a qualified product baseline; future work generalizes it to additional providers rather than restarting this phase.
 
 Start with one provider, likely ChatGPT, then generalize.
 
@@ -375,9 +377,11 @@ Do not block V1 on:
 
 ## 14. First meaningful milestone
 
-The smallest version that proves the thesis is:
+The original smallest version proposed to prove the thesis was:
 
-> A browser extension captures every non-temporary ChatGPT conversation into a provider-neutral local SQLite database, and an MCP server lets another AI client search snippets and progressively fetch exact historical context.
+> A browser extension captures ordinary ChatGPT conversations into a provider-neutral local archive, and an MCP server lets another AI client search snippets and progressively fetch exact historical context.
+
+The capture/archive half is now shipped using immutable JSONL revisions. The next proof point is the MCP/retrieval half using the BIG plan's `state.sqlite3` + rebuildable `index.sqlite3` sidecars without rewriting raw evidence.
 
 That alone proves:
 

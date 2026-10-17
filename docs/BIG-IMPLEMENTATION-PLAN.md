@@ -375,7 +375,9 @@ Recommended agent invocations: **2** (`3A`, `3B`).
 - protocol-independent core adapter;
 - read MCP tools;
 - batching;
-- client identities/capabilities;
+- enforced client identities/capabilities and immediate revocation;
+- minimum read/write/admin separation before any external client is connected;
+- local API/MCP authorization audit;
 - direct local setup for Codex/Claude Code/other agents.
 
 **3B — hosted AI connectivity**
@@ -383,10 +385,13 @@ Recommended agent invocations: **2** (`3A`, `3B`).
 - loopback HTTP MCP;
 - secure HTTPS tunnel lifecycle;
 - separate capability-scoped endpoints;
+- tunnel/public-surface security audit before publication;
 - ChatGPT setup UI + request proof;
 - reusable connector setup patterns for other hosted products that support remote MCP.
 
 Exit: a new AI client with no conversation history can recover project context through Mind Place alone.
+
+Security exit condition: a revoked client loses access on its next request, the public tunnel cannot reach admin/write surfaces it was not granted, and no hosted read client can escalate itself to maintenance authority.
 
 ### Phase 4 — Personal documents and approved folders
 
@@ -511,10 +516,10 @@ Recommended agent invocations: **2** (`9A`, `9B`).
 
 - encrypted-at-rest strategy and keychain UX after benchmarking;
 - private scopes / source redaction;
-- per-client permissions;
-- secure revoke/delete semantics;
+- advanced permission UX and policy profiles on top of the minimum controls already required by Phases 3-4;
+- secure destructive delete/forget semantics for retained canonical data;
 - bounded parser/maintenance-job isolation;
-- audit of tunnel and local API surfaces.
+- repeat/fuzz the tunnel and local API security audit against the mature feature set.
 
 **9B — backup and portability**
 
