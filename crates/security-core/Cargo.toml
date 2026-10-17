@@ -1,0 +1,15 @@
+[package]
+name = "mind-place-security"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+argon2 = { version = "0.5.3", features = ["password-hash"] }
+getrandom = "0.4.3"
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+zeroize = "1.9.0"
