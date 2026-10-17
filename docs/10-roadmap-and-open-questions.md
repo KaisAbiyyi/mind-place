@@ -226,15 +226,16 @@ Do not let vectors become the only retrieval path.
 Current preferred direction:
 
 ~~~text
-Language:       TypeScript
-Core runtime:   Node.js or Bun
-Database:       SQLite
-ORM or query:   Drizzle or direct typed SQL
+Core language:  Rust
+UI language:    TypeScript
+Core runtime:   native Rust / Tauri
+Database:       SQLite (authoritative state + separate rebuildable index)
+Query layer:    direct typed SQL / lightweight Rust wrapper
 Search:         SQLite FTS5
 Objects:        content-addressed local directory
 Compression:    Zstandard later
-Desktop:        Tauri later
-UI:             React/Vite candidate
+Desktop:        Tauri 2
+UI:             current Vite/TypeScript reader, framework only if UI scale justifies it
 Extension:      Chromium Manifest V3 first
 Model protocol: MCP
 Local protocol: HTTP or WebSocket as needed

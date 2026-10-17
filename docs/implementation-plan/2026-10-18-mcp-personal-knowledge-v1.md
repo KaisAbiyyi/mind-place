@@ -1,5 +1,7 @@
 # MCP personal knowledge and allowed-folder indexing — implementation contract v1
 
+> Strategy note: this document is a detailed design reference. The current project-level roadmap is [`../BIG-IMPLEMENTATION-PLAN.md`](../BIG-IMPLEMENTATION-PLAN.md). Where the two conflict, the BIG plan wins; implementation no longer needs to preserve this document's original fine-grained task splitting.
+
 This plan turns Mind Place from a ChatGPT archive reader into a local personal knowledge substrate that any compatible AI can research. It extends the current Rust archive without weakening its existing guarantees: captured conversation revisions remain immutable raw evidence, derived indexes remain rebuildable, automatic ChatGPT saving keeps its current non-scrolling boundary, and hosted models receive only the evidence the user has explicitly made available.
 
 The central design decision is to keep intelligence outside the core. Mind Place stores, indexes, filters, ranks, packages, and proves provenance deterministically. ChatGPT, Codex, Claude Code, Antigravity, or another agent can perform higher-level semantic work when the user asks for it. The baseline must not require a bundled LLM, paid embedding API, graph database, vector database, or cloud storage.
@@ -60,18 +62,19 @@ Mind Place validates coverage/provenance and atomically activates the generation
 
 Do not rewrite the current `archive-v1/conversations/.../captures/*.jsonl` model as part of this work. It is already the proven L0 boundary and changing it would combine a storage migration with retrieval, MCP, and file ingestion.
 
-Add a sidecar SQLite database under the Mind Place data root, for example:
+Add small authoritative state and a separate rebuildable index under the Mind Place data root, for example:
 
 ```text
 archive-v1/
   conversations/               current immutable chat evidence
   objects/                     content-addressed preserved document versions
-  catalog.sqlite3              rebuildable/index metadata + graph + source catalog
   exports/
   legacy/
+state.sqlite3                  approved roots, memories, permissions, manual overrides
+index.sqlite3                  rebuildable search/index metadata + derived graph
 ```
 
-`catalog.sqlite3` is authoritative only for user configuration that has no external source of truth, such as approved-source settings and manual graph edits. Search rows, chunks, automatic graph generations, extracted text, and ranking caches are derived and rebuildable.
+`state.sqlite3` contains user-authored or security-relevant state that cannot simply be regenerated. `index.sqlite3` contains search rows, chunks, automatic graph generations, extracted metadata, ranking caches and other derived views. Rebuilding the index must never delete or rewrite authoritative state.
 
 The first database should use SQLite WAL mode, normal indexed tables, and FTS5. No ORM is required in the Rust core unless it materially improves migrations; direct typed SQL is acceptable and keeps dependencies small.
 
@@ -97,6 +100,8 @@ gen_     graph/derivation generation
 
 Stable IDs exposed to models must never contain a username, drive letter, home path, or tunnel secret.
 
+Any stable ID referenced by authoritative `state.sqlite3` records must remain valid after `index.sqlite3` is deleted and rebuilt. Such IDs must either be deterministically derived from immutable/source identity or have their identity mapping persisted in authoritative state. The derived index may cache these IDs but must not become their only source of identity.
+
 The local catalog may map a logical path to a native path, but MCP should expose a virtual source path such as `/research/papers/model.pdf` or `/sibambo/src/engine.rs` rather than `C:\Users\...` by default.
 
 ## 4. Approved directory model
@@ -114,6 +119,7 @@ Important inherited rules:
 7. Symlink, junction, and reparse-point escapes must be detected by canonical destination, not only lexical prefix checks.
 8. The approved root itself is revalidated; replacing it with a link must not silently move the permission boundary.
 9. Permission is checked again when a delayed/indexing job actually opens a file.
+10. File ingestion should hold/revalidate safe directory or file handles around actual reads so a symlink/junction/reparse swap cannot win a time-of-check/time-of-use race after path validation.
 
 Mind Place can be stricter than CoS because it does not need shell execution or model-controlled writes for the document reader. The default document source is read-only.
 
@@ -144,7 +150,7 @@ Defaults should exclude noisy/generated trees such as `.git`, `node_modules`, `t
 
 ### 4.2 Revocation
 
-Removing or disabling a root must immediately block new reads, fetches, watches, and indexing from that native directory.
+Removing or disabling a root must immediately block new reads, fetches, watches, indexing, search snippets, graph results, context packs, cached results and maintenance access from that native directory. Authorization is applied before result ranking/snippet emission, not only before an exact follow-up fetch.
 
 The UI should make retained local evidence explicit with two separate actions:
 
@@ -227,8 +233,8 @@ Start with deterministic local extractors.
 Priority order:
 
 1. UTF-8/UTF-16 plain text, Markdown, source code, JSON/YAML/TOML/CSV and similar text.
-2. PDF text extraction.
-3. Office Open XML documents (`docx`, `pptx`, `xlsx`) using local parsers.
+2. PDF text extraction with page/object/time/memory ceilings.
+3. Office Open XML documents (`docx`, `pptx`, `xlsx`) using local parsers with ZIP entry-count, nesting, expanded-size, CPU/time and memory ceilings.
 4. Additional formats only when real user data justifies them.
 
 Do not require OCR, cloud document services, or an LLM for baseline ingestion.
@@ -408,7 +414,7 @@ http://127.0.0.1:<port>/mcp/read/<secret>
 http://127.0.0.1:<port>/mcp/maintain/<different-secret>
 ```
 
-The **read** surface is what hosted ChatGPT normally receives. The **maintain** surface is for an explicitly enabled graphification/curation job and should not be bundled into the normal reader connector.
+The **read** surface is what hosted ChatGPT normally receives. Maintenance/write capability is created only for an explicit graphification/curation job: use a short-lived credential bound to its `generation_id`, authorized root/source revision, allowed operations and batch ceilings, then revoke it on finish/cancel. Write batches must be idempotent or sequence-checked so a retry cannot duplicate a generation mutation.
 
 For each request:
 
