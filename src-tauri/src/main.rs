@@ -4,7 +4,7 @@ use mind_place_archive::{
     ArchiveStore, AssetResult, Conversation, ConversationSummary, ExportResult, ImportReceipt,
     SnapshotSummary, NATIVE_HOST_NAME,
 };
-use mind_place_security::{SecurityError, SecurityGate, SecurityStatus};
+use mind_place_security::{SecurityError, SecurityGate, SecurityStatus, UnlockLease};
 use serde::Serialize;
 use std::{
     io::Write,
@@ -41,12 +41,12 @@ fn security_error(error: SecurityError) -> String {
     }
 }
 
-fn require_unlocked(state: &AppState) -> Result<(), String> {
-    state
-        .security
-        .require_unlocked()
-        .map(|_| ())
-        .map_err(security_error)
+fn begin_unlocked(state: &AppState) -> Result<UnlockLease, String> {
+    state.security.require_unlocked().map_err(security_error)
+}
+
+fn finish_unlocked(security: &SecurityGate, lease: UnlockLease) -> Result<(), String> {
+    security.validate_lease(lease).map_err(security_error)
 }
 
 async fn blocking<T: Send + 'static>(
@@ -56,6 +56,17 @@ async fn blocking<T: Send + 'static>(
         .await
         .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())
+}
+
+async fn gated_blocking<T: Send + 'static>(
+    state: &AppState,
+    operation: impl FnOnce() -> mind_place_archive::Result<T> + Send + 'static,
+) -> Result<T, String> {
+    let security = state.security.clone();
+    let lease = begin_unlocked(state)?;
+    let result = blocking(operation).await?;
+    finish_unlocked(&security, lease)?;
+    Ok(result)
 }
 
 #[tauri::command]
@@ -103,9 +114,8 @@ async fn list_conversations(
     state: State<'_, AppState>,
     query: Option<String>,
 ) -> Result<Vec<ConversationSummary>, String> {
-    require_unlocked(&state)?;
     let store = state.store.clone();
-    blocking(move || store.list(query.as_deref().unwrap_or(""))).await
+    gated_blocking(&state, move || store.list(query.as_deref().unwrap_or(""))).await
 }
 
 #[tauri::command]
@@ -114,9 +124,8 @@ async fn read_conversation(
     id: String,
     snapshot_id: Option<String>,
 ) -> Result<Conversation, String> {
-    require_unlocked(&state)?;
     let store = state.store.clone();
-    blocking(move || store.read(&id, snapshot_id.as_deref())).await
+    gated_blocking(&state, move || store.read(&id, snapshot_id.as_deref())).await
 }
 
 #[tauri::command]
@@ -124,9 +133,8 @@ async fn list_snapshots(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<Vec<SnapshotSummary>, String> {
-    require_unlocked(&state)?;
     let store = state.store.clone();
-    blocking(move || store.snapshots(&id)).await
+    gated_blocking(&state, move || store.snapshots(&id)).await
 }
 
 #[tauri::command]
@@ -135,9 +143,8 @@ async fn export_markdown(
     id: String,
     snapshot_id: Option<String>,
 ) -> Result<ExportResult, String> {
-    require_unlocked(&state)?;
     let store = state.store.clone();
-    blocking(move || store.export_snapshot(&id, snapshot_id.as_deref())).await
+    gated_blocking(&state, move || store.export_snapshot(&id, snapshot_id.as_deref())).await
 }
 
 #[tauri::command]
@@ -146,17 +153,15 @@ async fn get_asset(
     id: String,
     asset_path: String,
 ) -> Result<AssetResult, String> {
-    require_unlocked(&state)?;
     let store = state.store.clone();
-    blocking(move || store.asset(&id, &asset_path)).await
+    gated_blocking(&state, move || store.asset(&id, &asset_path)).await
 }
 
 #[tauri::command]
 async fn import_legacy(state: State<'_, AppState>) -> Result<ImportReceipt, String> {
-    require_unlocked(&state)?;
     let store = state.store.clone();
     let source = state.legacy_path.clone();
-    blocking(move || store.import_legacy(&source)).await
+    gated_blocking(&state, move || store.import_legacy(&source)).await
 }
 
 fn native_manifest_path(state: &AppState, browser: &str) -> PathBuf {
@@ -187,8 +192,10 @@ fn setup_info(state: &AppState) -> SetupInfo {
 
 #[tauri::command]
 fn get_setup(state: State<'_, AppState>) -> Result<SetupInfo, String> {
-    require_unlocked(&state)?;
-    Ok(setup_info(&state))
+    let lease = begin_unlocked(&state)?;
+    let info = setup_info(&state);
+    finish_unlocked(&state.security, lease)?;
+    Ok(info)
 }
 
 #[cfg(windows)]
@@ -234,7 +241,7 @@ fn is_registered(_state: &AppState, _browser: &str) -> bool {
 
 #[tauri::command]
 fn register_extension(state: State<'_, AppState>, browser: String) -> Result<SetupInfo, String> {
-    require_unlocked(&state)?;
+    let lease = begin_unlocked(&state)?;
     if !matches!(browser.as_str(), "chrome" | "edge") {
         return Err("Choose Chrome or Edge".into());
     }
@@ -262,10 +269,13 @@ fn register_extension(state: State<'_, AppState>, browser: String) -> Result<Set
             .map_err(|e| e.to_string())?;
         key.set_value("", &target.display().to_string())
             .map_err(|e| e.to_string())?;
-        Ok(setup_info(&state))
+        let info = setup_info(&state);
+        finish_unlocked(&state.security, lease)?;
+        Ok(info)
     }
     #[cfg(not(windows))]
     {
+        let _ = lease;
         Err(
             "Browser native-host registration is currently implemented for Windows Chrome and Edge"
                 .into(),
