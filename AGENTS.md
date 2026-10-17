@@ -2,7 +2,7 @@
 
 Mind Place is developed **cloud-first and agentic-workflow first**. GitHub is the implementation source of truth. Local Windows checkouts are primarily qualification targets unless the user explicitly authorizes local implementation.
 
-Read `README.md`, `docs/current-product.md`, and `docs/BIG-IMPLEMENTATION-PLAN.md` before changing product behavior. For current agentic runtime/import direction also read `docs/implementation-plan/2026-10-18-agentic-first-runtime-and-imports.md`.
+Read `README.md`, `docs/current-product.md`, `docs/BIG-IMPLEMENTATION-PLAN.md`, and `docs/implementation-plan/CURRENT-PHASE.md` before changing product behavior. For current agentic runtime/import direction also read `docs/implementation-plan/2026-10-18-agentic-first-runtime-and-imports.md`. `CURRENT-PHASE.md` wins when older roadmap labels disagree about the current execution order.
 
 ## Engineering priority
 
