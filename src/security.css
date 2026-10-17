@@ -20,6 +20,7 @@
 .security-description { margin: 0 0 22px; color: var(--muted); font-size: 12px; line-height: 1.7; }
 .security-card form { display: grid; }
 .security-card .search-label { margin-left: 0; }
+.security-confirm-label { display: block; margin-top: 13px !important; }
 .security-input {
   width: 100%;
   height: 42px;
