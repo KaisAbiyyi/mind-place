@@ -26,6 +26,10 @@ const SHELL = `
       <form id="security-form" autocomplete="off">
         <label class="search-label" for="security-secret">PIN or password</label>
         <input id="security-secret" class="security-input" type="password" autocomplete="current-password" minlength="8" maxlength="256" required />
+        <div id="security-confirm-row" hidden>
+          <label class="search-label security-confirm-label" for="security-secret-confirm">Confirm PIN or password</label>
+          <input id="security-secret-confirm" class="security-input" type="password" autocomplete="new-password" minlength="8" maxlength="256" />
+        </div>
         <p id="security-error" class="security-error" role="alert" aria-live="assertive"></p>
         <button id="security-submit" class="primary-button security-submit" type="submit">Unlock</button>
       </form>
@@ -56,11 +60,13 @@ export async function mountSecurityGate({ root, invoke, onUnlocked }: SecurityGa
   root.innerHTML = SHELL;
   const form = root.querySelector<HTMLFormElement>("#security-form");
   const input = root.querySelector<HTMLInputElement>("#security-secret");
+  const confirmRow = root.querySelector<HTMLElement>("#security-confirm-row");
+  const confirmInput = root.querySelector<HTMLInputElement>("#security-secret-confirm");
   const submit = root.querySelector<HTMLButtonElement>("#security-submit");
   const description = root.querySelector<HTMLElement>("#security-description");
   const error = root.querySelector<HTMLElement>("#security-error");
   const title = root.querySelector<HTMLElement>("#security-title");
-  if (!form || !input || !submit || !description || !error || !title) {
+  if (!form || !input || !confirmRow || !confirmInput || !submit || !description || !error || !title) {
     throw new Error("Mind Place security surface is incomplete.");
   }
 
@@ -71,6 +77,8 @@ export async function mountSecurityGate({ root, invoke, onUnlocked }: SecurityGa
     : "Enter your local unlock secret to open the archive and enable privileged services for this runtime epoch.";
   submit.textContent = firstRun ? "Create and unlock" : "Unlock";
   input.autocomplete = firstRun ? "new-password" : "current-password";
+  confirmRow.hidden = !firstRun;
+  confirmInput.required = firstRun;
 
   if (status.retry_after_ms > 0) {
     error.textContent = "Unlock is temporarily rate limited after failed attempts.";
@@ -80,10 +88,20 @@ export async function mountSecurityGate({ root, invoke, onUnlocked }: SecurityGa
     event.preventDefault();
     if (submit.disabled) return;
     const secret = input.value;
+    const confirmation = confirmInput.value;
     input.value = "";
+    confirmInput.value = "";
     error.textContent = "";
+
+    if (firstRun && secret !== confirmation) {
+      error.textContent = "PIN or password confirmation does not match.";
+      input.focus();
+      return;
+    }
+
     submit.disabled = true;
     input.disabled = true;
+    confirmInput.disabled = true;
     form.setAttribute("aria-busy", "true");
     try {
       const command = firstRun ? "initialize_security" : "unlock_security";
@@ -94,6 +112,7 @@ export async function mountSecurityGate({ root, invoke, onUnlocked }: SecurityGa
     } catch (cause) {
       error.textContent = errorMessage(cause);
       input.disabled = false;
+      confirmInput.disabled = false;
       submit.disabled = false;
       form.setAttribute("aria-busy", "false");
       input.focus();
