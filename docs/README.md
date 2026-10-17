@@ -29,7 +29,8 @@ The documents below describe the larger provider-neutral vision. They are design
 
 ## Active implementation plans
 
-- [BIG implementation plan](./BIG-IMPLEMENTATION-PLAN.md) — current high-level roadmap for Mind Place as a model-independent continuity layer, including the storage stack, evidence-aware memory model, phase sizing, multi-provider direction, and potential feature universe.
+- [BIG implementation plan](./BIG-IMPLEMENTATION-PLAN.md) — current high-level roadmap for Mind Place as a model-independent continuity layer, including the storage stack, evidence-aware memory model, cloud-first phase sizing, multi-provider direction, and potential feature universe.
+- [Agentic-first runtime, conversation routing, and imports](./implementation-plan/2026-10-18-agentic-first-runtime-and-imports.md) — current amendment covering AI-written project/topic routing, Codex/Claude Code/Cowork imports, agent-oriented repository design, low-level optimization policy, and locked startup before MCP/tunnel access.
 - [MCP personal knowledge and allowed-folder indexing](./implementation-plan/2026-10-18-mcp-personal-knowledge-v1.md) — executable architecture for unified chat/document retrieval, approved folders, a ChatGPT MCP tunnel, rich fetch configuration, and agent-assisted Graphify generations.
 
 The core long-term principle is stable: models are replaceable, while a user's accumulated context should remain durable, inspectable, portable, and under the user's control.
