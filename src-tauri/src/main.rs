@@ -71,7 +71,9 @@ async fn initialize_security(
     let security = state.security.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let secret = Zeroizing::new(secret);
-        security.initialize(secret.as_bytes()).map_err(security_error)
+        security
+            .initialize(secret.as_bytes())
+            .map_err(security_error)
     })
     .await
     .map_err(|error| error.to_string())?
@@ -275,10 +277,7 @@ fn main() {
     tauri::Builder::default()
         .setup(|app| {
             let root = mind_place_archive::data_root()?;
-            let security_path = root
-                .parent()
-                .unwrap_or(&root)
-                .join("security-v1.json");
+            let security_path = root.parent().unwrap_or(&root).join("security-v1.json");
             let security = SecurityGate::open(security_path)?;
             let legacy_path = root.parent().unwrap_or(&root).join("sessions");
             let store = ArchiveStore::open(root)?;
