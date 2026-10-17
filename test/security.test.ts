@@ -1,0 +1,91 @@
+import assert from "node:assert/strict";
+import { setTimeout as delay } from "node:timers/promises";
+import { JSDOM } from "jsdom";
+import { test } from "node:test";
+import { mountSecurityGate, type SecurityStatus } from "../src/security.js";
+import type { Invoke } from "../src/reader.js";
+
+function domRoot() {
+  const dom = new JSDOM("<!doctype html><html><body><div id='app'></div></body></html>", {
+    url: "https://security.test/",
+  });
+  return { dom, root: dom.window.document.querySelector<HTMLElement>("#app")! };
+}
+
+const lockedUnconfigured: SecurityStatus = {
+  configured: false,
+  locked: true,
+  epoch: 0,
+  retry_after_ms: 0,
+};
+
+const lockedConfigured: SecurityStatus = {
+  configured: true,
+  locked: true,
+  epoch: 0,
+  retry_after_ms: 0,
+};
+
+test("first run creates a secret before opening the reader", async () => {
+  const { dom, root } = domRoot();
+  const calls: Array<{ command: string; args?: Record<string, unknown> }> = [];
+  let opened = 0;
+  const invoke: Invoke = async <T>(command: string, args?: Record<string, unknown>) => {
+    calls.push({ command, args });
+    if (command === "get_security_status") return lockedUnconfigured as T;
+    if (command === "initialize_security") {
+      return { configured: true, locked: false, epoch: 1, retry_after_ms: 0 } as T;
+    }
+    throw new Error(`unexpected ${command}`);
+  };
+
+  await mountSecurityGate({ root, invoke, onUnlocked: () => { opened += 1; } });
+  assert.match(root.textContent ?? "", /Protect Mind Place/);
+  assert.match(root.textContent ?? "", /does not yet claim to encrypt existing raw archive files/i);
+
+  const input = root.querySelector<HTMLInputElement>("#security-secret")!;
+  input.value = "correct horse battery staple";
+  root.querySelector<HTMLFormElement>("#security-form")!.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+  await delay(0);
+
+  assert.equal(opened, 1);
+  assert.equal(input.value, "");
+  assert.deepEqual(calls.at(-1), {
+    command: "initialize_security",
+    args: { secret: "correct horse battery staple" },
+  });
+});
+
+test("configured startup stays locked after an invalid secret", async () => {
+  const { dom, root } = domRoot();
+  let opened = 0;
+  const invoke: Invoke = async <T>(command: string) => {
+    if (command === "get_security_status") return lockedConfigured as T;
+    if (command === "unlock_security") throw new Error("MP_SECURITY_INVALID_CREDENTIALS:Unlock secret is incorrect");
+    throw new Error(`unexpected ${command}`);
+  };
+
+  await mountSecurityGate({ root, invoke, onUnlocked: () => { opened += 1; } });
+  const input = root.querySelector<HTMLInputElement>("#security-secret")!;
+  input.value = "wrong password";
+  root.querySelector<HTMLFormElement>("#security-form")!.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+  await delay(0);
+
+  assert.equal(opened, 0);
+  assert.equal(input.value, "");
+  assert.match(root.querySelector("#security-error")?.textContent ?? "", /Incorrect PIN or password/);
+  assert.equal(input.disabled, false);
+});
+
+test("already-unlocked runtime skips the gate", async () => {
+  const { root } = domRoot();
+  let opened = 0;
+  const invoke: Invoke = async <T>(command: string) => {
+    assert.equal(command, "get_security_status");
+    return { configured: true, locked: false, epoch: 9, retry_after_ms: 0 } as T;
+  };
+
+  await mountSecurityGate({ root, invoke, onUnlocked: () => { opened += 1; } });
+  assert.equal(opened, 1);
+  assert.equal(root.innerHTML, "");
+});
