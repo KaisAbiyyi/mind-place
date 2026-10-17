@@ -253,7 +253,10 @@ impl SecurityGate {
     }
 
     fn lock_state(&self) -> MutexGuard<'_, RuntimeState> {
-        self.inner.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        self.inner
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 }
 
@@ -323,7 +326,8 @@ fn validate_config(config: &StoredSecurityConfig) -> Result<()> {
     {
         return Err(SecurityError::InvalidConfig);
     }
-    let parsed = PasswordHash::new(&config.password_hash).map_err(|_| SecurityError::InvalidConfig)?;
+    let parsed =
+        PasswordHash::new(&config.password_hash).map_err(|_| SecurityError::InvalidConfig)?;
     if parsed.algorithm.as_str() != "argon2id" {
         return Err(SecurityError::InvalidConfig);
     }
@@ -359,7 +363,8 @@ fn read_config(path: &Path) -> Result<StoredSecurityConfig> {
         return Err(SecurityError::InvalidConfig);
     }
     let mut bytes = Vec::new();
-    file.take(MAX_CONFIG_BYTES as u64 + 1).read_to_end(&mut bytes)?;
+    file.take(MAX_CONFIG_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)?;
     if bytes.len() > MAX_CONFIG_BYTES {
         return Err(SecurityError::InvalidConfig);
     }
@@ -428,7 +433,10 @@ mod tests {
                 retry_after_ms: 0,
             }
         );
-        assert!(matches!(gate.require_unlocked(), Err(SecurityError::Locked)));
+        assert!(matches!(
+            gate.require_unlocked(),
+            Err(SecurityError::Locked)
+        ));
     }
 
     #[test]
@@ -441,19 +449,28 @@ mod tests {
         assert!(gate.validate_lease(lease).is_ok());
 
         gate.lock();
-        assert!(matches!(gate.validate_lease(lease), Err(SecurityError::Locked)));
+        assert!(matches!(
+            gate.validate_lease(lease),
+            Err(SecurityError::Locked)
+        ));
         assert!(gate.unlock(b"correct horse battery staple").is_ok());
 
         let restarted = SecurityGate::open(dir.path().join("security-v1.json")).unwrap();
         assert!(restarted.status().configured);
         assert!(restarted.status().locked);
-        assert!(matches!(restarted.require_unlocked(), Err(SecurityError::Locked)));
+        assert!(matches!(
+            restarted.require_unlocked(),
+            Err(SecurityError::Locked)
+        ));
     }
 
     #[test]
     fn weak_secret_is_rejected_without_creating_config() {
         let (_dir, gate) = gate();
-        assert!(matches!(gate.initialize(b"1234567"), Err(SecurityError::WeakSecret)));
+        assert!(matches!(
+            gate.initialize(b"1234567"),
+            Err(SecurityError::WeakSecret)
+        ));
         assert!(!gate.config_path().exists());
     }
 
@@ -470,7 +487,10 @@ mod tests {
         }
         assert!(gate.status().locked);
         assert!(gate.status().retry_after_ms > 0);
-        assert!(matches!(gate.unlock(b"correct horse battery staple"), Err(SecurityError::RateLimited { .. })));
+        assert!(matches!(
+            gate.unlock(b"correct horse battery staple"),
+            Err(SecurityError::RateLimited { .. })
+        ));
     }
 
     #[test]
@@ -482,6 +502,9 @@ mod tests {
             br#"{"schema_version":1,"kdf":{"algorithm":"argon2id","version":19,"memory_kib":1,"iterations":1,"parallelism":1},"password_hash":"bad"}"#,
         )
         .unwrap();
-        assert!(matches!(SecurityGate::open(path), Err(SecurityError::InvalidConfig)));
+        assert!(matches!(
+            SecurityGate::open(path),
+            Err(SecurityError::InvalidConfig)
+        ));
     }
 }
