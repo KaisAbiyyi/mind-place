@@ -19,6 +19,7 @@ Current execution order after the security-first reprioritization:
    - unlock epoch/lease invalidation contract;
    - privileged Tauri archive/setup commands gated before disclosure and revalidated before response;
    - first-run secret confirmation and fail-closed unlock UI;
+   - security dependencies are committed in `Cargo.lock`; no temporary lockfile-refresh workflow remains in the branch;
    - no claim of encryption-at-rest yet.
 2. **Phase 1B — authoritative `state.sqlite3`**.
    - migrations/backups;
