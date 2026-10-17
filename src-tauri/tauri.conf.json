@@ -1,0 +1,32 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Mind Place",
+  "version": "0.2.5",
+  "identifier": "com.kaisabiyyi.mindplace",
+  "build": {
+    "beforeDevCommand": "npm run dev:web",
+    "devUrl": "http://127.0.0.1:1420",
+    "beforeBuildCommand": "npm run build:web",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [{ "label": "main", "title": "Mind Place", "width": 1180, "height": 820, "minWidth": 360, "minHeight": 520, "create": false }],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; form-action 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "category": "Productivity",
+    "shortDescription": "A private AI conversation archive.",
+    "longDescription": "Save ChatGPT conversations manually or opt into automatic loaded-message saving without scrolling, then read, search and export your local archive offline.",
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/icon.ico"],
+    "externalBin": ["binaries/mind-place-capture-host"],
+    "resources": { "../extension/": "extension/", "../THIRD-PARTY-NOTICES.txt": "THIRD-PARTY-NOTICES.txt", "../LICENSE": "LICENSE" },
+    "windows": {
+      "webviewInstallMode": { "type": "downloadBootstrapper", "silent": true },
+      "nsis": { "displayLanguageSelector": false, "languages": ["English"], "installMode": "currentUser" }
+    }
+  }
+}

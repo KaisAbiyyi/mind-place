@@ -1,0 +1,19 @@
+[package]
+name = "mind-place"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[build-dependencies]
+tauri-build = { version = "=2.7.2", features = [] }
+
+[dependencies]
+tauri = { version = "=2.12.3", features = [] }
+mind-place-archive = { path = "../crates/archive-core" }
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.55"

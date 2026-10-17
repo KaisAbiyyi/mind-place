@@ -1,0 +1,38 @@
+{
+  "name": "mind-place",
+  "private": true,
+  "version": "0.2.5",
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/tauri.mjs dev",
+    "dev:web": "vite --host 127.0.0.1 --port 1420 --strictPort",
+    "build:web": "tsc --noEmit && vite build",
+    "build": "node scripts/tauri.mjs build --no-bundle",
+    "typecheck": "tsc --noEmit",
+    "verify:repo": "node scripts/verify-repo.mjs",
+    "test:web": "node --import tsx --test --test-concurrency=1 test/*.test.mjs test/*.test.ts",
+    "test:rust": "cargo test --workspace",
+    "test": "npm run verify:repo && npm run test:web && npm run test:rust",
+    "dist": "node scripts/tauri.mjs build",
+    "dist:win": "node scripts/tauri.mjs build --bundles nsis",
+    "dist:dir": "node scripts/tauri.mjs build --no-bundle",
+    "dist:dir:win": "node scripts/tauri.mjs build --no-bundle"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.10.1",
+    "dompurify": "^3.3.0",
+    "katex": "^0.16.25",
+    "marked": "^17.0.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "@tauri-apps/cli": "^2.10.1",
+    "@types/jsdom": "^27.0.0",
+    "@types/katex": "^0.16.7",
+    "@types/node": "^24.10.0",
+    "jsdom": "^27.2.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.0"
+  }
+}
