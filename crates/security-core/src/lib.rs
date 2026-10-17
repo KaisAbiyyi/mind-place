@@ -227,7 +227,6 @@ impl SecurityGate {
     pub fn lock(&self) -> SecurityStatus {
         let mut state = self.lock_state();
         state.locked = true;
-        state.blocked_until = None;
         advance_epoch(&mut state);
         status_from(&state)
     }
@@ -486,6 +485,8 @@ mod tests {
             ));
         }
         assert!(gate.status().locked);
+        assert!(gate.status().retry_after_ms > 0);
+        gate.lock();
         assert!(gate.status().retry_after_ms > 0);
         assert!(matches!(
             gate.unlock(b"correct horse battery staple"),
