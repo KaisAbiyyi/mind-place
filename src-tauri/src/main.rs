@@ -144,7 +144,10 @@ async fn export_markdown(
     snapshot_id: Option<String>,
 ) -> Result<ExportResult, String> {
     let store = state.store.clone();
-    gated_blocking(&state, move || store.export_snapshot(&id, snapshot_id.as_deref())).await
+    gated_blocking(&state, move || {
+        store.export_snapshot(&id, snapshot_id.as_deref())
+    })
+    .await
 }
 
 #[tauri::command]
