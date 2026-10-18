@@ -21,7 +21,9 @@ const SCHEMA: &str = include_str!("schema_v1.sql");
 
 pub mod fetch;
 pub mod retrieval;
-pub use fetch::{FetchBudget, FetchCursor, FetchGranularity, FetchRequest, FetchResponse, FetchSegment};
+pub use fetch::{
+    FetchBudget, FetchCursor, FetchGranularity, FetchRequest, FetchResponse, FetchSegment,
+};
 pub use retrieval::{
     MatchMode, QueryTerm, RetrievalFilters, RetrievalHit, RetrievalRequest, RetrievalResponse,
     WeightedQuery,
