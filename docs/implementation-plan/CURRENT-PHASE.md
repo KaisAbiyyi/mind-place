@@ -59,7 +59,7 @@ Current execution order after the security-first reprioritization:
    - unlock-lease guarded `search_retrieval` Tauri command and regression fixtures;
    - no state/index migration and no local/manual gate (`C1 / L0 / U0`);
    - details, limits and handoff: [phase-2a-retrieval.md](phase-2a-retrieval.md).
-2. **Phase 2B — progressive fetch and budgets** — **NEXT** (cloud-only).
+2. **Phase 2B — progressive fetch and budgets** — **IN PROGRESS** (cloud-only).
 3. Phase 2C — context builder and retrieval policies.
 4. Phase 2D — observability and retrieval qualification.
 
