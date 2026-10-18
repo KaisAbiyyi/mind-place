@@ -5,10 +5,15 @@ use mind_place_archive::{
     SnapshotSummary, NATIVE_HOST_NAME,
 };
 use mind_place_security::{SecurityError, SecurityGate, SecurityStatus, UnlockLease};
+use mind_place_state::StateStore;
 use serde::Serialize;
 use std::{
     io::Write,
     path::{Path, PathBuf},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
 };
 use tauri::{Manager, State};
 use zeroize::Zeroizing;
@@ -17,6 +22,8 @@ use zeroize::Zeroizing;
 struct AppState {
     store: ArchiveStore,
     security: SecurityGate,
+    state_path: PathBuf,
+    authority_ready: Arc<AtomicBool>,
     extension_path: PathBuf,
     host_path: PathBuf,
     legacy_path: PathBuf,
@@ -42,11 +49,17 @@ fn security_error(error: SecurityError) -> String {
 }
 
 fn begin_unlocked(state: &AppState) -> Result<UnlockLease, String> {
+    if !state.authority_ready.load(Ordering::Acquire) {
+        return Err("MP_STATE_NOT_READY:authoritative state not ready".into());
+    }
     state.security.require_unlocked().map_err(security_error)
 }
 
-fn finish_unlocked(security: &SecurityGate, lease: UnlockLease) -> Result<(), String> {
-    security.validate_lease(lease).map_err(security_error)
+fn finish_unlocked(state: &AppState, lease: UnlockLease) -> Result<(), String> {
+    if !state.authority_ready.load(Ordering::Acquire) {
+        return Err("MP_STATE_NOT_READY:authoritative state not ready".into());
+    }
+    state.security.validate_lease(lease).map_err(security_error)
 }
 
 async fn blocking<T: Send + 'static>(
@@ -62,10 +75,9 @@ async fn gated_blocking<T: Send + 'static>(
     state: &AppState,
     operation: impl FnOnce() -> mind_place_archive::Result<T> + Send + 'static,
 ) -> Result<T, String> {
-    let security = state.security.clone();
     let lease = begin_unlocked(state)?;
     let result = blocking(operation).await?;
-    finish_unlocked(&security, lease)?;
+    finish_unlocked(state, lease)?;
     Ok(result)
 }
 
@@ -80,11 +92,19 @@ async fn initialize_security(
     secret: String,
 ) -> Result<SecurityStatus, String> {
     let security = state.security.clone();
+    let state_path = state.state_path.clone();
+    let authority_ready = state.authority_ready.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let secret = Zeroizing::new(secret);
-        security
+        let status = security
             .initialize(secret.as_bytes())
-            .map_err(security_error)
+            .map_err(security_error)?;
+        if let Err(error) = StateStore::open(&state_path) {
+            security.lock();
+            return Err(format!("{}:{}", error.code(), error));
+        }
+        authority_ready.store(true, Ordering::Release);
+        Ok(status)
     })
     .await
     .map_err(|error| error.to_string())?
@@ -96,9 +116,17 @@ async fn unlock_security(
     secret: String,
 ) -> Result<SecurityStatus, String> {
     let security = state.security.clone();
+    let state_path = state.state_path.clone();
+    let authority_ready = state.authority_ready.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let secret = Zeroizing::new(secret);
-        security.unlock(secret.as_bytes()).map_err(security_error)
+        let status = security.unlock(secret.as_bytes()).map_err(security_error)?;
+        if let Err(error) = StateStore::open(&state_path) {
+            security.lock();
+            return Err(format!("{}:{}", error.code(), error));
+        }
+        authority_ready.store(true, Ordering::Release);
+        Ok(status)
     })
     .await
     .map_err(|error| error.to_string())?
@@ -106,6 +134,7 @@ async fn unlock_security(
 
 #[tauri::command]
 fn lock_security(state: State<'_, AppState>) -> SecurityStatus {
+    state.authority_ready.store(false, Ordering::Release);
     state.security.lock()
 }
 
@@ -197,7 +226,7 @@ fn setup_info(state: &AppState) -> SetupInfo {
 fn get_setup(state: State<'_, AppState>) -> Result<SetupInfo, String> {
     let lease = begin_unlocked(&state)?;
     let info = setup_info(&state);
-    finish_unlocked(&state.security, lease)?;
+    finish_unlocked(&state, lease)?;
     Ok(info)
 }
 
@@ -273,7 +302,7 @@ fn register_extension(state: State<'_, AppState>, browser: String) -> Result<Set
         key.set_value("", &target.display().to_string())
             .map_err(|e| e.to_string())?;
         let info = setup_info(&state);
-        finish_unlocked(&state.security, lease)?;
+        finish_unlocked(&state, lease)?;
         Ok(info)
     }
     #[cfg(not(windows))]
@@ -291,6 +320,7 @@ fn main() {
         .setup(|app| {
             let root = mind_place_archive::data_root()?;
             let security_path = root.parent().unwrap_or(&root).join("security-v1.json");
+            let state_path = root.parent().unwrap_or(&root).join("state.sqlite3");
             let security = SecurityGate::open(security_path)?;
             let legacy_path = root.parent().unwrap_or(&root).join("sessions");
             let store = ArchiveStore::open(root)?;
@@ -310,6 +340,8 @@ fn main() {
             app.manage(AppState {
                 store,
                 security,
+                state_path,
+                authority_ready: Arc::new(AtomicBool::new(false)),
                 extension_path,
                 host_path,
                 legacy_path,

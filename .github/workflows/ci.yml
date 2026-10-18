@@ -49,6 +49,9 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Qualify bundled SQLite runtime
+        run: cargo test -p mind-place-state bundled_sqlite_version_is_supported -- --nocapture
+
       - name: Test
         run: npm test
 
