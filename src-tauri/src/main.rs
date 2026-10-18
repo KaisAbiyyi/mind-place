@@ -549,6 +549,7 @@ fn main() {
             mcp_commands::stop_local_mcp,
             mcp_commands::issue_local_mcp_reader,
             mcp_commands::revoke_local_mcp_client,
+            mcp_commands::list_local_mcp_clients,
             initialize_security,
             unlock_security,
             lock_security,

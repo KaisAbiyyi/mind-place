@@ -1,7 +1,7 @@
 //! Trusted desktop owner controls; never exposed through MCP.
 use super::{begin_unlocked, finish_unlocked, AppState};
 use mind_place_integration::{transport::LocalMcpServer, ClientAuthority};
-use mind_place_state::{ClientCapability, StateStore};
+use mind_place_state::{ClientCapability, ClientRecord, StateStore};
 use serde::Serialize;
 use tauri::State;
 
@@ -94,6 +94,22 @@ pub(super) fn issue_local_mcp_reader(
         endpoint: ENDPOINT,
     })
 }
+
+#[tauri::command]
+pub(super) fn list_local_mcp_clients(
+    state: State<'_, AppState>,
+    after: Option<String>,
+) -> Result<Vec<ClientRecord>, String> {
+    let lease = begin_unlocked(&state)?;
+    let authority = StateStore::open(&state.state_path)
+        .map_err(|_| "MP_MCP_AUTHORITY:Unavailable".to_string())?;
+    let clients = authority
+        .list_credentialed_clients(after.as_deref(), 50)
+        .map_err(|_| "MP_MCP_CLIENT:Could not list clients".to_string())?;
+    finish_unlocked(&state, lease)?;
+    Ok(clients)
+}
+
 #[tauri::command]
 pub(super) fn revoke_local_mcp_client(
     state: State<'_, AppState>,

@@ -72,3 +72,44 @@ fn client_audit_cannot_be_changed_and_bad_migration_checksum_fails_closed() {
     drop(raw);
     assert!(matches!(StateStore::open(&path), Err(StateError::Corrupt)));
 }
+
+#[test]
+fn credentialed_inventory_is_paginated_and_excludes_unprovisioned_legacy_rows() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = StateStore::open(temp.path().join("state.sqlite3")).unwrap();
+    for (id, hash) in [
+        ("client:v1:a", "a".repeat(64)),
+        ("client:v1:b", "b".repeat(64)),
+        ("client:v1:c", "c".repeat(64)),
+    ] {
+        store
+            .issue_client(id, id, &hash, &[Cap::Read])
+            .unwrap();
+    }
+    let raw = Connection::open(store.path()).unwrap();
+    raw.execute(
+        "INSERT INTO clients(id,display_name,state) VALUES ('client:v1:legacy','Legacy','enabled')",
+        [],
+    )
+    .unwrap();
+    let first = store.list_credentialed_clients(None, 2).unwrap();
+    assert_eq!(first.len(), 2);
+    assert_eq!(first[0].id, "client:v1:a");
+    assert_eq!(first[1].id, "client:v1:b");
+    let next = store
+        .list_credentialed_clients(Some(&first[1].id), 2)
+        .unwrap();
+    assert_eq!(next.len(), 1);
+    assert_eq!(next[0].id, "client:v1:c");
+    store.revoke_client(&next[0].id).unwrap();
+    assert_eq!(
+        store
+            .list_credentialed_clients(Some(&first[1].id), 2)
+            .unwrap()[0]
+            .state,
+        "revoked"
+    );
+    assert!(store.list_credentialed_clients(None, 0).is_err());
+    assert!(store.list_credentialed_clients(None, 51).is_err());
+    assert!(store.list_credentialed_clients(Some("!"), 10).is_err());
+}
