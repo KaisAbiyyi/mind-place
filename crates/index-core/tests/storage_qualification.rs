@@ -311,6 +311,7 @@ fn qualifies_archive_scale() {
     assert_eq!(rebuilt.search("firstrareneedle", false, 10).unwrap(), first);
     assert_eq!(rebuilt.search("lastrareneedle", false, 10).unwrap(), last);
     let restored_lookup_ms = post_lookup_started.elapsed().as_millis();
+    assert_eq!(rebuilt.retrieve(&ranked_query).unwrap(), ranked_before_rebuild);
     fts_integrity(&index_path);
 
     let receipt = json!({
@@ -326,6 +327,12 @@ fn qualifies_archive_scale() {
         "initial_sync_ms": sync_ms,
         "rare_lookup_pair_ms": lookup_ms,
         "noop_sync_ms": noop_ms,
+        "phase_2d_legacy_lookup_median_us": legacy_median_us,
+        "phase_2d_ranked_inspector_median_us": ranked_median_us,
+        "phase_2d_context_inspector_median_us": context_median_us,
+        "phase_2d_ranked_guardrail_us": ranked_gate_us,
+        "phase_2d_context_guardrail_us": context_gate_us,
+        "phase_2d_inspection_regression": "pass",
         "delete_and_rebuild_ms": rebuild_ms,
         "restored_lookup_pair_ms": restored_lookup_ms,
         "index_bytes_before_delete": first_index_bytes,
