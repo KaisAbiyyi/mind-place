@@ -61,6 +61,7 @@ jobs:
           cargo build -p mind-place-capture-host
           New-Item -ItemType Directory -Force src-tauri/binaries | Out-Null
           Copy-Item "target/debug/mind-place-capture-host.exe" "src-tauri/binaries/mind-place-capture-host-x86_64-pc-windows-msvc.exe"
+          node scripts/generate-notices.mjs
 
       - name: Test hosted tunnel desktop boundaries
         run: cargo test -p mind-place --bin mind-place hosted_tunnel::tests -- --nocapture
