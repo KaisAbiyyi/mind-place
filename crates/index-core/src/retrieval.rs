@@ -92,6 +92,18 @@ impl Default for RetrievalRequest {
     }
 }
 
+/// Inspectable per-query relevance contribution. BM25 is the raw SQLite FTS5
+/// value (smaller is better); weighted_score contributes to the final rank.
+#[derive(Clone, Debug, Serialize, PartialEq)]
+pub struct ScoreContribution {
+    pub query_index: usize,
+    pub weight: f64,
+    pub bm25: f64,
+    pub lexical_relevance: f64,
+    pub exact_bonus: f64,
+    pub weighted_score: f64,
+}
+
 /// Provenance is independent of ephemeral FTS rowids, and sufficient to route
 /// a later Phase 2B fetch to the exact immutable archive revision and message.
 #[derive(Clone, Debug, Serialize, PartialEq)]
@@ -116,6 +128,8 @@ pub struct RetrievalHit {
     /// Zero-based indexes of input queries matching this exact chunk.
     pub matched_queries: Vec<usize>,
     pub exact_queries: Vec<usize>,
+    /// Phase 2D diagnostic breakdown; never a probability or confidence.
+    pub score_contributions: Vec<ScoreContribution>,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
@@ -298,6 +312,7 @@ impl IndexStore {
                             score: 0.0,
                             matched_queries: Vec::new(),
                             exact_queries: Vec::new(),
+                            score_contributions: Vec::new(),
                         },
                         bm25,
                     ))
@@ -318,7 +333,16 @@ impl IndexStore {
                 // explicit bounded bonus rather than relying on opaque SQL ties.
                 let relevance = (-bm25).max(0.0).ln_1p();
                 let exact_bonus = if *mode == MatchMode::Exact { 1.0 } else { 0.0 };
-                candidate.score += weight * (relevance + exact_bonus);
+                let weighted_score = weight * (relevance + exact_bonus);
+                candidate.score += weighted_score;
+                candidate.score_contributions.push(ScoreContribution {
+                    query_index: index,
+                    weight: *weight,
+                    bm25,
+                    lexical_relevance: relevance,
+                    exact_bonus,
+                    weighted_score,
+                });
                 candidate.matched_queries.push(index);
                 if *mode == MatchMode::Exact {
                     candidate.exact_queries.push(index);

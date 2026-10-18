@@ -2,7 +2,7 @@
 //! Run explicitly with MP_QUAL_CHUNKS=10000|100000|1000000.
 //! This is ignored in normal unit tests; Windows qualification CI runs all tiers.
 use mind_place_archive::{ArchiveStore, Capture, Message};
-use mind_place_index::IndexStore;
+use mind_place_index::{ContextPreset, ContextRequest, IndexStore, QueryTerm, RetrievalRequest};
 use mind_place_state::{canonical_source_id, MemoryClaim, SourceDescriptor, SourceKey, StateStore};
 use rusqlite::Connection;
 use serde_json::json;
@@ -135,6 +135,18 @@ fn fts_integrity(path: &Path) {
     .unwrap();
 }
 
+fn median_us(mut action: impl FnMut()) -> u128 {
+    action();
+    let mut samples = Vec::with_capacity(9);
+    for _ in 0..9 {
+        let start = Instant::now();
+        action();
+        samples.push(start.elapsed().as_micros());
+    }
+    samples.sort_unstable();
+    samples[4]
+}
+
 #[test]
 #[ignore = "explicit Windows CI/storage qualification only"]
 fn qualifies_archive_scale() {
@@ -209,6 +221,42 @@ fn qualifies_archive_scale() {
     assert_eq!(last[0].message_id, "message-09999");
     fts_integrity(&index_path);
 
+    // Same runner and 1E corpus: relative guardrails, not user-device SLAs.
+    let ranked_query = RetrievalRequest {
+        queries: vec![QueryTerm::Text("firstrareneedle".into())],
+        ..Default::default()
+    };
+    let context_query = ContextRequest {
+        queries: vec![QueryTerm::Text("firstrareneedle".into())],
+        preset: ContextPreset::Fast,
+        ..Default::default()
+    };
+    let legacy_median_us = median_us(|| {
+        assert_eq!(index.search("firstrareneedle", false, 10).unwrap().len(), 1);
+    });
+    let ranked_median_us = median_us(|| {
+        let result = index.inspect_retrieval(&ranked_query).unwrap();
+        assert_eq!(result.result.hits.len(), 1);
+        assert_eq!(result.result.hits[0].source_id, first_id);
+        assert_eq!(result.result.hits[0].score_contributions.len(), 1);
+    });
+    let context_median_us = median_us(|| {
+        let result = index.inspect_context(&archive, &context_query).unwrap();
+        assert_eq!(result.result.source_count, 1);
+        assert_eq!(result.result.groups[0].source_id, first_id);
+    });
+    let ranked_gate_us = (legacy_median_us * 20).max(50_000);
+    let context_gate_us = (legacy_median_us * 100).max(500_000);
+    assert!(
+        ranked_median_us <= ranked_gate_us,
+        "ranked inspection latency regression"
+    );
+    assert!(
+        context_median_us <= context_gate_us,
+        "context inspection latency regression"
+    );
+    let ranked_before_rebuild = index.retrieve(&ranked_query).unwrap();
+
     let noop_started = Instant::now();
     let noop = index.sync(&archive, &state).unwrap();
     let noop_ms = noop_started.elapsed().as_millis();
@@ -269,6 +317,10 @@ fn qualifies_archive_scale() {
     assert_eq!(rebuilt.search("firstrareneedle", false, 10).unwrap(), first);
     assert_eq!(rebuilt.search("lastrareneedle", false, 10).unwrap(), last);
     let restored_lookup_ms = post_lookup_started.elapsed().as_millis();
+    assert_eq!(
+        rebuilt.retrieve(&ranked_query).unwrap(),
+        ranked_before_rebuild
+    );
     fts_integrity(&index_path);
 
     let receipt = json!({
@@ -284,6 +336,12 @@ fn qualifies_archive_scale() {
         "initial_sync_ms": sync_ms,
         "rare_lookup_pair_ms": lookup_ms,
         "noop_sync_ms": noop_ms,
+        "phase_2d_legacy_lookup_median_us": legacy_median_us,
+        "phase_2d_ranked_inspector_median_us": ranked_median_us,
+        "phase_2d_context_inspector_median_us": context_median_us,
+        "phase_2d_ranked_guardrail_us": ranked_gate_us,
+        "phase_2d_context_guardrail_us": context_gate_us,
+        "phase_2d_inspection_regression": "pass",
         "delete_and_rebuild_ms": rebuild_ms,
         "restored_lookup_pair_ms": restored_lookup_ms,
         "index_bytes_before_delete": first_index_bytes,
