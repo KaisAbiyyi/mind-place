@@ -97,7 +97,10 @@ impl StateStore {
         let existed = fs::symlink_metadata(&path).is_ok();
         if existed {
             // Read-only preflight prevents touching unknown/future/corrupt DBs.
-            let ro = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+            let ro = Connection::open_with_flags(
+                &path,
+                OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+            )?;
             identity(&ro)?;
             let version = user_version(&ro)?;
             if version > SCHEMA_VERSION {
@@ -111,7 +114,9 @@ impl StateStore {
         }
         let mut db = Connection::open_with_flags(
             &path,
-            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE,
+            OpenFlags::SQLITE_OPEN_READ_WRITE
+                | OpenFlags::SQLITE_OPEN_CREATE
+                | OpenFlags::SQLITE_OPEN_NOFOLLOW,
         )?;
         db.busy_timeout(Duration::from_secs(5))?;
         db.pragma_update(None, "foreign_keys", "ON")?;
@@ -143,7 +148,10 @@ impl StateStore {
     }
     fn connection(&self) -> Result<Connection> {
         safe_path(&self.path)?;
-        let db = Connection::open_with_flags(&self.path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+        let db = Connection::open_with_flags(
+            &self.path,
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+        )?;
         db.busy_timeout(Duration::from_secs(5))?;
         db.pragma_update(None, "foreign_keys", "ON")?;
         db.pragma_update(None, "synchronous", "FULL")?;
@@ -319,7 +327,10 @@ fn backup(db: &Connection, parent: &Path, version: i64) -> Result<()> {
     safe_path(&dest)?;
     // Never copy SQLite main db alone while WAL is in use.
     db.execute("VACUUM INTO ?1", [dest.to_string_lossy().to_string()])?;
-    let ro = Connection::open_with_flags(&dest, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let ro = Connection::open_with_flags(
+        &dest,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+    )?;
     identity(&ro)?;
     health(&ro)?;
     File::open(&dest)?.sync_all()?;
