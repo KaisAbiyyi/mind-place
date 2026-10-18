@@ -506,31 +506,31 @@ No local or manual gate is required unless cloud Windows CI exposes a platform-o
 
 Exit: the current chat archive is searchable through the new engine with stable IDs and predictable latency.
 
-### Phase 2 — Universal retrieval kernel
+### Phase 2 — Universal retrieval kernel — DONE
 
-Planned workload: **C4 / L0 / U0**.
+Planned and completed workload: **C4 / L0 / U0**.
 
-**Cloud 2A — search request model + structured filters**
+**Cloud 2A — search request model + structured filters — DONE**
 
 - multi-query search;
 - structured filtering;
 - BM25/exact ranking;
 - stable compact search-result contract.
 
-**Cloud 2B — progressive fetch + budgets**
+**Cloud 2B — progressive fetch + budgets — DONE**
 
 - message/window/revision fetch;
 - token/byte/latency budgets;
 - result truncation/freshness metadata.
 
-**Cloud 2C — context builder + retrieval policies**
+**Cloud 2C — context builder + retrieval policies — DONE**
 
 - context builder;
 - overlap dedupe;
 - grouping/diversity;
 - retrieval presets (`fast`, `balanced`, `source_first`, `challenge`, `historical`);
 
-**Cloud 2D — observability + retrieval qualification**
+**Cloud 2D — observability + retrieval qualification — DONE**
 
 - local retrieval traces and score/provenance inspector data.
 - deterministic regression corpus and ranking tests;
@@ -539,6 +539,10 @@ Planned workload: **C4 / L0 / U0**.
 No phase-local session is mandatory: this phase is deliberately headless and can be qualified completely in cloud CI/synthetic corpora. Real-device retrieval quality is exercised when MCP and personal sources become available in later phases.
 
 Exit: a model can research years of chat history without loading whole conversations.
+
+Completed cloud-first in [PR #6](https://github.com/KaisAbiyyi/mind-place/pull/6), [#7](https://github.com/KaisAbiyyi/mind-place/pull/7), [#8](https://github.com/KaisAbiyyi/mind-place/pull/8), and [#9](https://github.com/KaisAbiyyi/mind-place/pull/9). The final Phase 2D code SHA is `77a3f15607d143b94ae4b51c2dd95b98e1abf91b`. [Windows product CI](https://github.com/KaisAbiyyi/mind-place/actions/runs/39123680880) and [10K/100K/1M storage/retrieval qualification](https://github.com/KaisAbiyyi/mind-place/actions/runs/39123680905) passed. See [Phase 2D qualification details](implementation-plan/phase-2d-retrieval-qualification.md).
+
+**NEXT:** Phase 3A — protocol-independent shared-brain integration core, cloud-only initially.
 
 ### Phase 3 — Shared-brain MCP and hosted tunnel
 
