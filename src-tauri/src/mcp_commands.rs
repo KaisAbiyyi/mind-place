@@ -89,7 +89,7 @@ pub(super) fn issue_local_mcp_reader(
     finish_unlocked(&state, lease)?;
     Ok(McpReaderCredential {
         client_id: issued.client.id,
-        display_name: issued.client.display_name,
+        display_name: issued.client.display_name.clone(),
         credential: issued.credential().to_owned(),
         endpoint: ENDPOINT,
     })
