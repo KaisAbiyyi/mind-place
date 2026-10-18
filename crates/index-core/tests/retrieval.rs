@@ -115,7 +115,7 @@ fn combines_weighted_queries_deduplicates_chunks_and_preserves_provenance() {
     assert_eq!(result.hits[0].provider, "chatgpt");
     assert_eq!(result.hits[0].source_url, format!("https://chatgpt.com/c/{A}"));
     assert_eq!(result.hits[0].conversation_id, A);
-    assert!(result.hits[0].source_id.starts_with("src_"));
+    assert!(result.hits[0].source_id.starts_with("src:v1:"));
     assert_eq!(result.hits[0].part, 0);
     assert_eq!(f.index.retrieve(&request).unwrap(), result);
     let compact = f.search(vec![text("moonlit")], RetrievalFilters::default(), 1);
