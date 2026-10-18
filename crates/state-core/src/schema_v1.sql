@@ -43,6 +43,11 @@ CREATE TABLE root_tombstones (
   reason TEXT NOT NULL DEFAULT 'user_revocation'
 ) STRICT;
 CREATE INDEX idx_root_tombstones_root ON root_tombstones(root_id);
+-- Revocation history is append-only, including for future maintenance paths.
+CREATE TRIGGER root_tombstones_immutable_update BEFORE UPDATE ON root_tombstones
+BEGIN SELECT RAISE(ABORT, 'immutable root tombstone'); END;
+CREATE TRIGGER root_tombstones_immutable_delete BEFORE DELETE ON root_tombstones
+BEGIN SELECT RAISE(ABORT, 'immutable root tombstone'); END;
 CREATE TABLE memory_claims (
   id TEXT PRIMARY KEY, statement TEXT NOT NULL,
   scope_id TEXT REFERENCES scopes(id) ON DELETE RESTRICT,
