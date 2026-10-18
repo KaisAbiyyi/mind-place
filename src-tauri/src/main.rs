@@ -4,7 +4,9 @@ use mind_place_archive::{
     ArchiveStore, AssetResult, Conversation, ConversationSummary, ExportResult, ImportReceipt,
     SnapshotSummary, NATIVE_HOST_NAME,
 };
-use mind_place_index::{IndexError, IndexStats, IndexStore, SearchHit, RetrievalRequest, RetrievalResponse};
+use mind_place_index::{
+    IndexError, IndexStats, IndexStore, RetrievalRequest, RetrievalResponse, SearchHit,
+};
 use mind_place_security::{SecurityError, SecurityGate, SecurityStatus, UnlockLease};
 use mind_place_state::StateStore;
 use serde::Serialize;
