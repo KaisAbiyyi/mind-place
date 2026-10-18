@@ -7,10 +7,14 @@ use std::{
     path::{Path, PathBuf},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
+mod identity;
+pub use identity::{canonical_source_id, SourceDescriptor, SourceKey};
+
 pub const APPLICATION_ID: i64 = 0x4D504C43;
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 const MIN_SQLITE_NUMBER: i32 = 3_053_002;
 const MIGRATION_V1: &str = include_str!("schema_v1.sql");
+const MIGRATION_V2: &str = include_str!("schema_v2.sql");
 pub type Result<T> = std::result::Result<T, StateError>;
 
 #[derive(Debug, thiserror::Error)]
@@ -73,6 +77,48 @@ pub struct SourceRoot {
     pub approval_state: String,
 }
 
+/// Authority-owned stable identity mapping. Derived indexes may cache this ID
+/// but must not substitute rowids or unregistered, transient search IDs.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SourceRecord {
+    pub id: String,
+    pub provider: String,
+    pub source_namespace: String,
+    pub source_kind: String,
+    pub key_type: String,
+    pub source_key: String,
+}
+
+fn source_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<SourceRecord> {
+    Ok(SourceRecord {
+        id: row.get(0)?,
+        provider: row.get(1)?,
+        source_namespace: row.get(2)?,
+        source_kind: row.get(3)?,
+        key_type: row.get(4)?,
+        source_key: row.get(5)?,
+    })
+}
+
+fn verify_source_record(source: &SourceRecord) -> Result<()> {
+    let key = match source.key_type.as_str() {
+        "external" => SourceKey::External(&source.source_key),
+        "raw_sha256" => SourceKey::RawSha256(&source.source_key),
+        _ => return Err(StateError::Corrupt),
+    };
+    let actual = canonical_source_id(&SourceDescriptor {
+        provider: &source.provider,
+        source_namespace: &source.source_namespace,
+        source_kind: &source.source_kind,
+        key,
+    })
+    .map_err(|_| StateError::Corrupt)?;
+    if actual != source.id {
+        return Err(StateError::Corrupt);
+    }
+    Ok(())
+}
+
 impl StateStore {
     /// Call only after authorized unlock. Never wipe, recreate, or auto-repair
     /// an existing unknown/corrupt/future-schema database.
@@ -106,10 +152,10 @@ impl StateStore {
             if version > SCHEMA_VERSION {
                 return Err(StateError::FutureSchema(version));
             }
-            if version == SCHEMA_VERSION {
-                validate(&ro)?;
-            } else {
+            if version == 0 {
                 health(&ro)?;
+            } else {
+                validate_version(&ro, version)?;
             }
         }
         let mut db = Connection::open_with_flags(
@@ -125,16 +171,28 @@ impl StateStore {
         if !existed {
             db.pragma_update(None, "application_id", APPLICATION_ID)?;
         }
-        if user_version(&db)? < SCHEMA_VERSION {
+        let previous_version = user_version(&db)?;
+        if previous_version < SCHEMA_VERSION {
             if existed {
-                backup(&db, parent, user_version(&db)?)?;
+                backup(&db, parent, previous_version)?;
             }
+            // Every pending schema step commits as one transaction. A failed
+            // v2 rebuild leaves the entire original v0/v1 state intact.
             let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-            tx.execute_batch(MIGRATION_V1)?;
-            tx.execute(
-                "INSERT INTO schema_migrations(version,checksum) VALUES(1,?1)",
-                [checksum()],
-            )?;
+            if previous_version < 1 {
+                tx.execute_batch(MIGRATION_V1)?;
+                tx.execute(
+                    "INSERT INTO schema_migrations(version,checksum) VALUES(1,?1)",
+                    [checksum(MIGRATION_V1)],
+                )?;
+            }
+            if previous_version < 2 {
+                tx.execute_batch(MIGRATION_V2)?;
+                tx.execute(
+                    "INSERT INTO schema_migrations(version,checksum) VALUES(2,?1)",
+                    [checksum(MIGRATION_V2)],
+                )?;
+            }
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             tx.commit()?;
         }
@@ -161,6 +219,89 @@ impl StateStore {
         }
         Ok(db)
     }
+    /// Idempotent, durable registration; no derived/index identifier is an input.
+    pub fn register_source(&self, source: &SourceDescriptor<'_>) -> Result<String> {
+        let id = canonical_source_id(source)?;
+        let (key_type, key) = source.key.parts();
+        let mut db = self.connection()?;
+        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        tx.execute(
+            "INSERT INTO source_identities(id,provider,source_namespace,source_kind,key_type,source_key)
+             VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT DO NOTHING",
+            params![
+                id,
+                source.provider,
+                source.source_namespace,
+                source.source_kind,
+                key_type,
+                key
+            ],
+        )?;
+        let saved = tx
+            .query_row(
+                "SELECT id,provider,source_namespace,source_kind,key_type,source_key
+                 FROM source_identities WHERE id=?1",
+                [&id],
+                source_record,
+            )
+            .optional()?
+            .ok_or(StateError::Corrupt)?;
+        verify_source_record(&saved)?;
+        if saved.provider != source.provider
+            || saved.source_namespace != source.source_namespace
+            || saved.source_kind != source.source_kind
+            || saved.key_type != key_type
+            || saved.source_key != key
+        {
+            return Err(StateError::Corrupt);
+        }
+        tx.commit()?;
+        Ok(id)
+    }
+
+    /// Resolve authority identity independently from index.sqlite3.
+    pub fn source(&self, id: &str) -> Result<Option<SourceRecord>> {
+        valid_id(id)?;
+        let saved = self
+            .connection()?
+            .query_row(
+                "SELECT id,provider,source_namespace,source_kind,key_type,source_key
+                 FROM source_identities WHERE id=?1",
+                [id],
+                source_record,
+            )
+            .optional()?;
+        if let Some(ref record) = saved {
+            verify_source_record(record)?;
+        }
+        Ok(saved)
+    }
+
+    /// Evidence must name an authority-registered canonical source. The FK
+    /// rejects disposable rowids, nonexistent sources and forged index IDs.
+    pub fn add_claim_source_evidence(
+        &self,
+        claim_id: &str,
+        source_id: &str,
+        evidence_kind: &str,
+    ) -> Result<()> {
+        valid_id(claim_id)?;
+        valid_id(source_id)?;
+        valid_text(evidence_kind)?;
+        if evidence_kind.len() > 64 || !source_id.starts_with("src:v1:") {
+            return Err(StateError::InvalidValue);
+        }
+        let source = self.source(source_id)?;
+        if source.is_none() {
+            return Err(StateError::InvalidValue);
+        }
+        self.connection()?.execute(
+            "INSERT INTO claim_evidence(claim_id,source_ref,evidence_kind) VALUES(?1,?2,?3)",
+            params![claim_id, source_id, evidence_kind],
+        )?;
+        Ok(())
+    }
+
     pub fn create_project(&self, id: &str, name: &str) -> Result<()> {
         valid_id(id)?;
         valid_text(name)?;
@@ -281,33 +422,56 @@ fn health(db: &Connection) -> Result<()> {
     }
     Ok(())
 }
-fn checksum() -> String {
-    format!("{:x}", Sha256::digest(MIGRATION_V1.as_bytes()))
+fn checksum(sql: &str) -> String {
+    format!("{:x}", Sha256::digest(sql.as_bytes()))
 }
 fn validate(db: &Connection) -> Result<()> {
+    validate_version(db, SCHEMA_VERSION)
+}
+fn validate_version(db: &Connection, version: i64) -> Result<()> {
     identity(db)?;
     health(db)?;
-    if user_version(db)? != SCHEMA_VERSION {
+    if !(1..=SCHEMA_VERSION).contains(&version) || user_version(db)? != version {
         return Err(StateError::Corrupt);
     }
-    let saved: Option<String> = db
-        .query_row(
-            "SELECT checksum FROM schema_migrations WHERE version=1",
-            [],
-            |r| r.get(0),
-        )
-        .optional()
-        .map_err(|_| StateError::Corrupt)?;
-    if saved.as_deref() != Some(checksum().as_str()) {
-        return Err(StateError::Corrupt);
+    for (step, migration) in [(1, MIGRATION_V1), (2, MIGRATION_V2)] {
+        if step > version {
+            break;
+        }
+        let saved: Option<String> = db
+            .query_row(
+                "SELECT checksum FROM schema_migrations WHERE version=?1",
+                [step],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|_| StateError::Corrupt)?;
+        if saved.as_deref() != Some(checksum(migration).as_str()) {
+            return Err(StateError::Corrupt);
+        }
     }
     let bad: Option<i64> = db
         .query_row("SELECT 1 FROM pragma_foreign_key_check LIMIT 1", [], |r| {
             r.get(0)
         })
-        .optional()?;
+        .optional()
+        .map_err(|_| StateError::Corrupt)?;
     if bad.is_some() {
         return Err(StateError::Corrupt);
+    }
+    if version >= 2 {
+        let mut statement = db
+            .prepare(
+                "SELECT id,provider,source_namespace,source_kind,key_type,source_key
+                 FROM source_identities",
+            )
+            .map_err(|_| StateError::Corrupt)?;
+        let records = statement
+            .query_map([], source_record)
+            .map_err(|_| StateError::Corrupt)?;
+        for record in records {
+            verify_source_record(&record.map_err(|_| StateError::Corrupt)?)?;
+        }
     }
     Ok(())
 }
