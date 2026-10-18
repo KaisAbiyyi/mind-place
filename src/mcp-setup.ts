@@ -2,6 +2,7 @@ import type { Invoke, ClipboardWriter } from "./reader.js";
 interface Status { running: boolean; endpoint: string; }
 interface Issued { client_id: string; credential: string; }
 interface Registered { id: string; display_name: string; state: string; policy_revision: number; }
+interface HostedStatus { running: boolean; tunnel_id: string | null; connection_verified: boolean; }
 /** Owner-only UI. MCP clients cannot invoke these commands. */
 export function mountLocalMcpSetup(parent: HTMLElement, invoke: Invoke, clipboard: ClipboardWriter): void {
   const section = document.createElement("section");
@@ -22,10 +23,44 @@ export function mountLocalMcpSetup(parent: HTMLElement, invoke: Invoke, clipboar
     '<button type="button" class="quiet-button" data-mcp-action="more">Load more clients</button>',
     '<p>Use Streamable HTTP with an Authorization Bearer header in your client settings.',
     ' Never commit credentials or put them in a URL. Locking Mind Place stops the listener.</p>',
+    '<div class="setup-mcp-hosted">',
+    '<h4>Hosted ChatGPT connection (Secure MCP Tunnel)</h4>',
+    '<p>This uses the official outbound-only tunnel-client; it does not publish a public MCP URL.',
+    ' Queries and selected archive evidence will traverse the OpenAI service when your remote client requests them.</p>',
+    '<p>Install the verified official tunnel-client executable beside Mind Place. Do not use a third-party binary.</p>',
+    '<label class="search-label" for="hosted-tunnel-id">Existing OpenAI tunnel ID</label>',
+    '<input id="hosted-tunnel-id" spellcheck="false" autocapitalize="off" autocomplete="off"',
+    ' placeholder="tunnel_..." maxlength="48">',
+    '<label class="search-label" for="hosted-runtime-key">OpenAI runtime API key (not admin key)</label>',
+    '<input id="hosted-runtime-key" type="password" autocomplete="off" spellcheck="false">',
+    '<label class="search-label"><input type="checkbox" id="hosted-consent">',
+    ' I understand a connected hosted AI can request my permitted read-only archive evidence.</label>',
+    '<div class="register-actions"><button type="button" class="quiet-button" data-mcp-action="hosted-start">',
+    'Start secure tunnel</button><button type="button" class="quiet-button" data-mcp-action="hosted-stop">',
+    'Stop tunnel and revoke its credential</button></div>',
+    '<p data-hosted-status role="status" aria-live="polite">Checking hosted tunnel…</p>',
+    '<p>After starting, use ChatGPT Plugins → Add custom MCP server → Tunnel, then select/paste your tunnel ID.',
+    ' This screen reports only whether the helper process is alive; live connectivity must be verified separately.',
+    ' Stop or lock Mind Place to close remote read access.</p>',
+    '</div>',
   ].join("");
   parent.append(document.createElement("hr"), section);
   const state = section.querySelector<HTMLElement>("[data-mcp-status]")!;
   const secret = section.querySelector<HTMLElement>("[data-mcp-secret]")!;
+  const hostedState = section.querySelector<HTMLElement>("[data-hosted-status]")!;
+  const refreshHostedStatus = async (): Promise<void> => {
+    try {
+      const hosted = await invoke<HostedStatus>("get_hosted_tunnel_status");
+      if (section.isConnected) {
+        hostedState.textContent = hosted.running
+          ? "Tunnel helper is running (not yet verified connected). ID: " + (hosted.tunnel_id ?? "unknown")
+          : "Hosted tunnel stopped; no remote access is active through this helper.";
+      }
+    } catch {
+      if (section.isConnected) hostedState.textContent = "Could not check hosted tunnel.";
+    }
+  };
+  void refreshHostedStatus();
   void invoke<Status>("get_local_mcp_status").then((result) => {
     if (section.isConnected) state.textContent = result.running ? "Local MCP is running." : "Local MCP is stopped.";
   }).catch(() => {
@@ -90,6 +125,26 @@ export function mountLocalMcpSetup(parent: HTMLElement, invoke: Invoke, clipboar
           const command = button.dataset.mcpAction === "start" ? "start_local_mcp" : "stop_local_mcp";
           const result = await invoke<Status>(command);
           if (section.isConnected) state.textContent = result.running ? "Local MCP is running." : "Local MCP is stopped.";
+          await refreshHostedStatus();
+          break;
+        }
+        case "hosted-start": {
+          const id = section.querySelector<HTMLInputElement>("#hosted-tunnel-id")?.value.trim() ?? "";
+          const keyInput = section.querySelector<HTMLInputElement>("#hosted-runtime-key");
+          const apiKey = keyInput?.value ?? "";
+          if (keyInput) keyInput.value = "";
+          const acknowledgedRemoteAccess = section.querySelector<HTMLInputElement>("#hosted-consent")?.checked ?? false;
+          await invoke<HostedStatus>("start_hosted_tunnel", {
+            tunnelId: id,
+            apiKey,
+            acknowledgedRemoteAccess,
+          });
+          await refreshHostedStatus();
+          break;
+        }
+        case "hosted-stop": {
+          await invoke<HostedStatus>("stop_hosted_tunnel");
+          await refreshHostedStatus();
           break;
         }
         case "more": {
@@ -136,12 +191,16 @@ export function mountLocalMcpSetup(parent: HTMLElement, invoke: Invoke, clipboar
             secret.replaceChildren();
             state.textContent = "Client revoked.";
             void loadClients(true);
+            await refreshHostedStatus();
           }
           break;
         }
       }
     } catch {
-      if (section.isConnected) state.textContent = "MCP operation failed; access remains fail-closed.";
+      if (section.isConnected) {
+        state.textContent = "MCP operation failed; check local setup, tunnel ID, and runtime key.";
+        await refreshHostedStatus();
+      }
     } finally {
       if (button.isConnected) button.disabled = false;
     }
