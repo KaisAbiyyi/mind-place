@@ -3,7 +3,7 @@
 //! This is ignored in normal unit tests; Windows qualification CI runs all tiers.
 use mind_place_archive::{ArchiveStore, Capture, Message};
 use mind_place_index::IndexStore;
-use mind_place_state::{canonical_source_id, SourceDescriptor, SourceKey, StateStore};
+use mind_place_state::{canonical_source_id, MemoryClaim, SourceDescriptor, SourceKey, StateStore};
 use rusqlite::Connection;
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -178,6 +178,17 @@ fn qualifies_archive_scale() {
     assert!(state.source(&first_id).unwrap().is_some());
     assert!(state.source(&last_id).unwrap().is_some());
 
+    // This is user-authored state, not reconstructible from the disposable FTS.
+    state.create_project("qualification-project", "Durable project").unwrap();
+    state.create_memory_claim(&MemoryClaim {
+        id: "qualification-claim".into(),
+        statement: "Canonical evidence survives index deletion".into(),
+        asserted_by: "user".into(),
+        epistemic_origin: "explicit".into(),
+        status: "active".into(),
+    }).unwrap();
+    state.add_claim_source_evidence("qualification-claim", &last_id, "source").unwrap();
+
     let lookup_started = Instant::now();
     let first = index.search("firstrareneedle", false, 10).unwrap();
     let last = index.search("lastrareneedle", false, 10).unwrap();
@@ -215,6 +226,25 @@ fn qualifies_archive_scale() {
     let reopened_state = StateStore::open(&state_path).unwrap();
     assert!(reopened_state.source(&first_id).unwrap().is_some());
     assert!(reopened_state.source(&last_id).unwrap().is_some());
+    assert_eq!(
+        reopened_state.get_project("qualification-project").unwrap().unwrap().name,
+        "Durable project"
+    );
+    let canonical_db = Connection::open(&state_path).unwrap();
+    let evidence_count: i64 = canonical_db.query_row(
+        "SELECT COUNT(*) FROM claim_evidence
+         WHERE claim_id='qualification-claim' AND source_ref=?1",
+        [&last_id],
+        |row| row.get(0),
+    ).unwrap();
+    assert_eq!(evidence_count, 1, "curated evidence reference survived");
+    let claim_count: i64 = canonical_db.query_row(
+        "SELECT COUNT(*) FROM memory_claims WHERE id='qualification-claim'",
+        [],
+        |row| row.get(0),
+    ).unwrap();
+    assert_eq!(claim_count, 1);
+    drop(canonical_db);
 
     let post_lookup_started = Instant::now();
     assert_eq!(rebuilt.search("firstrareneedle", false, 10).unwrap(), first);
@@ -240,7 +270,7 @@ fn qualifies_archive_scale() {
         "index_bytes_before_delete": first_index_bytes,
         "index_bytes_after_rebuild": db_bytes(&index_path),
         "raw_snapshot_hashes_preserved": true,
-        "authority_source_identities_preserved": true,
+        "authority_source_identities_and_claim_evidence_preserved": true,
         "sqlite_fts5_and_fk_integrity": "pass"
     });
     let rendered = serde_json::to_string_pretty(&receipt).unwrap();
