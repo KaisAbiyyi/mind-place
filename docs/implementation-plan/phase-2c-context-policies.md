@@ -17,3 +17,14 @@ Candidates from bounded search are interleaved across canonical source IDs to pr
 Text budgets are 4–65536 bytes and 1–16384 estimated tokens, with a cooperative 1–30000 ms latency budget. Token estimate is UTF-8 bytes divided by four, rounded up, not an actual model tokenizer. Envelope/metadata bytes are not included. Partial source fetches expose Phase 2B cursor data for explicit continuation. Truncation and bounded-shortlist limitations are reported, rather than implying exhaustive search.
 
 Only the app-owned ChatGPT archive adapter is supported. Future filesystem sources must enforce approved-root revocation before any evidence is returned. Phase 2D will add traces, inspector data and comprehensive retrieval performance gates. Local/manual qualification is not required for Phase 2C.
+
+## Qualified cloud handoff
+
+- UNIT: Phase 2C context builder and retrieval policies.
+- PR: https://github.com/KaisAbiyyi/mind-place/pull/8 (merged).
+- Qualified code SHA: `326969be7de7fd0d5e93affb6cdda165ef1c8b8c`.
+- Windows product CI: https://github.com/KaisAbiyyi/mind-place/actions/runs/39119472142 — PASS, including Rust/web tests and Tauri build.
+- Storage qualification: https://github.com/KaisAbiyyi/mind-place/actions/runs/39119472075 — PASS for 10K, 100K and 1M chunks.
+- Schema changes: none. Local/manual required: no.
+- Limits: historical uses archive capture-time; challenge does not infer contradictions. Token estimates and latency are not hard guarantees.
+- NEXT: `implement phase 2D`.
