@@ -21,7 +21,7 @@ Current execution order after the security-first reprioritization:
    - first-run secret confirmation and fail-closed unlock UI;
    - security dependencies are committed in `Cargo.lock`; no temporary lockfile-refresh workflow remains in `main`;
    - no claim of encryption-at-rest yet.
-2. **Phase 1B — authoritative `state.sqlite3`** — NEXT (not started).
+2. **Phase 1B — authoritative `state.sqlite3`** — IN PROGRESS in `feat/phase-1b-state-authority` (cloud-only).
    - migrations/backups;
    - authoritative mutable state;
    - root ACL/tombstones;
