@@ -212,6 +212,7 @@ fn structured_filters_intersect_without_leaking_other_messages() {
         },
         RetrievalFilters {
             captured_from: Some("2026-10-18T00:00:00Z".into()),
+            captured_to: None,
             ..base.clone()
         },
         RetrievalFilters {
