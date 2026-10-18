@@ -1,0 +1,62 @@
+name: Phase 1E storage qualification
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/storage-qualification.yml'
+      - 'crates/archive-core/**'
+      - 'crates/state-core/**'
+      - 'crates/index-core/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: storage-qualification-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-storage:
+    name: Windows / ${{ matrix.chunks }} message chunks
+    runs-on: windows-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        chunks: [10000, 100000, 1000000]
+    env:
+      CARGO_INCREMENTAL: 0
+      CARGO_BUILD_JOBS: 2
+      MP_QUAL_CHUNKS: ${{ matrix.chunks }}
+      MP_QUAL_RECEIPT: qualification/${{ matrix.chunks }}.json
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up pinned Rust and rustfmt
+        shell: pwsh
+        run: |
+          rustup toolchain install 1.90.0 --profile minimal --component rustfmt --no-self-update
+          rustup default 1.90.0
+
+      - name: Check Rust formatting
+        run: cargo fmt --all -- --check
+
+      - name: Qualify bundled SQLite and authoritative migrations
+        run: cargo test --release -p mind-place-state -- --nocapture
+
+      - name: Qualify FTS integration and index recovery regressions
+        run: cargo test --release -p mind-place-index --test index -- --nocapture
+
+      - name: Benchmark end-to-end archive and index reconstruction
+        run: cargo test --release -p mind-place-index --test storage_qualification qualifies_archive_scale -- --ignored --exact --nocapture
+
+      - name: Upload machine-readable result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase-1e-storage-${{ matrix.chunks }}
+          path: qualification/${{ matrix.chunks }}.json
+          if-no-files-found: warn
+          retention-days: 30
