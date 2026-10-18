@@ -120,7 +120,7 @@ fn configure(db: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn verify(db: &Connection) -> Result<()> {
+fn verify(db: &Connection, check_integrity: bool) -> Result<()> {
     let app_id: i64 = db.query_row("PRAGMA application_id", [], |r| r.get(0))?;
     if app_id != APPLICATION_ID {
         return Err(IndexError::ForeignDatabase);
@@ -129,9 +129,11 @@ fn verify(db: &Connection) -> Result<()> {
     if version != SCHEMA_VERSION {
         return Err(IndexError::InvalidIndex);
     }
-    let health: String = db.query_row("PRAGMA quick_check(1)", [], |r| r.get(0))?;
-    if health != "ok" {
-        return Err(IndexError::InvalidIndex);
+    if check_integrity {
+        let health: String = db.query_row("PRAGMA quick_check(1)", [], |r| r.get(0))?;
+        if health != "ok" {
+            return Err(IndexError::InvalidIndex);
+        }
     }
     let schema_hash: String = db
         .query_row(
@@ -161,7 +163,7 @@ impl IndexStore {
                 &path,
                 OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
             )?;
-            verify(&ro)?;
+            verify(&ro, true)?;
         }
         let mut db = Connection::open_with_flags(
             &path,
@@ -181,7 +183,7 @@ impl IndexStore {
             )?;
             tx.commit()?;
         }
-        verify(&db)?;
+        verify(&db, false)?;
         Ok(Self { path })
     }
 
@@ -196,7 +198,8 @@ impl IndexStore {
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
         )?;
         configure(&db)?;
-        verify(&db)?;
+        // Full integrity scans are done on open, not per hot search or transaction.
+        verify(&db, false)?;
         Ok(db)
     }
 
