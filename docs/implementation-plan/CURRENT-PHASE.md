@@ -40,12 +40,24 @@ Current execution order after the security-first reprioritization:
    - bounded chunking and tamper/cancellation/rebuild regression tests;
    - unlock-lease guarded Tauri commands and post-unlock startup refresh;
    - documented contract and limits at `phase-1d-derived-index.md`.
-5. **Phase 1E — storage/performance qualification** — NEXT (cloud-only).
-   - 10K/100K/1M fixtures;
-   - delete/rebuild invariants;
-   - Windows cloud CI and performance evidence.
+5. **Phase 1E — storage/performance qualification** — DONE. PR #5 squash-merged into `main` at `78853d35e0439c6fd201a667b6ba156bf22fb132` after [Windows product CI run 39112178143](https://github.com/KaisAbiyyi/mind-place/actions/runs/39112178143) and [storage qualification run 39112178136](https://github.com/KaisAbiyyi/mind-place/actions/runs/39112178136) both passed.
+   - actual archive→FTS5 benchmark at 10K/100K/1M messages with CI JSON receipts;
+   - measured Windows initial index 0.951/9.083/87.610 seconds and full rebuild 0.792/8.746/79.856 seconds;
+   - deletion/rebuild preserves raw evidence hashes, authoritative source IDs, curated claim/evidence and projects;
+   - all tiers passed SQLite/FTS/FK integrity, schema/migration and index regression checks;
+   - bundled SQLite observed 3.53.2; deliberate 3.54.1+ upgrade remains an independently qualified future change;
+   - full evidence and limitations at `phase-1e-storage-qualification.md`.
 
-Phase 1 remains cloud-only by default (`L0 / U0`). Do not pull local merely to continue feature implementation.
+**Phase 1 is complete** and remained cloud-only (`C5 / L0 / U0`). No device/manual gate is required.
+
+## Phase 2 — universal retrieval kernel
+
+1. **Phase 2A — search requests + structured filters** — **NEXT** (cloud-only): multi-query model, filters, BM25/exact retrieval and stable provenance-rich result contract.
+2. Phase 2B — progressive fetch and budgets.
+3. Phase 2C — context builder and retrieval policies.
+4. Phase 2D — observability and retrieval qualification.
+
+The next cloud instruction is `implement phase 2A`. Do not pull the local Windows checkout merely to begin Phase 2.
 
 ## Phase 1A explicit boundary
 
@@ -61,6 +73,6 @@ Do not weaken Phase 1A to fake those later guarantees. UI/documentation must sta
 
 ## Handoff rule
 
-A cloud unit is complete only when its PR/branch is CI-green and its final SHA is reported. If a cloud-discovered bug is fixed, rerun the relevant checks before merge. The next normal instruction after completed Phase 1D is:
+A cloud unit is complete only when its PR/branch is CI-green and its final SHA is reported. If a cloud-discovered bug is fixed, rerun the relevant checks before merge. The next normal instruction after completed Phase 1E is:
 
-`implement phase 1E`
+`implement phase 2A`
