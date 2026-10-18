@@ -36,3 +36,26 @@ This unit changes no raw archive, index/state schema, persisted user data, OS se
 Required gates before squash merge: `cargo fmt --all -- --check`, repo verification, TypeScript typecheck, full Rust/web tests, Tauri desktop Windows build, and full 10K/100K/1M Windows storage/performance matrix. No local Windows device/manual gate is required for Phase 2D (C1/L0/U0).
 
 **Next after green merge:** Phase 3A — shared-brain integration core and protocol-independent read adapter.
+
+## Qualified Windows results and final cloud handoff
+
+[Product CI run 39123680880](https://github.com/KaisAbiyyi/mind-place/actions/runs/39123680880) passed Rust formatting, repository checks, TypeScript typecheck, SQLite runtime verification, full Rust/web tests and Tauri Windows desktop build.
+
+[Windows storage/performance run 39123680905](https://github.com/KaisAbiyyi/mind-place/actions/runs/39123680905) passed all 10K/100K/1M tiers. Existing corpus integrity checks and Phase 2D tightened latency guardrails all passed.
+
+| Windows synthetic corpus | Phase 1D same-run legacy median | Phase 2D ranked inspector median | Phase 2D context inspector median |
+| --- | ---: | ---: | ---: |
+| 10,000 message chunks | 1.846 ms | 3.529 ms | 27.014 ms |
+| 100,000 message chunks | 2.144 ms | 4.144 ms | 27.936 ms |
+| 1,000,000 message chunks | 1.170 ms | 2.156 ms | 14.982 ms |
+
+Values above are nine-sample warmed medians from separate ephemeral Windows GitHub-hosted runners. Do **not** compare rows as a scaling curve across controlled identical hardware. They are not p95 latency or user-device SLAs. Current hard guardrails in the same run are ranked `max(20x legacy, 50ms)` and context `max(100x legacy, 500ms)`. JSON artifacts contain exact receipts.
+
+- **Unit:** Phase 2D observability and retrieval qualification.
+- **PR:** https://github.com/KaisAbiyyi/mind-place/pull/9 — squash-merged.
+- **Qualified implementation SHA:** `77a3f15607d143b94ae4b51c2dd95b98e1abf91b`.
+- **Raw evidence/state/schema changes:** none. Traces are ephemeral and metadata-only.
+- **Local/manual gate:** none, Phase 2D cloud-only (`C1/L0/U0`).
+- **Phase closure:** all four Phase 2 cloud units 2A–2D passed qualification (`C4/L0/U0`).
+- **Known limitations:** no external MCP, no live provider relevance assessment, no historical truth-state reconstruction and no exact model-token counting; deferred to their planned phases.
+- **NEXT:** `implement phase 3A` — protocol-independent shared-brain integration core.
