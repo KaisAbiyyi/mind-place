@@ -14,6 +14,7 @@ mind-place-archive = { path = "../crates/archive-core" }
 mind-place-security = { path = "../crates/security-core" }
 mind-place-state = { path = "../crates/state-core" }
 mind-place-index = { path = "../crates/index-core" }
+mind-place-integration = { path = "../crates/integration-core" }
 serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true

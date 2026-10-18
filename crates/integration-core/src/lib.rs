@@ -14,6 +14,8 @@ use serde_json::{json, Value};
 use thiserror::Error;
 
 pub mod clients;
+pub mod mcp;
+pub mod transport;
 pub use clients::{ClientAuthority, IssuedClient, CREDENTIAL_PREFIX};
 
 pub const CONTRACT_VERSION: u32 = 1;

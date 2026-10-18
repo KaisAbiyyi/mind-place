@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod mcp_commands;
+
 use mind_place_archive::{
     ArchiveStore, AssetResult, Conversation, ConversationSummary, ExportResult, ImportReceipt,
     SnapshotSummary, NATIVE_HOST_NAME,
@@ -9,6 +11,7 @@ use mind_place_index::{
     IndexError, IndexStats, IndexStore, RetrievalRequest, RetrievalResponse, SearchHit,
     SearchInspection,
 };
+use mind_place_integration::transport::LocalMcpServer;
 use mind_place_security::{SecurityError, SecurityGate, SecurityStatus, UnlockLease};
 use mind_place_state::StateStore;
 use serde::Serialize;
@@ -17,7 +20,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc,
+        Arc, Mutex,
     },
 };
 use tauri::{Manager, State};
@@ -30,6 +33,7 @@ struct AppState {
     state_path: PathBuf,
     index_path: PathBuf,
     authority_ready: Arc<AtomicBool>,
+    mcp: Arc<Mutex<Option<LocalMcpServer>>>,
     extension_path: PathBuf,
     host_path: PathBuf,
     legacy_path: PathBuf,
@@ -309,7 +313,9 @@ async fn unlock_security(
 #[tauri::command]
 fn lock_security(state: State<'_, AppState>) -> SecurityStatus {
     state.authority_ready.store(false, Ordering::Release);
-    state.security.lock()
+    let status = state.security.lock();
+    state.mcp.lock().unwrap_or_else(|e| e.into_inner()).take();
+    status
 }
 
 #[tauri::command]
@@ -518,6 +524,7 @@ fn main() {
                 state_path,
                 index_path,
                 authority_ready: Arc::new(AtomicBool::new(false)),
+                mcp: Arc::new(Mutex::new(None)),
                 extension_path,
                 host_path,
                 legacy_path,
@@ -537,6 +544,12 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             get_security_status,
+            mcp_commands::get_local_mcp_status,
+            mcp_commands::start_local_mcp,
+            mcp_commands::stop_local_mcp,
+            mcp_commands::issue_local_mcp_reader,
+            mcp_commands::revoke_local_mcp_client,
+            mcp_commands::list_local_mcp_clients,
             initialize_security,
             unlock_security,
             lock_security,

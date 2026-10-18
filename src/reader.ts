@@ -1,4 +1,5 @@
 import createDOMPurify from "dompurify";
+import { mountLocalMcpSetup } from "./mcp-setup.js";
 import { marked } from "marked";
 import renderMathInElement from "katex/contrib/auto-render";
 import type {
@@ -614,6 +615,7 @@ export function mountReader({ root, invoke, clipboard }: ReaderOptions): ReaderH
     importStatus.setAttribute("aria-live", "polite");
 
     setupContent.append(connection, pathList, registered, register, divider, legacyTitle, legacyText, legacyButton, importStatus);
+    mountLocalMcpSetup(setupContent, invoke, safeClipboard);
   };
 
   const loadSetup = async () => {
@@ -793,6 +795,7 @@ export function mountReader({ root, invoke, clipboard }: ReaderOptions): ReaderH
   };
 
   const closeSetup = () => {
+    setupContent.querySelector("[data-mcp-secret]")?.replaceChildren();
     if (typeof dialog.close === "function") {
       try { dialog.close(); } catch { dialog.removeAttribute("open"); }
     } else {
