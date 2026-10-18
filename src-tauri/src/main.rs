@@ -5,7 +5,8 @@ use mind_place_archive::{
     SnapshotSummary, NATIVE_HOST_NAME,
 };
 use mind_place_index::{
-    IndexError, IndexStats, IndexStore, RetrievalRequest, RetrievalResponse, SearchHit,
+    FetchRequest, FetchResponse, IndexError, IndexStats, IndexStore, RetrievalRequest,
+    RetrievalResponse, SearchHit,
 };
 use mind_place_security::{SecurityError, SecurityGate, SecurityStatus, UnlockLease};
 use mind_place_state::StateStore;
@@ -165,6 +166,21 @@ async fn search_retrieval(
     let index_path = state.index_path.clone();
     index_task(&state, move |_, _| {
         IndexStore::open(index_path)?.retrieve(&request)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn fetch_retrieval(
+    state: State<'_, AppState>,
+    request: FetchRequest,
+) -> Result<FetchResponse, String> {
+    let archive = state.store.clone();
+    let index_path = state.index_path.clone();
+    index_task(&state, move |lease, security| {
+        IndexStore::open(index_path)?.fetch_with_check(&archive, &request, || {
+            security.validate_lease(lease).map_err(|_| IndexError::Revoked)
+        })
     })
     .await
 }
@@ -466,7 +482,8 @@ fn main() {
             rebuild_archive_index,
             get_archive_index_stats,
             search_archive_index,
-            search_retrieval
+            search_retrieval,
+            fetch_retrieval
         ])
         .run(tauri::generate_context!())
         .expect("Mind Place failed to start");
