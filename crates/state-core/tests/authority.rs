@@ -86,9 +86,10 @@ fn upgrades_create_verified_sqlite_backup_before_write() {
         "CREATE TABLE old_evidence(x TEXT); INSERT INTO old_evidence VALUES('preserved');",
     )
     .unwrap();
-    // Keep the original connection alive: backup must include committed WAL frames.
-    StateStore::open(&p).unwrap();
+    // Close the v0 writer before migrating: Windows can deny schema-level
+    // operations while another SQLite connection still holds the WAL open.
     drop(db);
+    StateStore::open(&p).unwrap();
     let backups: Vec<_> = fs::read_dir(d.path().join("state-backups"))
         .unwrap()
         .collect();
