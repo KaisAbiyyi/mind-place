@@ -2,7 +2,7 @@
 //! Run explicitly with MP_QUAL_CHUNKS=10000|100000|1000000.
 //! This is ignored in normal unit tests; Windows qualification CI runs all tiers.
 use mind_place_archive::{ArchiveStore, Capture, Message};
-use mind_place_index::IndexStore;
+use mind_place_index::{ContextPreset, ContextRequest, IndexStore, QueryTerm, RetrievalRequest};
 use mind_place_state::{canonical_source_id, MemoryClaim, SourceDescriptor, SourceKey, StateStore};
 use rusqlite::Connection;
 use serde_json::json;
