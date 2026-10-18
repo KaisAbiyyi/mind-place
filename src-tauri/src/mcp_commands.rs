@@ -87,10 +87,11 @@ pub(super) fn issue_local_mcp_reader(
         .issue(&display_name, &[ClientCapability::Read])
         .map_err(|_| "MP_MCP_CLIENT:Cannot issue credential".to_string())?;
     finish_unlocked(&state, lease)?;
+    let credential = issued.credential().to_owned();
     Ok(McpReaderCredential {
         client_id: issued.client.id,
-        display_name: issued.client.display_name.clone(),
-        credential: issued.credential().to_owned(),
+        display_name: issued.client.display_name,
+        credential,
         endpoint: ENDPOINT,
     })
 }
