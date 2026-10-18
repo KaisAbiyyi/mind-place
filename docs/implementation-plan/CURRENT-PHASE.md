@@ -72,7 +72,7 @@ Current execution order after the security-first reprioritization:
    - unlock-lease guarded `build_retrieval_context`, ranking metadata correction and security regression tests;
    - no schema migration, local/manual gate not required (`C1 / L0 / U0`);
    - details/limits: [phase-2c-context-policies.md](phase-2c-context-policies.md).
-4. **Phase 2D — observability and retrieval qualification** — **NEXT** (cloud-only).
+4. **Phase 2D — observability and retrieval qualification** — **IN PROGRESS** (cloud-only).
 
 The next cloud instruction is `implement phase 2D`. No local Windows pull is needed merely to start Phase 2D.
 
