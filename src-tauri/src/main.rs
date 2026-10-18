@@ -1,7 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod mcp_commands;
 mod hosted_tunnel;
+mod mcp_commands;
 
 use mind_place_archive::{
     ArchiveStore, AssetResult, Conversation, ConversationSummary, ExportResult, ImportReceipt,
@@ -35,7 +35,7 @@ struct AppState {
     index_path: PathBuf,
     authority_ready: Arc<AtomicBool>,
     mcp: Arc<Mutex<Option<LocalMcpServer>>>,
-    hosted: Arc<Mutex<Option<hosted_tunnel::HostedTunnel>>>, 
+    hosted: Arc<Mutex<Option<hosted_tunnel::HostedTunnel>>>,
     extension_path: PathBuf,
     host_path: PathBuf,
     legacy_path: PathBuf,
