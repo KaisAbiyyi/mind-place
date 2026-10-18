@@ -179,7 +179,9 @@ async fn fetch_retrieval(
     let index_path = state.index_path.clone();
     index_task(&state, move |lease, security| {
         IndexStore::open(index_path)?.fetch_with_check(&archive, &request, || {
-            security.validate_lease(lease).map_err(|_| IndexError::Revoked)
+            security
+                .validate_lease(lease)
+                .map_err(|_| IndexError::Revoked)
         })
     })
     .await
