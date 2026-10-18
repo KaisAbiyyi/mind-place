@@ -16,6 +16,11 @@ zeroize = "1"
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+bytes = "1"
+http-body-util = "0.1"
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+tokio = { version = "1", features = ["net", "rt", "sync", "time", "macros"] }
 
 [dev-dependencies]
 tempfile.workspace = true
