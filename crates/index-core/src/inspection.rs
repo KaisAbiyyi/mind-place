@@ -2,8 +2,8 @@
 //! Never persist raw prompts, snippets, document text, source URLs, or PINs
 //! in a diagnostic trace. Evidence payload is separately unlock protected.
 use crate::{
-    ContextPack, ContextRequest, FetchRequest, FetchResponse, IndexStore, Result,
-    RetrievalRequest, RetrievalResponse,
+    ContextPack, ContextRequest, FetchRequest, FetchResponse, IndexStore, Result, RetrievalRequest,
+    RetrievalResponse,
 };
 use mind_place_archive::ArchiveStore;
 use serde::Serialize;
