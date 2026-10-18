@@ -40,9 +40,16 @@ fn durable_source_ids_are_stable_without_the_derived_index() {
     let state = StateStore::open(&path).unwrap();
     let key = descriptor("provider-message-key");
     let expected = canonical_source_id(&key).unwrap();
+    assert_eq!(
+        expected,
+        "src:v1:d887eb7cbb0f22c685a2701430ed6abc3270e40fd781f42a677a339f0b020788"
+    );
     assert_eq!(state.register_source(&key).unwrap(), expected);
     assert_eq!(state.register_source(&key).unwrap(), expected);
-    assert_eq!(state.source(&expected).unwrap().unwrap().source_key, "provider-message-key");
+    assert_eq!(
+        state.source(&expected).unwrap().unwrap().source_key,
+        "provider-message-key"
+    );
     let raw = Connection::open(&path).unwrap();
     let count: i64 = raw
         .query_row("SELECT COUNT(*) FROM source_identities", [], |r| r.get(0))
@@ -73,7 +80,9 @@ fn evidence_references_require_registered_authority_source() {
             status: "active".into(),
         })
         .unwrap();
-    let source_id = state.register_source(&descriptor("conversation-1")).unwrap();
+    let source_id = state
+        .register_source(&descriptor("conversation-1"))
+        .unwrap();
     state
         .add_claim_source_evidence("claim:1", &source_id, "support")
         .unwrap();
@@ -130,9 +139,11 @@ fn v1_upgrade_keeps_projects_and_creates_verified_v1_backup() {
         .unwrap();
     assert_eq!(version, 1);
     let original: String = snapshot
-        .query_row("SELECT name FROM projects WHERE id='project:old'", [], |r| {
-            r.get(0)
-        })
+        .query_row(
+            "SELECT name FROM projects WHERE id='project:old'",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
     assert_eq!(original, "Preserved");
     drop(snapshot);
