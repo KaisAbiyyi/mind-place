@@ -1,0 +1,18 @@
+[package]
+name = "mind-place-index"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+mind-place-archive = { path = "../archive-core" }
+mind-place-state = { path = "../state-core" }
+rusqlite = { version = "=0.40.2", features = ["bundled"] }
+sha2.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
