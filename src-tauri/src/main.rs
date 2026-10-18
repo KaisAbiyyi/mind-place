@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod mcp_commands;
+mod hosted_tunnel;
 
 use mind_place_archive::{
     ArchiveStore, AssetResult, Conversation, ConversationSummary, ExportResult, ImportReceipt,
@@ -34,6 +35,7 @@ struct AppState {
     index_path: PathBuf,
     authority_ready: Arc<AtomicBool>,
     mcp: Arc<Mutex<Option<LocalMcpServer>>>,
+    hosted: Arc<Mutex<Option<hosted_tunnel::HostedTunnel>>>, 
     extension_path: PathBuf,
     host_path: PathBuf,
     legacy_path: PathBuf,
@@ -314,6 +316,9 @@ async fn unlock_security(
 fn lock_security(state: State<'_, AppState>) -> SecurityStatus {
     state.authority_ready.store(false, Ordering::Release);
     let status = state.security.lock();
+    // Invalidate all read leases before killing the outbound helper and local listener.
+    // Revocation is best-effort while locked; all in-flight evidence is already blocked.
+    let _ = hosted_tunnel::stop_and_revoke(&state);
     state.mcp.lock().unwrap_or_else(|e| e.into_inner()).take();
     status
 }
@@ -525,6 +530,7 @@ fn main() {
                 index_path,
                 authority_ready: Arc::new(AtomicBool::new(false)),
                 mcp: Arc::new(Mutex::new(None)),
+                hosted: Arc::new(Mutex::new(None)),
                 extension_path,
                 host_path,
                 legacy_path,
@@ -550,6 +556,9 @@ fn main() {
             mcp_commands::issue_local_mcp_reader,
             mcp_commands::revoke_local_mcp_client,
             mcp_commands::list_local_mcp_clients,
+            hosted_tunnel::get_hosted_tunnel_status,
+            hosted_tunnel::start_hosted_tunnel,
+            hosted_tunnel::stop_hosted_tunnel,
             initialize_security,
             unlock_security,
             lock_security,
