@@ -46,6 +46,17 @@ pub struct FetchInspection {
 }
 
 impl IndexStore {
+    /// Read the generation directly instead of calling stats(), whose full
+    /// COUNT(DISTINCT) / COUNT(*) scans scale with a million derived rows.
+    fn inspect_generation(&self) -> Result<i64> {
+        let db = self.connection()?;
+        Ok(db.query_row(
+            "SELECT CAST(value AS INTEGER) FROM index_meta WHERE key='generation'",
+            [],
+            |row| row.get(0),
+        )?)
+    }
+
     /// Local diagnostic surface for the real Phase 2A pipeline, not a replay.
     pub fn inspect_retrieval_with_check(
         &self,
@@ -56,7 +67,7 @@ impl IndexStore {
         let started = Instant::now();
         let result = self.retrieve(request)?;
         check()?;
-        let generation = self.stats()?.generation;
+        let generation = self.inspect_generation()?;
         check()?;
         let mut sources = std::collections::BTreeSet::new();
         for hit in &result.hits {
@@ -93,7 +104,7 @@ impl IndexStore {
         let started = Instant::now();
         let result = self.build_context_with_check(archive, request, &mut check)?;
         check()?;
-        let generation = self.stats()?.generation;
+        let generation = self.inspect_generation()?;
         check()?;
         Ok(ContextInspection {
             trace: RetrievalTrace {
@@ -130,7 +141,7 @@ impl IndexStore {
         let started = Instant::now();
         let result = self.fetch_with_check(archive, request, &mut check)?;
         check()?;
-        let generation = self.stats()?.generation;
+        let generation = self.inspect_generation()?;
         check()?;
         Ok(FetchInspection {
             trace: RetrievalTrace {
