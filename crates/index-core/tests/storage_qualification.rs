@@ -221,6 +221,36 @@ fn qualifies_archive_scale() {
     assert_eq!(last[0].message_id, "message-09999");
     fts_integrity(&index_path);
 
+    // Same runner and 1E corpus: relative guardrails, not user-device SLAs.
+    let ranked_query = RetrievalRequest {
+        queries: vec![QueryTerm::Text("firstrareneedle".into())],
+        ..Default::default()
+    };
+    let context_query = ContextRequest {
+        queries: vec![QueryTerm::Text("firstrareneedle".into())],
+        preset: ContextPreset::Fast,
+        ..Default::default()
+    };
+    let legacy_median_us = median_us(|| {
+        assert_eq!(index.search("firstrareneedle", false, 10).unwrap().len(), 1);
+    });
+    let ranked_median_us = median_us(|| {
+        let result = index.inspect_retrieval(&ranked_query).unwrap();
+        assert_eq!(result.result.hits.len(), 1);
+        assert_eq!(result.result.hits[0].source_id, first_id);
+        assert_eq!(result.result.hits[0].score_contributions.len(), 1);
+    });
+    let context_median_us = median_us(|| {
+        let result = index.inspect_context(&archive, &context_query).unwrap();
+        assert_eq!(result.result.source_count, 1);
+        assert_eq!(result.result.groups[0].source_id, first_id);
+    });
+    let ranked_gate_us = (legacy_median_us * 40).max(100_000);
+    let context_gate_us = (legacy_median_us * 200).max(2_000_000);
+    assert!(ranked_median_us <= ranked_gate_us, "ranked inspection latency regression");
+    assert!(context_median_us <= context_gate_us, "context inspection latency regression");
+    let ranked_before_rebuild = index.retrieve(&ranked_query).unwrap();
+
     let noop_started = Instant::now();
     let noop = index.sync(&archive, &state).unwrap();
     let noop_ms = noop_started.elapsed().as_millis();
