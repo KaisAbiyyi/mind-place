@@ -1,0 +1,18 @@
+[package]
+name = "mind-place-integration"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+mind-place-archive = { path = "../archive-core" }
+mind-place-index = { path = "../index-core" }
+mind-place-security = { path = "../security-core" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+mind-place-state = { path = "../state-core" }
+tempfile.workspace = true
