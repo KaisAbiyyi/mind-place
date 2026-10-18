@@ -127,7 +127,6 @@ fn deleting_disposable_index_then_rebuilding_preserves_authority_and_raw() {
         .source_id
         .clone();
     let path = rig.index.path().to_owned();
-    drop(rig.index);
     remove_sqlite(&path);
     let recovered = IndexStore::open(&path).unwrap();
     assert!(recovered.search("silvertrail", false, 10).unwrap().is_empty());
