@@ -1,7 +1,10 @@
 # Phase 2A — Universal retrieval query and result contract
 
-Status: **IMPLEMENTING** on `feat/phase-2a-retrieval-kernel`. This contract is an
-implementation record, not an authorization to expose an external endpoint.
+Status: **DONE**. [PR #6](https://github.com/KaisAbiyyi/mind-place/pull/6)
+was squash-merged into `main` at
+`d7790973cc8ae3ef32f11eaad938b652de96a7cf` on 2026-10-18.
+This contract is an implementation record, not an authorization to expose
+an external endpoint.
 
 ## Boundary
 
@@ -117,5 +120,19 @@ construction, presets, diversity, contradictions and historical `as_of`.
 Phase 2D owns score/provenance inspection, larger ranking regression corpora
 and performance qualification.
 
-Verification required: Rust retrieval regression suite, full Windows CI
-(format, test, typecheck, desktop build), and no new local/manual gate.
+## Completed cloud handoff (2026-10-18)
+
+- **UNIT:** Phase 2A — multi-query search, structured filters and stable result contract.
+- **PR:** https://github.com/KaisAbiyyi/mind-place/pull/6 — squash-merged.
+- **Qualified code SHA:** `d7790973cc8ae3ef32f11eaad938b652de96a7cf`.
+- **Windows product CI:** https://github.com/KaisAbiyyi/mind-place/actions/runs/39114819537 —
+  success: format, repo verification, TypeScript typecheck, SQLite runtime,
+  all Rust/web tests (including 5 new Phase 2A tests) and Tauri desktop build.
+- **Storage qualification:** https://github.com/KaisAbiyyi/mind-place/actions/runs/39114819541 —
+  success for 10K, 100K and 1M archive-message chunk fixtures.
+- **Schema:** no migration; existing index schema v1, state/source IDs unchanged.
+- **Local required:** no. Phase 2 is cloud-only until future connector/device phases.
+- **Known limits:** archive-owned ChatGPT source adapter only; FTS5 phrase is
+  token-exact, not arbitrary byte-substring; shortlist ranking is bounded
+  and not exhaustive. Token/byte budgets and source windows are Phase 2B.
+- **NEXT:** `implement phase 2B` — progressive exact fetch and budgets.
