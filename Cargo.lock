@@ -1914,14 +1914,17 @@ dependencies = [
 name = "mind-place-integration"
 version = "0.2.5"
 dependencies = [
+ "getrandom 0.4.3",
  "mind-place-archive",
  "mind-place-index",
  "mind-place-security",
  "mind-place-state",
  "serde",
+ "sha2",
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
+ "zeroize",
 ]
 
 [[package]]

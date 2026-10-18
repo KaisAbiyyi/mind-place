@@ -13,6 +13,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use thiserror::Error;
 
+pub mod clients;
+pub use clients::{ClientAuthority, IssuedClient, CREDENTIAL_PREFIX};
+
 pub const CONTRACT_VERSION: u32 = 1;
 pub const MAX_BATCH_CALLS: usize = 8;
 pub const MAX_REQUEST_BYTES: usize = 64 * 1024;
@@ -36,6 +39,10 @@ pub enum IntegrationError {
     Index(#[from] IndexError),
     #[error("response serialization failed")]
     Serialization,
+    #[error("Mind Place client authority is unavailable")]
+    Authority(#[from] mind_place_state::StateError),
+    #[error("OS credential generation failed")]
+    CredentialGeneration,
 }
 
 impl IntegrationError {
@@ -49,6 +56,8 @@ impl IntegrationError {
             Self::Index(IndexError::Revoked) => "MP_INTEGRATION_REVOKED",
             Self::Index(_) => "MP_INTEGRATION_INDEX",
             Self::Serialization => "MP_INTEGRATION_SERIALIZATION",
+            Self::Authority(_) => "MP_INTEGRATION_AUTHORITY",
+            Self::CredentialGeneration => "MP_INTEGRATION_CREDENTIAL_GENERATION",
         }
     }
 }
