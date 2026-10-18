@@ -433,7 +433,7 @@ Base planning matrix:
 | Phase | Cloud development | Local qualification | User acceptance | Why local/user exists |
 | --- | ---: | ---: | ---: | --- |
 | 0 — Current foundation | 0 | 0 | 0 | already qualified |
-| 1 — Durable brain storage | 4 | 0 | 0 | backend + Windows CI are sufficient |
+| 1 — Security + durable brain storage | 5 | 0 | 0 | backend + Windows CI are sufficient |
 | 2 — Retrieval kernel | 4 | 0 | 0 | deterministic/headless |
 | 3 — MCP + tunnel | 5 | 2 | 1 | real Windows client + real hosted connector/account |
 | 4 — Documents/folders | 6 | 2 | 1 | NTFS/watcher/parser corpus + folder UX |
@@ -443,7 +443,7 @@ Base planning matrix:
 | 8 — Knowledge OS UI | 6 | 2 | 2 | packaged WebView + subjective daily/Hive UX |
 | 9 — Privacy/portability | 6 | 2 | 2 | Windows keychain + destructive/recovery UX |
 | 10 — v1.0 qualification | 5 | 3 | 2 | target hardware/install/update/full real E2E |
-| **Mandatory total** | **50** | **13** | **10** | |
+| **Mandatory total** | **51** | **13** | **10** | |
 
 These are a **safe ceiling for planned handoff boundaries**, not a target for bureaucracy. Adjacent low-risk cloud units may be combined after the earlier unit is green and the agent still has healthy context. Do not combine schema, security, filesystem authorization, provider live behavior, or destructive-data work merely to reduce the prompt count.
 
@@ -464,36 +464,41 @@ Already proven:
 
 This becomes the compatibility baseline. New phases should extend it rather than rewrite it unnecessarily.
 
-### Phase 1 — Durable brain storage core
+### Phase 1 — Security root and durable brain storage
 
-Planned workload: **C4 / L0 / U0**.
+Planned workload: **C5 / L0 / U0**. Security was deliberately promoted ahead of storage; `CURRENT-PHASE.md` records the live execution state.
 
-**Cloud 1A — authoritative state database**
+**Cloud 1A — security root and fail-closed unlock — DONE**
 
-- introduce `state.sqlite3` with migrations/backups;
-- memory claim schema, root ACL/tombstone schema, project/tag/scope primitives;
-- pin/bundle the SQLite runtime used by Rust.
+- versioned Argon2id security verifier and explicit first-run/unlock flow;
+- locked-by-default startup, unlock epoch/lease invalidation and privileged desktop command gating;
+- no claim of encryption-at-rest at this stage.
 
-**Cloud 1B — stable identity and state durability**
+**Cloud 1B — authoritative state database**
+
+- introduce `state.sqlite3` with transactional migrations and verified backups;
+- memory-claim history schema, root ACL/tombstones, client/security policy and project/tag/scope primitives;
+- pin/bundle the SQLite runtime used by Rust and qualify it in Windows CI;
+- fail closed on foreign, corrupt, future-schema or invalid migration state without rewriting raw archives.
+
+**Cloud 1C — stable identity and authority durability**
 
 - stable provider-neutral source IDs and deterministic/persisted identity mapping;
-- migration rollback/backup behavior;
-- state recovery tests;
+- migration rollback/recovery and state recovery tests;
 - prove authoritative references cannot depend on disposable random index IDs.
 
-**Cloud 1C — derived index + FTS**
+**Cloud 1D — derived index + FTS**
 
 - introduce disposable `index.sqlite3`;
 - index existing immutable ChatGPT archive into derived source/chunk rows;
 - FTS5 external-content index;
-- rebuild command;
-- incremental update path.
+- rebuild command and incremental update path.
 
-**Cloud 1D — storage qualification harness**
+**Cloud 1E — storage qualification harness**
 
 - benchmark representative 10K/100K/1M chunk corpora;
-- prove deleting `index.sqlite3` loses no canonical information.
-- run Windows GitHub Actions coverage for migration/rebuild and bundled SQLite/runtime integration so no local gate is needed by default.
+- prove deleting `index.sqlite3` loses no canonical information;
+- Windows GitHub Actions coverage for migration/rebuild and bundled SQLite/runtime integration.
 
 No local or manual gate is required unless cloud Windows CI exposes a platform-only uncertainty that cannot be reproduced there.
 
@@ -1006,7 +1011,7 @@ Base plan:
 
 | Work type | Planned sessions |
 | --- | ---: |
-| Cloud development units | **50** |
+| Cloud development units | **51** |
 | Local automated/device qualification | **13** |
 | Manual user acceptance | **10** |
 
@@ -1016,7 +1021,7 @@ Optional semantic/search branch, only if Phase 10 measurements justify it:
 - **+1 local qualification**;
 - normally **no additional manual user gate** unless it materially changes retrieval behavior visible in the release candidate.
 
-The 50 cloud units are safe handoff boundaries, not a requirement to waste 50 separate calendar days. Once earlier architecture is stable, adjacent low-risk units can realistically collapse the actual cloud prompt count toward roughly **35-40** without increasing risk. A capable cloud agent may continue into the next unit in the same run **only when the current unit is merged/green, enough context remains, and the user's instruction explicitly allows continuing**. For unattended overnight work, one named cloud unit per instruction is the safest default because the user wakes up to a bounded diff and a deterministic handoff.
+The 51 cloud units are safe handoff boundaries, not a requirement to waste 50 separate calendar days. Once earlier architecture is stable, adjacent low-risk units can realistically collapse the actual cloud prompt count toward roughly **35-40** without increasing risk. A capable cloud agent may continue into the next unit in the same run **only when the current unit is merged/green, enough context remains, and the user's instruction explicitly allows continuing**. For unattended overnight work, one named cloud unit per instruction is the safest default because the user wakes up to a bounded diff and a deterministic handoff.
 
 Manual user work is deliberately much smaller than cloud work. The target is that the user mainly approves real-account/provider behavior and subjective product quality, while agents handle implementation, CI, local diagnostics and reproducible qualification evidence.
 
