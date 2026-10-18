@@ -2,7 +2,9 @@
 //! Every durable source ID is registered in state.sqlite3, never assigned by this DB.
 use mind_place_archive::{ArchiveStore, Capture};
 use mind_place_state::{SourceDescriptor, SourceKey, StateStore};
-use rusqlite::{params, Connection, OpenFlags, OptionalExtension, Transaction, TransactionBehavior};
+use rusqlite::{
+    params, Connection, OpenFlags, OptionalExtension, Transaction, TransactionBehavior,
+};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{
@@ -131,11 +133,13 @@ fn verify(db: &Connection) -> Result<()> {
     if health != "ok" {
         return Err(IndexError::InvalidIndex);
     }
-    let schema_hash: String = db.query_row(
-        "SELECT value FROM index_meta WHERE key='schema_hash'",
-        [],
-        |r| r.get(0),
-    ).map_err(|_| IndexError::InvalidIndex)?;
+    let schema_hash: String = db
+        .query_row(
+            "SELECT value FROM index_meta WHERE key='schema_hash'",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|_| IndexError::InvalidIndex)?;
     if schema_hash != format!("{:x}", Sha256::digest(SCHEMA.as_bytes())) {
         return Err(IndexError::InvalidIndex);
     }
@@ -274,17 +278,23 @@ impl IndexStore {
                 key: SourceKey::External(&summary.conversation_id),
             })?;
             let snapshots = archive.snapshots(&summary.id)?;
-            if !snapshots.iter().any(|r| r.snapshot_id == selected.snapshot_id) {
+            if !snapshots
+                .iter()
+                .any(|r| r.snapshot_id == selected.snapshot_id)
+            {
                 return Err(IndexError::InvalidEvidence);
             }
             for revision in snapshots {
                 check()?;
                 let current = i64::from(revision.snapshot_id == selected.snapshot_id);
-                let known: bool = tx.query_row(
-                    "SELECT 1 FROM revisions WHERE source_id=?1 AND snapshot_id=?2",
-                    params![source_id, revision.snapshot_id],
-                    |_| Ok(()),
-                ).optional()?.is_some();
+                let known: bool = tx
+                    .query_row(
+                        "SELECT 1 FROM revisions WHERE source_id=?1 AND snapshot_id=?2",
+                        params![source_id, revision.snapshot_id],
+                        |_| Ok(()),
+                    )
+                    .optional()?
+                    .is_some();
                 if known {
                     tx.execute(
                         "UPDATE revisions SET seen_generation=?3,is_current=?4
@@ -335,7 +345,12 @@ impl IndexStore {
     }
 
     /// Provisional Phase 1D lexical lookup. Phase 2 will own ranking/filters.
-    pub fn search(&self, query: &str, include_history: bool, limit: usize) -> Result<Vec<SearchHit>> {
+    pub fn search(
+        &self,
+        query: &str,
+        include_history: bool,
+        limit: usize,
+    ) -> Result<Vec<SearchHit>> {
         if query.trim().is_empty() || query.len() > 1024 || limit == 0 || limit > 100 {
             return Err(IndexError::InvalidQuery);
         }
@@ -369,7 +384,8 @@ impl IndexStore {
                 })
             },
         )?;
-        rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
     }
 }
 
@@ -402,7 +418,16 @@ fn insert_capture(
     snapshot_id: &str,
     capture: &Capture,
 ) -> Result<()> {
-    insert_parts(tx, source_id, snapshot_id, "@title", "title", "title", None, &capture.title)?;
+    insert_parts(
+        tx,
+        source_id,
+        snapshot_id,
+        "@title",
+        "title",
+        "title",
+        None,
+        &capture.title,
+    )?;
     for message in &capture.messages {
         insert_parts(
             tx,
@@ -444,7 +469,16 @@ fn insert_parts(
             tx.execute(
                 "INSERT INTO chunks(source_id,snapshot_id,message_id,part,kind,role,model,body)
                  VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
-                params![source_id, snapshot_id, message_id, part, kind, role, model, chunk],
+                params![
+                    source_id,
+                    snapshot_id,
+                    message_id,
+                    part,
+                    kind,
+                    role,
+                    model,
+                    chunk
+                ],
             )?;
         }
         offset = end;
