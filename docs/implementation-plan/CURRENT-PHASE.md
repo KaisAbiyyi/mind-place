@@ -21,13 +21,13 @@ Current execution order after the security-first reprioritization:
    - first-run secret confirmation and fail-closed unlock UI;
    - security dependencies are committed in `Cargo.lock`; no temporary lockfile-refresh workflow remains in `main`;
    - no claim of encryption-at-rest yet.
-2. **Phase 1B — authoritative `state.sqlite3`** — IN PROGRESS in `feat/phase-1b-state-authority` (cloud-only).
+2. **Phase 1B — authoritative `state.sqlite3`** — DONE. PR #2 squash-merged into `main` at `32278f6a2a71a5211c429d86b5e377284d95acf0` after Windows CI run `39099905432` passed.
    - migrations/backups;
    - authoritative mutable state;
    - root ACL/tombstones;
    - memory-claim/project/topic/scope foundations;
    - durable security/client state that belongs in the authority store.
-3. **Phase 1C — stable identity and authority durability**.
+3. **Phase 1C — stable identity and authority durability** — NEXT (cloud-only).
    - provider-neutral IDs;
    - deterministic/persisted identity mapping;
    - migration rollback/recovery;
@@ -58,6 +58,6 @@ Do not weaken Phase 1A to fake those later guarantees. UI/documentation must sta
 
 ## Handoff rule
 
-A cloud unit is complete only when its PR/branch is CI-green and its final SHA is reported. If a cloud-discovered bug is fixed, rerun the relevant checks before merge. The next normal instruction after Phase 1A is:
+A cloud unit is complete only when its PR/branch is CI-green and its final SHA is reported. If a cloud-discovered bug is fixed, rerun the relevant checks before merge. The next normal instruction after completed Phase 1B is:
 
-`implement phase 1B`
+`implement phase 1C`
