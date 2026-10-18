@@ -487,7 +487,7 @@ Planned workload: **C5 / L0 / U0**. Security was deliberately promoted ahead of 
 - migration rollback/recovery and state recovery tests;
 - prove authoritative references cannot depend on disposable random index IDs.
 
-**Cloud 1D — derived index + FTS**
+**Cloud 1D — derived index + FTS — DONE**
 
 - introduce disposable `index.sqlite3`;
 - index existing immutable ChatGPT archive into derived source/chunk rows;
