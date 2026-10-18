@@ -91,8 +91,7 @@ fn trusted_client_binary() -> Result<PathBuf, String> {
     Ok(actual)
 }
 
-fn launch_client(id: &str, api_key: &str, credential: &str) -> Result<Child, String> {
-    let binary = trusted_client_binary()?;
+fn build_client_command(binary: PathBuf, id: &str, api_key: &str, credential: &str) -> Command {
     // Sensitive values go only into the child environment (and are never echoed).
     // Static MCP headers are resolved ONLY at the local origin by tunnel-client.
     // An upstream-provided Authorization header may override the static header;
@@ -120,6 +119,11 @@ fn launch_client(id: &str, api_key: &str, credential: &str) -> Result<Child, Str
         command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
     command
+}
+
+fn launch_client(id: &str, api_key: &str, credential: &str) -> Result<Child, String> {
+    let binary = trusted_client_binary()?;
+    build_client_command(binary, id, api_key, credential)
         .spawn()
         .map_err(|_| "MP_TUNNEL_SPAWN:Could not start installed tunnel-client".into())
 }
@@ -257,5 +261,29 @@ mod tests {
         assert_eq!(MCP_ORIGIN, "http://127.0.0.1:43731/mcp");
         assert_eq!(HEADER_REF, "Authorization: env:MIND_PLACE_HOSTED_BEARER");
         assert!(!HEADER_REF.contains("mpc_v1_"));
+    }
+
+    #[test]
+    fn subprocess_argv_has_no_runtime_key_or_archive_token() {
+        let key = "sk-proj_private_example_key_123";
+        let credential = "mpc_v1_private_example";
+        let command = super::build_client_command(
+            std::path::PathBuf::from("tunnel-client"),
+            &format!("tunnel_{}", "a".repeat(32)),
+            key,
+            credential,
+        );
+        let argv = command.get_args().map(|s| s.to_string_lossy().to_string()).collect::<Vec<_>>();
+        assert_eq!(argv[0], "run");
+        assert!(argv.iter().all(|part| !part.contains(key) && !part.contains(credential)));
+        let env = command.get_envs()
+            .filter_map(|(k,v)| v.map(|v| (k.to_string_lossy().to_string(), v.to_string_lossy().to_string())))
+            .collect::<std::collections::HashMap<_,_>>();
+        assert_eq!(env.get("CONTROL_PLANE_API_KEY").map(String::as_str), Some(key));
+        assert_eq!(env.get("MIND_PLACE_HOSTED_BEARER").map(String::as_str), Some("Bearer mpc_v1_private_example"));
+        assert_eq!(env.get("MCP_SERVER_URL").map(String::as_str), Some(MCP_ORIGIN));
+        assert_eq!(env.get("MCP_EXTRA_HEADERS").map(String::as_str), Some(HEADER_REF));
+        assert_eq!(env.get("MCP_DISCOVERY_EXTRA_HEADERS").map(String::as_str), Some(HEADER_REF));
+        assert_eq!(env.get("HEALTH_LISTEN_ADDR").map(String::as_str), Some("127.0.0.1:0"));
     }
 }
