@@ -27,12 +27,13 @@ Current execution order after the security-first reprioritization:
    - root ACL/tombstones;
    - memory-claim/project/topic/scope foundations;
    - durable security/client state that belongs in the authority store.
-3. **Phase 1C — stable identity and authority durability** — NEXT (cloud-only).
-   - provider-neutral IDs;
-   - deterministic/persisted identity mapping;
-   - migration rollback/recovery;
-   - authoritative references independent of disposable indexes.
-4. **Phase 1D — rebuildable `index.sqlite3` + FTS5**.
+3. **Phase 1C — stable identity and authority durability** — DONE. PR #3 squash-merged into `main` at `d007e80b079471bcb66661fb90feba907d837dc2` after Windows CI run `39105339145` passed.
+   - versioned provider-neutral IDs from deterministic, length-framed source origin tuples;
+   - authoritative `source_identities` mapping in `state.sqlite3` schema v2;
+   - FK-backed memory claim evidence references independent of disposable indexes;
+   - verified V1 snapshots, fail-closed orphan evidence, atomic rollback/recovery and restart/tamper tests;
+   - explicit identity contract at `phase-1c-source-identity.md`.
+4. **Phase 1D — rebuildable `index.sqlite3` + FTS5** — NEXT (cloud-only).
    - archive adapter;
    - source/chunk catalog;
    - FTS5 external-content index;
@@ -58,6 +59,6 @@ Do not weaken Phase 1A to fake those later guarantees. UI/documentation must sta
 
 ## Handoff rule
 
-A cloud unit is complete only when its PR/branch is CI-green and its final SHA is reported. If a cloud-discovered bug is fixed, rerun the relevant checks before merge. The next normal instruction after completed Phase 1B is:
+A cloud unit is complete only when its PR/branch is CI-green and its final SHA is reported. If a cloud-discovered bug is fixed, rerun the relevant checks before merge. The next normal instruction after completed Phase 1C is:
 
-`implement phase 1C`
+`implement phase 1D`
