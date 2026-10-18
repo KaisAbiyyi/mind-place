@@ -20,7 +20,10 @@ const MAX_CHUNK_BYTES: usize = 4096;
 const SCHEMA: &str = include_str!("schema_v1.sql");
 
 pub mod retrieval;
-pub use retrieval::{MatchMode, QueryTerm, RetrievalFilters, RetrievalHit, RetrievalRequest, RetrievalResponse, WeightedQuery};
+pub use retrieval::{
+    MatchMode, QueryTerm, RetrievalFilters, RetrievalHit, RetrievalRequest, RetrievalResponse,
+    WeightedQuery,
+};
 
 pub type Result<T> = std::result::Result<T, IndexError>;
 
