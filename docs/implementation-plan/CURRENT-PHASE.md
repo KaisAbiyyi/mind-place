@@ -52,7 +52,7 @@ Current execution order after the security-first reprioritization:
 
 ## Phase 2 — universal retrieval kernel
 
-1. **Phase 2A — search requests + structured filters** — **NEXT** (cloud-only): multi-query model, filters, BM25/exact retrieval and stable provenance-rich result contract.
+1. **Phase 2A — search requests + structured filters** — **IN PROGRESS** (cloud-only): multi-query model, filters, BM25/exact retrieval and stable provenance-rich result contract.
 2. Phase 2B — progressive fetch and budgets.
 3. Phase 2C — context builder and retrieval policies.
 4. Phase 2D — observability and retrieval qualification.
