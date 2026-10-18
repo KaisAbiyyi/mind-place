@@ -247,8 +247,14 @@ fn qualifies_archive_scale() {
     });
     let ranked_gate_us = (legacy_median_us * 40).max(100_000);
     let context_gate_us = (legacy_median_us * 200).max(2_000_000);
-    assert!(ranked_median_us <= ranked_gate_us, "ranked inspection latency regression");
-    assert!(context_median_us <= context_gate_us, "context inspection latency regression");
+    assert!(
+        ranked_median_us <= ranked_gate_us,
+        "ranked inspection latency regression"
+    );
+    assert!(
+        context_median_us <= context_gate_us,
+        "context inspection latency regression"
+    );
     let ranked_before_rebuild = index.retrieve(&ranked_query).unwrap();
 
     let noop_started = Instant::now();
@@ -311,7 +317,10 @@ fn qualifies_archive_scale() {
     assert_eq!(rebuilt.search("firstrareneedle", false, 10).unwrap(), first);
     assert_eq!(rebuilt.search("lastrareneedle", false, 10).unwrap(), last);
     let restored_lookup_ms = post_lookup_started.elapsed().as_millis();
-    assert_eq!(rebuilt.retrieve(&ranked_query).unwrap(), ranked_before_rebuild);
+    assert_eq!(
+        rebuilt.retrieve(&ranked_query).unwrap(),
+        ranked_before_rebuild
+    );
     fts_integrity(&index_path);
 
     let receipt = json!({
