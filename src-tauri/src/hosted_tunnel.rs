@@ -4,7 +4,8 @@ use super::{begin_unlocked, finish_unlocked, AppState};
 use mind_place_integration::ClientAuthority;
 use mind_place_state::{ClientCapability, StateStore};
 use serde::Serialize;
-use std::path::PathBuf;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::Ordering;
 use tauri::State;
@@ -17,6 +18,7 @@ const CLIENT_NAME: &str = "Mind Place hosted tunnel (ephemeral read-only)";
 /// Process and identity are owned by the unlocked desktop, not by remote MCP.
 pub(crate) struct HostedTunnel {
     child: Child,
+    _config: tempfile::NamedTempFile,
     client_id: String,
     tunnel_id: String,
 }
@@ -96,15 +98,43 @@ fn trusted_client_binary() -> Result<PathBuf, String> {
     Ok(actual)
 }
 
-fn build_client_command(binary: PathBuf, id: &str, api_key: &str, credential: &str) -> Command {
+fn build_client_command(
+    binary: PathBuf,
+    config: &Path,
+    id: &str,
+    api_key: &str,
+    credential: &str,
+) -> Command {
     // Sensitive values go only into the child environment (and are never echoed).
     // Static MCP headers are resolved ONLY at the local origin by tunnel-client.
     // An upstream-provided Authorization header may override the static header;
     // Phase 3B still authenticates every actual bearer and denies unknown grants.
     let bearer = Zeroizing::new(format!("Bearer {credential}"));
     let mut command = Command::new(binary);
+    // Only the application's minimal config may define MCP channels. Inherited
+    // user profiles or admin/Harpoon settings must never extend the exposed catalog.
+    for name in [
+        "TUNNEL_CLIENT_CONFIG",
+        "TUNNEL_CLIENT_PROFILE",
+        "TUNNEL_CLIENT_PROFILE_FILE",
+        "TUNNEL_CLIENT_PROFILE_DIR",
+        "CONTROL_PLANE_BASE_URL",
+        "CONTROL_PLANE_URL_PATH",
+        "CONTROL_PLANE_EXTRA_HEADERS",
+        "OPENAI_API_KEY",
+        "OPENAI_ADMIN_KEY",
+        "MCP_COMMAND",
+        "HARPOON_TARGETS",
+        "HARPOON_ALLOW_PLAINTEXT_HTTP",
+        "CLOUDFLARED_MANAGED",
+        "CLOUDFLARED_TUNNEL_TOKEN",
+    ] {
+        command.env_remove(name);
+    }
     command
         .arg("run")
+        .arg("--config")
+        .arg(config)
         .arg("--health.listen-addr=127.0.0.1:0")
         .arg("--log.level=warn")
         .env("CONTROL_PLANE_TUNNEL_ID", id)
@@ -126,11 +156,27 @@ fn build_client_command(binary: PathBuf, id: &str, api_key: &str, credential: &s
     command
 }
 
-fn launch_client(id: &str, api_key: &str, credential: &str) -> Result<Child, String> {
+fn launch_client(
+    id: &str,
+    api_key: &str,
+    credential: &str,
+) -> Result<(Child, tempfile::NamedTempFile), String> {
     let binary = trusted_client_binary()?;
-    build_client_command(binary, id, api_key, credential)
+    // Private temporary file contains NO secrets: settings arrive via child environment.
+    // Keeping this handle alive also prevents accidental profile substitution on disk.
+    let mut config = tempfile::NamedTempFile::new()
+        .map_err(|_| "MP_TUNNEL_CONFIG:Cannot create isolated profile")?;
+    config
+        .write_all(b"config_version: 1\n")
+        .map_err(|_| "MP_TUNNEL_CONFIG:Cannot write isolated profile")?;
+    config
+        .as_file()
+        .sync_all()
+        .map_err(|_| "MP_TUNNEL_CONFIG:Cannot sync isolated profile")?;
+    let child = build_client_command(binary, config.path(), id, api_key, credential)
         .spawn()
-        .map_err(|_| "MP_TUNNEL_SPAWN:Could not start installed tunnel-client".into())
+        .map_err(|_| "MP_TUNNEL_SPAWN:Could not start installed tunnel-client".to_string())?;
+    Ok((child, config))
 }
 
 fn revoke_ephemeral(state: &AppState, client_id: &str) -> Result<(), String> {
@@ -223,8 +269,8 @@ pub(super) fn start_hosted_tunnel(
         .issue(CLIENT_NAME, &[ClientCapability::Read])
         .map_err(|_| "MP_TUNNEL_AUTHORITY:Cannot create read-only client".to_string())?;
     let client_id = issued.client.id.clone();
-    let child = match launch_client(&tunnel_id, &api_key, issued.credential()) {
-        Ok(child) => child,
+    let (child, config) = match launch_client(&tunnel_id, &api_key, issued.credential()) {
+        Ok(process) => process,
         Err(error) => {
             let _ = revoke_ephemeral(&state, &client_id);
             return Err(error);
@@ -232,6 +278,7 @@ pub(super) fn start_hosted_tunnel(
     };
     let tunnel = HostedTunnel {
         child,
+        _config: config,
         client_id: client_id.clone(),
         tunnel_id: tunnel_id.clone(),
     };
@@ -301,6 +348,7 @@ mod tests {
         let credential = "mpc_v1_private_example";
         let command = super::build_client_command(
             std::path::PathBuf::from("tunnel-client"),
+            std::path::Path::new("isolated-runtime.yaml"),
             &format!("tunnel_{}", "a".repeat(32)),
             key,
             credential,
@@ -310,6 +358,8 @@ mod tests {
             .map(|s| s.to_string_lossy().to_string())
             .collect::<Vec<_>>();
         assert_eq!(argv[0], "run");
+        assert_eq!(argv[1], "--config");
+        assert_eq!(argv[2], "isolated-runtime.yaml");
         assert!(argv
             .iter()
             .all(|part| !part.contains(key) && !part.contains(credential)));
@@ -348,5 +398,8 @@ mod tests {
             env.get("HEALTH_LISTEN_ADDR").map(String::as_str),
             Some("127.0.0.1:0")
         );
+        for denied in ["OPENAI_ADMIN_KEY", "HARPOON_TARGETS", "TUNNEL_CLIENT_PROFILE"] {
+            assert!(command.get_envs().any(|(key, value)| key == denied && value.is_none()));
+        }
     }
 }
