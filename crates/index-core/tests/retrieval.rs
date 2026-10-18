@@ -71,9 +71,18 @@ impl Fixture {
     fn sync(&self) {
         self.index.sync(&self.archive, &self.state).unwrap();
     }
-    fn search(&self, terms: Vec<QueryTerm>, filters: RetrievalFilters, limit: usize) -> mind_place_index::RetrievalResponse {
+    fn search(
+        &self,
+        terms: Vec<QueryTerm>,
+        filters: RetrievalFilters,
+        limit: usize,
+    ) -> mind_place_index::RetrievalResponse {
         self.index
-            .retrieve(&RetrievalRequest { queries: terms, filters, limit })
+            .retrieve(&RetrievalRequest {
+                queries: terms,
+                filters,
+                limit,
+            })
             .unwrap()
     }
 }
@@ -91,14 +100,25 @@ fn exact(s: &str, weight: f64) -> QueryTerm {
 #[test]
 fn combines_weighted_queries_deduplicates_chunks_and_preserves_provenance() {
     let f = Fixture::new();
-    let a = f.archive.save(capture(
-        A, "Roadmap", "moonlit lantern planning and research",
-        "alphahelp answer", "2026-10-17T10:00:00Z",
-    )).unwrap();
-    f.archive.save(capture(
-        B, "Another project", "moonlit outreach and execution",
-        "bravohelp answer", "2026-10-18T10:00:00Z",
-    )).unwrap();
+    let a = f
+        .archive
+        .save(capture(
+            A,
+            "Roadmap",
+            "moonlit lantern planning and research",
+            "alphahelp answer",
+            "2026-10-17T10:00:00Z",
+        ))
+        .unwrap();
+    f.archive
+        .save(capture(
+            B,
+            "Another project",
+            "moonlit outreach and execution",
+            "bravohelp answer",
+            "2026-10-18T10:00:00Z",
+        ))
+        .unwrap();
     f.sync();
     let request = RetrievalRequest {
         queries: vec![text("moonlit"), exact("moonlit lantern", 4.0)],
@@ -113,7 +133,10 @@ fn combines_weighted_queries_deduplicates_chunks_and_preserves_provenance() {
     assert_eq!(result.hits[0].matched_queries, vec![0, 1]);
     assert_eq!(result.hits[0].exact_queries, vec![1]);
     assert_eq!(result.hits[0].provider, "chatgpt");
-    assert_eq!(result.hits[0].source_url, format!("https://chatgpt.com/c/{A}"));
+    assert_eq!(
+        result.hits[0].source_url,
+        format!("https://chatgpt.com/c/{A}")
+    );
     assert_eq!(result.hits[0].conversation_id, A);
     assert!(result.hits[0].source_id.starts_with("src:v1:"));
     assert_eq!(result.hits[0].part, 0);
@@ -127,14 +150,25 @@ fn combines_weighted_queries_deduplicates_chunks_and_preserves_provenance() {
 #[test]
 fn structured_filters_intersect_without_leaking_other_messages() {
     let f = Fixture::new();
-    let saved = f.archive.save(capture(
-        A, "Starbase alpha", "orbitapple visible user text",
-        "orbitapple target assistant", "2026-10-17T10:00:00Z",
-    )).unwrap();
-    f.archive.save(capture(
-        B, "Other starbase", "orbitapple other user",
-        "orbitapple other assistant", "2026-10-18T10:00:00Z",
-    )).unwrap();
+    let saved = f
+        .archive
+        .save(capture(
+            A,
+            "Starbase alpha",
+            "orbitapple visible user text",
+            "orbitapple target assistant",
+            "2026-10-17T10:00:00Z",
+        ))
+        .unwrap();
+    f.archive
+        .save(capture(
+            B,
+            "Other starbase",
+            "orbitapple other user",
+            "orbitapple other assistant",
+            "2026-10-18T10:00:00Z",
+        ))
+        .unwrap();
     f.sync();
     let base = RetrievalFilters {
         providers: vec!["chatgpt".into()],
@@ -154,18 +188,42 @@ fn structured_filters_intersect_without_leaking_other_messages() {
     assert_eq!(found.hits[0].model.as_deref(), Some("test-gpt"));
     assert_eq!(found.hits[0].role, "assistant");
     let source_id = found.hits[0].source_id.clone();
-    let narrowed = RetrievalFilters { source_ids: vec![source_id], ..base.clone() };
-    assert_eq!(f.search(vec![text("orbitapple")], narrowed, 10).hits.len(), 1);
+    let narrowed = RetrievalFilters {
+        source_ids: vec![source_id],
+        ..base.clone()
+    };
+    assert_eq!(
+        f.search(vec![text("orbitapple")], narrowed, 10).hits.len(),
+        1
+    );
 
     let absent = [
-        RetrievalFilters { providers: vec!["claude".into()], ..base.clone() },
-        RetrievalFilters { models: vec!["other-model".into()], ..base.clone() },
-        RetrievalFilters { roles: vec!["user".into()], ..base.clone() },
-        RetrievalFilters { captured_from: Some("2026-10-18T00:00:00Z".into()), ..base.clone() },
-        RetrievalFilters { conversation_ids: vec![B.into()], ..base.clone() },
+        RetrievalFilters {
+            providers: vec!["claude".into()],
+            ..base.clone()
+        },
+        RetrievalFilters {
+            models: vec!["other-model".into()],
+            ..base.clone()
+        },
+        RetrievalFilters {
+            roles: vec!["user".into()],
+            ..base.clone()
+        },
+        RetrievalFilters {
+            captured_from: Some("2026-10-18T00:00:00Z".into()),
+            ..base.clone()
+        },
+        RetrievalFilters {
+            conversation_ids: vec![B.into()],
+            ..base.clone()
+        },
     ];
     for filters in absent {
-        assert!(f.search(vec![text("orbitapple")], filters, 10).hits.is_empty());
+        assert!(f
+            .search(vec![text("orbitapple")], filters, 10)
+            .hits
+            .is_empty());
     }
     let title = f.search(
         vec![text("Starbase")],
@@ -183,20 +241,38 @@ fn structured_filters_intersect_without_leaking_other_messages() {
 #[test]
 fn defaults_current_only_and_history_requires_explicit_opt_in() {
     let f = Fixture::new();
-    let first = f.archive.save(capture(
-        A, "Archives", "amberhistory initial evidence", "ok",
-        "2026-10-17T10:00:00Z",
-    )).unwrap();
+    let first = f
+        .archive
+        .save(capture(
+            A,
+            "Archives",
+            "amberhistory initial evidence",
+            "ok",
+            "2026-10-17T10:00:00Z",
+        ))
+        .unwrap();
     f.sync();
-    let second = f.archive.save(capture(
-        A, "Archives", "cobaltcurrent latest evidence", "ok",
-        "2026-10-18T10:00:00Z",
-    )).unwrap();
+    let second = f
+        .archive
+        .save(capture(
+            A,
+            "Archives",
+            "cobaltcurrent latest evidence",
+            "ok",
+            "2026-10-18T10:00:00Z",
+        ))
+        .unwrap();
     f.sync();
-    assert!(f.search(vec![text("amberhistory")], RetrievalFilters::default(), 10).hits.is_empty());
+    assert!(f
+        .search(vec![text("amberhistory")], RetrievalFilters::default(), 10)
+        .hits
+        .is_empty());
     let historical = f.search(
         vec![text("amberhistory")],
-        RetrievalFilters { include_history: true, ..Default::default() },
+        RetrievalFilters {
+            include_history: true,
+            ..Default::default()
+        },
         10,
     );
     assert_eq!(historical.hits.len(), 1);
@@ -210,35 +286,91 @@ fn defaults_current_only_and_history_requires_explicit_opt_in() {
 #[test]
 fn rejects_invalid_requests_and_unsupported_filters_without_sql_injection() {
     let f = Fixture::new();
-    f.archive.save(capture(A, "SQL tests", "needle cautious", "ok", "2026-10-18T10:00:00Z")).unwrap();
+    f.archive
+        .save(capture(
+            A,
+            "SQL tests",
+            "needle cautious",
+            "ok",
+            "2026-10-18T10:00:00Z",
+        ))
+        .unwrap();
     f.sync();
     let invalid = [
         RetrievalRequest::default(),
-        RetrievalRequest { queries: vec![text("   ")], ..Default::default() },
-        RetrievalRequest { queries: vec![text("a")], limit: 101, ..Default::default() },
-        RetrievalRequest { queries: vec![text("a"); 9], ..Default::default() },
-        RetrievalRequest { queries: vec![text("a")], filters: RetrievalFilters {
-            models: vec!["".into()], ..Default::default()
-        }, ..Default::default() },
-        RetrievalRequest { queries: vec![text("a")], filters: RetrievalFilters {
-            captured_from: Some("tomorrow".into()), ..Default::default()
-        }, ..Default::default() },
-        RetrievalRequest { queries: vec![text("a")], filters: RetrievalFilters {
-            captured_from: Some("2026-10-19T00:00:00Z".into()),
-            captured_to: Some("2026-10-18T00:00:00Z".into()),
+        RetrievalRequest {
+            queries: vec![text("   ")],
             ..Default::default()
-        }, ..Default::default() },
-        RetrievalRequest { queries: vec![QueryTerm::Weighted(WeightedQuery {
-            text: "needle".into(), weight: f64::NAN, mode: MatchMode::Lexical,
-        })], ..Default::default() },
+        },
+        RetrievalRequest {
+            queries: vec![text("a")],
+            limit: 101,
+            ..Default::default()
+        },
+        RetrievalRequest {
+            queries: vec![text("a"); 9],
+            ..Default::default()
+        },
+        RetrievalRequest {
+            queries: vec![text("a")],
+            filters: RetrievalFilters {
+                models: vec!["".into()],
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        RetrievalRequest {
+            queries: vec![text("a")],
+            filters: RetrievalFilters {
+                captured_from: Some("tomorrow".into()),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        RetrievalRequest {
+            queries: vec![text("a")],
+            filters: RetrievalFilters {
+                captured_from: Some("2026-10-19T00:00:00Z".into()),
+                captured_to: Some("2026-10-18T00:00:00Z".into()),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        RetrievalRequest {
+            queries: vec![QueryTerm::Weighted(WeightedQuery {
+                text: "needle".into(),
+                weight: f64::NAN,
+                mode: MatchMode::Lexical,
+            })],
+            ..Default::default()
+        },
     ];
     for request in invalid {
-        assert!(matches!(f.index.retrieve(&request), Err(IndexError::InvalidQuery)));
+        assert!(matches!(
+            f.index.retrieve(&request),
+            Err(IndexError::InvalidQuery)
+        ));
     }
-    assert!(serde_json::from_str::<RetrievalRequest>(r#"{"queries":["needle"],"filters":{"projects":["secret"]}}"#).is_err());
-    let malicious = f.search(vec![text(r#"needle" OR *"#)], RetrievalFilters::default(), 10);
+    assert!(serde_json::from_str::<RetrievalRequest>(
+        r#"{"queries":["needle"],"filters":{"projects":["secret"]}}"#
+    )
+    .is_err());
+    let malicious = f.search(
+        vec![text(r#"needle" OR *"#)],
+        RetrievalFilters::default(),
+        10,
+    );
     assert!(malicious.hits.is_empty());
-    assert_eq!(f.search(vec![exact("needle cautious", 1.0)], RetrievalFilters::default(), 10).hits.len(), 1);
+    assert_eq!(
+        f.search(
+            vec![exact("needle cautious", 1.0)],
+            RetrievalFilters::default(),
+            10
+        )
+        .hits
+        .len(),
+        1
+    );
 }
 
 #[test]
