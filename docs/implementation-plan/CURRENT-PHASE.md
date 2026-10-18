@@ -59,11 +59,16 @@ Current execution order after the security-first reprioritization:
    - unlock-lease guarded `search_retrieval` Tauri command and regression fixtures;
    - no state/index migration and no local/manual gate (`C1 / L0 / U0`);
    - details, limits and handoff: [phase-2a-retrieval.md](phase-2a-retrieval.md).
-2. **Phase 2B — progressive fetch and budgets** — **IN PROGRESS** (cloud-only).
-3. Phase 2C — context builder and retrieval policies.
+2. **Phase 2B — progressive fetch and budgets** — **DONE**. [PR #7](https://github.com/KaisAbiyyi/mind-place/pull/7) squash-merged into `main` at `5672b49ed508eb07e9331180e987a1313a8f9773`. Windows [product CI 39116420328](https://github.com/KaisAbiyyi/mind-place/actions/runs/39116420328) and [storage qualification 39116420331](https://github.com/KaisAbiyyi/mind-place/actions/runs/39116420331) all passed.
+   - exact-source/snapshot message, window and revision fetch with canonical identity and integrity checks;
+   - Unicode-safe resumable cursors, byte/token-estimate/latency bounds and explicit truncated/freshness receipts;
+   - unlock-lease guarded `fetch_retrieval` Tauri command and negative/security regression fixtures;
+   - no index/state schema migration, and no local/manual gate (`C1 / L0 / U0`);
+   - details, limitations and cloud handoff: [phase-2b-progressive-fetch.md](phase-2b-progressive-fetch.md).
+3. **Phase 2C — context builder and retrieval policies** — **NEXT** (cloud-only).
 4. Phase 2D — observability and retrieval qualification.
 
-The next cloud instruction is `implement phase 2B`. Do not pull the local Windows checkout merely to begin Phase 2B.
+The next cloud instruction is `implement phase 2C`. Do not pull the local Windows checkout merely to begin Phase 2C.
 
 ## Phase 1A explicit boundary
 
@@ -79,6 +84,6 @@ Do not weaken Phase 1A to fake those later guarantees. UI/documentation must sta
 
 ## Handoff rule
 
-A cloud unit is complete only when its PR/branch is CI-green and its final SHA is reported. If a cloud-discovered bug is fixed, rerun the relevant checks before merge. The next normal instruction after completed Phase 2A is:
+A cloud unit is complete only when its PR/branch is CI-green and its final SHA is reported. If a cloud-discovered bug is fixed, rerun the relevant checks before merge. The next normal instruction after completed Phase 2B is:
 
-`implement phase 2B`
+`implement phase 2C`
