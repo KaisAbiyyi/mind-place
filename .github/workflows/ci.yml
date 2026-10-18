@@ -55,6 +55,19 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Stage capture sidecar for native desktop tests
+        shell: pwsh
+        run: |
+          cargo build -p mind-place-capture-host
+          New-Item -ItemType Directory -Force src-tauri/binaries | Out-Null
+          $triple = (rustc -vV | Select-String '^host:\s*(.+)
+
+      - name: Build desktop app
+        run: npm run build
+).Matches[0].Groups[1].Value.Trim()
+          if (-not $triple) { throw 'Missing Rust target triple' }
+          Copy-Item "target/debug/mind-place-capture-host.exe" "src-tauri/binaries/mind-place-capture-host-$triple.exe"
+
       - name: Test hosted tunnel desktop boundaries
         run: cargo test -p mind-place --bin mind-place hosted_tunnel::tests -- --nocapture
 
