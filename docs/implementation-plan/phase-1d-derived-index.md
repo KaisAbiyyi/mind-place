@@ -1,5 +1,7 @@
 # Phase 1D — derived archive index and FTS5
 
+Status: **DONE** — [PR #4](https://github.com/KaisAbiyyi/mind-place/pull/4) squash-merged into `main` at `ccbb6e9ffadce1ebaefde3d328e3936725156823`. Windows [CI run 39108537645](https://github.com/KaisAbiyyi/mind-place/actions/runs/39108537645) passed formatting, repository verification, typecheck, bundled SQLite gate, web/Rust tests and Tauri desktop build.
+
 The index is a performance projection, not a source of truth. Its SQLite file is
 a sibling of the existing archive-v1 and state.sqlite3 files:
 
@@ -89,3 +91,14 @@ desktop build. No local Windows/manual session is planned for this unit.
 
 NEXT: Phase 1E benchmarks, deletion/rebuild at representative scale and
 Windows SQLite-integrated qualification.
+
+## Completed cloud handoff (2026-10-18)
+
+- **UNIT:** Phase 1D — rebuildable derived index and FTS5.
+- **PR:** https://github.com/KaisAbiyyi/mind-place/pull/4 — squash-merged.
+- **Qualified code SHA:** `ccbb6e9ffadce1ebaefde3d328e3936725156823`.
+- **Validation:** Windows CI run `39108537645` — successful; all Rust/web tests, format/typecheck, SQLite version and desktop build passed.
+- **Storage contract:** `index.sqlite3` is disposable; `state.sqlite3` retains canonical identities; raw archive revisions remain immutable.
+- **Local required:** No; Phase 1D is qualified by cloud CI. Do not pull a local checkout for this unit.
+- **Known limits:** New externally saved captures require refresh or next unlock; selected index revision is the archive's latest selected revision, historical revisions remain queryable. Full at-scale measurement and stronger rebuild fault injection are Phase 1E work.
+- **NEXT:** `implement phase 1E` — performance/scale and index deletion/rebuild qualification.
