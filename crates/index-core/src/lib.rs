@@ -19,7 +19,9 @@ const NAMESPACE: &str = "mind-place-chatgpt-archive-v1";
 const MAX_CHUNK_BYTES: usize = 4096;
 const SCHEMA: &str = include_str!("schema_v1.sql");
 
+pub mod context;
 pub mod fetch;
+pub use context::{ContextBudget, ContextExcerpt, ContextGroup, ContextPack, ContextPreset, ContextRequest};
 pub mod retrieval;
 pub use fetch::{
     FetchBudget, FetchCursor, FetchGranularity, FetchRequest, FetchResponse, FetchSegment,
