@@ -333,7 +333,13 @@ fn backup(db: &Connection, parent: &Path, version: i64) -> Result<()> {
     )?;
     identity(&ro)?;
     health(&ro)?;
-    File::open(&dest)?.sync_all()?;
+    drop(ro);
+    // Windows FlushFileBuffers requires a write-capable file handle.
+    OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&dest)?
+        .sync_all()?;
     #[cfg(unix)]
     {
         File::open(&folder)?.sync_all()?;
