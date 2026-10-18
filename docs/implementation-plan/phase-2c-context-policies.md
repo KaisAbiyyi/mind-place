@@ -1,6 +1,6 @@
 # Phase 2C — context packs and retrieval policies
 
-Status: IN PROGRESS. Cloud-only implementation on branch `feat/phase-2c-context-policies`.
+Status: **DONE**. PR #8 squash-merged at `326969be7de7fd0d5e93affb6cdda165ef1c8b8c` (2026-10-18).
 
 ## Core contract
 
