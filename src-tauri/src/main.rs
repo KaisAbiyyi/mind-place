@@ -11,9 +11,9 @@ use mind_place_index::{
     IndexError, IndexStats, IndexStore, RetrievalRequest, RetrievalResponse, SearchHit,
     SearchInspection,
 };
+use mind_place_integration::transport::LocalMcpServer;
 use mind_place_security::{SecurityError, SecurityGate, SecurityStatus, UnlockLease};
 use mind_place_state::StateStore;
-use mind_place_integration::transport::LocalMcpServer;
 use serde::Serialize;
 use std::{
     io::Write,

@@ -16,7 +16,10 @@ pub struct McpReply {
 }
 impl McpReply {
     fn ok(id: Value, result: Value) -> Self {
-        Self { status: 200, body: Some(json!({"jsonrpc":"2.0","id":id,"result":result})) }
+        Self {
+            status: 200,
+            body: Some(json!({"jsonrpc":"2.0","id":id,"result":result})),
+        }
     }
     fn error(status: u16, id: Value, code: i32, message: &'static str) -> Self {
         Self {
@@ -28,7 +31,10 @@ impl McpReply {
         }
     }
     fn no_content() -> Self {
-        Self { status: 202, body: None }
+        Self {
+            status: 202,
+            body: None,
+        }
     }
 }
 
@@ -41,12 +47,17 @@ fn name(name: ToolName) -> &'static str {
 }
 
 pub fn catalog() -> Vec<Value> {
-    tool_catalog().into_iter().map(|tool| json!({
-        "name": name(tool.name),
-        "description": tool.description,
-        "inputSchema": tool.input_schema,
-        "annotations": {"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true}
-    })).collect()
+    tool_catalog()
+        .into_iter()
+        .map(|tool| {
+            json!({
+                "name": name(tool.name),
+                "description": tool.description,
+                "inputSchema": tool.input_schema,
+                "annotations": {"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true}
+            })
+        })
+        .collect()
 }
 
 fn meta() -> Value {
@@ -91,7 +102,8 @@ pub fn dispatch(
         let request_meta = params.get("_meta");
         if request_meta
             .and_then(|m| m.get("io.modelcontextprotocol/protocolVersion"))
-            .and_then(Value::as_str) != Some(MODERN)
+            .and_then(Value::as_str)
+            != Some(MODERN)
             || method_header != Some(method)
             || (method == "tools/call" && name_header != params.get("name").and_then(Value::as_str))
             || (method != "tools/call" && name_header.is_some())
@@ -104,14 +116,18 @@ pub fn dispatch(
         {
             return McpReply::error(400, id, -32602, "Invalid params");
         }
-    } else if params.get("_meta").and_then(|m| m.get("io.modelcontextprotocol/protocolVersion")).is_some() {
+    } else if params
+        .get("_meta")
+        .and_then(|m| m.get("io.modelcontextprotocol/protocolVersion"))
+        .is_some()
+    {
         return McpReply::error(400, id, -32602, "Invalid params");
     }
 
     // Authentication is mandatory even for initialize, discovery, ping and
     // tools/list. No client ever identifies itself via untrusted request params.
-    let authorized = crate::ClientAuthority::new(state, core.security)
-        .authorize(bearer, ClientCapability::Read);
+    let authorized =
+        crate::ClientAuthority::new(state, core.security).authorize(bearer, ClientCapability::Read);
     if authorized.is_err() {
         return McpReply::error(401, id, -32001, "Unauthorized");
     }
@@ -137,7 +153,13 @@ pub fn dispatch(
             "cacheScope":"private",
             "_meta":meta()
         }),
-        "ping" => if modern { json!({"resultType":"complete","_meta":meta()}) } else { json!({}) },
+        "ping" => {
+            if modern {
+                json!({"resultType":"complete","_meta":meta()})
+            } else {
+                json!({})
+            }
+        }
         "tools/list" => {
             if params.get("cursor").is_some() {
                 return McpReply::error(400, id, -32602, "Invalid params");
@@ -156,15 +178,28 @@ pub fn dispatch(
                 Some("context_build") => ToolName::ContextBuild,
                 _ => return McpReply::error(404, id, -32602, "Unknown tool"),
             };
-            let arguments = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
-            let response = match core.execute_client_batch(state, bearer, &ToolBatch {
-                calls: vec![ToolCall { name: tool, arguments }]
-            }) {
+            let arguments = params
+                .get("arguments")
+                .cloned()
+                .unwrap_or_else(|| json!({}));
+            let response = match core.execute_client_batch(
+                state,
+                bearer,
+                &ToolBatch {
+                    calls: vec![ToolCall {
+                        name: tool,
+                        arguments,
+                    }],
+                },
+            ) {
                 Ok(reply) => reply,
                 Err(crate::IntegrationError::AccessDenied | crate::IntegrationError::Locked) => {
                     return McpReply::error(403, id, -32001, "Access revoked");
                 }
-                Err(crate::IntegrationError::InvalidArguments | crate::IntegrationError::Index(mind_place_index::IndexError::InvalidQuery)) => {
+                Err(
+                    crate::IntegrationError::InvalidArguments
+                    | crate::IntegrationError::Index(mind_place_index::IndexError::InvalidQuery),
+                ) => {
                     return McpReply::error(400, id, -32602, "Invalid params");
                 }
                 Err(_) => return McpReply::error(500, id, -32603, "Internal error"),
