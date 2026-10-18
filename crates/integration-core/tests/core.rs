@@ -93,10 +93,9 @@ fn catalog_is_closed_read_only_and_machine_readable() {
         assert_eq!(tool.input_schema["additionalProperties"], false);
         assert!(tool.input_schema["required"].is_array());
     }
-    assert!(serde_json::from_str::<ToolCall>(
-        r#"{"name":"memory_delete","arguments":{}}"#
-    )
-    .is_err());
+    assert!(
+        serde_json::from_str::<ToolCall>(r#"{"name":"memory_delete","arguments":{}}"#).is_err()
+    );
     assert!(serde_json::from_str::<ToolCall>(
         r#"{"name":"memory_search","arguments":{},"write":true}"#
     )
@@ -175,7 +174,10 @@ fn search_then_pinned_fetch_and_context_preserve_raw_provenance() {
     let fetched = &results.results[0].result;
     assert_eq!(fetched["source_id"], hit["source_id"]);
     assert_eq!(fetched["snapshot_id"], hit["snapshot_id"]);
-    assert_eq!(fetched["segments"][0]["text"], "copper lantern continuity proof");
+    assert_eq!(
+        fetched["segments"][0]["text"],
+        "copper lantern continuity proof"
+    );
     let packed = &results.results[1].result;
     assert_eq!(packed["groups"][0]["source_id"], hit["source_id"]);
     assert_eq!(packed["groups"][0]["snapshot_id"], hit["snapshot_id"]);

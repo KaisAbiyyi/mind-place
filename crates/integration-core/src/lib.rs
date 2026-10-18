@@ -272,19 +272,22 @@ impl<'a> IntegrationCore<'a> {
                     let request: FetchRequest = serde_json::from_value(call.arguments.clone())
                         .map_err(|_| IntegrationError::InvalidArguments)?;
                     let mut check = || self.check_index(lease, &mut authorize_read);
-                    serde_json::to_value(
-                        self.index.fetch_with_check(self.archive, &request, &mut check)?,
-                    )
+                    serde_json::to_value(self.index.fetch_with_check(
+                        self.archive,
+                        &request,
+                        &mut check,
+                    )?)
                     .map_err(|_| IntegrationError::Serialization)?
                 }
                 ToolName::ContextBuild => {
                     let request: ContextRequest = serde_json::from_value(call.arguments.clone())
                         .map_err(|_| IntegrationError::InvalidArguments)?;
                     let mut check = || self.check_index(lease, &mut authorize_read);
-                    serde_json::to_value(
-                        self.index
-                            .build_context_with_check(self.archive, &request, &mut check)?,
-                    )
+                    serde_json::to_value(self.index.build_context_with_check(
+                        self.archive,
+                        &request,
+                        &mut check,
+                    )?)
                     .map_err(|_| IntegrationError::Serialization)?
                 }
             };
@@ -308,7 +311,11 @@ impl<'a> IntegrationCore<'a> {
         })
     }
 
-    fn check(&self, lease: UnlockLease, authorize_read: &mut impl FnMut() -> Result<()>) -> Result<()> {
+    fn check(
+        &self,
+        lease: UnlockLease,
+        authorize_read: &mut impl FnMut() -> Result<()>,
+    ) -> Result<()> {
         self.security.validate_lease(lease)?;
         authorize_read()?;
         self.security.validate_lease(lease)?;
