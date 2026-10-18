@@ -4,8 +4,8 @@ use mind_place_archive::{
     ArchiveStore, AssetResult, Conversation, ConversationSummary, ExportResult, ImportReceipt,
     SnapshotSummary, NATIVE_HOST_NAME,
 };
-use mind_place_security::{SecurityError, SecurityGate, SecurityStatus, UnlockLease};
 use mind_place_index::{IndexError, IndexStats, IndexStore, SearchHit};
+use mind_place_security::{SecurityError, SecurityGate, SecurityStatus, UnlockLease};
 use mind_place_state::StateStore;
 use serde::Serialize;
 use std::{
@@ -83,12 +83,9 @@ async fn gated_blocking<T: Send + 'static>(
     Ok(result)
 }
 
-
 async fn index_task<T: Send + 'static>(
     state: &AppState,
-    operation: impl FnOnce(UnlockLease, SecurityGate) -> mind_place_index::Result<T>
-        + Send
-        + 'static,
+    operation: impl FnOnce(UnlockLease, SecurityGate) -> mind_place_index::Result<T> + Send + 'static,
 ) -> Result<T, String> {
     let lease = begin_unlocked(state)?;
     let security = state.security.clone();
@@ -149,7 +146,11 @@ async fn search_archive_index(
 ) -> Result<Vec<SearchHit>, String> {
     let index_path = state.index_path.clone();
     index_task(&state, move |_, _| {
-        IndexStore::open(index_path)?.search(&query, include_history.unwrap_or(false), limit.unwrap_or(20))
+        IndexStore::open(index_path)?.search(
+            &query,
+            include_history.unwrap_or(false),
+            limit.unwrap_or(20),
+        )
     })
     .await
 }
