@@ -55,5 +55,8 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Test hosted tunnel desktop boundaries
+        run: cargo test -p mind-place --bin mind-place hosted_tunnel::tests -- --nocapture
+
       - name: Build desktop app
         run: npm run build
