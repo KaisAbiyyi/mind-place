@@ -5,6 +5,7 @@ use mind_place_archive::{
     SnapshotSummary, NATIVE_HOST_NAME,
 };
 use mind_place_security::{SecurityError, SecurityGate, SecurityStatus, UnlockLease};
+use mind_place_index::{IndexError, IndexStats, IndexStore, SearchHit};
 use mind_place_state::StateStore;
 use serde::Serialize;
 use std::{
@@ -23,6 +24,7 @@ struct AppState {
     store: ArchiveStore,
     security: SecurityGate,
     state_path: PathBuf,
+    index_path: PathBuf,
     authority_ready: Arc<AtomicBool>,
     extension_path: PathBuf,
     host_path: PathBuf,
@@ -79,6 +81,77 @@ async fn gated_blocking<T: Send + 'static>(
     let result = blocking(operation).await?;
     finish_unlocked(state, lease)?;
     Ok(result)
+}
+
+
+async fn index_task<T: Send + 'static>(
+    state: &AppState,
+    operation: impl FnOnce(UnlockLease, SecurityGate) -> mind_place_index::Result<T>
+        + Send
+        + 'static,
+) -> Result<T, String> {
+    let lease = begin_unlocked(state)?;
+    let security = state.security.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || operation(lease, security))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| format!("{}:{}", error.code(), error))?;
+    finish_unlocked(state, lease)?;
+    Ok(result)
+}
+
+#[tauri::command]
+async fn refresh_archive_index(state: State<'_, AppState>) -> Result<IndexStats, String> {
+    let archive = state.store.clone();
+    let state_path = state.state_path.clone();
+    let index_path = state.index_path.clone();
+    index_task(&state, move |lease, security| {
+        let authority = StateStore::open(state_path)?;
+        let index = IndexStore::open(index_path)?;
+        index.sync_with_check(&archive, &authority, || {
+            security
+                .validate_lease(lease)
+                .map_err(|_| IndexError::Revoked)
+        })
+    })
+    .await
+}
+
+#[tauri::command]
+async fn rebuild_archive_index(state: State<'_, AppState>) -> Result<IndexStats, String> {
+    let archive = state.store.clone();
+    let state_path = state.state_path.clone();
+    let index_path = state.index_path.clone();
+    index_task(&state, move |lease, security| {
+        let authority = StateStore::open(state_path)?;
+        let index = IndexStore::open(index_path)?;
+        index.rebuild_with_check(&archive, &authority, || {
+            security
+                .validate_lease(lease)
+                .map_err(|_| IndexError::Revoked)
+        })
+    })
+    .await
+}
+
+#[tauri::command]
+async fn get_archive_index_stats(state: State<'_, AppState>) -> Result<IndexStats, String> {
+    let index_path = state.index_path.clone();
+    index_task(&state, move |_, _| IndexStore::open(index_path)?.stats()).await
+}
+
+#[tauri::command]
+async fn search_archive_index(
+    state: State<'_, AppState>,
+    query: String,
+    include_history: Option<bool>,
+    limit: Option<usize>,
+) -> Result<Vec<SearchHit>, String> {
+    let index_path = state.index_path.clone();
+    index_task(&state, move |_, _| {
+        IndexStore::open(index_path)?.search(&query, include_history.unwrap_or(false), limit.unwrap_or(20))
+    })
+    .await
 }
 
 #[tauri::command]
@@ -321,6 +394,7 @@ fn main() {
             let root = mind_place_archive::data_root()?;
             let security_path = root.parent().unwrap_or(&root).join("security-v1.json");
             let state_path = root.parent().unwrap_or(&root).join("state.sqlite3");
+            let index_path = root.parent().unwrap_or(&root).join("index.sqlite3");
             let security = SecurityGate::open(security_path)?;
             let legacy_path = root.parent().unwrap_or(&root).join("sessions");
             let store = ArchiveStore::open(root)?;
@@ -341,6 +415,7 @@ fn main() {
                 store,
                 security,
                 state_path,
+                index_path,
                 authority_ready: Arc::new(AtomicBool::new(false)),
                 extension_path,
                 host_path,
@@ -371,7 +446,11 @@ fn main() {
             get_asset,
             get_setup,
             register_extension,
-            import_legacy
+            import_legacy,
+            refresh_archive_index,
+            rebuild_archive_index,
+            get_archive_index_stats,
+            search_archive_index
         ])
         .run(tauri::generate_context!())
         .expect("Mind Place failed to start");
