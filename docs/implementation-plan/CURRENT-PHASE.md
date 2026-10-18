@@ -72,9 +72,16 @@ Current execution order after the security-first reprioritization:
    - unlock-lease guarded `build_retrieval_context`, ranking metadata correction and security regression tests;
    - no schema migration, local/manual gate not required (`C1 / L0 / U0`);
    - details/limits: [phase-2c-context-policies.md](phase-2c-context-policies.md).
-4. **Phase 2D — observability and retrieval qualification** — **IN PROGRESS** (cloud-only).
+4. **Phase 2D — observability and retrieval qualification** — **DONE**. [PR #9](https://github.com/KaisAbiyyi/mind-place/pull/9) squash-merged at `77a3f15607d143b94ae4b51c2dd95b98e1abf91b`. Windows [product CI 39123680880](https://github.com/KaisAbiyyi/mind-place/actions/runs/39123680880) and [storage/performance qualification 39123680905](https://github.com/KaisAbiyyi/mind-place/actions/runs/39123680905) all passed.
+   - ephemeral metadata-only search/context/fetch traces and unlock-lease guarded local inspectors;
+   - per-query BM25/exact score explanation with stable provenance, without confusing ranking score with confidence;
+   - deterministic ranking, privacy, revocation and rebuild regression tests;
+   - Phase 1E synthetic 10K/100K/1M Windows corpus extended with same-run median retrieval/context performance gates and machine-readable receipts;
+   - optimized index generation read avoids corpus-wide count; 1M ranked-inspector median 2.156 ms and context-inspector median 14.982 ms on the qualified Windows runner;
+   - no schema migration, raw data rewrite, MCP exposure, or local/manual qualification (`C1 / L0 / U0`);
+   - details and caveats: [phase-2d-retrieval-qualification.md](phase-2d-retrieval-qualification.md).
 
-The next cloud instruction is `implement phase 2D`. No local Windows pull is needed merely to start Phase 2D.
+**Phase 2 is complete** (`C4 / L0 / U0`), with all four units 2A–2D cloud qualified and merged. The next cloud instruction is `implement phase 3A` — protocol-independent shared-brain integration core. Local Windows pull is not needed merely to start Phase 3A.
 
 ## Phase 1A explicit boundary
 
@@ -90,6 +97,6 @@ Do not weaken Phase 1A to fake those later guarantees. UI/documentation must sta
 
 ## Handoff rule
 
-A cloud unit is complete only when its PR/branch is CI-green and its final SHA is reported. If a cloud-discovered bug is fixed, rerun the relevant checks before merge. The next normal instruction after completed Phase 2C is:
+A cloud unit is complete only when its PR/branch is CI-green and its final SHA is reported. If a cloud-discovered bug is fixed, rerun the relevant checks before merge. The next normal instruction after completed Phase 2D is:
 
-`implement phase 2D`
+`implement phase 3A`
