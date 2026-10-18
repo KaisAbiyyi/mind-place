@@ -1,6 +1,6 @@
 # Phase 1E — Windows storage and performance qualification
 
-Status: **IN PROGRESS** — cloud-only unit following Phase 1D at `76010d1f8599141b71a0478cd6aab053286ca1d7`.
+Status: **DONE** — [PR #5](https://github.com/KaisAbiyyi/mind-place/pull/5) squash-merged into `main` at `78853d35e0439c6fd201a667b6ba156bf22fb132` after successful Windows [product CI #39112178143](https://github.com/KaisAbiyyi/mind-place/actions/runs/39112178143) and [storage qualification #39112178136](https://github.com/KaisAbiyyi/mind-place/actions/runs/39112178136).
 
 This is a **qualification harness**, not a new storage format or authorization surface.
 The evidence source remains `archive-v1`; `state.sqlite3` keeps canonical source
@@ -58,8 +58,8 @@ and live WAL sidecars. Receipts record OS and SQLite version.
 There is intentionally **no fabricated absolute latency target**: GitHub-hosted
 Windows runners vary, and the Phase 1D provisional search contract is not the
 final Phase 2 retrieval kernel. Correctness and integrity are hard gates.
-Measured bottlenecks and scaling ratios will be documented from the real CI
-receipts; any proposed future performance budget must use that evidence.
+Measured bottlenecks and scaling ratios are documented below from the actual Windows CI
+receipts; future performance budgets must use evidence from relevant workloads.
 
 ### Reproduction (Windows cloud CI)
 
@@ -74,6 +74,29 @@ authority or index crates, and supports manual dispatch. Ordinary `npm test`
 continues to execute the fast integration regression tests but **does not run**
 the million-chunk qualification.
 
+## Qualified Windows results (2026-10-18)
+
+[Windows qualification run 39112178136](https://github.com/KaisAbiyyi/mind-place/actions/runs/39112178136) passed **all three matrix jobs**. Each job uploaded a machine-readable JSON artifact named `phase-1e-storage-<tier>`, retained for 30 days. The test also ran the state schema/migration suite and Phase 1D index regressions in release profile.
+
+| Metric | 10K | 100K | 1M |
+| --- | ---: | ---: | ---: |
+| Actual FTS rows (with title) | 10,001 | 100,010 | 1,000,100 |
+| Corpus generation (ms) | 88 | 928 | 9,485 |
+| Initial sync (ms) | 951 | 9,083 | 87,610 |
+| No-op incremental sync (ms) | 55 | 325 | 3,163 |
+| Two rare FTS lookups (ms) | 4 | 4 | 4 |
+| Full delete-and-rebuild (ms) | 792 | 8,746 | 79,856 |
+| Derived index size (bytes) | 7,081,984 | 70,270,976 | 691,134,464 |
+| Raw JSONL hash invariant | PASS | PASS | PASS |
+| Canonical IDs, project, claim + evidence | PASS | PASS | PASS |
+| Foreign keys, SQLite and FTS integrity | PASS | PASS | PASS |
+
+Values are single-run measurements on separate ephemeral Windows CI runners, **not** user-device SLAs or p95. Initial sync scales approximately with chunk count on this synthetic dataset; no-op scan still reads archived records and takes 3.16 seconds at 1M. Rare-term lookups are not a substitute for Phase 2 ranking and high-frequency query performance tests.
+
+**Bundled SQLite measured:** 3.53.2 across all tiers. This meets the current source-code minimum but is below the strategic 3.54.1-or-newer upgrade target. Upgrading the pinned runtime remains a separate deliberate, regression-qualified dependency change; this phase did not silently change the storage ABI.
+
+The regular [Windows product CI run 39112178143](https://github.com/KaisAbiyyi/mind-place/actions/runs/39112178143) also passed formatting, repository verification, TypeScript typecheck, bundled SQLite qualification, the full test suite and the native desktop build.
+
 ## Scope and qualification boundary
 
 - No schema changes, no new private data access, no changes to captured raw
@@ -87,12 +110,13 @@ the million-chunk qualification.
 - This unit requires no local Windows pull or manual acceptance unless hosted
   Windows CI reveals an irreducible local-only uncertainty.
 
-## Cloud handoff (fill from completed Actions runs)
+## Completed cloud / Phase 1 handoff
 
-- **Unit:** 1E — storage qualification harness
-- **Branch:** `feat/phase-1e-storage-qualification`
-- **PR / merged SHA:** pending
-- **Windows CI run and artifact links:** pending
-- **10K / 100K / 1M results:** pending
-- **Local required:** no by default
-- **Next:** Phase 2A after Phase 1E tests and code have green CI evidence.
+- **UNIT:** 1E — storage qualification harness, closing Phase 1 (1A–1E).
+- **PR:** [#5](https://github.com/KaisAbiyyi/mind-place/pull/5) — squash-merged.
+- **Qualified Phase 1E code SHA:** `78853d35e0439c6fd201a667b6ba156bf22fb132`.
+- **Validation:** [Windows CI #39112178143](https://github.com/KaisAbiyyi/mind-place/actions/runs/39112178143) **PASS**; [Windows 10K/100K/1M qualification #39112178136](https://github.com/KaisAbiyyi/mind-place/actions/runs/39112178136) **PASS (3/3)**, with all three JSON receipts uploaded.
+- **Storage decisions:** immutable `archive-v1` remains canonical evidence, `state.sqlite3` retains identity/curated authority, `index.sqlite3` is disposable and rebuildable; no schema/protocol change in 1E.
+- **Local required:** **No** (Phase 1 is C5/L0/U0). User should not pull locally just to begin Phase 2A.
+- **Known limits:** Synthetic one-chunk-per-message corpus, rare query timing only, one runner observation per scale, bundled SQLite 3.53.2 (target upgrade later), no live provider or UI test.
+- **NEXT:** `implement phase 2A` — universal search request model, structured filters, BM25/exact retrieval and stable result contract.
