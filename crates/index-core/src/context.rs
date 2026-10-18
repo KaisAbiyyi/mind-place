@@ -86,7 +86,9 @@ impl ContextBudget {
         {
             return Err(IndexError::InvalidQuery);
         }
-        Ok(self.max_bytes.min(self.max_estimated_tokens.saturating_mul(4)))
+        Ok(self
+            .max_bytes
+            .min(self.max_estimated_tokens.saturating_mul(4)))
     }
 }
 
@@ -189,11 +191,11 @@ fn apply_policy(request: &ContextRequest) -> Result<RetrievalFilters> {
         }
         ContextPreset::Historical => {
             let as_of = request.as_of.as_deref().ok_or(IndexError::InvalidQuery)?;
-            let timestamp = DateTime::parse_from_rfc3339(as_of)
-                .map_err(|_| IndexError::InvalidQuery)?;
+            let timestamp =
+                DateTime::parse_from_rfc3339(as_of).map_err(|_| IndexError::InvalidQuery)?;
             if let Some(existing) = &filters.captured_to {
-                let existing_date = DateTime::parse_from_rfc3339(existing)
-                    .map_err(|_| IndexError::InvalidQuery)?;
+                let existing_date =
+                    DateTime::parse_from_rfc3339(existing).map_err(|_| IndexError::InvalidQuery)?;
                 if timestamp < existing_date {
                     filters.captured_to = Some(as_of.to_string());
                 }
@@ -234,7 +236,11 @@ fn interleave(hits: Vec<RetrievalHit>) -> Vec<RetrievalHit> {
 }
 
 impl IndexStore {
-    pub fn build_context(&self, archive: &ArchiveStore, request: &ContextRequest) -> Result<ContextPack> {
+    pub fn build_context(
+        &self,
+        archive: &ArchiveStore,
+        request: &ContextRequest,
+    ) -> Result<ContextPack> {
         self.build_context_with_check(archive, request, || Ok(()))
     }
 
@@ -295,8 +301,11 @@ impl IndexStore {
                 note_reason(&mut reasons, "text_budget");
                 break;
             }
-            let remaining_ms = request.budget.max_latency_ms
-                .saturating_sub(elapsed.as_millis() as u64).max(1);
+            let remaining_ms = request
+                .budget
+                .max_latency_ms
+                .saturating_sub(elapsed.as_millis() as u64)
+                .max(1);
             let limit_bytes = available.min(16 * 1024);
             let fetch_request = FetchRequest {
                 source_id: hit.source_id.clone(),
@@ -309,9 +318,21 @@ impl IndexStore {
                 } else {
                     FetchGranularity::Window
                 },
-                message_id: if hit.kind == "title" { None } else { Some(hit.message_id.clone()) },
-                before: if hit.kind == "title" { 0 } else { request.preset.neighbors() },
-                after: if hit.kind == "title" { 0 } else { request.preset.neighbors() },
+                message_id: if hit.kind == "title" {
+                    None
+                } else {
+                    Some(hit.message_id.clone())
+                },
+                before: if hit.kind == "title" {
+                    0
+                } else {
+                    request.preset.neighbors()
+                },
+                after: if hit.kind == "title" {
+                    0
+                } else {
+                    request.preset.neighbors()
+                },
                 budget: FetchBudget {
                     max_bytes: limit_bytes,
                     max_estimated_tokens: limit_bytes.div_ceil(4),
@@ -323,20 +344,29 @@ impl IndexStore {
             // and match against index metadata before any text is emitted.
             let fetched = self.fetch_with_check(archive, &fetch_request, &mut check)?;
             let key = (fetched.source_id.clone(), fetched.snapshot_id.clone());
-            let group_at = groups.iter().position(|g| (g.source_id.as_str(), g.snapshot_id.as_str()) ==
-                (key.0.as_str(), key.1.as_str()));
+            let group_at = groups.iter().position(|g| {
+                (g.source_id.as_str(), g.snapshot_id.as_str()) == (key.0.as_str(), key.1.as_str())
+            });
             let mut pending = Vec::new();
             if hit.kind == "title" {
                 let text = bounded_prefix(&fetched.title, available);
                 let unique = seen_segments.insert((
-                    hit.source_id.clone(), hit.snapshot_id.clone(), "title".to_string(), 0,
+                    hit.source_id.clone(),
+                    hit.snapshot_id.clone(),
+                    "title".to_string(),
+                    0,
                 ));
                 if unique && !text.is_empty() {
                     pending.push(ContextExcerpt {
-                        kind: "title".into(), message_id: "@title".into(),
-                        message_index: None, role: "title".into(),
-                        text: text.to_string(), byte_start: 0, byte_end: text.len(),
-                        total_bytes: fetched.title.len(), score: hit.score,
+                        kind: "title".into(),
+                        message_id: "@title".into(),
+                        message_index: None,
+                        role: "title".into(),
+                        text: text.to_string(),
+                        byte_start: 0,
+                        byte_end: text.len(),
+                        total_bytes: fetched.title.len(),
+                        score: hit.score,
                         matched_queries: hit.matched_queries.clone(),
                     });
                     if text.len() != fetched.title.len() {
@@ -350,8 +380,10 @@ impl IndexStore {
                         break;
                     }
                     let identity = (
-                        hit.source_id.clone(), hit.snapshot_id.clone(),
-                        "message".to_string(), segment.message_index,
+                        hit.source_id.clone(),
+                        hit.snapshot_id.clone(),
+                        "message".to_string(),
+                        segment.message_index,
                     );
                     if !seen_segments.insert(identity) || segment.text.is_empty() {
                         continue;
@@ -391,14 +423,26 @@ impl IndexStore {
                 }
             } else {
                 groups.push(ContextGroup {
-                    source_id: fetched.source_id, archive_id: fetched.archive_id,
-                    snapshot_id: fetched.snapshot_id, conversation_id: fetched.conversation_id,
-                    title: fetched.title, source_url: fetched.source_url,
-                    captured_at: fetched.captured_at, completeness: fetched.completeness,
+                    source_id: fetched.source_id,
+                    archive_id: fetched.archive_id,
+                    snapshot_id: fetched.snapshot_id,
+                    conversation_id: fetched.conversation_id,
+                    title: fetched.title,
+                    source_url: fetched.source_url,
+                    captured_at: fetched.captured_at,
+                    completeness: fetched.completeness,
                     indexed_is_current: fetched.indexed_is_current,
                     excerpts: pending,
-                    next_cursor: if fetched.truncated { fetched.next_cursor } else { None },
-                    continuation_message_id: if fetched.truncated { fetch_request.message_id.clone() } else { None },
+                    next_cursor: if fetched.truncated {
+                        fetched.next_cursor
+                    } else {
+                        None
+                    },
+                    continuation_message_id: if fetched.truncated {
+                        fetch_request.message_id.clone()
+                    } else {
+                        None
+                    },
                 });
             }
             used += pending_bytes;
@@ -416,10 +460,13 @@ impl IndexStore {
         let source_count = source_counts.len();
         Ok(ContextPack {
             preset: request.preset,
-            groups, candidate_count: search.candidate_count,
+            groups,
+            candidate_count: search.candidate_count,
             search_shortlist_truncated: search.truncated,
-            text_bytes: used, estimated_tokens: used.div_ceil(4),
-            excerpt_count, source_count,
+            text_bytes: used,
+            estimated_tokens: used.div_ceil(4),
+            excerpt_count,
+            source_count,
             truncated: !reasons.is_empty() || search.truncated,
             truncation_reasons: reasons,
         })
