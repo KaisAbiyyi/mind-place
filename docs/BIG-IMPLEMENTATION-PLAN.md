@@ -474,14 +474,14 @@ Planned workload: **C5 / L0 / U0**. Security was deliberately promoted ahead of 
 - locked-by-default startup, unlock epoch/lease invalidation and privileged desktop command gating;
 - no claim of encryption-at-rest at this stage.
 
-**Cloud 1B — authoritative state database**
+**Cloud 1B — authoritative state database — DONE**
 
 - introduce `state.sqlite3` with transactional migrations and verified backups;
 - memory-claim history schema, root ACL/tombstones, client/security policy and project/tag/scope primitives;
 - pin/bundle the SQLite runtime used by Rust and qualify it in Windows CI;
 - fail closed on foreign, corrupt, future-schema or invalid migration state without rewriting raw archives.
 
-**Cloud 1C — stable identity and authority durability**
+**Cloud 1C — stable identity and authority durability — DONE**
 
 - stable provider-neutral source IDs and deterministic/persisted identity mapping;
 - migration rollback/recovery and state recovery tests;
