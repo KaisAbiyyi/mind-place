@@ -398,8 +398,14 @@ mod tests {
             env.get("HEALTH_LISTEN_ADDR").map(String::as_str),
             Some("127.0.0.1:0")
         );
-        for denied in ["OPENAI_ADMIN_KEY", "HARPOON_TARGETS", "TUNNEL_CLIENT_PROFILE"] {
-            assert!(command.get_envs().any(|(key, value)| key == denied && value.is_none()));
+        for denied in [
+            "OPENAI_ADMIN_KEY",
+            "HARPOON_TARGETS",
+            "TUNNEL_CLIENT_PROFILE",
+        ] {
+            assert!(command
+                .get_envs()
+                .any(|(key, value)| key == denied && value.is_none()));
         }
     }
 }
