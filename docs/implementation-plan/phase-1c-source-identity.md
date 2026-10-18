@@ -1,6 +1,6 @@
 # Phase 1C — source identity and authority durability
 
-Status: implementation under cloud Windows CI qualification.
+Status: **DONE** — PR #3 squash-merged at `d007e80b079471bcb66661fb90feba907d837dc2` after Windows CI run [39105339145](https://github.com/KaisAbiyyi/mind-place/actions/runs/39105339145) passed.
 
 ## Identity contract
 
@@ -76,3 +76,15 @@ The integration suite proves:
 
 Cloud Windows CI runs the Rust tests as part of the existing workspace test
 suite. Phase 1 needs no local/manual acceptance gate by default.
+
+## Completed cloud handoff (2026-10-18)
+
+- **UNIT:** Phase 1C — stable identity and authority durability.
+- **PR:** https://github.com/KaisAbiyyi/mind-place/pull/3 — squash-merged.
+- **Qualified code SHA:** `d007e80b079471bcb66661fb90feba907d837dc2`.
+- **Windows CI:** https://github.com/KaisAbiyyi/mind-place/actions/runs/39105339145 — success; Rust formatting, repository contract, TypeScript typecheck, bundled SQLite gate, full web/Rust tests and Tauri desktop build.
+- **Schema/protocol:** authoritative schema v2; deterministic versioned source IDs; provider/account/import namespaces, origin keys and typed source references; no derived index added.
+- **Recovery:** V0/V1 transactional migration, snapshot verification, orphan-reference rejection/rollback, checksum checks, foreign key integrity and identity-tamper fail-closed tests.
+- **Local required:** No; Phase 1C is qualified on Windows CI. Do not modify local checkout for implementation.
+- **Known limits:** Existing V1 unbound evidence cannot be auto-adopted; explicit origin-based reconciliation is required. Phase 1D must implement archive adapter, `index.sqlite3` rebuild and FTS5 while reusing the existing canonical ID contract. Raw-object digest authenticity must be validated by the future ingestion adapter before registration. At-scale identity open-validation cost belongs in the Phase 1E benchmark.
+- **NEXT:** `implement phase 1D`.
