@@ -160,15 +160,16 @@ fn legacy_handshake_and_modern_header_guards() {
         200
     );
 }
-fn tcp_request(payload: String) -> String {
-    let mut connection = std::net::TcpStream::connect(("127.0.0.1", mcp::MCP_PORT)).unwrap();
-    connection
-        .set_read_timeout(Some(std::time::Duration::from_secs(8)))
-        .unwrap();
-    connection.write_all(payload.as_bytes()).unwrap();
+fn tcp_request_result(payload: String) -> std::io::Result<String> {
+    let mut connection = std::net::TcpStream::connect(("127.0.0.1", mcp::MCP_PORT))?;
+    connection.set_read_timeout(Some(std::time::Duration::from_secs(8)))?;
+    connection.write_all(payload.as_bytes())?;
     let mut bytes = Vec::new();
-    connection.read_to_end(&mut bytes).unwrap();
-    String::from_utf8(bytes).unwrap()
+    connection.read_to_end(&mut bytes)?;
+    String::from_utf8(bytes).map_err(std::io::Error::other)
+}
+fn tcp_request(payload: String) -> String {
+    tcp_request_result(payload).unwrap()
 }
 fn raw(token: &str, host: &str, origin: &str) -> String {
     let data = json!({"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":meta()}})
@@ -211,10 +212,23 @@ async fn real_http_deny_rebinding_origin_and_locked_epoch() {
     assert!(denied.starts_with("HTTP/1.1 403"));
     f.security.lock();
     let token = f.token.clone();
-    let denied =
-        tokio::task::spawn_blocking(move || tcp_request(raw(&token, "127.0.0.1:43731", "")))
-            .await
-            .unwrap();
-    assert!(!denied.contains("supportedVersions"));
+    let denied = tokio::task::spawn_blocking(move || {
+        tcp_request_result(raw(&token, "127.0.0.1:43731", ""))
+    })
+    .await
+    .unwrap();
+    // A lock can close its listener before an HTTP response is written.
+    // Windows reports TCP ConnectionReset for that refusal; neither form
+    // may ever contain private MCP discovery or source material.
+    match denied {
+        Ok(response) => assert!(!response.contains("supportedVersions")),
+        Err(error) => assert!(matches!(
+            error.kind(),
+            std::io::ErrorKind::ConnectionReset
+                | std::io::ErrorKind::ConnectionAborted
+                | std::io::ErrorKind::BrokenPipe
+                | std::io::ErrorKind::UnexpectedEof
+        )),
+    }
     server.stop();
 }
