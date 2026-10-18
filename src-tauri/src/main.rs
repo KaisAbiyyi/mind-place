@@ -4,7 +4,9 @@ use mind_place_archive::{
     ArchiveStore, AssetResult, Conversation, ConversationSummary, ExportResult, ImportReceipt,
     SnapshotSummary, NATIVE_HOST_NAME,
 };
-use mind_place_index::{IndexError, IndexStats, IndexStore, SearchHit};
+use mind_place_index::{
+    IndexError, IndexStats, IndexStore, RetrievalRequest, RetrievalResponse, SearchHit,
+};
 use mind_place_security::{SecurityError, SecurityGate, SecurityStatus, UnlockLease};
 use mind_place_state::StateStore;
 use serde::Serialize;
@@ -151,6 +153,18 @@ async fn search_archive_index(
             include_history.unwrap_or(false),
             limit.unwrap_or(20),
         )
+    })
+    .await
+}
+
+#[tauri::command]
+async fn search_retrieval(
+    state: State<'_, AppState>,
+    request: RetrievalRequest,
+) -> Result<RetrievalResponse, String> {
+    let index_path = state.index_path.clone();
+    index_task(&state, move |_, _| {
+        IndexStore::open(index_path)?.retrieve(&request)
     })
     .await
 }
@@ -451,7 +465,8 @@ fn main() {
             refresh_archive_index,
             rebuild_archive_index,
             get_archive_index_stats,
-            search_archive_index
+            search_archive_index,
+            search_retrieval
         ])
         .run(tauri::generate_context!())
         .expect("Mind Place failed to start");
