@@ -80,7 +80,10 @@ impl Rig {
 #[test]
 fn indexes_current_and_history_incrementally_without_mutating_raw() {
     let rig = Rig::new();
-    let first = rig.archive.save(capture("violetcomet first observation")).unwrap();
+    let first = rig
+        .archive
+        .save(capture("violetcomet first observation"))
+        .unwrap();
     let before = rig.raw(&first.id, &first.snapshot_id);
     let initial = rig.index.sync(&rig.archive, &rig.state).unwrap();
     assert_eq!(initial.sources, 1);
@@ -106,21 +109,34 @@ fn indexes_current_and_history_incrementally_without_mutating_raw() {
     let repeat = rig.index.sync(&rig.archive, &rig.state).unwrap();
     assert_eq!(repeat.inserted_revisions, 0);
     assert_eq!(repeat.chunks, initial.chunks);
-    let second = rig.archive.save(capture("copperplanet second observation")).unwrap();
+    let second = rig
+        .archive
+        .save(capture("copperplanet second observation"))
+        .unwrap();
     assert_ne!(first.snapshot_id, second.snapshot_id);
     let update = rig.index.sync(&rig.archive, &rig.state).unwrap();
     assert_eq!(update.inserted_revisions, 1);
     assert_eq!(update.revisions, 2);
-    assert!(rig.index.search("violetcomet", false, 10).unwrap().is_empty());
+    assert!(rig
+        .index
+        .search("violetcomet", false, 10)
+        .unwrap()
+        .is_empty());
     assert_eq!(rig.index.search("violetcomet", true, 10).unwrap().len(), 1);
-    assert_eq!(rig.index.search("copperplanet", false, 10).unwrap().len(), 1);
+    assert_eq!(
+        rig.index.search("copperplanet", false, 10).unwrap().len(),
+        1
+    );
     assert_eq!(rig.raw(&first.id, &first.snapshot_id), before);
 }
 
 #[test]
 fn deleting_disposable_index_then_rebuilding_preserves_authority_and_raw() {
     let rig = Rig::new();
-    let saved = rig.archive.save(capture("silvertrail searchable truth")).unwrap();
+    let saved = rig
+        .archive
+        .save(capture("silvertrail searchable truth"))
+        .unwrap();
     rig.index.sync(&rig.archive, &rig.state).unwrap();
     let evidence_hash = Sha256::digest(rig.raw(&saved.id, &saved.snapshot_id));
     let identity = rig.index.search("silvertrail", false, 10).unwrap()[0]
@@ -163,7 +179,9 @@ fn cancelled_incremental_write_rolls_back_old_index_generation() {
     rig.archive.save(capture("originapple durable")).unwrap();
     rig.index.sync(&rig.archive, &rig.state).unwrap();
     let previous = rig.index.stats().unwrap();
-    rig.archive.save(capture("newbanana should not commit")).unwrap();
+    rig.archive
+        .save(capture("newbanana should not commit"))
+        .unwrap();
     let mut attempts = 0;
     let error = rig.index.sync_with_check(&rig.archive, &rig.state, || {
         attempts += 1;
@@ -183,8 +201,13 @@ fn cancelled_incremental_write_rolls_back_old_index_generation() {
 fn rejects_tampered_revision_without_rewriting_raw_or_index() {
     let rig = Rig::new();
     let saved = rig.archive.save(capture("authentic content")).unwrap();
-    let path = rig.archive.root().join("conversations").join(&saved.id)
-        .join("captures").join(format!("{}.jsonl", saved.snapshot_id));
+    let path = rig
+        .archive
+        .root()
+        .join("conversations")
+        .join(&saved.id)
+        .join("captures")
+        .join(format!("{}.jsonl", saved.snapshot_id));
     let original = fs::read(&path).unwrap();
     let tampered = String::from_utf8(original.clone())
         .unwrap()
@@ -217,13 +240,18 @@ fn foreign_database_is_never_overwritten() {
     let dir = tempfile::tempdir().unwrap();
     let index_path = dir.path().join("index.sqlite3");
     let db = rusqlite::Connection::open(&index_path).unwrap();
-    db.execute_batch("CREATE TABLE foreign_data(secret TEXT); INSERT INTO foreign_data VALUES('keep');").unwrap();
+    db.execute_batch(
+        "CREATE TABLE foreign_data(secret TEXT); INSERT INTO foreign_data VALUES('keep');",
+    )
+    .unwrap();
     drop(db);
     assert!(matches!(
         IndexStore::open(&index_path),
         Err(IndexError::ForeignDatabase)
     ));
     let db = rusqlite::Connection::open(&index_path).unwrap();
-    let value: String = db.query_row("SELECT secret FROM foreign_data", [], |row| row.get(0)).unwrap();
+    let value: String = db
+        .query_row("SELECT secret FROM foreign_data", [], |row| row.get(0))
+        .unwrap();
     assert_eq!(value, "keep");
 }
