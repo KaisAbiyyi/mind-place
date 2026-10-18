@@ -37,6 +37,8 @@ fn newly_created_database_is_durable_and_reopenable() {
         .execute("UPDATE memory_claim_events SET event_type='fake'", [])
         .is_err());
     assert!(raw.execute("DELETE FROM memory_claim_events", []).is_err());
+    assert!(raw.execute("UPDATE root_tombstones SET reason='forged'", []).is_err());
+    assert!(raw.execute("DELETE FROM root_tombstones", []).is_err());
 }
 #[test]
 fn never_overwrite_unknown_or_future_schema() {
