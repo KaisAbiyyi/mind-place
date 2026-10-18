@@ -21,6 +21,7 @@ const SCHEMA: &str = include_str!("schema_v1.sql");
 
 pub mod context;
 pub mod fetch;
+pub mod inspection;
 pub use context::{
     ContextBudget, ContextExcerpt, ContextGroup, ContextPack, ContextPreset, ContextRequest,
 };
@@ -28,8 +29,10 @@ pub mod retrieval;
 pub use fetch::{
     FetchBudget, FetchCursor, FetchGranularity, FetchRequest, FetchResponse, FetchSegment,
 };
+pub use inspection::{ContextInspection, FetchInspection, RetrievalTrace, SearchInspection};
 pub use retrieval::{
     MatchMode, QueryTerm, RetrievalFilters, RetrievalHit, RetrievalRequest, RetrievalResponse,
+    ScoreContribution,
     WeightedQuery,
 };
 
