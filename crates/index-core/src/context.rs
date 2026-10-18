@@ -385,7 +385,26 @@ impl IndexStore {
                         "message".to_string(),
                         segment.message_index,
                     );
-                    if !seen_segments.insert(identity) || segment.text.is_empty() {
+                    let is_match = segment.message_id == hit.message_id;
+                    if !seen_segments.insert(identity) {
+                        // A neighbor fetched by an earlier hit can later become
+                        // a direct match; enrich its provenance without
+                        // returning the same original message twice.
+                        if is_match {
+                            if let Some(at) = group_at {
+                                if let Some(existing) = groups[at].excerpts.iter_mut().find(|entry| {
+                                    entry.message_index == Some(segment.message_index)
+                                }) {
+                                    existing.score = existing.score.max(hit.score);
+                                    existing.matched_queries.extend(hit.matched_queries.iter().copied());
+                                    existing.matched_queries.sort_unstable();
+                                    existing.matched_queries.dedup();
+                                }
+                            }
+                        }
+                        continue;
+                    }
+                    if segment.text.is_empty() {
                         continue;
                     }
                     pending.push(ContextExcerpt {
@@ -397,8 +416,8 @@ impl IndexStore {
                         byte_start: segment.byte_start,
                         byte_end: segment.byte_end,
                         total_bytes: segment.message_total_bytes,
-                        score: hit.score,
-                        matched_queries: hit.matched_queries.clone(),
+                        score: if is_match { hit.score } else { 0.0 },
+                        matched_queries: if is_match { hit.matched_queries.clone() } else { Vec::new() },
                     });
                 }
             }
