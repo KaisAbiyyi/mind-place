@@ -46,7 +46,12 @@ impl Rig {
         let archive = ArchiveStore::open(tmp.path().join("archive-v1")).unwrap();
         let authority = StateStore::open(tmp.path().join("state.sqlite3")).unwrap();
         let index = IndexStore::open(tmp.path().join("index.sqlite3")).unwrap();
-        Self { _tmp: tmp, archive, authority, index }
+        Self {
+            _tmp: tmp,
+            archive,
+            authority,
+            index,
+        }
     }
 
     fn add(&self, id: &str, text: &str, date: &str) {
@@ -89,15 +94,24 @@ fn weighted_exact_rank_and_components_are_reproducible_after_rebuild() {
     for hit in &initial.result.hits {
         assert!(hit.source_id.starts_with("src:v1:"));
         assert_eq!(hit.kind, "message");
-        let sum = hit.score_contributions.iter().map(|part| part.weighted_score).sum::<f64>();
+        let sum = hit
+            .score_contributions
+            .iter()
+            .map(|part| part.weighted_score)
+            .sum::<f64>();
         assert!((sum - hit.score).abs() < 1e-9);
-        assert!(hit.score_contributions.iter().all(|part|
-            part.bm25.is_finite()
+        assert!(hit
+            .score_contributions
+            .iter()
+            .all(|part| part.bm25.is_finite()
                 && part.lexical_relevance.is_finite()
                 && part.weighted_score.is_finite()
                 && part.exact_bonus >= 0.0));
     }
-    assert_eq!(initial.result.hits[0].score_contributions[1].exact_bonus, 1.0);
+    assert_eq!(
+        initial.result.hits[0].score_contributions[1].exact_bonus,
+        1.0
+    );
 
     rig.index.rebuild(&rig.archive, &rig.authority).unwrap();
     let rebuilt = rig.index.inspect_retrieval(&terms()).unwrap();
@@ -133,19 +147,26 @@ fn inspector_traces_do_not_include_user_corpus_or_identifiers() {
     assert_eq!(fetch.trace.candidate_count, 0);
     assert_eq!(fetch.trace.text_bytes, private.len());
     assert!(fetch.result.segments[0].text.contains(private));
-    assert!(!serde_json::to_string(&fetch.trace).unwrap().contains(private));
+    assert!(!serde_json::to_string(&fetch.trace)
+        .unwrap()
+        .contains(private));
 
     let context_request = ContextRequest {
         queries: vec![QueryTerm::Text("quartzmarker".into())],
         preset: ContextPreset::Fast,
         ..Default::default()
     };
-    let context = rig.index.inspect_context(&rig.archive, &context_request).unwrap();
+    let context = rig
+        .index
+        .inspect_context(&rig.archive, &context_request)
+        .unwrap();
     assert_eq!(context.trace.operation, "context");
     assert_eq!(context.trace.text_bytes, context.result.text_bytes);
     assert_eq!(context.trace.source_count, 1);
     assert_eq!(context.trace.result_count, context.result.excerpt_count);
-    assert!(!serde_json::to_string(&context.trace).unwrap().contains(private));
+    assert!(!serde_json::to_string(&context.trace)
+        .unwrap()
+        .contains(private));
 }
 
 #[test]
@@ -159,7 +180,10 @@ fn inspector_respects_structured_filters_and_history_selection() {
     historical.filters.include_history = true;
     let all = rig.index.inspect_retrieval(&historical).unwrap();
     assert_eq!(all.result.hits.len(), 2);
-    assert_ne!(all.result.hits[0].snapshot_id, all.result.hits[1].snapshot_id);
+    assert_ne!(
+        all.result.hits[0].snapshot_id,
+        all.result.hits[1].snapshot_id
+    );
     historical.filters.providers = vec!["claude".into()];
     let filtered = rig.index.inspect_retrieval(&historical).unwrap();
     assert_eq!(filtered.trace.result_count, 0);
@@ -174,7 +198,11 @@ fn inspector_check_callback_revokes_before_any_payload() {
     let mut checks = 0;
     let denied = rig.index.inspect_retrieval_with_check(&terms(), || {
         checks += 1;
-        if checks >= 2 { Err(IndexError::Revoked) } else { Ok(()) }
+        if checks >= 2 {
+            Err(IndexError::Revoked)
+        } else {
+            Ok(())
+        }
     });
     assert!(matches!(denied, Err(IndexError::Revoked)));
     assert!(checks >= 2);
@@ -183,10 +211,16 @@ fn inspector_check_callback_revokes_before_any_payload() {
         queries: vec![QueryTerm::Text("quartzmarker".into())],
         ..Default::default()
     };
-    let denied = rig.index.inspect_context_with_check(&rig.archive, &context_request, || {
-        checks += 1;
-        if checks >= 3 { Err(IndexError::Revoked) } else { Ok(()) }
-    });
+    let denied = rig
+        .index
+        .inspect_context_with_check(&rig.archive, &context_request, || {
+            checks += 1;
+            if checks >= 3 {
+                Err(IndexError::Revoked)
+            } else {
+                Ok(())
+            }
+        });
     assert!(matches!(denied, Err(IndexError::Revoked)));
     assert!(checks >= 3);
 }
