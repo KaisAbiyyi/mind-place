@@ -49,7 +49,10 @@ fn stopped() -> HostedTunnelStatus {
 }
 
 fn valid_segment(segment: &str, len: usize) -> bool {
-    segment.len() == len && segment.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+    segment.len() == len
+        && segment
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
 }
 
 /// tunnel-client IDs have either a bare 32-character body or a four-character namespace.
@@ -73,7 +76,9 @@ fn valid_runtime_key(key: &str) -> bool {
 /// or auto-downloaded code. Refuse symlinks escaping the app directory.
 fn trusted_client_binary() -> Result<PathBuf, String> {
     let app = std::env::current_exe().map_err(|_| "MP_TUNNEL_BINARY:Cannot locate app")?;
-    let parent = app.parent().ok_or("MP_TUNNEL_BINARY:Cannot locate app directory")?;
+    let parent = app
+        .parent()
+        .ok_or("MP_TUNNEL_BINARY:Cannot locate app directory")?;
     let expected = parent.join(if cfg!(windows) {
         "tunnel-client.exe"
     } else {
@@ -137,7 +142,11 @@ fn revoke_ephemeral(state: &AppState, client_id: &str) -> Result<(), String> {
 /// Drop the child before revoking, so no newly admitted request can use it.
 /// On unexpected termination, the next status read will revoke its client.
 pub(crate) fn stop_and_revoke(state: &AppState) -> Result<(), String> {
-    let previous = state.hosted.lock().unwrap_or_else(|e| e.into_inner()).take();
+    let previous = state
+        .hosted
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .take();
     if let Some(tunnel) = previous {
         let client_id = tunnel.client_id.clone();
         drop(tunnel);
@@ -147,7 +156,10 @@ pub(crate) fn stop_and_revoke(state: &AppState) -> Result<(), String> {
 }
 
 pub(crate) fn is_active_client(state: &AppState, id: &str) -> bool {
-    state.hosted.lock().unwrap_or_else(|e| e.into_inner())
+    state
+        .hosted
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
         .as_ref()
         .is_some_and(|hosted| hosted.client_id == id)
 }
@@ -197,7 +209,12 @@ pub(super) fn start_hosted_tunnel(
     if guard.is_some() {
         return Err("MP_TUNNEL_ACTIVE:Stop the previous tunnel first".into());
     }
-    if state.mcp.lock().unwrap_or_else(|e| e.into_inner()).is_none() {
+    if state
+        .mcp
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .is_none()
+    {
         return Err("MP_TUNNEL_LOCAL:Start local MCP before starting the tunnel".into());
     }
     let authority = StateStore::open(&state.state_path)
@@ -213,7 +230,11 @@ pub(super) fn start_hosted_tunnel(
             return Err(error);
         }
     };
-    let tunnel = HostedTunnel { child, client_id: client_id.clone(), tunnel_id: tunnel_id.clone() };
+    let tunnel = HostedTunnel {
+        child,
+        client_id: client_id.clone(),
+        tunnel_id: tunnel_id.clone(),
+    };
     if let Err(error) = finish_unlocked(&state, lease) {
         drop(tunnel);
         let _ = revoke_ephemeral(&state, &client_id);
@@ -243,8 +264,14 @@ mod tests {
         assert!(valid_tunnel_id(&format!("tunnel_{}", "a".repeat(32))));
         assert!(valid_tunnel_id(&format!("tunnel_ab12_{}", "9".repeat(32))));
         for invalid in [
-            "tunnel_test", "tunnel_", "tunnel_AA", "tunnel_abc_123",
-            "tunnel_ab12_1111", "../tunnel", "tunnel_abc\n", "tunnel_ABC",
+            "tunnel_test",
+            "tunnel_",
+            "tunnel_AA",
+            "tunnel_abc_123",
+            "tunnel_ab12_1111",
+            "../tunnel",
+            "tunnel_abc\n",
+            "tunnel_ABC",
         ] {
             assert!(!valid_tunnel_id(invalid), "{invalid}");
         }
@@ -252,7 +279,12 @@ mod tests {
     #[test]
     fn runtime_key_cannot_contain_shell_or_header_controls() {
         assert!(valid_runtime_key("sk-proj_long_runtime_key"));
-        for invalid in ["sk-short", "Bearer abcdefghijklmnop", "sk-key\r\ninjected: true", "sk-hello world123"] {
+        for invalid in [
+            "sk-short",
+            "Bearer abcdefghijklmnop",
+            "sk-key\r\ninjected: true",
+            "sk-hello world123",
+        ] {
             assert!(!valid_runtime_key(invalid));
         }
     }
@@ -273,17 +305,48 @@ mod tests {
             key,
             credential,
         );
-        let argv = command.get_args().map(|s| s.to_string_lossy().to_string()).collect::<Vec<_>>();
+        let argv = command
+            .get_args()
+            .map(|s| s.to_string_lossy().to_string())
+            .collect::<Vec<_>>();
         assert_eq!(argv[0], "run");
-        assert!(argv.iter().all(|part| !part.contains(key) && !part.contains(credential)));
-        let env = command.get_envs()
-            .filter_map(|(k,v)| v.map(|v| (k.to_string_lossy().to_string(), v.to_string_lossy().to_string())))
-            .collect::<std::collections::HashMap<_,_>>();
-        assert_eq!(env.get("CONTROL_PLANE_API_KEY").map(String::as_str), Some(key));
-        assert_eq!(env.get("MIND_PLACE_HOSTED_BEARER").map(String::as_str), Some("Bearer mpc_v1_private_example"));
-        assert_eq!(env.get("MCP_SERVER_URL").map(String::as_str), Some(MCP_ORIGIN));
-        assert_eq!(env.get("MCP_EXTRA_HEADERS").map(String::as_str), Some(HEADER_REF));
-        assert_eq!(env.get("MCP_DISCOVERY_EXTRA_HEADERS").map(String::as_str), Some(HEADER_REF));
-        assert_eq!(env.get("HEALTH_LISTEN_ADDR").map(String::as_str), Some("127.0.0.1:0"));
+        assert!(argv
+            .iter()
+            .all(|part| !part.contains(key) && !part.contains(credential)));
+        let env = command
+            .get_envs()
+            .filter_map(|(k, v)| {
+                v.map(|v| {
+                    (
+                        k.to_string_lossy().to_string(),
+                        v.to_string_lossy().to_string(),
+                    )
+                })
+            })
+            .collect::<std::collections::HashMap<_, _>>();
+        assert_eq!(
+            env.get("CONTROL_PLANE_API_KEY").map(String::as_str),
+            Some(key)
+        );
+        assert_eq!(
+            env.get("MIND_PLACE_HOSTED_BEARER").map(String::as_str),
+            Some("Bearer mpc_v1_private_example")
+        );
+        assert_eq!(
+            env.get("MCP_SERVER_URL").map(String::as_str),
+            Some(MCP_ORIGIN)
+        );
+        assert_eq!(
+            env.get("MCP_EXTRA_HEADERS").map(String::as_str),
+            Some(HEADER_REF)
+        );
+        assert_eq!(
+            env.get("MCP_DISCOVERY_EXTRA_HEADERS").map(String::as_str),
+            Some(HEADER_REF)
+        );
+        assert_eq!(
+            env.get("HEALTH_LISTEN_ADDR").map(String::as_str),
+            Some("127.0.0.1:0")
+        );
     }
 }
