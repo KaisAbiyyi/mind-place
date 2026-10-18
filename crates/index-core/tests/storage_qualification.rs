@@ -135,6 +135,18 @@ fn fts_integrity(path: &Path) {
     .unwrap();
 }
 
+fn median_us(mut action: impl FnMut()) -> u128 {
+    action();
+    let mut samples = Vec::with_capacity(9);
+    for _ in 0..9 {
+        let start = Instant::now();
+        action();
+        samples.push(start.elapsed().as_micros());
+    }
+    samples.sort_unstable();
+    samples[4]
+}
+
 #[test]
 #[ignore = "explicit Windows CI/storage qualification only"]
 fn qualifies_archive_scale() {
