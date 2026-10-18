@@ -9,13 +9,17 @@ const SOURCE: &str = "11111111-2222-4333-8444-555555555555";
 
 fn capture(first: &str, second: &str, third: &str) -> Capture {
     Capture {
-        schema_version: 1, provider: "chatgpt".into(),
+        schema_version: 1,
+        provider: "chatgpt".into(),
         conversation_id: SOURCE.into(),
         source_url: format!("https://chatgpt.com/c/{SOURCE}"),
         title: "Project evidence".into(),
-        conversation_created_at: None, conversation_updated_at: None,
+        conversation_created_at: None,
+        conversation_updated_at: None,
         captured_at: "2026-10-18T09:00:00Z".into(),
-        capture_method: "manual-dom".into(), completeness: "partial".into(), warnings: vec![],
+        capture_method: "manual-dom".into(),
+        completeness: "partial".into(),
+        warnings: vec![],
         messages: vec![
             message("one", "user", first),
             message("two", "assistant", second),
@@ -25,8 +29,13 @@ fn capture(first: &str, second: &str, third: &str) -> Capture {
 }
 fn message(id: &str, role: &str, text: &str) -> Message {
     Message {
-        id: id.into(), role: role.into(), text: text.into(), format: "plain".into(),
-        authored_at: None, model: None, attachments: vec![],
+        id: id.into(),
+        role: role.into(),
+        text: text.into(),
+        format: "plain".into(),
+        authored_at: None,
+        model: None,
+        attachments: vec![],
     }
 }
 struct Rig {
@@ -41,13 +50,23 @@ impl Rig {
         let archive = ArchiveStore::open(dir.path().join("archive-v1")).unwrap();
         let state = StateStore::open(dir.path().join("state.sqlite3")).unwrap();
         let index = IndexStore::open(dir.path().join("index.sqlite3")).unwrap();
-        Self { _dir: dir, archive, state, index }
+        Self {
+            _dir: dir,
+            archive,
+            state,
+            index,
+        }
     }
     fn save(&self, capture: Capture) -> FetchRequest {
         let saved = self.archive.save(capture).unwrap();
         self.index.sync(&self.archive, &self.state).unwrap();
-        let hit = self.index.search("needle", true, 10).unwrap()
-            .into_iter().find(|hit| hit.snapshot_id == saved.snapshot_id).unwrap();
+        let hit = self
+            .index
+            .search("needle", true, 10)
+            .unwrap()
+            .into_iter()
+            .find(|hit| hit.snapshot_id == saved.snapshot_id)
+            .unwrap();
         FetchRequest {
             source_id: hit.source_id,
             archive_id: saved.id,
@@ -77,19 +96,32 @@ fn message_window_and_revision_use_exact_immutable_provenance() {
     assert!(!one.truncated);
 
     let window = rig.fetch(&FetchRequest {
-        granularity: FetchGranularity::Window, before: 1, after: 1,
+        granularity: FetchGranularity::Window,
+        before: 1,
+        after: 1,
         ..base.clone()
     });
-    assert_eq!(window.segments.iter().map(|s| s.text.as_str()).collect::<Vec<_>>(),
-        vec!["Before", "needle precise answer", "After"]);
+    assert_eq!(
+        window
+            .segments
+            .iter()
+            .map(|s| s.text.as_str())
+            .collect::<Vec<_>>(),
+        vec!["Before", "needle precise answer", "After"]
+    );
     assert_eq!(window.selected_start, 0);
     assert_eq!(window.selected_end_exclusive, 3);
 
     let revision = rig.fetch(&FetchRequest {
-        granularity: FetchGranularity::Revision, message_id: None, ..base
+        granularity: FetchGranularity::Revision,
+        message_id: None,
+        ..base
     });
     assert_eq!(revision.segments.len(), 3);
-    assert_eq!(revision.text_bytes, "Before".len() + "needle precise answer".len() + "After".len());
+    assert_eq!(
+        revision.text_bytes,
+        "Before".len() + "needle precise answer".len() + "After".len()
+    );
     assert_eq!(revision.estimated_tokens, revision.text_bytes.div_ceil(4));
     assert_eq!(revision.completeness, "partial");
 }
@@ -99,7 +131,11 @@ fn pagination_never_drops_or_duplicates_unicode_on_byte_and_token_limits() {
     let rig = Rig::new();
     let content = format!("{}{}", "cat".repeat(33), "🌌日本語".repeat(37));
     let mut request = rig.save(capture("before", &format!("needle {content}"), "after"));
-    request.budget = FetchBudget { max_bytes: 37, max_estimated_tokens: 7, max_latency_ms: 30_000 };
+    request.budget = FetchBudget {
+        max_bytes: 37,
+        max_estimated_tokens: 7,
+        max_latency_ms: 30_000,
+    };
     let mut out = String::new();
     let mut attempts = 0;
     loop {
@@ -129,14 +165,22 @@ fn pagination_never_drops_or_duplicates_unicode_on_byte_and_token_limits() {
 fn zero_length_messages_and_segment_limit_advance_without_loops() {
     let rig = Rig::new();
     let mut c = capture("needle", "", "followup");
-    c.messages = (0..120).map(|i| message(&format!("m{i}"), "user", "")).collect();
+    c.messages = (0..120)
+        .map(|i| message(&format!("m{i}"), "user", ""))
+        .collect();
     c.messages[0].text = "needle".into();
     let mut request = rig.save(c);
     request.granularity = FetchGranularity::Revision;
     request.message_id = None;
     let first = rig.fetch(&request);
     assert_eq!(first.segments.len(), 100);
-    assert_eq!(first.next_cursor, Some(FetchCursor { message_index: 100, byte_offset: 0 }));
+    assert_eq!(
+        first.next_cursor,
+        Some(FetchCursor {
+            message_index: 100,
+            byte_offset: 0
+        })
+    );
     assert!(first.truncated);
     assert_eq!(first.truncation_reason.as_deref(), Some("segment_limit"));
     request.cursor = first.next_cursor;
@@ -165,23 +209,88 @@ fn invalid_handles_budgets_cursors_and_revocation_fail_closed() {
     let rig = Rig::new();
     let base = rig.save(capture("prior", "needle secure source", "following"));
     let cases = [
-        FetchRequest { source_id: "src:v1:".into(), ..base.clone() },
-        FetchRequest { archive_id: "a".repeat(64), ..base.clone() },
-        FetchRequest { snapshot_id: "f".repeat(64), ..base.clone() },
-        FetchRequest { message_id: Some("missing".into()), ..base.clone() },
-        FetchRequest { message_id: None, ..base.clone() },
-        FetchRequest { before: 1, ..base.clone() },
-        FetchRequest { granularity: FetchGranularity::Revision, message_id: Some("two".into()), ..base.clone() },
-        FetchRequest { granularity: FetchGranularity::Window, before: 21, ..base.clone() },
-        FetchRequest { budget: FetchBudget { max_bytes: 3, ..Default::default() }, ..base.clone() },
-        FetchRequest { budget: FetchBudget { max_estimated_tokens: 0, ..Default::default() }, ..base.clone() },
-        FetchRequest { budget: FetchBudget { max_latency_ms: 0, ..Default::default() }, ..base.clone() },
-        FetchRequest { cursor: Some(FetchCursor { message_index: 0, byte_offset: 0 }), ..base.clone() },
-        FetchRequest { cursor: Some(FetchCursor { message_index: 1, byte_offset: 9999 }), ..base.clone() },
-        FetchRequest { cursor: Some(FetchCursor { message_index: 2, byte_offset: 1 }), ..base.clone() },
+        FetchRequest {
+            source_id: "src:v1:".into(),
+            ..base.clone()
+        },
+        FetchRequest {
+            archive_id: "a".repeat(64),
+            ..base.clone()
+        },
+        FetchRequest {
+            snapshot_id: "f".repeat(64),
+            ..base.clone()
+        },
+        FetchRequest {
+            message_id: Some("missing".into()),
+            ..base.clone()
+        },
+        FetchRequest {
+            message_id: None,
+            ..base.clone()
+        },
+        FetchRequest {
+            before: 1,
+            ..base.clone()
+        },
+        FetchRequest {
+            granularity: FetchGranularity::Revision,
+            message_id: Some("two".into()),
+            ..base.clone()
+        },
+        FetchRequest {
+            granularity: FetchGranularity::Window,
+            before: 21,
+            ..base.clone()
+        },
+        FetchRequest {
+            budget: FetchBudget {
+                max_bytes: 3,
+                ..Default::default()
+            },
+            ..base.clone()
+        },
+        FetchRequest {
+            budget: FetchBudget {
+                max_estimated_tokens: 0,
+                ..Default::default()
+            },
+            ..base.clone()
+        },
+        FetchRequest {
+            budget: FetchBudget {
+                max_latency_ms: 0,
+                ..Default::default()
+            },
+            ..base.clone()
+        },
+        FetchRequest {
+            cursor: Some(FetchCursor {
+                message_index: 0,
+                byte_offset: 0,
+            }),
+            ..base.clone()
+        },
+        FetchRequest {
+            cursor: Some(FetchCursor {
+                message_index: 1,
+                byte_offset: 9999,
+            }),
+            ..base.clone()
+        },
+        FetchRequest {
+            cursor: Some(FetchCursor {
+                message_index: 2,
+                byte_offset: 1,
+            }),
+            ..base.clone()
+        },
     ];
     for request in cases {
-        assert!(matches!(rig.index.fetch(&rig.archive, &request), Err(IndexError::InvalidQuery)));
+        assert!(matches!(
+            rig.index.fetch(&rig.archive, &request),
+            Err(IndexError::InvalidQuery)
+        ));
     }
     let mut checked = false;
     let revoked = rig.index.fetch_with_check(&rig.archive, &base, || {
@@ -192,17 +301,27 @@ fn invalid_handles_budgets_cursors_and_revocation_fail_closed() {
     assert!(matches!(revoked, Err(IndexError::Revoked)));
     assert!(serde_json::from_str::<FetchRequest>(
         r#"{"source_id":"x","archive_id":"y","snapshot_id":"z","folder_root":"private"}"#,
-    ).is_err());
+    )
+    .is_err());
 }
 
 #[test]
 fn tampered_raw_revision_is_rejected_even_with_valid_index_provenance() {
     let rig = Rig::new();
     let request = rig.save(capture("prior", "needle immutable evidence", "context"));
-    let path = rig.archive.root().join("conversations").join(&request.archive_id)
-        .join("captures").join(format!("{}.jsonl", request.snapshot_id));
+    let path = rig
+        .archive
+        .root()
+        .join("conversations")
+        .join(&request.archive_id)
+        .join("captures")
+        .join(format!("{}.jsonl", request.snapshot_id));
     let old = fs::read_to_string(&path).unwrap();
-    fs::write(&path, old.replace("immutable evidence", "modified  evidence")).unwrap();
+    fs::write(
+        &path,
+        old.replace("immutable evidence", "modified  evidence"),
+    )
+    .unwrap();
     assert!(matches!(
         rig.index.fetch(&rig.archive, &request),
         Err(IndexError::InvalidEvidence)
