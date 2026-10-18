@@ -1,6 +1,6 @@
 # Phase 3A — transport-independent shared-brain integration core
 
-Status: cloud implementation branch (qualification pending).
+Status: **DONE**. [PR #10](https://github.com/KaisAbiyyi/mind-place/pull/10) squash-merged at `a42c90fc4f874e870f3f0a669340af27bd672bcc`. [Windows product CI](https://github.com/KaisAbiyyi/mind-place/actions/runs/39125313066) passed in full.
 
 ## Boundary
 
@@ -47,3 +47,10 @@ using an unconditional authorization callback.
   all tests, desktop app build.
 - Phase 3A does not require a local Windows or user-account acceptance gate.
   Proceed to **Cloud 3B — client authorization**, not directly to a listener.
+
+## Final Phase 3A handoff
+
+- Code/merge SHA: `a42c90fc4f874e870f3f0a669340af27bd672bcc` (`main`).
+- Product CI: `39125313066` — all gates **PASS**.
+- Local/manual qualification: **not required for Cloud 3A** (no executable MCP listener/hosted client surface in this unit).
+- Next cloud unit: **3B — client authorization**; make capability checks fail-closed and immediately revocable before any transport can call the integration core.

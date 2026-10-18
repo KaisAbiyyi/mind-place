@@ -81,11 +81,11 @@ Current execution order after the security-first reprioritization:
    - no schema migration, raw data rewrite, MCP exposure, or local/manual qualification (`C1 / L0 / U0`);
    - details and caveats: [phase-2d-retrieval-qualification.md](phase-2d-retrieval-qualification.md).
 
-**Phase 2 is complete** (`C4 / L0 / U0`), with all four units 2A–2D cloud qualified and merged. The next cloud instruction is `implement phase 3A` — protocol-independent shared-brain integration core. Local Windows pull is not needed merely to start Phase 3A.
+**Phase 2 is complete** (`C4 / L0 / U0`), with all four units 2A–2D cloud qualified and merged. Phase 3A has now merged to `main`; the next cloud instruction is `implement phase 3B` — authenticated client identities, scoped capabilities, and immediate revocation. No local Windows pull is required merely to start 3B.
 
 ## Phase 3 — shared-brain MCP
 
-1. **Phase 3A — protocol-independent integration core** — IN PROGRESS (cloud branch `feat/phase-3a-shared-brain-core`).
+1. **Phase 3A — protocol-independent integration core** — **DONE**. [PR #10](https://github.com/KaisAbiyyi/mind-place/pull/10) squash-merged to `main` at `a42c90fc4f874e870f3f0a669340af27bd672bcc` after [Windows CI run 39125313066](https://github.com/KaisAbiyyi/mind-place/actions/runs/39125313066) passed (format, repository, typecheck, SQLite, full tests, desktop build).
    - read-only `memory_search`, `memory_fetch` and `context_build` contracts, protocol-neutral discovery and bounded all-or-nothing batches;
    - mandatory injected live read authorization plus unlock-epoch checks (3B supplies real client identities);
    - no HTTP/MCP listener yet; no local/manual gate required;
@@ -106,6 +106,6 @@ Do not weaken Phase 1A to fake those later guarantees. UI/documentation must sta
 
 ## Handoff rule
 
-A cloud unit is complete only when its PR/branch is CI-green and its final SHA is reported. If a cloud-discovered bug is fixed, rerun the relevant checks before merge. The next normal instruction after completed Phase 2D is:
+A cloud unit is complete only when its PR/branch is CI-green and its final SHA is reported. If a cloud-discovered bug is fixed, rerun the relevant checks before merge. The next normal instruction after completed Phase 3A is:
 
-`implement phase 3A`
+`implement phase 3B`
