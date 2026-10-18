@@ -12,16 +12,16 @@ This file is the small execution-order pointer for cloud agents. Strategy lives 
 
 Current execution order after the security-first reprioritization:
 
-1. **Phase 1A — security root and fail-closed unlock architecture** — IN PROGRESS in PR #1.
+1. **Phase 1A — security root and fail-closed unlock architecture** — DONE. PR #1 squash-merged into `main` at `e19d5f36a80441cdd9938e395a07bfad43ef4f63` after Windows CI #25 passed.
    - versioned local security state;
    - memory-hard secret verifier;
    - locked-by-default process startup;
    - unlock epoch/lease invalidation contract;
    - privileged Tauri archive/setup commands gated before disclosure and revalidated before response;
    - first-run secret confirmation and fail-closed unlock UI;
-   - security dependencies are committed in `Cargo.lock`; no temporary lockfile-refresh workflow remains in the branch;
+   - security dependencies are committed in `Cargo.lock`; no temporary lockfile-refresh workflow remains in `main`;
    - no claim of encryption-at-rest yet.
-2. **Phase 1B — authoritative `state.sqlite3`**.
+2. **Phase 1B — authoritative `state.sqlite3`** — NEXT (not started).
    - migrations/backups;
    - authoritative mutable state;
    - root ACL/tombstones;
