@@ -542,7 +542,7 @@ Exit: a model can research years of chat history without loading whole conversat
 
 Completed cloud-first in [PR #6](https://github.com/KaisAbiyyi/mind-place/pull/6), [#7](https://github.com/KaisAbiyyi/mind-place/pull/7), [#8](https://github.com/KaisAbiyyi/mind-place/pull/8), and [#9](https://github.com/KaisAbiyyi/mind-place/pull/9). The final Phase 2D code SHA is `77a3f15607d143b94ae4b51c2dd95b98e1abf91b`. [Windows product CI](https://github.com/KaisAbiyyi/mind-place/actions/runs/39123680880) and [10K/100K/1M storage/retrieval qualification](https://github.com/KaisAbiyyi/mind-place/actions/runs/39123680905) passed. See [Phase 2D qualification details](implementation-plan/phase-2d-retrieval-qualification.md).
 
-**NEXT:** Phase 3B — client authorization, cloud-only initially. Phase 3A is DONE: [PR #10](https://github.com/KaisAbiyyi/mind-place/pull/10) squash-merged at `a42c90fc4f874e870f3f0a669340af27bd672bcc`; [Windows product CI 39125313066](https://github.com/KaisAbiyyi/mind-place/actions/runs/39125313066) passed all gates.
+**NEXT:** Phase 3C — local MCP transport, cloud-only initially. Phase 3B is DONE: [PR #11](https://github.com/KaisAbiyyi/mind-place/pull/11) squash-merged at `b88a26f28a6a601f9b307049946d7b9547e1907c`; [Windows CI 39129016103](https://github.com/KaisAbiyyi/mind-place/actions/runs/39129016103) and [10K/100K/1M storage qualification 39129016073](https://github.com/KaisAbiyyi/mind-place/actions/runs/39129016073) passed. Phase 3A is DONE: [PR #10](https://github.com/KaisAbiyyi/mind-place/pull/10) squash-merged at `a42c90fc4f874e870f3f0a669340af27bd672bcc`; [Windows product CI 39125313066](https://github.com/KaisAbiyyi/mind-place/actions/runs/39125313066) passed all gates.
 
 ### Phase 3 — Shared-brain MCP and hosted tunnel
 
@@ -557,11 +557,13 @@ Planned workload: **C5 / L2 / U1**.
 - bounded batches; fail-closed unlock-epoch/read authorization callback rechecks;
 - no network transport or client admission until later 3B/3C; see [3A handoff](implementation-plan/phase-3a-shared-brain-core.md).
 
-**Cloud 3B — client authorization**
+**Cloud 3B — client authorization — DONE**
 
 - enforced client identities/capabilities and immediate revocation;
 - minimum read/write/admin separation before any external client is connected;
 - local API/MCP authorization audit;
+- authority v3 credential hashes and append-only metadata audit; authenticated read dispatcher checks current grants at every source boundary;
+- never emits tokens except to trusted one-time local owner provisioning; no external listener in this unit; see [3B handoff](implementation-plan/phase-3b-client-authorization.md).
 
 **Cloud 3C — local MCP transport**
 

@@ -1,6 +1,6 @@
 # Phase 3B — durable client authorization and audit
 
-Status: cloud implementation; requires Windows CI before merge.
+Status: **DONE**. [PR #11](https://github.com/KaisAbiyyi/mind-place/pull/11) squash-merged at `b88a26f28a6a601f9b307049946d7b9547e1907c`. [Windows CI 39129016103](https://github.com/KaisAbiyyi/mind-place/actions/runs/39129016103) and [10K/100K/1M storage qualification 39129016073](https://github.com/KaisAbiyyi/mind-place/actions/runs/39129016073) passed.
 
 ## Boundaries
 
@@ -17,3 +17,11 @@ IntegrationCore::execute_client_batch is the credential-gated 3B entry point and
 Windows CI baseline: cargo fmt, verify:repo, typecheck, npm test and desktop build. New tests exercise v2→v3 migration and backup, legacy default-deny, immutable audit, locked processing, token storage, read/write/admin isolation, immediate revocation, disable, rotation, and batch invalidation.
 
 Cloud-only unit. No direct local or hosted MCP transport until 3C/3D; no manual Windows qualification required now. Next: Phase 3C local MCP transport.
+
+## Final cloud handoff
+
+- Phase 3B code SHA: `b88a26f28a6a601f9b307049946d7b9547e1907c` (`main`).
+- CI: format, repository verification, TypeScript typecheck, SQLite, full tests and Windows desktop build — **PASS**.
+- Storage benchmark: 10K, 100K and 1M message chunks — **PASS**.
+- No Windows local/manual gate for 3B; 3L1 and 3L2 remain later phase gates.
+- Next cloud phase is **3C — local MCP transport**. Use only the credential-gated dispatcher, never unconditional authorizer closures in any exposed route.

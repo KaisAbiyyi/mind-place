@@ -81,7 +81,7 @@ Current execution order after the security-first reprioritization:
    - no schema migration, raw data rewrite, MCP exposure, or local/manual qualification (`C1 / L0 / U0`);
    - details and caveats: [phase-2d-retrieval-qualification.md](phase-2d-retrieval-qualification.md).
 
-**Phase 2 is complete** (`C4 / L0 / U0`), with all four units 2A–2D cloud qualified and merged. Phase 3A has now merged to `main`; the next cloud instruction is `implement phase 3B` — authenticated client identities, scoped capabilities, and immediate revocation. No local Windows pull is required merely to start 3B.
+**Phase 2 is complete** (`C4 / L0 / U0`), with all four units 2A–2D cloud qualified and merged. Phases 3A and 3B have merged to `main`. The next cloud instruction is `implement phase 3C` — local MCP transport. No local Windows pull is required merely to start cloud 3C.
 
 ## Phase 3 — shared-brain MCP
 
@@ -90,7 +90,12 @@ Current execution order after the security-first reprioritization:
    - mandatory injected live read authorization plus unlock-epoch checks (3B supplies real client identities);
    - no HTTP/MCP listener yet; no local/manual gate required;
    - details: [phase-3a-shared-brain-core.md](phase-3a-shared-brain-core.md).
-2. **Next: Cloud 3B — client authorization** (scoped capabilities, revocation, durable state, audit) before local MCP transport in 3C.
+2. **Phase 3B — client authorization — DONE.** [PR #11](https://github.com/KaisAbiyyi/mind-place/pull/11) squash-merged to `main` at `b88a26f28a6a601f9b307049946d7b9547e1907c` after [Windows CI 39129016103](https://github.com/KaisAbiyyi/mind-place/actions/runs/39129016103) and [storage qualification 39129016073](https://github.com/KaisAbiyyi/mind-place/actions/runs/39129016073) (10K/100K/1M) all passed.
+   - authoritative state schema v3 for secret-hashed client credentials, policy revisions and metadata-only append-only audit;
+   - explicit read/write/admin grants, live revocation, token rotation and terminal identity revoke;
+   - credential-gated Phase 3A read batch admission and authorization on each evidence boundary;
+   - no transport, user setup wizard or manual Windows gate yet; [Phase 3B handoff](phase-3b-client-authorization.md).
+3. **Next: Cloud 3C — local MCP transport**, preserving credential admission, request/body/result bounds, lifecycle and error semantics.
 
 ## Phase 1A explicit boundary
 
@@ -106,6 +111,6 @@ Do not weaken Phase 1A to fake those later guarantees. UI/documentation must sta
 
 ## Handoff rule
 
-A cloud unit is complete only when its PR/branch is CI-green and its final SHA is reported. If a cloud-discovered bug is fixed, rerun the relevant checks before merge. The next normal instruction after completed Phase 3A is:
+A cloud unit is complete only when its PR/branch is CI-green and its final SHA is reported. If a cloud-discovered bug is fixed, rerun the relevant checks before merge. The next normal instruction after completed Phase 3B is:
 
-`implement phase 3B`
+`implement phase 3C`
