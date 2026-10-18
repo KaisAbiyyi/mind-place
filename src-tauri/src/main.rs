@@ -10,7 +10,10 @@ use serde::Serialize;
 use std::{
     io::Write,
     path::{Path, PathBuf},
-    sync::{atomic::{AtomicBool, Ordering}, Arc},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
 };
 use tauri::{Manager, State};
 use zeroize::Zeroizing;
@@ -93,7 +96,9 @@ async fn initialize_security(
     let authority_ready = state.authority_ready.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let secret = Zeroizing::new(secret);
-        let status = security.initialize(secret.as_bytes()).map_err(security_error)?;
+        let status = security
+            .initialize(secret.as_bytes())
+            .map_err(security_error)?;
         if let Err(error) = StateStore::open(&state_path) {
             security.lock();
             return Err(format!("{}:{}", error.code(), error));
