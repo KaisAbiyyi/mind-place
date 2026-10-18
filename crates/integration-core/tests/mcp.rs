@@ -212,11 +212,10 @@ async fn real_http_deny_rebinding_origin_and_locked_epoch() {
     assert!(denied.starts_with("HTTP/1.1 403"));
     f.security.lock();
     let token = f.token.clone();
-    let denied = tokio::task::spawn_blocking(move || {
-        tcp_request_result(raw(&token, "127.0.0.1:43731", ""))
-    })
-    .await
-    .unwrap();
+    let denied =
+        tokio::task::spawn_blocking(move || tcp_request_result(raw(&token, "127.0.0.1:43731", "")))
+            .await
+            .unwrap();
     // A lock can close its listener before an HTTP response is written.
     // Windows reports TCP ConnectionReset for that refusal; neither form
     // may ever contain private MCP discovery or source material.
