@@ -1911,6 +1911,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "mind-place-integration"
+version = "0.2.5"
+dependencies = [
+ "mind-place-archive",
+ "mind-place-index",
+ "mind-place-security",
+ "mind-place-state",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "mind-place-security"
 version = "0.2.5"
 dependencies = [

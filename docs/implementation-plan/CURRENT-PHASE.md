@@ -83,6 +83,15 @@ Current execution order after the security-first reprioritization:
 
 **Phase 2 is complete** (`C4 / L0 / U0`), with all four units 2A–2D cloud qualified and merged. The next cloud instruction is `implement phase 3A` — protocol-independent shared-brain integration core. Local Windows pull is not needed merely to start Phase 3A.
 
+## Phase 3 — shared-brain MCP
+
+1. **Phase 3A — protocol-independent integration core** — IN PROGRESS (cloud branch `feat/phase-3a-shared-brain-core`).
+   - read-only `memory_search`, `memory_fetch` and `context_build` contracts, protocol-neutral discovery and bounded all-or-nothing batches;
+   - mandatory injected live read authorization plus unlock-epoch checks (3B supplies real client identities);
+   - no HTTP/MCP listener yet; no local/manual gate required;
+   - details: [phase-3a-shared-brain-core.md](phase-3a-shared-brain-core.md).
+2. **Next: Cloud 3B — client authorization** (scoped capabilities, revocation, durable state, audit) before local MCP transport in 3C.
+
 ## Phase 1A explicit boundary
 
 Phase 1A establishes the **local process security root**. It intentionally does not yet complete:

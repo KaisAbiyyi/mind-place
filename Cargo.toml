@@ -1,6 +1,6 @@
 [workspace]
-members = ["crates/archive-core", "crates/capture-host", "crates/security-core", "crates/state-core", "crates/index-core", "src-tauri"]
-default-members = ["crates/archive-core", "crates/capture-host", "crates/security-core", "crates/state-core", "crates/index-core"]
+members = ["crates/archive-core", "crates/capture-host", "crates/security-core", "crates/state-core", "crates/index-core", "crates/integration-core", "src-tauri"]
+default-members = ["crates/archive-core", "crates/capture-host", "crates/security-core", "crates/state-core", "crates/index-core", "crates/integration-core"]
 resolver = "2"
 
 [workspace.package]
