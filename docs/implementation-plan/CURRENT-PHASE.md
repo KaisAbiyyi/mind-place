@@ -65,7 +65,7 @@ Current execution order after the security-first reprioritization:
    - unlock-lease guarded `fetch_retrieval` Tauri command and negative/security regression fixtures;
    - no index/state schema migration, and no local/manual gate (`C1 / L0 / U0`);
    - details, limitations and cloud handoff: [phase-2b-progressive-fetch.md](phase-2b-progressive-fetch.md).
-3. **Phase 2C — context builder and retrieval policies** — **NEXT** (cloud-only).
+3. **Phase 2C — context builder and retrieval policies** — **IN PROGRESS** (cloud-only).
 4. Phase 2D — observability and retrieval qualification.
 
 The next cloud instruction is `implement phase 2C`. Do not pull the local Windows checkout merely to begin Phase 2C.

@@ -5,8 +5,8 @@ use mind_place_archive::{
     SnapshotSummary, NATIVE_HOST_NAME,
 };
 use mind_place_index::{
-    FetchRequest, FetchResponse, IndexError, IndexStats, IndexStore, RetrievalRequest,
-    RetrievalResponse, SearchHit,
+    ContextPack, ContextRequest, FetchRequest, FetchResponse, IndexError, IndexStats, IndexStore,
+    RetrievalRequest, RetrievalResponse, SearchHit,
 };
 use mind_place_security::{SecurityError, SecurityGate, SecurityStatus, UnlockLease};
 use mind_place_state::StateStore;
@@ -179,6 +179,23 @@ async fn fetch_retrieval(
     let index_path = state.index_path.clone();
     index_task(&state, move |lease, security| {
         IndexStore::open(index_path)?.fetch_with_check(&archive, &request, || {
+            security
+                .validate_lease(lease)
+                .map_err(|_| IndexError::Revoked)
+        })
+    })
+    .await
+}
+
+#[tauri::command]
+async fn build_retrieval_context(
+    state: State<'_, AppState>,
+    request: ContextRequest,
+) -> Result<ContextPack, String> {
+    let archive = state.store.clone();
+    let index_path = state.index_path.clone();
+    index_task(&state, move |lease, security| {
+        IndexStore::open(index_path)?.build_context_with_check(&archive, &request, || {
             security
                 .validate_lease(lease)
                 .map_err(|_| IndexError::Revoked)
@@ -485,7 +502,8 @@ fn main() {
             get_archive_index_stats,
             search_archive_index,
             search_retrieval,
-            fetch_retrieval
+            fetch_retrieval,
+            build_retrieval_context
         ])
         .run(tauri::generate_context!())
         .expect("Mind Place failed to start");
