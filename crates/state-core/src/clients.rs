@@ -165,7 +165,6 @@ impl StateStore {
             .map_err(StateError::from)
     }
 
-
     /// Paginated credentialed client inventory for trusted local owner UI only.
     /// No credential hash or bearer material is included in the response.
     pub fn list_credentialed_clients(
@@ -185,10 +184,7 @@ impl StateStore {
              FROM clients c JOIN client_credentials k ON k.client_id=c.id
              WHERE c.id > ?1 ORDER BY c.id LIMIT ?2",
         )?;
-        let clients = stmt.query_map(
-            params![after_id.unwrap_or(""), limit as i64],
-            client_row,
-        )?;
+        let clients = stmt.query_map(params![after_id.unwrap_or(""), limit as i64], client_row)?;
         clients
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(StateError::from)

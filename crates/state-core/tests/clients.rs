@@ -82,9 +82,7 @@ fn credentialed_inventory_is_paginated_and_excludes_unprovisioned_legacy_rows() 
         ("client:v1:b", "b".repeat(64)),
         ("client:v1:c", "c".repeat(64)),
     ] {
-        store
-            .issue_client(id, id, &hash, &[Cap::Read])
-            .unwrap();
+        store.issue_client(id, id, &hash, &[Cap::Read]).unwrap();
     }
     let raw = Connection::open(store.path()).unwrap();
     raw.execute(
