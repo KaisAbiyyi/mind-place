@@ -6,6 +6,7 @@ use mind_place_archive::ArchiveStore;
 use mind_place_state::{canonical_source_id, SourceDescriptor, SourceKey};
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
+use sha2::Digest;
 use std::time::{Duration, Instant};
 
 const NAMESPACE: &str = "mind-place-chatgpt-archive-v1";
