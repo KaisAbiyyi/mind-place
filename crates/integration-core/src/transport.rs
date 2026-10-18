@@ -183,10 +183,16 @@ async fn handle_bounded(request: Request<Incoming>, ctx: ServerContext) -> WireR
             )
         }
     };
-    if !ctx.active.load(Ordering::Acquire) || ctx.security.require_unlocked().is_err() {
-        return error(403);
+    // Pin the original unlock epoch for the entire HTTP exchange. Merely
+    // checking 'unlocked' at the end could accept a lock-then-unlock race.
+    let lease = match ctx.security.require_unlocked() {
+        Ok(lease) => lease,
+        Err(_) => return error(403),
+    };
+    if !ctx.active.load(Ordering::Acquire) {
+        return error(503);
     }
-
+    let post_security = ctx.security.clone();
     let active = ctx.active.clone();
     let active_for_task = active.clone();
     let task = tokio::task::spawn_blocking(move || {
@@ -211,13 +217,19 @@ async fn handle_bounded(request: Request<Incoming>, ctx: ServerContext) -> WireR
             method.as_deref(),
             name.as_deref(),
         );
-        if !active_for_task.load(Ordering::Acquire) || ctx.security.require_unlocked().is_err() {
+        if !active_for_task.load(Ordering::Acquire)
+            || ctx.security.validate_lease(lease).is_err()
+        {
             return error(403);
         }
         wire(reply.status, reply.body)
     });
     match task.await {
-        Ok(response) if ctx_active_postcondition(&active) => response,
+        Ok(response)
+            if ctx_active_postcondition(&active) && post_security.validate_lease(lease).is_ok() =>
+        {
+            response
+        }
         _ => error(503),
     }
 }
