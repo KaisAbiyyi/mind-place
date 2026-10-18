@@ -1,0 +1,38 @@
+name: Phase 1B lock and format bootstrap (temporary)
+
+on:
+  push:
+    branches:
+      - feat/phase-1b-state-authority
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  normalize:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: true
+      - name: Setup Rust 1.90
+        shell: pwsh
+        run: |
+          rustup toolchain install 1.90.0 --profile minimal --component rustfmt --no-self-update
+          rustup default 1.90.0
+      - name: Resolve new state dependencies and validate compile
+        run: cargo check -p mind-place-state
+      - name: Format Rust workspace
+        run: cargo fmt --all
+      - name: Commit generated lockfile and formatting
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.lock crates src-tauri
+          if (-not (git diff --cached --quiet)) {
+            git commit -m "chore(state): lock SQLite dependencies and format Rust"
+            git push origin HEAD:feat/phase-1b-state-authority
+          }
