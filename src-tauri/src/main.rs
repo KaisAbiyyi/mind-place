@@ -5,8 +5,8 @@ use mind_place_archive::{
     SnapshotSummary, NATIVE_HOST_NAME,
 };
 use mind_place_index::{
-    ContextPack, ContextRequest, FetchRequest, FetchResponse, IndexError, IndexStats, IndexStore, RetrievalRequest,
-    RetrievalResponse, SearchHit,
+    ContextPack, ContextRequest, FetchRequest, FetchResponse, IndexError, IndexStats, IndexStore,
+    RetrievalRequest, RetrievalResponse, SearchHit,
 };
 use mind_place_security::{SecurityError, SecurityGate, SecurityStatus, UnlockLease};
 use mind_place_state::StateStore;
@@ -196,7 +196,9 @@ async fn build_retrieval_context(
     let index_path = state.index_path.clone();
     index_task(&state, move |lease, security| {
         IndexStore::open(index_path)?.build_context_with_check(&archive, &request, || {
-            security.validate_lease(lease).map_err(|_| IndexError::Revoked)
+            security
+                .validate_lease(lease)
+                .map_err(|_| IndexError::Revoked)
         })
     })
     .await
