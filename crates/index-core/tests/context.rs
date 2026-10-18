@@ -110,6 +110,10 @@ fn balanced_windows_deduplicate_overlap_and_are_reproducible() {
     assert!(group.excerpts.iter().any(|e| e.text == "intro"));
     assert!(group.excerpts.iter().any(|e| e.text == "outro"));
     assert!(group.excerpts.iter().all(|e| e.kind == "message"));
+    assert!(group.excerpts.iter().filter(|e| e.text.contains("needle"))
+        .all(|e| e.matched_queries == vec![0] && e.score > 0.0));
+    assert!(group.excerpts.iter().filter(|e| !e.text.contains("needle"))
+        .all(|e| e.matched_queries.is_empty() && e.score == 0.0));
     assert!(group.source_id.starts_with("src:v1:"));
     assert_eq!(pack.source_count, 1);
     assert_eq!(pack.excerpt_count, 4);
