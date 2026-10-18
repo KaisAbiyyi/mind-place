@@ -494,11 +494,13 @@ Planned workload: **C5 / L0 / U0**. Security was deliberately promoted ahead of 
 - FTS5 external-content index;
 - rebuild command and incremental update path.
 
-**Cloud 1E — storage qualification harness**
+**Cloud 1E — storage qualification harness — DONE**
 
 - benchmark representative 10K/100K/1M chunk corpora;
 - prove deleting `index.sqlite3` loses no canonical information;
 - Windows GitHub Actions coverage for migration/rebuild and bundled SQLite/runtime integration.
+
+Completed in [PR #5](https://github.com/KaisAbiyyi/mind-place/pull/5); [Windows storage CI](https://github.com/KaisAbiyyi/mind-place/actions/runs/39112178136) passed the three tiers, with detailed receipts and current SQLite-version limits in [`phase-1e-storage-qualification.md`](implementation-plan/phase-1e-storage-qualification.md).
 
 No local or manual gate is required unless cloud Windows CI exposes a platform-only uncertainty that cannot be reproduced there.
 
