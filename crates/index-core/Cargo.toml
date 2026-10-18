@@ -12,6 +12,7 @@ rusqlite = { version = "=0.40.2", features = ["bundled"] }
 sha2.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+chrono.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
