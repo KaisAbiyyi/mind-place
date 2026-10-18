@@ -4,16 +4,19 @@ use mind_place_archive::{
     ArchiveStore, AssetResult, Conversation, ConversationSummary, ExportResult, ImportReceipt,
     SnapshotSummary, NATIVE_HOST_NAME,
 };
+use mind_place_security::{SecurityError, SecurityGate, SecurityStatus, UnlockLease};
 use serde::Serialize;
 use std::{
     io::Write,
     path::{Path, PathBuf},
 };
 use tauri::{Manager, State};
+use zeroize::Zeroizing;
 
 #[derive(Clone)]
 struct AppState {
     store: ArchiveStore,
+    security: SecurityGate,
     extension_path: PathBuf,
     host_path: PathBuf,
     legacy_path: PathBuf,
@@ -31,6 +34,21 @@ struct SetupInfo {
     legacy_available: bool,
 }
 
+fn security_error(error: SecurityError) -> String {
+    match error.retry_after_ms() {
+        Some(retry_after_ms) => format!("{}:{retry_after_ms}:{}", error.code(), error),
+        None => format!("{}:{}", error.code(), error),
+    }
+}
+
+fn begin_unlocked(state: &AppState) -> Result<UnlockLease, String> {
+    state.security.require_unlocked().map_err(security_error)
+}
+
+fn finish_unlocked(security: &SecurityGate, lease: UnlockLease) -> Result<(), String> {
+    security.validate_lease(lease).map_err(security_error)
+}
+
 async fn blocking<T: Send + 'static>(
     operation: impl FnOnce() -> mind_place_archive::Result<T> + Send + 'static,
 ) -> Result<T, String> {
@@ -40,14 +58,66 @@ async fn blocking<T: Send + 'static>(
         .map_err(|e| e.to_string())
 }
 
+async fn gated_blocking<T: Send + 'static>(
+    state: &AppState,
+    operation: impl FnOnce() -> mind_place_archive::Result<T> + Send + 'static,
+) -> Result<T, String> {
+    let security = state.security.clone();
+    let lease = begin_unlocked(state)?;
+    let result = blocking(operation).await?;
+    finish_unlocked(&security, lease)?;
+    Ok(result)
+}
+
+#[tauri::command]
+fn get_security_status(state: State<'_, AppState>) -> SecurityStatus {
+    state.security.status()
+}
+
+#[tauri::command]
+async fn initialize_security(
+    state: State<'_, AppState>,
+    secret: String,
+) -> Result<SecurityStatus, String> {
+    let security = state.security.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let secret = Zeroizing::new(secret);
+        security
+            .initialize(secret.as_bytes())
+            .map_err(security_error)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn unlock_security(
+    state: State<'_, AppState>,
+    secret: String,
+) -> Result<SecurityStatus, String> {
+    let security = state.security.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let secret = Zeroizing::new(secret);
+        security.unlock(secret.as_bytes()).map_err(security_error)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+fn lock_security(state: State<'_, AppState>) -> SecurityStatus {
+    state.security.lock()
+}
+
 #[tauri::command]
 async fn list_conversations(
     state: State<'_, AppState>,
     query: Option<String>,
 ) -> Result<Vec<ConversationSummary>, String> {
     let store = state.store.clone();
-    blocking(move || store.list(query.as_deref().unwrap_or(""))).await
+    gated_blocking(&state, move || store.list(query.as_deref().unwrap_or(""))).await
 }
+
 #[tauri::command]
 async fn read_conversation(
     state: State<'_, AppState>,
@@ -55,16 +125,18 @@ async fn read_conversation(
     snapshot_id: Option<String>,
 ) -> Result<Conversation, String> {
     let store = state.store.clone();
-    blocking(move || store.read(&id, snapshot_id.as_deref())).await
+    gated_blocking(&state, move || store.read(&id, snapshot_id.as_deref())).await
 }
+
 #[tauri::command]
 async fn list_snapshots(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<Vec<SnapshotSummary>, String> {
     let store = state.store.clone();
-    blocking(move || store.snapshots(&id)).await
+    gated_blocking(&state, move || store.snapshots(&id)).await
 }
+
 #[tauri::command]
 async fn export_markdown(
     state: State<'_, AppState>,
@@ -72,8 +144,12 @@ async fn export_markdown(
     snapshot_id: Option<String>,
 ) -> Result<ExportResult, String> {
     let store = state.store.clone();
-    blocking(move || store.export_snapshot(&id, snapshot_id.as_deref())).await
+    gated_blocking(&state, move || {
+        store.export_snapshot(&id, snapshot_id.as_deref())
+    })
+    .await
 }
+
 #[tauri::command]
 async fn get_asset(
     state: State<'_, AppState>,
@@ -81,13 +157,14 @@ async fn get_asset(
     asset_path: String,
 ) -> Result<AssetResult, String> {
     let store = state.store.clone();
-    blocking(move || store.asset(&id, &asset_path)).await
+    gated_blocking(&state, move || store.asset(&id, &asset_path)).await
 }
+
 #[tauri::command]
 async fn import_legacy(state: State<'_, AppState>) -> Result<ImportReceipt, String> {
     let store = state.store.clone();
     let source = state.legacy_path.clone();
-    blocking(move || store.import_legacy(&source)).await
+    gated_blocking(&state, move || store.import_legacy(&source)).await
 }
 
 fn native_manifest_path(state: &AppState, browser: &str) -> PathBuf {
@@ -117,8 +194,11 @@ fn setup_info(state: &AppState) -> SetupInfo {
 }
 
 #[tauri::command]
-fn get_setup(state: State<'_, AppState>) -> SetupInfo {
-    setup_info(&state)
+fn get_setup(state: State<'_, AppState>) -> Result<SetupInfo, String> {
+    let lease = begin_unlocked(&state)?;
+    let info = setup_info(&state);
+    finish_unlocked(&state.security, lease)?;
+    Ok(info)
 }
 
 #[cfg(windows)]
@@ -156,6 +236,7 @@ fn is_registered(state: &AppState, browser: &str) -> bool {
         .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
         .is_some_and(|value| value == expected)
 }
+
 #[cfg(not(windows))]
 fn is_registered(_state: &AppState, _browser: &str) -> bool {
     false
@@ -163,6 +244,7 @@ fn is_registered(_state: &AppState, _browser: &str) -> bool {
 
 #[tauri::command]
 fn register_extension(state: State<'_, AppState>, browser: String) -> Result<SetupInfo, String> {
+    let lease = begin_unlocked(&state)?;
     if !matches!(browser.as_str(), "chrome" | "edge") {
         return Err("Choose Chrome or Edge".into());
     }
@@ -190,10 +272,13 @@ fn register_extension(state: State<'_, AppState>, browser: String) -> Result<Set
             .map_err(|e| e.to_string())?;
         key.set_value("", &target.display().to_string())
             .map_err(|e| e.to_string())?;
-        Ok(setup_info(&state))
+        let info = setup_info(&state);
+        finish_unlocked(&state.security, lease)?;
+        Ok(info)
     }
     #[cfg(not(windows))]
     {
+        let _ = lease;
         Err(
             "Browser native-host registration is currently implemented for Windows Chrome and Edge"
                 .into(),
@@ -205,6 +290,8 @@ fn main() {
     tauri::Builder::default()
         .setup(|app| {
             let root = mind_place_archive::data_root()?;
+            let security_path = root.parent().unwrap_or(&root).join("security-v1.json");
+            let security = SecurityGate::open(security_path)?;
             let legacy_path = root.parent().unwrap_or(&root).join("sessions");
             let store = ArchiveStore::open(root)?;
             let host_path = std::env::current_exe()?
@@ -222,6 +309,7 @@ fn main() {
             };
             app.manage(AppState {
                 store,
+                security,
                 extension_path,
                 host_path,
                 legacy_path,
@@ -240,6 +328,10 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            get_security_status,
+            initialize_security,
+            unlock_security,
+            lock_security,
             list_conversations,
             read_conversation,
             list_snapshots,
