@@ -16,9 +16,15 @@ const MAX_ESTIMATED_TOKENS: usize = 65_536;
 const MAX_LATENCY_MS: u64 = 30_000;
 const MAX_WINDOW: usize = 20;
 
-fn default_bytes() -> usize { 16 * 1024 }
-fn default_tokens() -> usize { 4096 }
-fn default_latency() -> u64 { 2000 }
+fn default_bytes() -> usize {
+    16 * 1024
+}
+fn default_tokens() -> usize {
+    4096
+}
+fn default_latency() -> u64 {
+    2000
+}
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -42,7 +48,11 @@ pub struct FetchBudget {
 }
 impl Default for FetchBudget {
     fn default() -> Self {
-        Self { max_bytes: default_bytes(), max_estimated_tokens: default_tokens(), max_latency_ms: default_latency() }
+        Self {
+            max_bytes: default_bytes(),
+            max_estimated_tokens: default_tokens(),
+            max_latency_ms: default_latency(),
+        }
     }
 }
 impl FetchBudget {
@@ -53,7 +63,9 @@ impl FetchBudget {
         {
             return Err(IndexError::InvalidQuery);
         }
-        Ok(self.max_bytes.min(self.max_estimated_tokens.saturating_mul(4)))
+        Ok(self
+            .max_bytes
+            .min(self.max_estimated_tokens.saturating_mul(4)))
     }
 }
 
@@ -84,9 +96,15 @@ pub struct FetchRequest {
 impl Default for FetchRequest {
     fn default() -> Self {
         Self {
-            source_id: String::new(), archive_id: String::new(), snapshot_id: String::new(),
-            granularity: FetchGranularity::Message, message_id: None, before: 0, after: 0,
-            budget: FetchBudget::default(), cursor: None,
+            source_id: String::new(),
+            archive_id: String::new(),
+            snapshot_id: String::new(),
+            granularity: FetchGranularity::Message,
+            message_id: None,
+            before: 0,
+            after: 0,
+            budget: FetchBudget::default(),
+            cursor: None,
         }
     }
 }
@@ -152,10 +170,12 @@ impl IndexStore {
             || request.after > MAX_WINDOW
             || (request.granularity != FetchGranularity::Window
                 && (request.before != 0 || request.after != 0))
-            || (request.granularity == FetchGranularity::Revision
-                && request.message_id.is_some())
+            || (request.granularity == FetchGranularity::Revision && request.message_id.is_some())
             || (request.granularity != FetchGranularity::Revision
-                && request.message_id.as_ref().is_none_or(|id| id.is_empty() || id.len() > 256))
+                && request
+                    .message_id
+                    .as_ref()
+                    .is_none_or(|id| id.is_empty() || id.len() > 256))
         {
             return Err(IndexError::InvalidQuery);
         }
@@ -178,21 +198,25 @@ impl IndexStore {
             return Err(IndexError::InvalidEvidence);
         }
         let canonical = canonical_source_id(&SourceDescriptor {
-            provider: "chatgpt", source_namespace: NAMESPACE,
-            source_kind: "conversation", key: SourceKey::External(&conversation_id),
+            provider: "chatgpt",
+            source_namespace: NAMESPACE,
+            source_kind: "conversation",
+            key: SourceKey::External(&conversation_id),
         })?;
         if canonical != request.source_id {
             return Err(IndexError::InvalidEvidence);
         }
-        let expected_archive = format!("{:x}", sha2::Sha256::digest(
-            format!("{provider}:{conversation_id}").as_bytes()
-        ));
+        let expected_archive = format!(
+            "{:x}",
+            sha2::Sha256::digest(format!("{provider}:{conversation_id}").as_bytes())
+        );
         if expected_archive != request.archive_id {
             return Err(IndexError::InvalidEvidence);
         }
         let generation: i64 = db.query_row(
             "SELECT CAST(value AS INTEGER) FROM index_meta WHERE key='generation'",
-            [], |row| row.get(0),
+            [],
+            |row| row.get(0),
         )?;
         check()?;
         let conversation = archive.read(&request.archive_id, Some(&request.snapshot_id))?;
@@ -215,20 +239,31 @@ impl IndexStore {
             FetchGranularity::Revision => (0, messages.len()),
             FetchGranularity::Message | FetchGranularity::Window => {
                 let target = request.message_id.as_deref().unwrap_or_default();
-                let at = messages.iter().position(|message| message.id == target)
+                let at = messages
+                    .iter()
+                    .position(|message| message.id == target)
                     .ok_or(IndexError::InvalidQuery)?;
                 if request.granularity == FetchGranularity::Message {
                     (at, at + 1)
                 } else {
-                    (at.saturating_sub(request.before), at.saturating_add(request.after + 1).min(messages.len()))
+                    (
+                        at.saturating_sub(request.before),
+                        at.saturating_add(request.after + 1).min(messages.len()),
+                    )
                 }
             }
         };
-        let mut cursor = request.cursor.unwrap_or(FetchCursor { message_index: start, byte_offset: 0 });
-        if cursor.message_index < start || cursor.message_index > end
+        let mut cursor = request.cursor.unwrap_or(FetchCursor {
+            message_index: start,
+            byte_offset: 0,
+        });
+        if cursor.message_index < start
+            || cursor.message_index > end
             || (cursor.message_index == end && cursor.byte_offset != 0)
             || (cursor.message_index < end
-                && !messages[cursor.message_index].text.is_char_boundary(cursor.byte_offset))
+                && !messages[cursor.message_index]
+                    .text
+                    .is_char_boundary(cursor.byte_offset))
         {
             return Err(IndexError::InvalidQuery);
         }
@@ -246,7 +281,14 @@ impl IndexStore {
                 break;
             }
             if used >= cap {
-                reason = Some(if cap == request.budget.max_bytes { "byte_budget" } else { "token_estimate_budget" }.to_string());
+                reason = Some(
+                    if cap == request.budget.max_bytes {
+                        "byte_budget"
+                    } else {
+                        "token_estimate_budget"
+                    }
+                    .to_string(),
+                );
                 break;
             }
             let message = &messages[cursor.message_index];
@@ -288,10 +330,19 @@ impl IndexStore {
             source_id: request.source_id.clone(),
             archive_id: request.archive_id.clone(),
             snapshot_id: request.snapshot_id.clone(),
-            conversation_id, provider, source_url, title, captured_at, completeness,
-            index_generation: generation, indexed_is_current: is_current == 1,
-            selected_start: start, selected_end_exclusive: end,
-            segments, text_bytes: used, estimated_tokens: used.div_ceil(4),
+            conversation_id,
+            provider,
+            source_url,
+            title,
+            captured_at,
+            completeness,
+            index_generation: generation,
+            indexed_is_current: is_current == 1,
+            selected_start: start,
+            selected_end_exclusive: end,
+            segments,
+            text_bytes: used,
+            estimated_tokens: used.div_ceil(4),
             truncated,
             truncation_reason: if truncated { reason } else { None },
             next_cursor: truncated.then_some(cursor),
@@ -300,7 +351,10 @@ impl IndexStore {
 }
 
 fn is_hex(value: &str) -> bool {
-    !value.is_empty() && value.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+    !value.is_empty()
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
 }
 fn is_hex64(value: &str) -> bool {
     value.len() == 64 && is_hex(value)
