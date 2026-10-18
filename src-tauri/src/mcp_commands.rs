@@ -68,8 +68,10 @@ pub(super) async fn start_local_mcp(state: State<'_, AppState>) -> Result<McpSta
 #[tauri::command]
 pub(super) fn stop_local_mcp(state: State<'_, AppState>) -> Result<McpStatus, String> {
     let lease = begin_unlocked(&state)?;
+    let tunnel_stop = super::hosted_tunnel::stop_and_revoke(&state);
     state.mcp.lock().unwrap_or_else(|e| e.into_inner()).take();
     finish_unlocked(&state, lease)?;
+    tunnel_stop?;
     Ok(McpStatus {
         running: false,
         endpoint: ENDPOINT,
@@ -117,6 +119,10 @@ pub(super) fn revoke_local_mcp_client(
     client_id: String,
 ) -> Result<(), String> {
     let lease = begin_unlocked(&state)?;
+    if super::hosted_tunnel::is_active_client(&state, &client_id) {
+        super::hosted_tunnel::stop_and_revoke(&state)?;
+        return finish_unlocked(&state, lease);
+    }
     let authority = StateStore::open(&state.state_path)
         .map_err(|_| "MP_MCP_AUTHORITY:Unavailable".to_string())?;
     ClientAuthority::new(&authority, &state.security)
