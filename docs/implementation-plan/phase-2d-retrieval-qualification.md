@@ -1,6 +1,6 @@
 # Phase 2D — Local retrieval observability and qualification
 
-Status: **IN PROGRESS** on `feat/phase-2d-retrieval-qualification`.
+Status: **DONE**. [PR #9](https://github.com/KaisAbiyyi/mind-place/pull/9) squash-merged into `main` at `77a3f15607d143b94ae4b51c2dd95b98e1abf91b` (2026-10-18).
 
 ## Inspection surface
 
