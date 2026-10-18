@@ -118,7 +118,9 @@ fn delete_disposable_index(path: &Path) {
 fn fts_integrity(path: &Path) {
     let db = Connection::open(path).unwrap();
     let foreign_keys: i64 = db
-        .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| row.get(0))
+        .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+            row.get(0)
+        })
         .unwrap();
     assert_eq!(foreign_keys, 0, "derived FK violation");
     let health: String = db
@@ -179,15 +181,21 @@ fn qualifies_archive_scale() {
     assert!(state.source(&last_id).unwrap().is_some());
 
     // This is user-authored state, not reconstructible from the disposable FTS.
-    state.create_project("qualification-project", "Durable project").unwrap();
-    state.create_memory_claim(&MemoryClaim {
-        id: "qualification-claim".into(),
-        statement: "Canonical evidence survives index deletion".into(),
-        asserted_by: "user".into(),
-        epistemic_origin: "explicit".into(),
-        status: "active".into(),
-    }).unwrap();
-    state.add_claim_source_evidence("qualification-claim", &last_id, "source").unwrap();
+    state
+        .create_project("qualification-project", "Durable project")
+        .unwrap();
+    state
+        .create_memory_claim(&MemoryClaim {
+            id: "qualification-claim".into(),
+            statement: "Canonical evidence survives index deletion".into(),
+            asserted_by: "user".into(),
+            epistemic_origin: "explicit".into(),
+            status: "active".into(),
+        })
+        .unwrap();
+    state
+        .add_claim_source_evidence("qualification-claim", &last_id, "source")
+        .unwrap();
 
     let lookup_started = Instant::now();
     let first = index.search("firstrareneedle", false, 10).unwrap();
@@ -212,7 +220,10 @@ fn qualifies_archive_scale() {
     delete_disposable_index(&index_path);
     let rebuilt = IndexStore::open(&index_path).unwrap();
     assert_eq!(rebuilt.stats().unwrap().chunks, 0);
-    assert!(rebuilt.search("firstrareneedle", false, 10).unwrap().is_empty());
+    assert!(rebuilt
+        .search("firstrareneedle", false, 10)
+        .unwrap()
+        .is_empty());
 
     let rebuild_started = Instant::now();
     let restored = rebuilt.rebuild(&archive, &state).unwrap();
@@ -227,22 +238,30 @@ fn qualifies_archive_scale() {
     assert!(reopened_state.source(&first_id).unwrap().is_some());
     assert!(reopened_state.source(&last_id).unwrap().is_some());
     assert_eq!(
-        reopened_state.get_project("qualification-project").unwrap().unwrap().name,
+        reopened_state
+            .get_project("qualification-project")
+            .unwrap()
+            .unwrap()
+            .name,
         "Durable project"
     );
     let canonical_db = Connection::open(&state_path).unwrap();
-    let evidence_count: i64 = canonical_db.query_row(
-        "SELECT COUNT(*) FROM claim_evidence
+    let evidence_count: i64 = canonical_db
+        .query_row(
+            "SELECT COUNT(*) FROM claim_evidence
          WHERE claim_id='qualification-claim' AND source_ref=?1",
-        [&last_id],
-        |row| row.get(0),
-    ).unwrap();
+            [&last_id],
+            |row| row.get(0),
+        )
+        .unwrap();
     assert_eq!(evidence_count, 1, "curated evidence reference survived");
-    let claim_count: i64 = canonical_db.query_row(
-        "SELECT COUNT(*) FROM memory_claims WHERE id='qualification-claim'",
-        [],
-        |row| row.get(0),
-    ).unwrap();
+    let claim_count: i64 = canonical_db
+        .query_row(
+            "SELECT COUNT(*) FROM memory_claims WHERE id='qualification-claim'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
     assert_eq!(claim_count, 1);
     drop(canonical_db);
 
