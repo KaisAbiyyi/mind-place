@@ -245,8 +245,8 @@ fn qualifies_archive_scale() {
         assert_eq!(result.result.source_count, 1);
         assert_eq!(result.result.groups[0].source_id, first_id);
     });
-    let ranked_gate_us = (legacy_median_us * 40).max(100_000);
-    let context_gate_us = (legacy_median_us * 200).max(2_000_000);
+    let ranked_gate_us = (legacy_median_us * 20).max(50_000);
+    let context_gate_us = (legacy_median_us * 100).max(500_000);
     assert!(
         ranked_median_us <= ranked_gate_us,
         "ranked inspection latency regression"
