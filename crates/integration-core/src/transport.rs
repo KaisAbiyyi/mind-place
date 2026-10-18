@@ -153,8 +153,9 @@ async fn handle_bounded(request: Request<Incoming>, ctx: ServerContext) -> WireR
     }
 
     let active = ctx.active.clone();
+    let active_for_task = active.clone();
     let task = tokio::task::spawn_blocking(move || {
-        if !active.load(Ordering::Acquire) { return error(503); }
+        if !active_for_task.load(Ordering::Acquire) { return error(503); }
         let state = match StateStore::open(ctx.state_path) {
             Ok(value) => value,
             Err(_) => return error(503),
@@ -168,7 +169,7 @@ async fn handle_bounded(request: Request<Incoming>, ctx: ServerContext) -> WireR
             &core, &state, &authorization, parsed, &version,
             method.as_deref(), name.as_deref(),
         );
-        if !active.load(Ordering::Acquire) || ctx.security.require_unlocked().is_err() {
+        if !active_for_task.load(Ordering::Acquire) || ctx.security.require_unlocked().is_err() {
             return error(403);
         }
         wire(reply.status, reply.body)

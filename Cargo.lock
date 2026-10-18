@@ -1860,6 +1860,8 @@ name = "mind-place"
 version = "0.2.5"
 dependencies = [
  "mind-place-archive",
+ "mind-place-index",
+ "mind-place-integration",
  "mind-place-security",
  "mind-place-state",
  "serde",
