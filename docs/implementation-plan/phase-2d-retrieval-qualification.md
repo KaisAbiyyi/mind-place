@@ -20,7 +20,12 @@ The existing `storage_qualification.rs` generates the same deterministic Phase 1
 - the Phase 2A weighted ranking and inspector;
 - the Phase 2C context builder and inspector (which uses Phase 2B integrity-checked archive fetch).
 
-The ranked-inspector median must be at most `max(40× baseline, 100,000 microseconds)`; the context-inspector median must be at most `max(200× baseline, 2,000,000 microseconds)`. These are **broad CI regression guardrails**, not user-device p95 or guaranteed service deadlines. The historical Phase 1E rare lookup pair was about 4 ms, but those original runner measurements must not be misrepresented as a same-run baseline. Relative comparisons are taken on the same current Windows runner. Receipts report all observed medians and gates, with no personally sourced content.
+The ranked-inspector median must be at most `max(20× baseline, 50,000 microseconds)`; the context-inspector median must be at most `max(100× baseline, 500,000 microseconds)`. These are **broad CI regression guardrails**, not user-device p95 or guaranteed service deadlines. The historical Phase 1E rare lookup pair was about 4 ms, but those original runner measurements must not be misrepresented as a same-run baseline. Relative comparisons are taken on the same current Windows runner. Receipts report all observed medians and gates, with no personally sourced content.
+
+Phase 2D inspectors read the index-generation key directly, avoiding an
+otherwise full-corpus count of every chunk merely to emit diagnostic metadata.
+The first 1M Windows measurement exposed this unnecessary overhead; the
+tightened gates verify the optimized implementation.
 
 The test also verifies the ranked search response is unchanged following the Phase 1E physical index deletion and full rebuild. Previous Phase 1E proof of untouched raw hashes, curated state and authoritative IDs remains mandatory. The existing Windows matrix workflow uploads the updated JSON qualification receipts for all tiers.
 
