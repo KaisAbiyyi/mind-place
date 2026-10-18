@@ -12,6 +12,11 @@ const tauriInvoke: Invoke = <T>(command: string, args?: Record<string, unknown>)
 
 const openReader = () => {
   mountReader({ root, invoke: tauriInvoke });
+  // The archive can already contain saved revisions before this startup.
+  // Refresh without delaying unlock or claiming the disposable index is authority.
+  void tauriInvoke("refresh_archive_index").catch(() => {
+    console.warn("Mind Place background archive indexing did not complete.");
+  });
 };
 
 mountSecurityGate({ root, invoke: tauriInvoke, onUnlocked: openReader }).catch(() => {
