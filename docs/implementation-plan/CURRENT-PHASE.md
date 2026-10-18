@@ -33,12 +33,14 @@ Current execution order after the security-first reprioritization:
    - FK-backed memory claim evidence references independent of disposable indexes;
    - verified V1 snapshots, fail-closed orphan evidence, atomic rollback/recovery and restart/tamper tests;
    - explicit identity contract at `phase-1c-source-identity.md`.
-4. **Phase 1D — rebuildable `index.sqlite3` + FTS5** — NEXT (cloud-only).
-   - archive adapter;
-   - source/chunk catalog;
-   - FTS5 external-content index;
-   - incremental update + rebuild.
-5. **Phase 1E — storage/performance qualification**.
+4. **Phase 1D — rebuildable `index.sqlite3` + FTS5** — DONE. PR #4 squash-merged into `main` at `ccbb6e9ffadce1ebaefde3d328e3936725156823` after Windows CI run `39108537645` passed.
+   - separate disposable index and source/revision/chunk catalog for ChatGPT archive;
+   - external-content FTS5 with incremental, transactional rebuild and current/history lookup;
+   - Phase 1C canonical source IDs reused in authoritative `state.sqlite3`;
+   - bounded chunking and tamper/cancellation/rebuild regression tests;
+   - unlock-lease guarded Tauri commands and post-unlock startup refresh;
+   - documented contract and limits at `phase-1d-derived-index.md`.
+5. **Phase 1E — storage/performance qualification** — NEXT (cloud-only).
    - 10K/100K/1M fixtures;
    - delete/rebuild invariants;
    - Windows cloud CI and performance evidence.
@@ -59,6 +61,6 @@ Do not weaken Phase 1A to fake those later guarantees. UI/documentation must sta
 
 ## Handoff rule
 
-A cloud unit is complete only when its PR/branch is CI-green and its final SHA is reported. If a cloud-discovered bug is fixed, rerun the relevant checks before merge. The next normal instruction after completed Phase 1C is:
+A cloud unit is complete only when its PR/branch is CI-green and its final SHA is reported. If a cloud-discovered bug is fixed, rerun the relevant checks before merge. The next normal instruction after completed Phase 1D is:
 
-`implement phase 1D`
+`implement phase 1E`
