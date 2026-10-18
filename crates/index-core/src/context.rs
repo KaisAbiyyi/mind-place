@@ -402,8 +402,7 @@ impl IndexStore {
                 });
             }
             used += pending_bytes;
-            excerpt_count += groups[group_at.unwrap_or(groups.len() - 1)].excerpts.len();
-            // Recalculate without trusting a count of window overlaps.
+            // Count only emitted segments after overlap deduplication.
             excerpt_count = groups.iter().map(|group| group.excerpts.len()).sum();
             if fetched.truncated && hit.kind != "title" {
                 note_reason(&mut reasons, "partial_fetch");
