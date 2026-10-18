@@ -392,11 +392,15 @@ impl IndexStore {
                         // returning the same original message twice.
                         if is_match {
                             if let Some(at) = group_at {
-                                if let Some(existing) = groups[at].excerpts.iter_mut().find(|entry| {
-                                    entry.message_index == Some(segment.message_index)
-                                }) {
+                                if let Some(existing) =
+                                    groups[at].excerpts.iter_mut().find(|entry| {
+                                        entry.message_index == Some(segment.message_index)
+                                    })
+                                {
                                     existing.score = existing.score.max(hit.score);
-                                    existing.matched_queries.extend(hit.matched_queries.iter().copied());
+                                    existing
+                                        .matched_queries
+                                        .extend(hit.matched_queries.iter().copied());
                                     existing.matched_queries.sort_unstable();
                                     existing.matched_queries.dedup();
                                 }
@@ -417,7 +421,11 @@ impl IndexStore {
                         byte_end: segment.byte_end,
                         total_bytes: segment.message_total_bytes,
                         score: if is_match { hit.score } else { 0.0 },
-                        matched_queries: if is_match { hit.matched_queries.clone() } else { Vec::new() },
+                        matched_queries: if is_match {
+                            hit.matched_queries.clone()
+                        } else {
+                            Vec::new()
+                        },
                     });
                 }
             }
