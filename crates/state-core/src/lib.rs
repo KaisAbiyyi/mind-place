@@ -8,13 +8,16 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 mod identity;
+mod clients;
+pub use clients::{ClientAuditEvent, ClientCapability, ClientRecord};
 pub use identity::{canonical_source_id, SourceDescriptor, SourceKey};
 
 pub const APPLICATION_ID: i64 = 0x4D504C43;
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
 const MIN_SQLITE_NUMBER: i32 = 3_053_002;
 const MIGRATION_V1: &str = include_str!("schema_v1.sql");
 const MIGRATION_V2: &str = include_str!("schema_v2.sql");
+const MIGRATION_V3: &str = include_str!("schema_v3.sql");
 pub type Result<T> = std::result::Result<T, StateError>;
 
 #[derive(Debug, thiserror::Error)]
@@ -191,6 +194,13 @@ impl StateStore {
                 tx.execute(
                     "INSERT INTO schema_migrations(version,checksum) VALUES(2,?1)",
                     [checksum(MIGRATION_V2)],
+                )?;
+            }
+            if previous_version < 3 {
+                tx.execute_batch(MIGRATION_V3)?;
+                tx.execute(
+                    "INSERT INTO schema_migrations(version,checksum) VALUES(3,?1)",
+                    [checksum(MIGRATION_V3)],
                 )?;
             }
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -434,7 +444,7 @@ fn validate_version(db: &Connection, version: i64) -> Result<()> {
     if !(1..=SCHEMA_VERSION).contains(&version) || user_version(db)? != version {
         return Err(StateError::Corrupt);
     }
-    for (step, migration) in [(1, MIGRATION_V1), (2, MIGRATION_V2)] {
+    for (step, migration) in [(1, MIGRATION_V1), (2, MIGRATION_V2), (3, MIGRATION_V3)] {
         if step > version {
             break;
         }
