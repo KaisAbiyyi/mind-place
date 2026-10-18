@@ -7,6 +7,11 @@ fn fresh() -> (tempfile::TempDir, StateStore) {
     (d, s)
 }
 #[test]
+fn bundled_sqlite_version_is_supported() {
+    println!("Bundled Mind Place SQLite: {}", rusqlite::version());
+    assert!(rusqlite::version_number() >= 3_053_002);
+}
+#[test]
 fn newly_created_database_is_durable_and_reopenable() {
     let (_dir, db) = fresh();
     db.create_project("p:1", "Mind Place").unwrap();
@@ -76,12 +81,14 @@ fn upgrades_create_verified_sqlite_backup_before_write() {
     let db = Connection::open(&p).unwrap();
     db.pragma_update(None, "application_id", APPLICATION_ID)
         .unwrap();
+    db.pragma_update(None, "journal_mode", "WAL").unwrap();
     db.execute_batch(
         "CREATE TABLE old_evidence(x TEXT); INSERT INTO old_evidence VALUES('preserved');",
     )
     .unwrap();
-    drop(db);
+    // Keep the original connection alive: backup must include committed WAL frames.
     StateStore::open(&p).unwrap();
+    drop(db);
     let backups: Vec<_> = fs::read_dir(d.path().join("state-backups"))
         .unwrap()
         .collect();
