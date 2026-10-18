@@ -41,7 +41,11 @@ pub struct ClientAuditEvent {
 }
 
 fn valid_hash(s: &str) -> Result<()> {
-    if s.len() != 64 || !s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+    if s.len() != 64
+        || !s
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
         return Err(StateError::InvalidValue);
     }
     Ok(())
@@ -61,8 +65,10 @@ fn bump_policy(tx: &rusqlite::Transaction<'_>, revoke_generation: bool) -> Resul
          client_revocation_generation=client_revocation_generation+?1 WHERE id=1",
         [i64::from(revoke_generation)],
     )?;
-    tx.query_row("SELECT revision FROM security_policy WHERE id=1", [], |r| r.get(0))
-        .map_err(StateError::from)
+    tx.query_row("SELECT revision FROM security_policy WHERE id=1", [], |r| {
+        r.get(0)
+    })
+    .map_err(StateError::from)
 }
 fn audit(
     tx: &rusqlite::Transaction<'_>,
@@ -74,7 +80,12 @@ fn audit(
     tx.execute(
         "INSERT INTO client_audit(client_id,event,capability,policy_revision)
          VALUES (?1,?2,?3,?4)",
-        params![client_id, event, capability.map(ClientCapability::as_str), policy_revision],
+        params![
+            client_id,
+            event,
+            capability.map(ClientCapability::as_str),
+            policy_revision
+        ],
     )?;
     Ok(())
 }
@@ -96,7 +107,10 @@ impl StateStore {
             || display_name.len() > 128
             || capabilities.is_empty()
             || capabilities.len() > 3
-            || capabilities.iter().enumerate().any(|(i, cap)| capabilities[..i].contains(cap))
+            || capabilities
+                .iter()
+                .enumerate()
+                .any(|(i, cap)| capabilities[..i].contains(cap))
         {
             return Err(StateError::InvalidValue);
         }
@@ -172,11 +186,18 @@ impl StateStore {
             "UPDATE clients SET state=?2,policy_revision=policy_revision+1
              WHERE id=?1 AND state IN ('enabled','disabled') AND state!=?2",
             params![id, state],
-        )? != 1 {
+        )? != 1
+        {
             return Err(StateError::InvalidValue);
         }
         let policy = bump_policy(&tx, !enabled)?;
-        audit(&tx, Some(id), if enabled { "enabled" } else { "disabled" }, None, policy)?;
+        audit(
+            &tx,
+            Some(id),
+            if enabled { "enabled" } else { "disabled" },
+            None,
+            policy,
+        )?;
         tx.commit()?;
         Ok(())
     }
@@ -190,7 +211,8 @@ impl StateStore {
             "UPDATE clients SET state='revoked',revoked_at=unixepoch(),
              policy_revision=policy_revision+1 WHERE id=?1 AND state!='revoked'",
             [id],
-        )? != 1 {
+        )? != 1
+        {
             return Err(StateError::InvalidValue);
         }
         let policy = bump_policy(&tx, true)?;
@@ -210,7 +232,8 @@ impl StateStore {
              rotated_at=unixepoch() WHERE client_id=?1 AND EXISTS
              (SELECT 1 FROM clients WHERE id=?1 AND state='enabled')",
             params![id, replacement_hash],
-        )? != 1 {
+        )? != 1
+        {
             return Err(StateError::InvalidValue);
         }
         tx.execute(
@@ -234,11 +257,9 @@ impl StateStore {
         valid_id(id)?;
         let mut db = self.connection()?;
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let state: Option<String> = tx.query_row(
-            "SELECT state FROM clients WHERE id=?1",
-            [id],
-            |r| r.get(0),
-        ).optional()?;
+        let state: Option<String> = tx
+            .query_row("SELECT state FROM clients WHERE id=?1", [id], |r| r.get(0))
+            .optional()?;
         if !matches!(state.as_deref(), Some("enabled" | "disabled")) {
             return Err(StateError::InvalidValue);
         }
@@ -267,7 +288,11 @@ impl StateStore {
         audit(
             &tx,
             Some(id),
-            if granted { "capability_granted" } else { "capability_revoked" },
+            if granted {
+                "capability_granted"
+            } else {
+                "capability_revoked"
+            },
             Some(cap),
             policy,
         )?;
@@ -278,7 +303,10 @@ impl StateStore {
     /// Metadata-only request audit. This is not an access grant. Locked-process
     /// requests never reach state I/O and thus produce no local audit row.
     pub fn audit_client_read(&self, client_id: Option<&str>, event: &str) -> Result<()> {
-        if !matches!(event, "read_attempt" | "read_completed" | "read_denied" | "read_failed") {
+        if !matches!(
+            event,
+            "read_attempt" | "read_completed" | "read_denied" | "read_failed"
+        ) {
             return Err(StateError::InvalidValue);
         }
         if let Some(id) = client_id {
@@ -286,12 +314,17 @@ impl StateStore {
         }
         let mut db = self.connection()?;
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let revision = tx.query_row(
-            "SELECT revision FROM security_policy WHERE id=1",
-            [],
-            |r| r.get(0),
+        let revision =
+            tx.query_row("SELECT revision FROM security_policy WHERE id=1", [], |r| {
+                r.get(0)
+            })?;
+        audit(
+            &tx,
+            client_id,
+            event,
+            Some(ClientCapability::Read),
+            revision,
         )?;
-        audit(&tx, client_id, event, Some(ClientCapability::Read), revision)?;
         tx.commit()?;
         Ok(())
     }
@@ -317,6 +350,8 @@ impl StateStore {
                 recorded_at: r.get(5)?,
             })
         })?;
-        events.collect::<std::result::Result<Vec<_>, _>>().map_err(StateError::from)
+        events
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(StateError::from)
     }
 }

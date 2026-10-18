@@ -7,8 +7,8 @@ use std::{
     path::{Path, PathBuf},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-mod identity;
 mod clients;
+mod identity;
 pub use clients::{ClientAuditEvent, ClientCapability, ClientRecord};
 pub use identity::{canonical_source_id, SourceDescriptor, SourceKey};
 

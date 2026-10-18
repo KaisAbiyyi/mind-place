@@ -65,7 +65,10 @@ impl<'a> ClientAuthority<'a> {
         let credential = new_credential()?;
         let hash = credential_hash(&credential)?;
         self.state.rotate_client_hash(id, &hash)?;
-        let client = self.state.client(id)?.ok_or(IntegrationError::AccessDenied)?;
+        let client = self
+            .state
+            .client(id)?
+            .ok_or(IntegrationError::AccessDenied)?;
         self.security.validate_lease(lease)?;
         Ok(IssuedClient { client, credential })
     }
@@ -81,7 +84,12 @@ impl<'a> ClientAuthority<'a> {
         self.security.validate_lease(lease)?;
         Ok(())
     }
-    pub fn set_capability(&self, id: &str, capability: ClientCapability, grant: bool) -> Result<()> {
+    pub fn set_capability(
+        &self,
+        id: &str,
+        capability: ClientCapability,
+        grant: bool,
+    ) -> Result<()> {
         let lease = self.security.require_unlocked()?;
         self.state.set_client_capability(id, capability, grant)?;
         self.security.validate_lease(lease)?;
@@ -120,7 +128,9 @@ impl IntegrationCore<'_> {
         };
         state.audit_client_read(Some(&client), "read_attempt")?;
         let result = self.execute_batch(batch, || {
-            if state.authorize_client_hash(&hash, ClientCapability::Read)?.as_deref()
+            if state
+                .authorize_client_hash(&hash, ClientCapability::Read)?
+                .as_deref()
                 == Some(client.as_str())
             {
                 Ok(())
@@ -130,7 +140,11 @@ impl IntegrationCore<'_> {
         });
         state.audit_client_read(
             Some(&client),
-            if result.is_ok() { "read_completed" } else { "read_failed" },
+            if result.is_ok() {
+                "read_completed"
+            } else {
+                "read_failed"
+            },
         )?;
         result
     }
