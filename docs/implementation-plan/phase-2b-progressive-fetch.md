@@ -1,8 +1,10 @@
 # Phase 2B — Progressive evidence fetch and bounded output
 
-Status: **IN PROGRESS**. Implemented as a headless Rust primitive with a
-lease-guarded Tauri adapter. Do not expose it over MCP/public endpoints without
-the later Phase 3 capability checks.
+Status: **DONE**. [PR #7](https://github.com/KaisAbiyyi/mind-place/pull/7)
+squash-merged into `main` at
+`5672b49ed508eb07e9331180e987a1313a8f9773` on 2026-10-18.
+Implemented as a headless Rust primitive with a lease-guarded Tauri adapter.
+Do not expose it over MCP/public endpoints without the Phase 3 capability checks.
 
 ## Architecture and proof of source
 
@@ -89,3 +91,21 @@ to Phases 3 and 4, before any new external surface is published.
 Windows product CI must pass formatting, repository verification, typecheck,
 Rust/web integration tests and desktop build. Storage qualification is a
 regression backstop. No local/manual session is required for this cloud unit.
+
+## Completed cloud handoff (2026-10-18)
+
+- **UNIT:** Phase 2B — progressive fetch and bounded output.
+- **PR:** https://github.com/KaisAbiyyi/mind-place/pull/7 — squash-merged.
+- **Qualified code SHA:** `5672b49ed508eb07e9331180e987a1313a8f9773`.
+- **Windows product CI:** https://github.com/KaisAbiyyi/mind-place/actions/runs/39116420328 —
+  PASS: Rust format, repo checks, TS typecheck, SQLite runtime qualification,
+  full web/Rust regression suites including six new fetch tests, and desktop build.
+- **Windows storage CI:** https://github.com/KaisAbiyyi/mind-place/actions/runs/39116420331 —
+  PASS for archive/FTS/rebuild fixtures of 10K, 100K and 1M message chunks.
+- **Storage changes:** none; raw evidence and authoritative identity remain unchanged.
+- **Local required:** no — Phase 2B cloud-only (`C1/L0/U0`).
+- **Known limits:** byte budget excludes JSON envelope; token counts are
+  documented estimates; latency is cooperative, not a hard I/O timeout.
+  Only the current local ChatGPT archive adapter is supported.
+- **NEXT:** `implement phase 2C` — context builder, overlap dedupe,
+  retrieval policies and diversity.
