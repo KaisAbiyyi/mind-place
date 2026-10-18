@@ -217,9 +217,7 @@ async fn handle_bounded(request: Request<Incoming>, ctx: ServerContext) -> WireR
             method.as_deref(),
             name.as_deref(),
         );
-        if !active_for_task.load(Ordering::Acquire)
-            || ctx.security.validate_lease(lease).is_err()
-        {
+        if !active_for_task.load(Ordering::Acquire) || ctx.security.validate_lease(lease).is_err() {
             return error(403);
         }
         wire(reply.status, reply.body)
