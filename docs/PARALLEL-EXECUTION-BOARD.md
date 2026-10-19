@@ -1,0 +1,92 @@
+# Mind Place — dependency and parallel execution board
+
+**Last coordinated baseline:** 2026-10-19. This supplements [the BIG plan](BIG-IMPLEMENTATION-PLAN.md) and [current phase](implementation-plan/CURRENT-PHASE.md); it does **not** replace acceptance gates or rewrite historical status. Read [agent orchestration policy](AGENT-ORCHESTRATION.md).
+
+## How to request work
+
+Say `ambil MP-4E` (or `ambil 4E` in Mind Place context). The agent first **checks latest GitHub task claims/PRs, the current roadmap and dependencies**, then declares `CLAIM MP-4E` with unique session ID, resource locks, branch and base SHA before editing. If claimed by another agent, do **REPORT_ONLY** or request fenced transfer; do not silently duplicate the work. Descriptive unit IDs are stable, vendor-neutral, and independent of ChatGPT/Codex/Gemini identity. GitHub comments alone are not atomic claims: serialize conflicting units without a real coordinator.
+
+Historical Cloud 1A–1E, 2A–2D, 3A–3D are complete. **3E currently has existing PR #14 and is NOT unassigned; do not steal it.** `3L1/3L2/3U` remain mandatory after 3E cloud merge, and are not proved by CI. Rows below are *eligible work descriptions*, not assertions that their dependencies have passed. `LOCAL` and `HUMAN` cannot be taken as generic cloud implementations.
+
+## Task dependency registry (all remaining named units)
+
+| Task ID | Deliverable | Required predecessors | Exclusive logical resource | Gate / parallel note |
+|---|---|---|---|---|
+| `MP-3E` | Cloud MCP adversarial security and simulated tunnel review | `MP-3D` | `mcp-security` | PR #14 ACTIVE; no second writer |
+| `MP-3L1` | Real Windows local MCP client qualification | `MP-3E` | `native-mcp` | LOCAL; no cloud simulation substitute |
+| `MP-3L2` | Official hosted tunnel remote proof | `MP-3L1` | `hosted-account` | LOCAL; requires scoped real access |
+| `MP-3U` | Actual ChatGPT source continuity and revocation acceptance | `MP-3L2` | `human-acceptance` | HUMAN |
+| `MP-4A` | Approved-root registry, virtual namespace and contract | `MP-3U` | `folder-identity/state-schema` | C |
+| `MP-4B` | NTFS root authorization and path containment | `MP-4A` | `folder-authority` | C |
+| `MP-4C` | Scanner, watchers, rescan and revocation reconciliation | `MP-4B`, `MP-4D` | `folder-scanner` | C |
+| `MP-4D` | Versioned document object store and dedup | `MP-4A` | `object-store/state-schema` | C |
+| `MP-4E` | Bounded PDF/OOXML/Markdown/source extractors | `MP-4A` | `document-extractors` | C; parallel with 4B/4D after interface freeze |
+| `MP-4F` | Unified document retrieval/UI and indexed qualification | `MP-4C`, `MP-4D`, `MP-4E` | `document-integration/retrieval` | C |
+| `MP-4L1` | Windows NTFS junction/reparse/races | `MP-4F` | `windows-fs` | LOCAL |
+| `MP-4L2` | Representative documents/parser/resource limits | `MP-4F`, `MP-4L1` | `windows-corpus` | LOCAL |
+| `MP-4U` | Folder add/search/revoke workflow acceptance | `MP-4L2` | `human-acceptance` | HUMAN |
+| `MP-5A` | Evidence-based claim transitions and as-of history | `MP-4F` | `memory-state-schema` | C |
+| `MP-5B` | Conflict relations and evidence-aware ranking | `MP-5A` | `memory-retrieval` | C |
+| `MP-5C` | Memory create/update/forget with idempotence/authorization | `MP-5A` | `memory-writes` | C; may parallel with 5B after 5A |
+| `MP-5D` | History/conflict/provenance UI and deterministic scenarios | `MP-5B`, `MP-5C` | `memory-ui` | C |
+| `MP-6A` | Rebuildable graph schema and deterministic edges | `MP-4F` | `graph-index-schema` | C; may parallel with 5A if migrations do not overlap |
+| `MP-6B` | Graph neighbors, community aggregation, bounded retrieval | `MP-6A` | `graph-query` | C |
+| `MP-6C` | Graph generations/hash invalidation and atomic activation | `MP-6A` | `graph-build` | C; parallel with 6B after 6A |
+| `MP-6D` | Scoped graph maintenance capabilities and transactions | `MP-6C` | `graph-authority` | C |
+| `MP-6E` | Graphify prompt templates and graph qualification | `MP-6B`, `MP-6D` | `graphify-integration` | C |
+| `MP-7A` | Provider-neutral capture contracts and ChatGPT regression | `MP-4F` | `capture-contract` | C; can run beside graph/memory lanes |
+| `MP-7B` | Claude capture/import adapter and branches | `MP-7A` | `capture-claude` | C |
+| `MP-7C` | Gemini capture/import adapter and revisions | `MP-7A` | `capture-gemini` | C; parallel with 7B |
+| `MP-7D` | Generic JSON/HTML/Markdown import adapter | `MP-7A` | `capture-generic` | C; parallel with 7B/7C |
+| `MP-7E` | Provider capability matrix, privacy and regression | `MP-7B`, `MP-7C`, `MP-7D` | `capture-integration` | C |
+| `MP-7L1` | Real Claude session/device qualification | `MP-7E` | `claude-account` | LOCAL |
+| `MP-7U1` | Claude transcript/provider acceptance | `MP-7L1` | `human-acceptance` | HUMAN |
+| `MP-7L2` | Real Gemini session/device qualification | `MP-7E` | `gemini-account` | LOCAL |
+| `MP-7U2` | Gemini transcript/provider acceptance | `MP-7L2` | `human-acceptance` | HUMAN |
+| `MP-8A` | Virtualized Knowledge OS navigation/data architecture | `MP-5D`, `MP-6E`, `MP-7E` | `ui-shell` | C |
+| `MP-8B` | Conversation/files/search library and context preview | `MP-8A` | `ui-library` | C |
+| `MP-8C` | Memories/projects/people/topics workspace | `MP-8A` | `ui-memory` | C; parallel with 8B |
+| `MP-8D` | Retrieval/connector health and inspector UI | `MP-8A` | `ui-health` | C; parallel with 8B/8C |
+| `MP-8E` | Hive graph explorer, zoom and timeline | `MP-8A`, `MP-6E` | `ui-hive` | C; parallel with 8B/8C/8D |
+| `MP-8F` | Desktop integration, accessiblity and performance | `MP-8B`, `MP-8C`, `MP-8D`, `MP-8E` | `ui-integration` | C |
+| `MP-8L1` | Real packaged WebView2 navigation and startup | `MP-8F` | `windows-ui` | LOCAL |
+| `MP-8L2` | Large corpus UI/graph responsiveness and memory | `MP-8L1` | `windows-ui-benchmark` | LOCAL |
+| `MP-8U1` | Knowledge library daily UX acceptance | `MP-8L1` | `human-acceptance` | HUMAN |
+| `MP-8U2` | Hive usability and source drilldown acceptance | `MP-8L2` | `human-acceptance` | HUMAN |
+| `MP-9A` | Measure encrypted storage options and backup impacts | `MP-4F` | `security-architecture` | C; research may start early without migration |
+| `MP-9B` | Windows key lifecycle, encrypted state/object integration | `MP-9A` | `crypto-migration` | C |
+| `MP-9C` | Private scopes, redaction, destructive forget | `MP-9B`, `MP-5C` | `privacy-deletion` | C |
+| `MP-9D` | Parsers and connector attack/fuzz hardening | `MP-9B`, `MP-7E` | `privacy-boundaries` | C; parallel with 9C/9E if contracts frozen |
+| `MP-9E` | Atomic backup, restore, corruption/integrity | `MP-9B` | `backup` | C |
+| `MP-9F` | Portable export/import, schema migration/rebuild | `MP-9C`, `MP-9E` | `portable-migration` | C |
+| `MP-9L1` | Native Windows credential store and unlock measurement | `MP-9F` | `windows-keychain` | LOCAL |
+| `MP-9L2` | Destructive recovery/backup on isolated copy | `MP-9F` | `windows-recovery` | LOCAL |
+| `MP-9U1` | Owner key recovery/lock experience | `MP-9L1` | `human-acceptance` | HUMAN |
+| `MP-9U2` | Owner forget/restore approvals | `MP-9L2` | `human-acceptance` | HUMAN |
+| `MP-10A` | Gold continuity questions and reproducible benchmark set | `MP-7E` | `benchmark-gold` | C; can prepare while other lanes run |
+| `MP-10B` | Retrieval/ranking bakeoff and cost tuning | `MP-10A`, `MP-6E`, `MP-5D` | `benchmark-retrieval` | C |
+| `MP-10C` | 1M-chunk/100K-file scale, resource and startup gates | `MP-10A`, `MP-4F` | `benchmark-scale` | C; parallel with 10B |
+| `MP-10D` | Fault injection, crash, restore and migration proof | `MP-9F` | `release-recovery` | C; parallel with 10B/C |
+| `MP-10E` | Signed immutable candidate, qualified integration and release | `MP-8F`, `MP-9F`, `MP-10B`, `MP-10C`, `MP-10D` | `release` | C |
+| `MP-10L1` | Representative hardware performance qualification | `MP-10E` | `windows-performance` | LOCAL |
+| `MP-10L2` | Installer/migration/update/rollback qualification | `MP-10E` | `windows-release` | LOCAL |
+| `MP-10L3` | Two-client real one-brain end-to-end | `MP-10E` | `windows-e2e` | LOCAL |
+| `MP-10U1` | Owner real-project continuity decision | `MP-10L3` | `human-acceptance` | HUMAN |
+| `MP-10U2` | Owner final release decision | `MP-10L1`, `MP-10L2`, `MP-10U1` | `human-acceptance` | HUMAN |
+| `MP-10S1` | OPTIONAL vector/hybrid benchmark only if metrics justify | `MP-10B` | `optional-semantic` | OPT-IN |
+| `MP-10S2` | OPTIONAL Tantivy benchmark only if FTS5 bottleneck | `MP-10C` | `optional-tantivy` | OPT-IN |
+
+## Safe parallel examples (only after predecessor gates PASS)
+
+- After `MP-4A`: separate `MP-4B` (NTFS authorization) and `MP-4E` (bounded extractors). `MP-4D` may join if no state-schema migration lock overlaps; use explicit interface freeze. `MP-4C` waits for both 4B and 4D.
+- After `MP-5A`: `MP-5B` and `MP-5C` are separate ranking/read vs write lanes; `MP-6A` graph index schema and `MP-7A` provider-neutral adapter may run in parallel if they do not modify the same schema/authorization definitions.
+- After `MP-7A`: `MP-7B`, `MP-7C`, `MP-7D` are independent provider adapters. Do not merge 7E until all are qualified.
+- After `MP-8A`: 8B/8C/8D/8E can run in separate UI feature directories only with frozen navigation contracts; 8F is the integration gate.
+- After `MP-9B`: 9C (destructive/privacy), 9D (attack validation), and 9E (backup) may run independently with explicit locked security interfaces; 9F waits for 9C/9E.
+- Phase 10B, 10C, 10D are separate benchmark/performance/fault lanes after their declared dependencies; 10E waits for all.
+
+## Task output contract
+
+Every unit must conclude with `TASK_ID, CLAIM, OWNER, BASE_SHA, BRANCH, REMOTE_CHECKPOINT_SHA, PR, CHECKS, CHANGED_LOGICAL_RESOURCES, NEXT, LOCAL_REQUIRED, HUMAN_REQUIRED`. Only reviewed CI-green code merges. If the agent/browser/quota stops before push, report **UNPUSHED_WORK_AT_RISK** and favor resuming its original workspace. Avoid changing a live private archive during cloud tests. No phase is accepted until all planned C/L/U gates for that phase succeed.
+
+Historical tasks are retained in the BIG plan rather than being duplicated as available claims here.
