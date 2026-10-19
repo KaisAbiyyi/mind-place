@@ -181,7 +181,10 @@ fn simulated_forwarded_rpc(token: &str, method: &str, params: Value, extras: &st
     let name_header = if method == "tools/call" {
         format!(
             "Mcp-Name: {}\r\n",
-            params.get("name").and_then(Value::as_str).unwrap_or_default()
+            params
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
         )
     } else {
         String::new()
@@ -265,13 +268,18 @@ async fn real_http_deny_rebinding_origin_and_locked_epoch() {
         "",
     )
     .await;
-    let tools = response_json(&list)["result"]["tools"].as_array().unwrap().clone();
+    let tools = response_json(&list)["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .clone();
     let names: Vec<&str> = tools
         .iter()
         .map(|tool| tool["name"].as_str().unwrap())
         .collect();
     assert_eq!(names, ["memory_search", "memory_fetch", "context_build"]);
-    assert!(tools.iter().all(|tool| tool["annotations"]["readOnlyHint"] == true));
+    assert!(tools
+        .iter()
+        .all(|tool| tool["annotations"]["readOnlyHint"] == true));
     let search = simulated_forward(
         hosted_token.clone(),
         "tools/call",
@@ -310,7 +318,11 @@ async fn real_http_deny_rebinding_origin_and_locked_epoch() {
 
     // Hosted clients never get owner/admin Tauri commands, even by guessing
     // the method or tool name; invalid metadata cannot widen the catalog.
-    for name in ["revoke_local_mcp_client", "start_hosted_tunnel", "set_client_capability"] {
+    for name in [
+        "revoke_local_mcp_client",
+        "start_hosted_tunnel",
+        "set_client_capability",
+    ] {
         let denied = simulated_forward(
             hosted_token.clone(),
             "tools/call",
@@ -353,7 +365,9 @@ async fn real_http_deny_rebinding_origin_and_locked_epoch() {
         json!({"_meta":meta()}),
         &duplicated,
     );
-    let denied = tokio::task::spawn_blocking(move || tcp_request(denied)).await.unwrap();
+    let denied = tokio::task::spawn_blocking(move || tcp_request(denied))
+        .await
+        .unwrap();
     assert!(denied.starts_with("HTTP/1.1 401"), "{denied}");
     let denied = simulated_forward(
         hosted_token.clone(),
@@ -396,13 +410,7 @@ async fn real_http_deny_rebinding_origin_and_locked_epoch() {
     let rotated = ClientAuthority::new(&f.state, &f.security)
         .rotate(&hosted_id)
         .unwrap();
-    let denied = simulated_forward(
-        hosted_token,
-        "tools/list",
-        json!({"_meta":meta()}),
-        "",
-    )
-    .await;
+    let denied = simulated_forward(hosted_token, "tools/list", json!({"_meta":meta()}), "").await;
     assert!(denied.starts_with("HTTP/1.1 401"), "{denied}");
     ClientAuthority::new(&f.state, &f.security)
         .revoke(&hosted_id)
