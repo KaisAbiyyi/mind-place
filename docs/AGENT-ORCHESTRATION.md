@@ -45,5 +45,5 @@ Each handoff must give: `PROJECT, REPO(S), TASK_ID, CLAIM_STATUS/OWNER/GENERATIO
 
 Phase 3E PR #14 is ongoing; this governance-only change neither claims nor completes it. Keep 3L1/3L2/3U live validation after cloud security qualification.
 
-Current phase/dependency evidence: [docs/implementation-plan/CURRENT-PHASE.md](docs/implementation-plan/CURRENT-PHASE.md). This policy does **not** claim any existing phase as complete or start/stop another agent. No task registry, lock controller, checkpoint automation or agent dispatch API is installed by this docs change; these are enforceable operating requirements for agents and a specification for a future controller.
+Current phase/dependency evidence: [implementation-plan/CURRENT-PHASE.md](implementation-plan/CURRENT-PHASE.md). This policy does **not** claim any existing phase as complete or start/stop another agent. No task registry, lock controller, checkpoint automation or agent dispatch API is installed by this docs change; these are enforceable operating requirements for agents and a specification for a future controller.
 
