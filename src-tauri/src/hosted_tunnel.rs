@@ -408,4 +408,73 @@ mod tests {
                 .any(|(key, value)| key == denied && value.is_none()));
         }
     }
+    #[test]
+    #[ignore = "Only launched as a short-lived subprocess fixture"]
+    fn phase_3e_exited_mock_helper() {
+        // Intentionally exits at once. Does not connect to OpenAI or bind a socket.
+    }
+
+    #[test]
+    fn phase_3e_detects_unexpected_helper_exit_without_reporting_remote_connection() {
+        let child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "hosted_tunnel::tests::phase_3e_exited_mock_helper",
+                "--ignored",
+            ])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let mut hosted = super::HostedTunnel {
+            child,
+            _config: tempfile::NamedTempFile::new().unwrap(),
+            client_id: "client:v1:simulated".into(),
+            tunnel_id: format!("tunnel_{}", "a".repeat(32)),
+        };
+        assert!(hosted.child.wait().unwrap().success());
+        assert!(!hosted.running(), "dead helper must be reaped by status polling");
+        let status = super::stopped();
+        assert!(!status.running);
+        assert!(!status.connection_verified);
+        assert!(status.tunnel_id.is_none());
+        // Drop also reaps/kills the child and cannot restart it.
+        drop(hosted);
+    }
+
+    #[test]
+    fn phase_3e_helper_cannot_inherit_admin_or_public_forwarding_configuration() {
+        let command = super::build_client_command(
+            std::path::PathBuf::from("tunnel-client"),
+            std::path::Path::new("isolated.yaml"),
+            &format!("tunnel_{}", "b".repeat(32)),
+            "sk-proj_example_runtime_token",
+            "mpc_v1_test_only",
+        );
+        let removed = [
+            "OPENAI_ADMIN_KEY",
+            "CONTROL_PLANE_EXTRA_HEADERS",
+            "CONTROL_PLANE_BASE_URL",
+            "TUNNEL_CLIENT_CONFIG",
+            "TUNNEL_CLIENT_PROFILE",
+            "TUNNEL_CLIENT_PROFILE_DIR",
+            "MCP_COMMAND",
+            "HARPOON_TARGETS",
+            "HARPOON_ALLOW_PLAINTEXT_HTTP",
+            "CLOUDFLARED_TUNNEL_TOKEN",
+        ];
+        for name in removed {
+            assert!(
+                command.get_envs().any(|(key, value)| key == name && value.is_none()),
+                "unsafe inherited variable not explicitly removed: {name}"
+            );
+        }
+        let argv = command.get_args().map(|a| a.to_string_lossy().to_string()).collect::<Vec<_>>();
+        assert!(argv.iter().all(|part| !part.starts_with("http://") && !part.starts_with("https://")));
+        assert!(command.get_envs().any(|(key, value)| {
+            key == "MCP_SERVER_URL" && value == Some(std::ffi::OsStr::new(super::MCP_ORIGIN))
+        }));
+    }
+
 }
