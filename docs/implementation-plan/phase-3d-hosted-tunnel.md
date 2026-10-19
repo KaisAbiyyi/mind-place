@@ -1,6 +1,6 @@
 # Phase 3D — Hosted AI tunnel and owner setup
 
-**Status:** cloud implementation; Windows CI and downstream local/user qualification pending.
+**Status:** cloud implementation merged in [PR #13](https://github.com/KaisAbiyyi/mind-place/pull/13) at `f8ccfef14767a1e1462e8ac7c6145ff6bb75b087` after [Windows CI 39172822022](https://github.com/KaisAbiyyi/mind-place/actions/runs/39172822022) passed. Downstream local/user qualification remains pending.
 
 ## Transport selection
 
