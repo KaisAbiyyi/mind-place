@@ -1,0 +1,11 @@
+{
+  "bundle": {
+    "externalBin": ["binaries/mind-place-capture-host", "binaries/tunnel-client"],
+    "resources": {
+      "../extension/": "extension/",
+      "../THIRD-PARTY-NOTICES.txt": "THIRD-PARTY-NOTICES.txt",
+      "../LICENSE": "LICENSE",
+      "../target/tunnel-helper/windows-x64/resources/": "tunnel/"
+    }
+  }
+}

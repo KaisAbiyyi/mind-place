@@ -13,6 +13,12 @@ Mind Place has four product components:
 
 The browser extension and native host communicate only for a capture request. No background desktop daemon is required for normal operation.
 
+## Optional AI connections
+
+The unlocked owner can explicitly start the read-only local MCP listener and optional outbound OpenAI Secure MCP Tunnel. Windows x64 packages include the pinned official `tunnel-client.exe`, its upstream license/notice files and a receipt under `tunnel/`. No manual helper download/copy is needed. Build-time and pre-launch SHA-256 checks reject missing or modified helper bytes; repair/reinstall the package if verification fails. Other platforms are not qualified for bundled-helper distribution.
+
+Tunnel/workspace provisioning and a runtime API key remain the owner's account setup. Remote access requires explicit consent and a separate ephemeral read-only identity; stop, lock and revoke close that access. A running helper is not proof of account/network connectivity. Real local MCP, live tunnel and owner acceptance remain separate 3L1/3L2/3U gates.
+
 ## Capture modes
 
 ### Manual save

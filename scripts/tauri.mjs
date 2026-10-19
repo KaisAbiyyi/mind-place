@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
+import { prepareTunnelHelper, verifyHelperBundle } from './tunnel-helper.mjs';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 function run(command,args){return new Promise((resolve,reject)=>{
@@ -9,7 +10,9 @@ function run(command,args){return new Promise((resolve,reject)=>{
  child.on('error',reject);child.on('exit',(code,signal)=>code===0?resolve():reject(new Error(`${command} exited ${code??signal}`)));
 });}
 
-export function stageProduct(source,output,extension,notices,license){
+export function stageProduct(source,output,extension,notices,license,helper){
+ if(process.platform==='win32'&&!helper)throw new Error('Missing verified tunnel helper for Windows package');
+ if(helper)verifyHelperBundle(helper.directory,helper.pin);
  fs.mkdirSync(output,{recursive:true});
  const exe=process.platform==='win32'?'.exe':'';
  for(const name of [`mind-place${exe}`,`mind-place-capture-host${exe}`]){
@@ -19,6 +22,10 @@ export function stageProduct(source,output,extension,notices,license){
  fs.cpSync(extension,path.join(output,'extension'),{recursive:true,filter:source=>!fs.lstatSync(source).isSymbolicLink()});
  fs.copyFileSync(notices,path.join(output,'THIRD-PARTY-NOTICES.txt'));
  fs.copyFileSync(license,path.join(output,'LICENSE'));
+ if(helper){
+  fs.copyFileSync(path.join(helper.directory,helper.pin.executable.name),path.join(output,'tunnel-client.exe'));
+  fs.cpSync(path.join(helper.directory,'resources'),path.join(output,'tunnel'),{recursive:true});
+ }
  const manifest=JSON.parse(fs.readFileSync(path.join(output,'extension/manifest.json'),'utf8'));
  if(manifest.content_scripts?.length||manifest.host_permissions?.length)throw new Error('Capture package cannot contain unconditional page scripts or host access');
  if(JSON.stringify(manifest.optional_host_permissions)!==JSON.stringify(['https://chatgpt.com/*']))throw new Error('Only optional ChatGPT origin access may be packaged');
@@ -27,7 +34,8 @@ export function stageProduct(source,output,extension,notices,license){
  const files=[];
  function walk(dir){for(const entry of fs.readdirSync(dir,{withFileTypes:true})){const file=path.join(dir,entry.name);if(entry.isDirectory())walk(file);else if(entry.isFile())files.push({path:path.relative(output,file).replaceAll('\\','/'),bytes:fs.statSync(file).size});else throw new Error('Unexpected package link or special file');}}
  walk(output);
- if(files.some(f=>/app\.asar|cloudflared|tunnel-client|node_modules|node-pty|koffi|tree-sitter|pets\//i.test(f.path)))throw new Error('Unexpected legacy payload found in reader package');
+ const helperFiles=new Set(helper?['tunnel-client.exe',...Object.keys(helper.pin.resources).map(name=>`tunnel/${name}`),'tunnel/receipt.json']:[]);
+ if(files.some(f=>!helperFiles.has(f.path)&&(/app\.asar|cloudflared|tunnel-client|node_modules|node-pty|koffi|tree-sitter|pets\//i.test(f.path)||f.path.startsWith('tunnel/'))))throw new Error('Unexpected legacy payload found in reader package');
  const receipt={date:new Date().toISOString(),platform:process.platform,arch:process.arch,bytes:files.reduce((n,f)=>n+f.bytes,0),files};
  fs.mkdirSync(path.join(root,'outputs'),{recursive:true});fs.writeFileSync(path.join(root,'outputs/lean-package-footprint.json'),JSON.stringify(receipt,null,2)+'\n');
  console.log(`Reader payload: ${(receipt.bytes/1e6).toFixed(2)} MB (${(receipt.bytes/1048576).toFixed(2)} MiB); ${files.length} files`);
@@ -44,9 +52,10 @@ async function main(){
  await run('cargo',['build','-p','mind-place-capture-host',...(profile==='release'?['--release']:[])]);
  const exe=process.platform==='win32'?'.exe':'';
  const source=path.join(root,'target',profile);fs.mkdirSync(path.join(root,'src-tauri/binaries'),{recursive:true});
+ const helper=await prepareTunnelHelper(triple,source);
  fs.copyFileSync(path.join(source,`mind-place-capture-host${exe}`),path.join(root,'src-tauri/binaries',`mind-place-capture-host-${triple}${exe}`));
  await run(process.execPath,[path.join(root,'scripts/generate-notices.mjs')]);
  await run(process.execPath,[path.join(root,'node_modules/@tauri-apps/cli/tauri.js'),operation,...args]);
- if(operation==='build')stageProduct(source,path.join(root,'release',`${process.platform}-${process.arch}`),path.join(root,'extension'),path.join(root,'THIRD-PARTY-NOTICES.txt'),path.join(root,'LICENSE'));
+ if(operation==='build')stageProduct(source,path.join(root,'release',`${process.platform}-${process.arch}`),path.join(root,'extension'),path.join(root,'THIRD-PARTY-NOTICES.txt'),path.join(root,'LICENSE'),helper);
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url))main().catch(error=>{console.error(error.message);process.exitCode=1;});
