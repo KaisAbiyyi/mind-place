@@ -574,9 +574,9 @@ Completed in [PR #12](https://github.com/KaisAbiyyi/mind-place/pull/12), Windows
 - request/body/result bounds;
 - direct local setup for Codex/Claude Code/other agents.
 
-**Cloud 3D — hosted tunnel + setup flow — cloud PR #13 under qualification**
+**Cloud 3D — hosted tunnel + setup flow — DONE**
 
-Implementation uses official outbound-only OpenAI Secure MCP Tunnel rather than a public HTTPS URL. A private tunnel ID is selected by an authorized ChatGPT workspace; Mind Place never binds a public listener. Remote account/transport proof remains explicitly pending for 3L2/3U. See [3D handoff](implementation-plan/phase-3d-hosted-tunnel.md).
+[PR #13](https://github.com/KaisAbiyyi/mind-place/pull/13) squash-merged at `f8ccfef14767a1e1462e8ac7c6145ff6bb75b087` after Windows CI passed. Implementation uses the official outbound-only OpenAI Secure MCP Tunnel; Mind Place never binds a public listener. Remote account/transport proof remains explicitly pending for 3L2/3U. See [3D handoff](implementation-plan/phase-3d-hosted-tunnel.md).
 
 - loopback HTTP MCP;
 - secure HTTPS tunnel lifecycle;
@@ -584,13 +584,13 @@ Implementation uses official outbound-only OpenAI Secure MCP Tunnel rather than 
 - ChatGPT setup UI + request proof;
 - reusable connector setup patterns for other hosted products that support remote MCP.
 
-**Cloud 3E — security and E2E cloud qualification**
+**Cloud 3E — security and E2E cloud qualification — PR under qualification**
 
 - tunnel/public-surface security audit before publication;
 - stale/revoked credential tests;
 - read-client escalation tests;
 - automated MCP conformance and simulated tunnel tests;
-- phase handoff with exact local connector procedures.
+- phase handoff with exact local connector procedures; see [3E security qualification](implementation-plan/phase-3e-security-qualification.md).
 
 **Local 3L1 — direct local MCP qualification**
 
