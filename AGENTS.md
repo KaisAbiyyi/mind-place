@@ -61,3 +61,13 @@ npm run build
 Add focused security, migration, fuzz/bounds, benchmark, provider-fixture, and rebuild tests when the changed subsystem requires them.
 
 Windows x64 is the qualified packaging target. Use `npm run dist:win` when release packaging changes.
+
+## Shared multi-agent orchestration (2026-10-19)
+
+**Required reading:** [docs/AGENT-ORCHESTRATION.md](docs/AGENT-ORCHESTRATION.md). This is an additive execution protocol; existing product, phase, local D:, security and acceptance rules continue to apply.
+
+- All roadmap tasks remain **unassigned** until an agent explicitly claims a bounded unit. ChatGPT Work, Codex Cloud/local and optional future executors may each architect, implement or review based on tool availability and budget.
+- Before editing, check active PRs/claims, base SHA, dependencies and overlapping **logical** resources. Exclusive single-writer ownership per unit; no conflicting parallel implementation. Issue labels are **not** atomic locks. Without a working claim controller, a coordinator must serialize conflicting work.
+- Use task-specific branches and early draft PRs with safe, sanitized, **pushed checkpoint commits**; record last durable SHA and unfinished work. An interrupted Codex VM or browser session is not proof that its changes reached GitHub. Recover/report first; take over only after fencing/releasing the previous claim.
+- Keep GitHub as source of truth and respect all named cloud/local/human gates. Preserve unrelated work, private fixtures and security constraints. No local/native test is silently replaced by hosted CI.
+- Prefer the owner's verified GitHub noreply identity for new commits where supported and authorized; disclose attribution exceptions. PR creation/push identity and commit author may differ. Keep actual agent provenance in PR/task records; avoid unsolicited AI co-author trailers.
