@@ -128,6 +128,16 @@ fn build_client_command(
         "HARPOON_ALLOW_PLAINTEXT_HTTP",
         "CLOUDFLARED_MANAGED",
         "CLOUDFLARED_TUNNEL_TOKEN",
+        "CLOUDFLARED_TOKEN",
+        "CLOUDFLARED_PATH",
+        "HARPOON_ADDITIONAL_TRANSPORTS",
+        "HARPOON_CAPTURE_PAYLOADS",
+        "HARPOON_HTTP_PROXY",
+        "MCP_OAUTH_TRUSTED_ORIGINS",
+        "MCP_FORWARD_TRACE_CONTEXT",
+        "LOG_FILE",
+        "TRACING_FILE",
+        "HEALTH_URL_FILE",
     ] {
         command.env_remove(name);
     }
@@ -144,6 +154,10 @@ fn build_client_command(
         .env("MCP_DISCOVERY_EXTRA_HEADERS", HEADER_REF)
         .env("MIND_PLACE_HOSTED_BEARER", bearer.as_str())
         .env("HEALTH_LISTEN_ADDR", "127.0.0.1:0")
+        .env("ALLOW_REMOTE_UI", "false")
+        .env("OPEN_WEB_UI", "false")
+        .env("LOG_HTTP_RAW_UNSAFE", "false")
+        .env("TRACING_ENABLED", "false")
         .env("ADMIN_UI_OPEN_BROWSER", "false")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -570,6 +584,11 @@ mod tests {
             "MCP_COMMAND",
             "HARPOON_TARGETS",
             "HARPOON_ALLOW_PLAINTEXT_HTTP",
+            "HARPOON_ADDITIONAL_TRANSPORTS",
+            "HARPOON_CAPTURE_PAYLOADS",
+            "MCP_OAUTH_TRUSTED_ORIGINS",
+            "LOG_FILE",
+            "TRACING_FILE",
             "CLOUDFLARED_TUNNEL_TOKEN",
         ];
         for name in removed {
@@ -590,5 +609,15 @@ mod tests {
         assert!(command.get_envs().any(|(key, value)| {
             key == "MCP_SERVER_URL" && value == Some(std::ffi::OsStr::new(super::MCP_ORIGIN))
         }));
+        for name in [
+            "ALLOW_REMOTE_UI",
+            "OPEN_WEB_UI",
+            "LOG_HTTP_RAW_UNSAFE",
+            "TRACING_ENABLED",
+        ] {
+            assert!(command.get_envs().any(|(key, value)| {
+                key == name && value == Some(std::ffi::OsStr::new("false"))
+            }));
+        }
     }
 }
