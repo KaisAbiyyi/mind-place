@@ -1148,3 +1148,8 @@ The desired end state is a system that can remember almost everything while stil
 ## Shared multi-agent execution governance (2026-10-19)
 
 The phase/work-unit roadmap remains **agent-neutral**: no task is preassigned to ChatGPT, Codex, or a future executor. Before implementation, each agent must follow the [shared claim, isolation, checkpoint, recovery, Git author attribution, and local/human gate policy](AGENT-ORCHESTRATION.md). This governance update does not advance a phase or replace any previously required CI/native/user acceptance proof.
+
+
+## Explicit dependency board for parallel agents
+
+See [the complete outstanding task/parallel execution board](PARALLEL-EXECUTION-BOARD.md) for named C/L/U task IDs, dependencies, logical locks, and safe independent work lanes. Units are unassigned until claimed; previous receipts and mandatory gate order remain authoritative.
