@@ -81,7 +81,7 @@ Current execution order after the security-first reprioritization:
    - no schema migration, raw data rewrite, MCP exposure, or local/manual qualification (`C1 / L0 / U0`);
    - details and caveats: [phase-2d-retrieval-qualification.md](phase-2d-retrieval-qualification.md).
 
-**Phase 2 is complete** (`C4 / L0 / U0`), with all four units 2A–2D cloud qualified and merged. Phases 3A–3C have merged to `main`; Phase 3D is under cloud qualification in PR #13. No local Windows pull is required to implement or review cloud 3D.
+**Phase 2 is complete** (`C4 / L0 / U0`), with all four units 2A–2D cloud qualified and merged. Phases 3A–3D have merged to `main`; Phase 3E is under cloud qualification. No local Windows pull is required until the Phase 3E handoff.
 
 ## Phase 3 — shared-brain MCP
 
