@@ -180,25 +180,62 @@ fn launch_client(
 }
 
 fn revoke_ephemeral(state: &AppState, client_id: &str) -> Result<(), String> {
-    StateStore::open(&state.state_path)
+    if StateStore::open(&state.state_path)
         .and_then(|store| store.revoke_client(client_id))
-        .map_err(|_| "MP_TUNNEL_REVOKE:Review hosted client in local client inventory".into())
+        .is_err()
+    {
+        // The persisted grant is not known to be revoked. Lock the entire
+        // reader authority instead of leaving a still-valid hosted token.
+        state.authority_ready.store(false, Ordering::Release);
+        state.security.lock();
+        state.mcp.lock().unwrap_or_else(|e| e.into_inner()).take();
+        return Err("MP_TUNNEL_REVOKE:Authority unavailable; Mind Place locked".into());
+    }
+    Ok(())
 }
 
-/// Drop the child before revoking, so no newly admitted request can use it.
-/// On unexpected termination, the next status read will revoke its client.
-pub(crate) fn stop_and_revoke(state: &AppState) -> Result<(), String> {
-    let previous = state
-        .hosted
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .take();
+/// The expected ID prevents an old monitor from closing a newly started tunnel.
+/// Drop/kill the child before revoking its credential.
+fn stop_client(state: &AppState, expected_id: Option<&str>) -> Result<(), String> {
+    let previous = {
+        let mut guard = state.hosted.lock().unwrap_or_else(|e| e.into_inner());
+        if expected_id.is_some_and(|id| {
+            guard.as_ref().is_none_or(|current| current.client_id != id)
+        }) {
+            return Ok(());
+        }
+        guard.take()
+    };
     if let Some(tunnel) = previous {
         let client_id = tunnel.client_id.clone();
         drop(tunnel);
         revoke_ephemeral(state, &client_id)?;
     }
     Ok(())
+}
+
+pub(crate) fn stop_and_revoke(state: &AppState) -> Result<(), String> {
+    stop_client(state, None)
+}
+
+/// No user status polling is required to revoke a dead helper's credential.
+/// A matching client identity is mandatory so a stale monitor cannot kill a
+/// later owner-approved session. This never calls the network.
+fn watch_helper(state: AppState, expected_id: String) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        let dead = {
+            let mut guard = state.hosted.lock().unwrap_or_else(|e| e.into_inner());
+            match guard.as_mut() {
+                Some(tunnel) if tunnel.client_id == expected_id => !tunnel.running(),
+                _ => break,
+            }
+        };
+        if dead {
+            let _ = stop_client(&state, Some(&expected_id));
+            break;
+        }
+    });
 }
 
 pub(crate) fn is_active_client(state: &AppState, id: &str) -> bool {
@@ -226,12 +263,10 @@ pub(super) fn get_hosted_tunnel_status(state: State<'_, AppState>) -> HostedTunn
         }
     }
     // A dead helper must not leave a live automatic read credential.
-    let previous = guard.take();
+    let dead_id = guard.as_ref().map(|tunnel| tunnel.client_id.clone());
     drop(guard);
-    if let Some(tunnel) = previous {
-        let id = tunnel.client_id.clone();
-        drop(tunnel);
-        let _ = revoke_ephemeral(&state, &id);
+    if let Some(id) = dead_id {
+        let _ = stop_client(&state, Some(&id));
     }
     stopped()
 }
@@ -288,6 +323,8 @@ pub(super) fn start_hosted_tunnel(
         return Err(error);
     }
     *guard = Some(tunnel);
+    drop(guard);
+    watch_helper(state.inner().clone(), client_id);
     Ok(HostedTunnelStatus {
         running: true,
         tunnel_id: Some(tunnel_id),
