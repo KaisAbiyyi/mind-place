@@ -530,7 +530,11 @@ mod tests {
         super::watch_helper(state.clone(), issued.client.id.clone());
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         while std::time::Instant::now() < deadline {
-            if state.hosted.lock().unwrap().is_none() {
+            let stopped = state.hosted.lock().unwrap().is_none();
+            let revoked = mind_place_integration::ClientAuthority::new(&db, &security)
+                .authorize(&credential, mind_place_state::ClientCapability::Read)
+                .is_err();
+            if stopped && revoked {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(50));
