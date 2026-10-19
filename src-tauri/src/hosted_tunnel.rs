@@ -480,6 +480,66 @@ mod tests {
         drop(hosted);
     }
 
+
+    #[test]
+    fn phase_3e_watchdog_revokes_crashed_helpers_read_identity_without_ui_poll() {
+        let dir = tempfile::tempdir().unwrap();
+        let state_path = dir.path().join("state.sqlite3");
+        let db = mind_place_state::StateStore::open(&state_path).unwrap();
+        let security = mind_place_security::SecurityGate::open(dir.path().join("security.json"))
+            .unwrap();
+        security.initialize(b"phase-3e-test-secret").unwrap();
+        let issued = mind_place_integration::ClientAuthority::new(&db, &security)
+            .issue("Crash-only hosted identity", &[mind_place_state::ClientCapability::Read])
+            .unwrap();
+        let id = issued.client.id.clone();
+        let credential = issued.credential().to_owned();
+        let child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "hosted_tunnel::tests::phase_3e_exited_mock_helper",
+                "--ignored",
+            ])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let state = super::AppState {
+            store: mind_place_archive::ArchiveStore::open(dir.path().join("archive-v1"))
+                .unwrap(),
+            security: security.clone(),
+            state_path,
+            index_path: dir.path().join("index.sqlite3"),
+            authority_ready: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            mcp: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            hosted: std::sync::Arc::new(std::sync::Mutex::new(Some(super::HostedTunnel {
+                child,
+                _config: tempfile::NamedTempFile::new().unwrap(),
+                client_id: id,
+                tunnel_id: format!("tunnel_{}", "c".repeat(32)),
+            }))),
+            extension_path: dir.path().join("extension"),
+            host_path: dir.path().join("host"),
+            legacy_path: dir.path().join("legacy"),
+        };
+        super::watch_helper(state.clone(), issued.client.id.clone());
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            if state.hosted.lock().unwrap().is_none() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert!(state.hosted.lock().unwrap().is_none(), "crashed helper was not reaped");
+        assert!(
+            mind_place_integration::ClientAuthority::new(&db, &security)
+                .authorize(&credential, mind_place_state::ClientCapability::Read)
+                .is_err(),
+            "orphan hosted credential retained read access after helper exit"
+        );
+    }
+
     #[test]
     fn phase_3e_helper_cannot_inherit_admin_or_public_forwarding_configuration() {
         let command = super::build_client_command(
