@@ -71,3 +71,7 @@ Windows x64 is the qualified packaging target. Use `npm run dist:win` when relea
 - Use task-specific branches and early draft PRs with safe, sanitized, **pushed checkpoint commits**; record last durable SHA and unfinished work. An interrupted Codex VM or browser session is not proof that its changes reached GitHub. Recover/report first; take over only after fencing/releasing the previous claim.
 - Keep GitHub as source of truth and respect all named cloud/local/human gates. Preserve unrelated work, private fixtures and security constraints. No local/native test is silently replaced by hosted CI.
 - Prefer the owner's verified GitHub noreply identity for new commits where supported and authorized; disclose attribution exceptions. PR creation/push identity and commit author may differ. Keep actual agent provenance in PR/task records; avoid unsolicited AI co-author trailers.
+
+## Stable neutral task IDs and parallel lanes
+
+Before claiming work read [docs/PARALLEL-EXECUTION-BOARD.md](docs/PARALLEL-EXECUTION-BOARD.md). A request such as `ambil MP-4E` selects a bounded unit subject to its dependencies and exclusive locks; board entries never preassign an agent.
