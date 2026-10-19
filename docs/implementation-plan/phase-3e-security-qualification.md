@@ -1,6 +1,6 @@
 # Phase 3E — MCP and hosted tunnel cloud security qualification
 
-**Status:** cloud implementation in PR qualification; no real remote ChatGPT or user-device proof.
+**Status:** merged in PR #14 at `55465041cf9f2e2df05eeeccec9ac3249df1cc0c`, with Windows CI PASS. MP-3F now adds bundled-helper packaging before local qualification. No real remote ChatGPT or user-device proof.
 
 ## Threat model and security invariants
 

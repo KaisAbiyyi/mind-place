@@ -546,7 +546,7 @@ Completed cloud-first in [PR #6](https://github.com/KaisAbiyyi/mind-place/pull/6
 
 ### Phase 3 — Shared-brain MCP and hosted tunnel
 
-Planned workload: **C5 / L2 / U1**.
+Planned workload: **C6 / L2 / U1** (includes owner-prioritized MP-3F bundled helper).
 
 **Cloud 3A — protocol-independent integration core — DONE**
 

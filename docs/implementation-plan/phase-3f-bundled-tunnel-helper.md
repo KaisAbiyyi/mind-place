@@ -14,3 +14,7 @@ Acceptance:
 - Report package proof separately from installed GUI, live tunnel, local MCP and owner acceptance. Do not claim 3L1/3L2/3U PASS.
 
 Implementation: pin the existing v0.0.16 release and published asset checksums, stage the verified executable as a Windows Tauri sidecar, include notices as resources, and reuse the adjacent-executable lifecycle. Production archive/state/index formats and capture behavior are outside scope.
+
+## Completion receipt
+
+Code checkpoint `d27fa0987a4ad626b741321ae67ccb0c2767f72a`, PR #17. Status: **IMPLEMENTED / LOCAL PACKAGING PASS / REVIEW**, not merged. Full baseline, Windows NSIS, portable ZIP integrity and native helper tests passed. Independent review found no Critical/Important issues. Latest GitHub CI/integration and 3L1/3L2/3U remain pending. [Dated implementation summary](../implementation-summary/2026-10-20-phase-3f-bundled-tunnel-helper.md) records artifact hashes, test counts, minor limitations and preserved unrelated lockfile work. Claim moves to REVIEW; no overlapping writer is authorized by this receipt.
