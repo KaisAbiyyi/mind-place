@@ -176,6 +176,38 @@ fn raw(token: &str, host: &str, origin: &str) -> String {
         .to_string();
     format!("POST /mcp HTTP/1.1\r\nHost: {host}\r\nContent-Type: application/json\r\nAccept: application/json, text/event-stream\r\nAuthorization: Bearer {token}\r\nMCP-Protocol-Version: 2026-07-28\r\nMcp-Method: server/discover\r\n{origin}Content-Length: {}\r\nConnection: close\r\n\r\n{data}",data.len())
 }
+
+fn simulated_forwarded_rpc(token: &str, method: &str, params: Value, extras: &str) -> String {
+    let name_header = if method == "tools/call" {
+        format!(
+            "Mcp-Name: {}\r\n",
+            params.get("name").and_then(Value::as_str).unwrap_or_default()
+        )
+    } else {
+        String::new()
+    };
+    let body = json!({"jsonrpc":"2.0","id":11,"method":method,"params":params}).to_string();
+    format!(
+        "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:43731\r\nContent-Type: application/json\r\nAccept: application/json, text/event-stream\r\nAuthorization: Bearer {token}\r\nMCP-Protocol-Version: 2026-07-28\r\nMcp-Method: {method}\r\n{name_header}{extras}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+}
+async fn simulated_forward(
+    token: String,
+    method: &'static str,
+    params: Value,
+    extras: &'static str,
+) -> String {
+    tokio::task::spawn_blocking(move || {
+        tcp_request(simulated_forwarded_rpc(&token, method, params, extras))
+    })
+    .await
+    .unwrap()
+}
+fn response_json(response: &str) -> Value {
+    serde_json::from_str(response.split_once("\r\n\r\n").unwrap().1).unwrap()
+}
+
 #[tokio::test]
 async fn real_http_deny_rebinding_origin_and_locked_epoch() {
     let f = Fixture::new();
@@ -210,6 +242,181 @@ async fn real_http_deny_rebinding_origin_and_locked_epoch() {
     .await
     .unwrap();
     assert!(denied.starts_with("HTTP/1.1 403"));
+
+    // 3E: simulate remote tunnel requests at the sole local origin, without
+    // pretending that an external OpenAI account/network has been exercised.
+    let hosted = ClientAuthority::new(&f.state, &f.security)
+        .issue("Simulated hosted reader", &[ClientCapability::Read])
+        .unwrap();
+    let hosted_id = hosted.client.id.clone();
+    let hosted_token = hosted.credential().to_string();
+    let discovery = simulated_forward(
+        hosted_token.clone(),
+        "server/discover",
+        json!({"_meta":meta()}),
+        "",
+    )
+    .await;
+    assert!(discovery.starts_with("HTTP/1.1 200"), "{discovery}");
+    let list = simulated_forward(
+        hosted_token.clone(),
+        "tools/list",
+        json!({"_meta":meta()}),
+        "",
+    )
+    .await;
+    let tools = response_json(&list)["result"]["tools"].as_array().unwrap().clone();
+    let names: Vec<&str> = tools
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["memory_search", "memory_fetch", "context_build"]);
+    assert!(tools.iter().all(|tool| tool["annotations"]["readOnlyHint"] == true));
+    let search = simulated_forward(
+        hosted_token.clone(),
+        "tools/call",
+        json!({"_meta":meta(),"name":"memory_search","arguments":{"queries":["amber eclipse"]}}),
+        "",
+    )
+    .await;
+    assert!(search.starts_with("HTTP/1.1 200"), "{search}");
+    let search_json = response_json(&search);
+    let hit = &search_json["result"]["structuredContent"]["hits"][0];
+    assert_eq!(hit["message_id"], "m1");
+    let fetch = simulated_forward(
+        hosted_token.clone(),
+        "tools/call",
+        json!({"_meta":meta(),"name":"memory_fetch","arguments":{
+            "source_id":hit["source_id"],
+            "archive_id":hit["archive_id"],
+            "snapshot_id":hit["snapshot_id"],
+            "granularity":"message",
+            "message_id":"m1"
+        }}),
+        "",
+    )
+    .await;
+    assert!(fetch.starts_with("HTTP/1.1 200"), "{fetch}");
+    assert!(fetch.contains("amber eclipse knowledge"));
+    let context = simulated_forward(
+        hosted_token.clone(),
+        "tools/call",
+        json!({"_meta":meta(),"name":"context_build","arguments":{"queries":["amber eclipse"]}}),
+        "",
+    )
+    .await;
+    assert!(context.starts_with("HTTP/1.1 200"), "{context}");
+    assert!(context.contains("m1"));
+
+    // Hosted clients never get owner/admin Tauri commands, even by guessing
+    // the method or tool name; invalid metadata cannot widen the catalog.
+    for name in ["revoke_local_mcp_client", "start_hosted_tunnel", "set_client_capability"] {
+        let denied = simulated_forward(
+            hosted_token.clone(),
+            "tools/call",
+            json!({"_meta":meta(),"name":name,"arguments":{"client_id":hosted_id}}),
+            "",
+        )
+        .await;
+        assert!(denied.starts_with("HTTP/1.1 404"), "{denied}");
+        assert!(!denied.contains("amber eclipse"));
+    }
+    let denied = simulated_forward(
+        hosted_token.clone(),
+        "resources/list",
+        json!({"_meta":meta()}),
+        "",
+    )
+    .await;
+    assert!(denied.starts_with("HTTP/1.1 404"), "{denied}");
+
+    // These are the dangerous forwarding and credential confusion cases:
+    // a tunneled request must still face the origin's strict HTTP checks.
+    for header in [
+        "Origin: https://chatgpt.com\r\n",
+        "Forwarded: for=198.51.100.7;host=evil.example\r\n",
+        "X-Forwarded-Host: evil.example\r\n",
+    ] {
+        let denied = simulated_forward(
+            hosted_token.clone(),
+            "tools/list",
+            json!({"_meta":meta()}),
+            header,
+        )
+        .await;
+        assert!(denied.starts_with("HTTP/1.1 403"), "{denied}");
+    }
+    let duplicated = format!("Authorization: Bearer {}\r\n", f.token);
+    let denied = simulated_forwarded_rpc(
+        &hosted_token,
+        "tools/list",
+        json!({"_meta":meta()}),
+        &duplicated,
+    );
+    let denied = tokio::task::spawn_blocking(move || tcp_request(denied)).await.unwrap();
+    assert!(denied.starts_with("HTTP/1.1 401"), "{denied}");
+    let denied = simulated_forward(
+        hosted_token.clone(),
+        "tools/list",
+        json!({"_meta":{"io.modelcontextprotocol/protocolVersion":"2025-11-25","io.modelcontextprotocol/clientCapabilities":{}}}),
+        "",
+    )
+    .await;
+    assert!(denied.starts_with("HTTP/1.1 400"), "{denied}");
+
+    // A credential with admin but no read capability cannot enumerate tools
+    // or elevate itself by supplying a claimed role in its JSON params.
+    let admin = ClientAuthority::new(&f.state, &f.security)
+        .issue("Isolated admin", &[ClientCapability::Admin])
+        .unwrap();
+    let denied = simulated_forward(
+        admin.credential().to_string(),
+        "tools/list",
+        json!({"_meta":meta(),"capabilities":["read","admin"]}),
+        "",
+    )
+    .await;
+    assert!(denied.starts_with("HTTP/1.1 401"), "{denied}");
+    assert!(!denied.contains("memory_search"));
+
+    ClientAuthority::new(&f.state, &f.security)
+        .set_capability(&hosted_id, ClientCapability::Read, false)
+        .unwrap();
+    let denied = simulated_forward(
+        hosted_token.clone(),
+        "tools/list",
+        json!({"_meta":meta()}),
+        "",
+    )
+    .await;
+    assert!(denied.starts_with("HTTP/1.1 401"), "{denied}");
+    ClientAuthority::new(&f.state, &f.security)
+        .set_capability(&hosted_id, ClientCapability::Read, true)
+        .unwrap();
+    let rotated = ClientAuthority::new(&f.state, &f.security)
+        .rotate(&hosted_id)
+        .unwrap();
+    let denied = simulated_forward(
+        hosted_token,
+        "tools/list",
+        json!({"_meta":meta()}),
+        "",
+    )
+    .await;
+    assert!(denied.starts_with("HTTP/1.1 401"), "{denied}");
+    ClientAuthority::new(&f.state, &f.security)
+        .revoke(&hosted_id)
+        .unwrap();
+    let denied = simulated_forward(
+        rotated.credential().to_string(),
+        "tools/list",
+        json!({"_meta":meta()}),
+        "",
+    )
+    .await;
+    assert!(denied.starts_with("HTTP/1.1 401"), "{denied}");
+    assert!(!denied.contains("memory_search"));
+
     f.security.lock();
     let token = f.token.clone();
     let denied =
