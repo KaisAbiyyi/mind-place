@@ -1143,3 +1143,8 @@ These are possible features, not all v1.0 requirements.
 - optimizing benchmark numbers at the cost of provenance and reversibility.
 
 The desired end state is a system that can remember almost everything while still allowing a smarter future model to disagree with, reinterpret, or completely rebuild the derived understanding of that history.
+
+
+## Shared multi-agent execution governance (2026-10-19)
+
+The phase/work-unit roadmap remains **agent-neutral**: no task is preassigned to ChatGPT, Codex, or a future executor. Before implementation, each agent must follow the [shared claim, isolation, checkpoint, recovery, Git author attribution, and local/human gate policy](AGENT-ORCHESTRATION.md). This governance update does not advance a phase or replace any previously required CI/native/user acceptance proof.
