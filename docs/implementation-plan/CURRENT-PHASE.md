@@ -81,7 +81,7 @@ Current execution order after the security-first reprioritization:
    - no schema migration, raw data rewrite, MCP exposure, or local/manual qualification (`C1 / L0 / U0`);
    - details and caveats: [phase-2d-retrieval-qualification.md](phase-2d-retrieval-qualification.md).
 
-**Phase 2 is complete** (`C4 / L0 / U0`), with all four units 2A–2D cloud qualified and merged. Phases 3A–3C have merged to `main`; Phase 3D is under cloud qualification in PR #13. No local Windows pull is required to implement or review cloud 3D.
+**Phase 2 is complete** (`C4 / L0 / U0`), with all four units 2A–2D cloud qualified and merged. Phases 3A–3D have merged to `main`; Phase 3E is under cloud qualification. No local Windows pull is required until the Phase 3E handoff.
 
 ## Phase 3 — shared-brain MCP
 
@@ -97,7 +97,9 @@ Current execution order after the security-first reprioritization:
    - no transport, user setup wizard or manual Windows gate yet; [Phase 3B handoff](phase-3b-client-authorization.md).
 3. **Phase 3C — local MCP transport — DONE.** [PR #12](https://github.com/KaisAbiyyi/mind-place/pull/12) squash-merged to `main` at `0a1d4e6630f6b3d93061403db6fe2b82194b3fbc`. [Windows CI 39150596022](https://github.com/KaisAbiyyi/mind-place/actions/runs/39150596022) and [10K/100K/1M storage qualification 39150596005](https://github.com/KaisAbiyyi/mind-place/actions/runs/39150596005) passed.
    - Strict explicit owner-started loopback MCP; no public listener; read-only Streamable HTTP, bounds, revocation and lifecycle.
-4. **Phase 3D — secure hosted tunnel + owner setup — CLOUD PR IN QUALIFICATION.** [PR #13](https://github.com/KaisAbiyyi/mind-place/pull/13) implements owner-consented outbound OpenAI Secure MCP Tunnel process with ephemeral read-only credential, lock/stop lifecycle and ChatGPT setup UI. No public endpoint. See [3D handoff](phase-3d-hosted-tunnel.md). Remote request proof is reserved for 3L2/3U; 3E must run additional simulated adversarial checks.
+4. **Phase 3D — secure hosted tunnel + owner setup — DONE.** [PR #13](https://github.com/KaisAbiyyi/mind-place/pull/13) squash-merged into `main` at `f8ccfef14767a1e1462e8ac7c6145ff6bb75b087` after [Windows CI 39172822022](https://github.com/KaisAbiyyi/mind-place/actions/runs/39172822022) passed. Owner-consented outbound OpenAI Secure MCP Tunnel, ephemeral read-only credential, lock/stop lifecycle and ChatGPT setup UI. No public endpoint. Remote request proof reserved for 3L2/3U.
+
+5. **Phase 3E — security and E2E cloud qualification — PR UNDER QUALIFICATION.** Simulated transport and protocol conformance over actual loopback TCP, stale/rotated bearer and read-admin escalation denial, strict header adversarial cases, native helper exit isolation, periodic unexpected-exit revocation and fail-closed authority failure. See [Phase 3E handoff](phase-3e-security-qualification.md). **No real hosted tunnel or end-user qualification is claimed.**
 
 ## Phase 1A explicit boundary
 
@@ -113,4 +115,4 @@ Do not weaken Phase 1A to fake those later guarantees. UI/documentation must sta
 
 ## Handoff rule
 
-A cloud unit is complete only when its PR/branch is CI-green and its final SHA is reported. If a cloud-discovered bug is fixed, rerun the relevant checks before merge. The next cloud sequence is **qualify and squash-merge PR #13**, then **implement Phase 3E**. After 3E, hand off to the user before local 3L1/3L2 and hosted 3U qualification. Do not misreport cloud CI as a real tunnel or ChatGPT account proof.
+A cloud unit is complete only when its PR/branch is CI-green and its final SHA is reported. If a cloud-discovered bug is fixed, rerun the relevant checks before merge. The next cloud sequence is **qualify the Phase 3E PR through Windows CI and squash-merge after review**. After 3E, hand off to the user before local 3L1/3L2 and hosted 3U qualification. Do not misreport cloud CI as a real tunnel or ChatGPT account proof.

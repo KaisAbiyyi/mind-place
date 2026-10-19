@@ -64,6 +64,9 @@ jobs:
           node scripts/generate-notices.mjs
           npm run build:web
 
+      - name: Qualify Phase 3E simulated MCP and revocation boundary
+        run: cargo test -p mind-place-integration --test mcp -- --nocapture
+
       - name: Test hosted tunnel desktop boundaries
         run: cargo test -p mind-place --bin mind-place hosted_tunnel::tests -- --nocapture
 

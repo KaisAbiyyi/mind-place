@@ -128,6 +128,16 @@ fn build_client_command(
         "HARPOON_ALLOW_PLAINTEXT_HTTP",
         "CLOUDFLARED_MANAGED",
         "CLOUDFLARED_TUNNEL_TOKEN",
+        "CLOUDFLARED_TOKEN",
+        "CLOUDFLARED_PATH",
+        "HARPOON_ADDITIONAL_TRANSPORTS",
+        "HARPOON_CAPTURE_PAYLOADS",
+        "HARPOON_HTTP_PROXY",
+        "MCP_OAUTH_TRUSTED_ORIGINS",
+        "MCP_FORWARD_TRACE_CONTEXT",
+        "LOG_FILE",
+        "TRACING_FILE",
+        "HEALTH_URL_FILE",
     ] {
         command.env_remove(name);
     }
@@ -144,6 +154,10 @@ fn build_client_command(
         .env("MCP_DISCOVERY_EXTRA_HEADERS", HEADER_REF)
         .env("MIND_PLACE_HOSTED_BEARER", bearer.as_str())
         .env("HEALTH_LISTEN_ADDR", "127.0.0.1:0")
+        .env("ALLOW_REMOTE_UI", "false")
+        .env("OPEN_WEB_UI", "false")
+        .env("LOG_HTTP_RAW_UNSAFE", "false")
+        .env("TRACING_ENABLED", "false")
         .env("ADMIN_UI_OPEN_BROWSER", "false")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -180,25 +194,62 @@ fn launch_client(
 }
 
 fn revoke_ephemeral(state: &AppState, client_id: &str) -> Result<(), String> {
-    StateStore::open(&state.state_path)
+    if StateStore::open(&state.state_path)
         .and_then(|store| store.revoke_client(client_id))
-        .map_err(|_| "MP_TUNNEL_REVOKE:Review hosted client in local client inventory".into())
+        .is_err()
+    {
+        // The persisted grant is not known to be revoked. Lock the entire
+        // reader authority instead of leaving a still-valid hosted token.
+        state.authority_ready.store(false, Ordering::Release);
+        state.security.lock();
+        state.mcp.lock().unwrap_or_else(|e| e.into_inner()).take();
+        return Err("MP_TUNNEL_REVOKE:Authority unavailable; Mind Place locked".into());
+    }
+    Ok(())
 }
 
-/// Drop the child before revoking, so no newly admitted request can use it.
-/// On unexpected termination, the next status read will revoke its client.
-pub(crate) fn stop_and_revoke(state: &AppState) -> Result<(), String> {
-    let previous = state
-        .hosted
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .take();
+/// The expected ID prevents an old monitor from closing a newly started tunnel.
+/// Drop/kill the child before revoking its credential.
+fn stop_client(state: &AppState, expected_id: Option<&str>) -> Result<(), String> {
+    let previous = {
+        let mut guard = state.hosted.lock().unwrap_or_else(|e| e.into_inner());
+        if expected_id
+            .is_some_and(|id| guard.as_ref().is_none_or(|current| current.client_id != id))
+        {
+            return Ok(());
+        }
+        guard.take()
+    };
     if let Some(tunnel) = previous {
         let client_id = tunnel.client_id.clone();
         drop(tunnel);
         revoke_ephemeral(state, &client_id)?;
     }
     Ok(())
+}
+
+pub(crate) fn stop_and_revoke(state: &AppState) -> Result<(), String> {
+    stop_client(state, None)
+}
+
+/// No user status polling is required to revoke a dead helper's credential.
+/// A matching client identity is mandatory so a stale monitor cannot kill a
+/// later owner-approved session. This never calls the network.
+fn watch_helper(state: AppState, expected_id: String) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        let dead = {
+            let mut guard = state.hosted.lock().unwrap_or_else(|e| e.into_inner());
+            match guard.as_mut() {
+                Some(tunnel) if tunnel.client_id == expected_id => !tunnel.running(),
+                _ => break,
+            }
+        };
+        if dead {
+            let _ = stop_client(&state, Some(&expected_id));
+            break;
+        }
+    });
 }
 
 pub(crate) fn is_active_client(state: &AppState, id: &str) -> bool {
@@ -226,12 +277,10 @@ pub(super) fn get_hosted_tunnel_status(state: State<'_, AppState>) -> HostedTunn
         }
     }
     // A dead helper must not leave a live automatic read credential.
-    let previous = guard.take();
+    let dead_id = guard.as_ref().map(|tunnel| tunnel.client_id.clone());
     drop(guard);
-    if let Some(tunnel) = previous {
-        let id = tunnel.client_id.clone();
-        drop(tunnel);
-        let _ = revoke_ephemeral(&state, &id);
+    if let Some(id) = dead_id {
+        let _ = stop_client(&state, Some(&id));
     }
     stopped()
 }
@@ -288,6 +337,8 @@ pub(super) fn start_hosted_tunnel(
         return Err(error);
     }
     *guard = Some(tunnel);
+    drop(guard);
+    watch_helper(state.inner().clone(), client_id);
     Ok(HostedTunnelStatus {
         running: true,
         tunnel_id: Some(tunnel_id),
@@ -406,6 +457,167 @@ mod tests {
             assert!(command
                 .get_envs()
                 .any(|(key, value)| key == denied && value.is_none()));
+        }
+    }
+    #[test]
+    #[ignore = "Only launched as a short-lived subprocess fixture"]
+    fn phase_3e_exited_mock_helper() {
+        // Intentionally exits at once. Does not connect to OpenAI or bind a socket.
+    }
+
+    #[test]
+    fn phase_3e_detects_unexpected_helper_exit_without_reporting_remote_connection() {
+        let child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "hosted_tunnel::tests::phase_3e_exited_mock_helper",
+                "--ignored",
+            ])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let mut hosted = super::HostedTunnel {
+            child,
+            _config: tempfile::NamedTempFile::new().unwrap(),
+            client_id: "client:v1:simulated".into(),
+            tunnel_id: format!("tunnel_{}", "a".repeat(32)),
+        };
+        assert!(hosted.child.wait().unwrap().success());
+        assert!(
+            !hosted.running(),
+            "dead helper must be reaped by status polling"
+        );
+        let status = super::stopped();
+        assert!(!status.running);
+        assert!(!status.connection_verified);
+        assert!(status.tunnel_id.is_none());
+        // Drop also reaps/kills the child and cannot restart it.
+        drop(hosted);
+    }
+
+    #[test]
+    fn phase_3e_watchdog_revokes_crashed_helpers_read_identity_without_ui_poll() {
+        let dir = tempfile::tempdir().unwrap();
+        let state_path = dir.path().join("state.sqlite3");
+        let db = mind_place_state::StateStore::open(&state_path).unwrap();
+        let security =
+            mind_place_security::SecurityGate::open(dir.path().join("security.json")).unwrap();
+        security.initialize(b"phase-3e-test-secret").unwrap();
+        let issued = mind_place_integration::ClientAuthority::new(&db, &security)
+            .issue(
+                "Crash-only hosted identity",
+                &[mind_place_state::ClientCapability::Read],
+            )
+            .unwrap();
+        let id = issued.client.id.clone();
+        let credential = issued.credential().to_owned();
+        let child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "hosted_tunnel::tests::phase_3e_exited_mock_helper",
+                "--ignored",
+            ])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let state = super::AppState {
+            store: mind_place_archive::ArchiveStore::open(dir.path().join("archive-v1")).unwrap(),
+            security: security.clone(),
+            state_path,
+            index_path: dir.path().join("index.sqlite3"),
+            authority_ready: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            mcp: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            hosted: std::sync::Arc::new(std::sync::Mutex::new(Some(super::HostedTunnel {
+                child,
+                _config: tempfile::NamedTempFile::new().unwrap(),
+                client_id: id,
+                tunnel_id: format!("tunnel_{}", "c".repeat(32)),
+            }))),
+            extension_path: dir.path().join("extension"),
+            host_path: dir.path().join("host"),
+            legacy_path: dir.path().join("legacy"),
+        };
+        super::watch_helper(state.clone(), issued.client.id.clone());
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            let stopped = state.hosted.lock().unwrap().is_none();
+            let revoked = mind_place_integration::ClientAuthority::new(&db, &security)
+                .authorize(&credential, mind_place_state::ClientCapability::Read)
+                .is_err();
+            if stopped && revoked {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert!(
+            state.hosted.lock().unwrap().is_none(),
+            "crashed helper was not reaped"
+        );
+        assert!(
+            mind_place_integration::ClientAuthority::new(&db, &security)
+                .authorize(&credential, mind_place_state::ClientCapability::Read)
+                .is_err(),
+            "orphan hosted credential retained read access after helper exit"
+        );
+    }
+
+    #[test]
+    fn phase_3e_helper_cannot_inherit_admin_or_public_forwarding_configuration() {
+        let command = super::build_client_command(
+            std::path::PathBuf::from("tunnel-client"),
+            std::path::Path::new("isolated.yaml"),
+            &format!("tunnel_{}", "b".repeat(32)),
+            "sk-proj_example_runtime_token",
+            "mpc_v1_test_only",
+        );
+        let removed = [
+            "OPENAI_ADMIN_KEY",
+            "CONTROL_PLANE_EXTRA_HEADERS",
+            "CONTROL_PLANE_BASE_URL",
+            "TUNNEL_CLIENT_CONFIG",
+            "TUNNEL_CLIENT_PROFILE",
+            "TUNNEL_CLIENT_PROFILE_DIR",
+            "MCP_COMMAND",
+            "HARPOON_TARGETS",
+            "HARPOON_ALLOW_PLAINTEXT_HTTP",
+            "HARPOON_ADDITIONAL_TRANSPORTS",
+            "HARPOON_CAPTURE_PAYLOADS",
+            "MCP_OAUTH_TRUSTED_ORIGINS",
+            "LOG_FILE",
+            "TRACING_FILE",
+            "CLOUDFLARED_TUNNEL_TOKEN",
+        ];
+        for name in removed {
+            assert!(
+                command
+                    .get_envs()
+                    .any(|(key, value)| key == name && value.is_none()),
+                "unsafe inherited variable not explicitly removed: {name}"
+            );
+        }
+        let argv = command
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect::<Vec<_>>();
+        assert!(argv
+            .iter()
+            .all(|part| !part.starts_with("http://") && !part.starts_with("https://")));
+        assert!(command.get_envs().any(|(key, value)| {
+            key == "MCP_SERVER_URL" && value == Some(std::ffi::OsStr::new(super::MCP_ORIGIN))
+        }));
+        for name in [
+            "ALLOW_REMOTE_UI",
+            "OPEN_WEB_UI",
+            "LOG_HTTP_RAW_UNSAFE",
+            "TRACING_ENABLED",
+        ] {
+            assert!(command.get_envs().any(|(key, value)| {
+                key == name && value == Some(std::ffi::OsStr::new("false"))
+            }));
         }
     }
 }
