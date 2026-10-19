@@ -199,9 +199,9 @@ fn revoke_ephemeral(state: &AppState, client_id: &str) -> Result<(), String> {
 fn stop_client(state: &AppState, expected_id: Option<&str>) -> Result<(), String> {
     let previous = {
         let mut guard = state.hosted.lock().unwrap_or_else(|e| e.into_inner());
-        if expected_id.is_some_and(|id| {
-            guard.as_ref().is_none_or(|current| current.client_id != id)
-        }) {
+        if expected_id
+            .is_some_and(|id| guard.as_ref().is_none_or(|current| current.client_id != id))
+        {
             return Ok(());
         }
         guard.take()
@@ -471,7 +471,10 @@ mod tests {
             tunnel_id: format!("tunnel_{}", "a".repeat(32)),
         };
         assert!(hosted.child.wait().unwrap().success());
-        assert!(!hosted.running(), "dead helper must be reaped by status polling");
+        assert!(
+            !hosted.running(),
+            "dead helper must be reaped by status polling"
+        );
         let status = super::stopped();
         assert!(!status.running);
         assert!(!status.connection_verified);
@@ -480,17 +483,19 @@ mod tests {
         drop(hosted);
     }
 
-
     #[test]
     fn phase_3e_watchdog_revokes_crashed_helpers_read_identity_without_ui_poll() {
         let dir = tempfile::tempdir().unwrap();
         let state_path = dir.path().join("state.sqlite3");
         let db = mind_place_state::StateStore::open(&state_path).unwrap();
-        let security = mind_place_security::SecurityGate::open(dir.path().join("security.json"))
-            .unwrap();
+        let security =
+            mind_place_security::SecurityGate::open(dir.path().join("security.json")).unwrap();
         security.initialize(b"phase-3e-test-secret").unwrap();
         let issued = mind_place_integration::ClientAuthority::new(&db, &security)
-            .issue("Crash-only hosted identity", &[mind_place_state::ClientCapability::Read])
+            .issue(
+                "Crash-only hosted identity",
+                &[mind_place_state::ClientCapability::Read],
+            )
             .unwrap();
         let id = issued.client.id.clone();
         let credential = issued.credential().to_owned();
@@ -506,8 +511,7 @@ mod tests {
             .spawn()
             .unwrap();
         let state = super::AppState {
-            store: mind_place_archive::ArchiveStore::open(dir.path().join("archive-v1"))
-                .unwrap(),
+            store: mind_place_archive::ArchiveStore::open(dir.path().join("archive-v1")).unwrap(),
             security: security.clone(),
             state_path,
             index_path: dir.path().join("index.sqlite3"),
@@ -531,7 +535,10 @@ mod tests {
             }
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
-        assert!(state.hosted.lock().unwrap().is_none(), "crashed helper was not reaped");
+        assert!(
+            state.hosted.lock().unwrap().is_none(),
+            "crashed helper was not reaped"
+        );
         assert!(
             mind_place_integration::ClientAuthority::new(&db, &security)
                 .authorize(&credential, mind_place_state::ClientCapability::Read)
@@ -563,15 +570,21 @@ mod tests {
         ];
         for name in removed {
             assert!(
-                command.get_envs().any(|(key, value)| key == name && value.is_none()),
+                command
+                    .get_envs()
+                    .any(|(key, value)| key == name && value.is_none()),
                 "unsafe inherited variable not explicitly removed: {name}"
             );
         }
-        let argv = command.get_args().map(|a| a.to_string_lossy().to_string()).collect::<Vec<_>>();
-        assert!(argv.iter().all(|part| !part.starts_with("http://") && !part.starts_with("https://")));
+        let argv = command
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect::<Vec<_>>();
+        assert!(argv
+            .iter()
+            .all(|part| !part.starts_with("http://") && !part.starts_with("https://")));
         assert!(command.get_envs().any(|(key, value)| {
             key == "MCP_SERVER_URL" && value == Some(std::ffi::OsStr::new(super::MCP_ORIGIN))
         }));
     }
-
 }
