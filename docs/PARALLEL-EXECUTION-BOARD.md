@@ -25,16 +25,16 @@ Historical Cloud 1A–1E, 2A–2D, 3A–3D are complete. **3E currently has exis
 | `MP-4L1` | Windows NTFS junction/reparse/races | `MP-4F` | `windows-fs` | LOCAL |
 | `MP-4L2` | Representative documents/parser/resource limits | `MP-4F`, `MP-4L1` | `windows-corpus` | LOCAL |
 | `MP-4U` | Folder add/search/revoke workflow acceptance | `MP-4L2` | `human-acceptance` | HUMAN |
-| `MP-5A` | Evidence-based claim transitions and as-of history | `MP-4F` | `memory-state-schema` | C |
+| `MP-5A` | Evidence-based claim transitions and as-of history | `MP-4U` | `memory-state-schema` | C |
 | `MP-5B` | Conflict relations and evidence-aware ranking | `MP-5A` | `memory-retrieval` | C |
 | `MP-5C` | Memory create/update/forget with idempotence/authorization | `MP-5A` | `memory-writes` | C; may parallel with 5B after 5A |
 | `MP-5D` | History/conflict/provenance UI and deterministic scenarios | `MP-5B`, `MP-5C` | `memory-ui` | C |
-| `MP-6A` | Rebuildable graph schema and deterministic edges | `MP-4F` | `graph-index-schema` | C; may parallel with 5A if migrations do not overlap |
+| `MP-6A` | Rebuildable graph schema and deterministic edges | `MP-4U` | `graph-index-schema` | C; may parallel with 5A if migrations do not overlap |
 | `MP-6B` | Graph neighbors, community aggregation, bounded retrieval | `MP-6A` | `graph-query` | C |
 | `MP-6C` | Graph generations/hash invalidation and atomic activation | `MP-6A` | `graph-build` | C; parallel with 6B after 6A |
 | `MP-6D` | Scoped graph maintenance capabilities and transactions | `MP-6C` | `graph-authority` | C |
 | `MP-6E` | Graphify prompt templates and graph qualification | `MP-6B`, `MP-6D` | `graphify-integration` | C |
-| `MP-7A` | Provider-neutral capture contracts and ChatGPT regression | `MP-4F` | `capture-contract` | C; can run beside graph/memory lanes |
+| `MP-7A` | Provider-neutral capture contracts and ChatGPT regression | `MP-4U` | `capture-contract` | C; can run beside graph/memory lanes |
 | `MP-7B` | Claude capture/import adapter and branches | `MP-7A` | `capture-claude` | C |
 | `MP-7C` | Gemini capture/import adapter and revisions | `MP-7A` | `capture-gemini` | C; parallel with 7B |
 | `MP-7D` | Generic JSON/HTML/Markdown import adapter | `MP-7A` | `capture-generic` | C; parallel with 7B/7C |
@@ -53,7 +53,7 @@ Historical Cloud 1A–1E, 2A–2D, 3A–3D are complete. **3E currently has exis
 | `MP-8L2` | Large corpus UI/graph responsiveness and memory | `MP-8L1` | `windows-ui-benchmark` | LOCAL |
 | `MP-8U1` | Knowledge library daily UX acceptance | `MP-8L1` | `human-acceptance` | HUMAN |
 | `MP-8U2` | Hive usability and source drilldown acceptance | `MP-8L2` | `human-acceptance` | HUMAN |
-| `MP-9A` | Measure encrypted storage options and backup impacts | `MP-4F` | `security-architecture` | C; research may start early without migration |
+| `MP-9A` | Measure encrypted storage options and backup impacts | `MP-8F` | `security-architecture` | C; research may start early without migration |
 | `MP-9B` | Windows key lifecycle, encrypted state/object integration | `MP-9A` | `crypto-migration` | C |
 | `MP-9C` | Private scopes, redaction, destructive forget | `MP-9B`, `MP-5C` | `privacy-deletion` | C |
 | `MP-9D` | Parsers and connector attack/fuzz hardening | `MP-9B`, `MP-7E` | `privacy-boundaries` | C; parallel with 9C/9E if contracts frozen |
