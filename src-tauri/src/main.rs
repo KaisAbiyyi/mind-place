@@ -456,9 +456,12 @@ async fn refresh_document_root_index(
         let authority = StateStore::open(state_path)?;
         let projection = DocumentIndex::open(document_index_path)?;
         projection.refresh_root(&authority, &root_id, || {
-            security.validate_lease(lease).map_err(|_| IndexError::Revoked)
+            security
+                .validate_lease(lease)
+                .map_err(|_| IndexError::Revoked)
         })
-    }).await
+    })
+    .await
 }
 
 /// Owner search only: checks live root grant, immutable head, native source
@@ -475,9 +478,12 @@ async fn search_document_index(
         let authority = StateStore::open(state_path)?;
         let projection = DocumentIndex::open(document_index_path)?;
         projection.search(&authority, &query, limit.unwrap_or(20), || {
-            security.validate_lease(lease).map_err(|_| IndexError::Revoked)
+            security
+                .validate_lease(lease)
+                .map_err(|_| IndexError::Revoked)
         })
-    }).await
+    })
+    .await
 }
 
 #[tauri::command]
