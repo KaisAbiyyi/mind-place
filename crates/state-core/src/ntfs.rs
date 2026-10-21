@@ -1,6 +1,13 @@
 //! Capability boundary: NTFS handle-relative no-reparse traversal.
 use std::{fs::File, io, path::Path};
 
+#[derive(Debug)]
+pub(crate) struct DirectoryEntry {
+    pub(crate) name: String,
+    pub(crate) is_directory: bool,
+    pub(crate) is_reparse: bool,
+}
+
 #[cfg(windows)]
 mod platform {
     use super::*;
@@ -77,6 +84,19 @@ mod platform {
             ea_len: u32,
         ) -> i32;
         fn RtlNtStatusToDosError(status: i32) -> u32;
+        fn NtQueryDirectoryFile(
+            handle: isize,
+            event: isize,
+            apc_routine: *mut c_void,
+            apc_context: *mut c_void,
+            status: *mut IoStatusBlock,
+            file_information: *mut c_void,
+            length: u32,
+            file_information_class: u32,
+            return_single_entry: u8,
+            file_name: *mut UnicodeString,
+            restart_scan: u8,
+        ) -> i32;
     }
 
     fn identity(file: &File, directory: bool) -> io::Result<(u64, u64)> {
@@ -115,6 +135,10 @@ mod platform {
     }
     pub(crate) fn root_identity(path: &Path) -> io::Result<(u64, u64)> {
         identity(&root(path)?, true)
+    }
+    pub(crate) fn document_file_identity(file: &File) -> io::Result<String> {
+        let (volume, index) = identity(file, false)?;
+        Ok(format!("ntfs:{volume}:{index}"))
     }
     fn child(parent: &File, segment: &str, directory: bool) -> io::Result<File> {
         // NT RootDirectory binds each child to a verified parent HANDLE, not
@@ -186,6 +210,96 @@ mod platform {
         }
         Ok(file)
     }
+
+    /// NT handle-bound directory enumeration. No path-based read_dir, even
+    /// temporarily: a junction swap could otherwise disclose outside names.
+    pub(crate) fn directory_entries(
+        path: &Path,
+        expected: (u64, u64),
+        segments: &[String],
+    ) -> io::Result<Vec<DirectoryEntry>> {
+        let mut dir = root(path)?;
+        if identity(&dir, true)? != expected {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "approved root replaced",
+            ));
+        }
+        for segment in segments {
+            dir = child(&dir, segment, true)?;
+        }
+        let mut names = Vec::new();
+        let mut buf = vec![0u8; 64 * 1024];
+        let mut restart = 1u8;
+        loop {
+            let mut status = IoStatusBlock {
+                status: 0,
+                information: 0,
+            };
+            let rc = unsafe {
+                NtQueryDirectoryFile(
+                    dir.as_raw_handle() as isize,
+                    0,
+                    ptr::null_mut(),
+                    ptr::null_mut(),
+                    &mut status,
+                    buf.as_mut_ptr().cast(),
+                    buf.len() as u32,
+                    1, // FileDirectoryInformation: 64-byte header + UTF-16 name
+                    1,
+                    ptr::null_mut(),
+                    restart,
+                )
+            };
+            restart = 0;
+            if rc as u32 == 0x80000006 {
+                // STATUS_NO_MORE_FILES
+                break;
+            }
+            if rc != 0 {
+                return Err(io::Error::from_raw_os_error(
+                    unsafe { RtlNtStatusToDosError(rc) } as i32,
+                ));
+            }
+            if status.information < 64 || status.information > buf.len() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "malformed directory record",
+                ));
+            }
+            let attribute = u32::from_le_bytes(buf[56..60].try_into().unwrap());
+            let size = u32::from_le_bytes(buf[60..64].try_into().unwrap()) as usize;
+            if size == 0 || size % 2 != 0 || 64 + size > status.information {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "malformed directory name",
+                ));
+            }
+            let name = String::from_utf16(
+                &buf[64..64 + size]
+                    .chunks_exact(2)
+                    .map(|unit| u16::from_le_bytes([unit[0], unit[1]]))
+                    .collect::<Vec<_>>(),
+            )
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid UTF-16 entry"))?;
+            if name == "." || name == ".." {
+                continue;
+            }
+            names.push(DirectoryEntry {
+                name,
+                is_directory: attribute & DIRECTORY != 0,
+                is_reparse: attribute & REPARSE != 0,
+            });
+            if names.len() > 10_000 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "too many directory entries",
+                ));
+            }
+        }
+        names.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(names)
+    }
 }
 #[cfg(not(windows))]
 mod platform {
@@ -203,6 +317,16 @@ mod platform {
             Err(io::Error::new(io::ErrorKind::Unsupported, "NTFS only"))
         }
     }
+    pub(crate) fn directory_entries(
+        _: &Path,
+        _: (u64, u64),
+        _: &[String],
+    ) -> io::Result<Vec<DirectoryEntry>> {
+        Err(io::Error::new(io::ErrorKind::Unsupported, "NTFS only"))
+    }
+    pub(crate) fn document_file_identity(_: &File) -> io::Result<String> {
+        Err(io::Error::new(io::ErrorKind::Unsupported, "NTFS only"))
+    }
     pub(crate) fn open_document(_: &Path, _: (u64, u64), _: &[String]) -> io::Result<File> {
         Err(io::Error::new(
             io::ErrorKind::Unsupported,
@@ -210,4 +334,6 @@ mod platform {
         ))
     }
 }
-pub(crate) use platform::{open_document, root_identity};
+pub(crate) use platform::{
+    directory_entries, document_file_identity, open_document, root_identity,
+};

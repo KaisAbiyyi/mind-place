@@ -10,6 +10,7 @@ use std::{
 mod clients;
 mod document_objects;
 mod document_roots;
+mod document_scanner;
 mod identity;
 mod ntfs;
 pub use clients::{ClientAuditEvent, ClientCapability, ClientRecord};
@@ -18,6 +19,7 @@ pub use document_objects::{
     MAX_DOCUMENT_OBJECT_BYTES,
 };
 pub use document_roots::{DocumentRoot, VirtualDocumentPath, VIRTUAL_ROOT_PREFIX};
+pub use document_scanner::{DocumentScanner, ScanPolicy, ScanReport, WatchEvent};
 pub use identity::{canonical_source_id, SourceDescriptor, SourceKey};
 
 pub const APPLICATION_ID: i64 = 0x4D504C43;

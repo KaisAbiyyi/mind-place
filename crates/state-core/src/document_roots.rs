@@ -343,7 +343,7 @@ impl StateStore {
         self.revoke_root(id)
     }
 
-    fn authorized_binding(&self, id: &str) -> Result<(u64, u64)> {
+    pub(crate) fn authorized_binding(&self, id: &str) -> Result<(u64, u64)> {
         let db = self.connection()?;
         let row: Option<(String, String)> = db
             .query_row(
