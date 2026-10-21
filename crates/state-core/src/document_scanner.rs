@@ -12,7 +12,7 @@ use crate::{
 use serde::Serialize;
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs, io,
+    io,
     path::{Path, PathBuf},
     time::UNIX_EPOCH,
 };
@@ -20,7 +20,6 @@ use std::{
 const MAX_SCAN_ENTRIES: usize = 10_000;
 const MAX_DEPTH: usize = 24;
 const MAX_READ_BYTES: u64 = 32 * 1024 * 1024;
-const REPARSE_POINT: u32 = 0x400;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ScanPolicy {
@@ -170,9 +169,9 @@ impl DocumentScanner {
         Ok(result)
     }
 
-    /// Complete bounded filesystem inventory. Directory listing is metadata-only,
-    /// with no-follow filters; every file read uses NTFS handle-relative opens.
-    /// Native enumeration/rename races still require MP-4L1 owner qualification.
+    /// Complete bounded filesystem inventory. Directory names and file bytes
+    /// are both read from NTFS root-identity-verified relative handles.
+    /// Native rename/event-loss stress still requires MP-4L1 qualification.
     /// On overflow or scan failure, no "complete" inventory is published.
     pub fn rescan(
         &mut self,
@@ -287,7 +286,8 @@ impl DocumentScanner {
 
     fn walk(
         &self,
-        directory: &Path,
+        root_path: &Path,
+        expected: (u64, u64),
         segments: &[String],
         found: &mut BTreeSet<Vec<String>>,
         excluded: &mut usize,
@@ -297,37 +297,27 @@ impl DocumentScanner {
         if segments.len() > self.policy.max_depth {
             return Err(StateError::DocumentLimit);
         }
-        // No-follow metadata checks avoid intentionally traversing reparse
-        // points. All source bytes are still opened only through 4B handles.
-        let md = fs::symlink_metadata(directory)?;
-        if !md.is_dir() || md.file_type().is_symlink() || is_reparse(&md) {
-            return Err(StateError::DocumentDenied);
-        }
-        let mut entries = fs::read_dir(directory)?.collect::<io::Result<Vec<_>>>()?;
+        // Every listing is bound to an NT directory handle under the original
+        // approved root identity. No path-based metadata/read_dir traversal.
+        let entries = crate::ntfs::directory_entries(root_path, expected, segments)?;
         if entries.len() > self.policy.max_files
             || found.len() + entries.len() > self.policy.max_files
         {
             return Err(StateError::DocumentLimit);
         }
-        entries.sort_by_key(|entry| entry.file_name());
         for entry in entries {
             unlock_guard()?;
-            let name = entry
-                .file_name()
-                .into_string()
-                .map_err(|_| StateError::InvalidValue)?;
             let mut child = segments.to_vec();
-            child.push(name.clone());
-            let md = fs::symlink_metadata(entry.path())?;
-            if md.file_type().is_symlink() || is_reparse(&md) {
+            child.push(entry.name.clone());
+            if entry.is_reparse {
                 *excluded += 1;
-            } else if md.is_dir() {
-                if self.policy.excluded_dir(&name) {
+            } else if entry.is_directory {
+                if self.policy.excluded_dir(&entry.name) {
                     *excluded += 1;
                 } else {
-                    self.walk(&entry.path(), &child, found, excluded, unlock_guard)?;
+                    self.walk(root_path, expected, &child, found, excluded, unlock_guard)?;
                 }
-            } else if md.is_file() && self.policy.included(Path::new(&name)) {
+            } else if self.policy.included(Path::new(&entry.name)) {
                 found.insert(child);
                 if found.len() > self.policy.max_files {
                     return Err(StateError::DocumentLimit);
@@ -338,14 +328,4 @@ impl DocumentScanner {
         }
         Ok(())
     }
-}
-#[cfg(windows)]
-fn is_reparse(meta: &fs::Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt;
-    meta.file_attributes() & REPARSE_POINT != 0
-}
-#[cfg(not(windows))]
-fn is_reparse(_: &fs::Metadata) -> bool {
-    let _ = REPARSE_POINT;
-    false
 }
