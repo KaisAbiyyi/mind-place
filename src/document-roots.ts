@@ -2,6 +2,23 @@ import type { Invoke } from "./reader.js";
 
 const REVOKE_CONFIRM_WINDOW_MS = 15_000;
 
+export interface DocumentSearchHit {
+  uri: string;
+  version_id: string;
+  section: string;
+  snippet: string;
+  score: number;
+}
+
+export interface DocumentIndexReport {
+  root_id: string;
+  scanned_files: number;
+  indexed_files: number;
+  skipped_files: number;
+  indexed_chunks: number;
+  generation: number;
+}
+
 export interface DocumentRoot {
   id: string;
   canonical_path: string;
@@ -19,7 +36,7 @@ export function mountDocumentRootSetup(parent: HTMLElement, invoke: Invoke): voi
   heading.textContent = "Personal document folders — owner permissions";
   const explanation = doc.createElement("p");
   explanation.textContent =
-    "Staging only records a pending identity. Approve explicitly to permit future bounded document reads. Revocation is permanent. Scanning and indexing are not enabled yet.";
+    "Staging only records a pending identity. Approve explicitly, then manually index that folder to make bounded document search available. Revocation is permanent.";
   const form = doc.createElement("form");
   form.className = "document-root-form";
   const label = doc.createElement("label");
@@ -42,7 +59,29 @@ export function mountDocumentRootSetup(parent: HTMLElement, invoke: Invoke): voi
   status.setAttribute("aria-live", "polite");
   const list = doc.createElement("ul");
   list.className = "document-root-list";
-  section.append(heading, explanation, form, status, list);
+  const searchForm = doc.createElement("form");
+  searchForm.className = "document-search-form";
+  const searchLabel = doc.createElement("label");
+  searchLabel.textContent = "Search approved, indexed documents";
+  const searchInput = doc.createElement("input");
+  searchInput.type = "search";
+  searchInput.maxLength = 256;
+  searchInput.autocomplete = "off";
+  searchInput.placeholder = "Exact phrase…";
+  searchLabel.append(searchInput);
+  const searchButton = doc.createElement("button");
+  searchButton.type = "submit";
+  searchButton.className = "quiet-button";
+  searchButton.textContent = "Search documents";
+  searchForm.append(searchLabel, searchButton);
+  const searchStatus = doc.createElement("p");
+  searchStatus.setAttribute("role", "status");
+  searchStatus.setAttribute("aria-live", "polite");
+  const results = doc.createElement("ul");
+  results.className = "document-search-results";
+  results.setAttribute("aria-label", "Document search results");
+  let searchEpoch = 0;
+  section.append(heading, explanation, form, status, list, searchForm, searchStatus, results);
   parent.append(section);
 
   const refresh = async (): Promise<void> => {
@@ -75,7 +114,7 @@ export function mountDocumentRootSetup(parent: HTMLElement, invoke: Invoke): voi
             void invoke<DocumentRoot>("approve_document_root", { rootId: root.id })
               .then(async () => {
                 if (!section.isConnected) return;
-                status.textContent = "Approved. Scanning and indexing remain disabled.";
+                status.textContent = "Approved. Select Index folder explicitly to discover files.";
                 await refresh();
               })
               .catch((error: unknown) => {
@@ -84,6 +123,27 @@ export function mountDocumentRootSetup(parent: HTMLElement, invoke: Invoke): voi
               .finally(() => { if (section.isConnected) approve.disabled = false; });
           });
           item.append(approve);
+        }
+        if (root.approval_state === "approved") {
+          const index = doc.createElement("button");
+          index.type = "button";
+          index.className = "quiet-button";
+          index.dataset.action = "index-root";
+          index.textContent = "Index folder";
+          index.addEventListener("click", () => {
+            index.disabled = true;
+            status.textContent = "Scanning approved files and building a disposable index…";
+            void invoke<DocumentIndexReport>("refresh_document_root_index", { rootId: root.id })
+              .then((report) => {
+                if (!section.isConnected) return;
+                status.textContent = `Indexed ${report.indexed_files} files / ${report.indexed_chunks} chunks (${report.skipped_files} skipped). Generation ${report.generation}.`;
+              })
+              .catch((error: unknown) => {
+                if (section.isConnected) status.textContent = `Document indexing failed: ${String(error)}`;
+              })
+              .finally(() => { if (section.isConnected) index.disabled = false; });
+          });
+          item.append(index);
         }
         if (root.approval_state !== "revoked") {
           const revoke = doc.createElement("button");
@@ -120,6 +180,9 @@ export function mountDocumentRootSetup(parent: HTMLElement, invoke: Invoke): voi
             void invoke<void>("revoke_document_root", { rootId: root.id })
               .then(async () => {
                 if (!section.isConnected) return;
+                searchEpoch++;
+                results.replaceChildren();
+                searchStatus.textContent = "Results cleared after revocation.";
                 status.textContent = "Document root permanently revoked.";
                 await refresh();
               })
@@ -136,6 +199,40 @@ export function mountDocumentRootSetup(parent: HTMLElement, invoke: Invoke): voi
       if (section.isConnected) status.textContent = "Document registry unavailable while locked or offline.";
     }
   };
+
+  searchForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const query = searchInput.value.trim();
+    if (!query || query.length > 256) {
+      searchStatus.textContent = "Enter a document search phrase (up to 256 characters).";
+      return;
+    }
+    const epoch = ++searchEpoch;
+    searchButton.disabled = true;
+    results.replaceChildren();
+    searchStatus.textContent = "Checking indexed documents and live permissions…";
+    void invoke<DocumentSearchHit[]>("search_document_index", { query, limit: 20 })
+      .then((hits) => {
+        if (!section.isConnected || epoch !== searchEpoch) return;
+        searchStatus.textContent = `${hits.length} verified document matches. New/modified files require Index folder again.`;
+        for (const hit of hits) {
+          const item = doc.createElement("li");
+          const title = doc.createElement("strong");
+          title.textContent = hit.uri;
+          const part = doc.createElement("small");
+          part.textContent = ` · ${hit.section} · revision ${hit.version_id.slice(0, 20)}`;
+          const excerpt = doc.createElement("p");
+          excerpt.textContent = hit.snippet;
+          item.append(title, part, excerpt);
+          results.append(item);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!section.isConnected || epoch !== searchEpoch) return;
+        searchStatus.textContent = `Document search unavailable: ${String(error)}`;
+      })
+      .finally(() => { if (section.isConnected && epoch === searchEpoch) searchButton.disabled = false; });
+  });
 
   form.addEventListener("submit", (event) => {
     event.preventDefault();
