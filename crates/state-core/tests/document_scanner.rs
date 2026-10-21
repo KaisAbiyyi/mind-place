@@ -127,7 +127,6 @@ fn windows_guard_abort_never_publishes_inventory() {
     assert_eq!(scanner.current_uris(&root, || Ok(())).unwrap(), None);
 }
 
-
 #[cfg(windows)]
 #[test]
 fn windows_handle_enumerator_skips_reparse_and_rejects_root_swap() {
@@ -142,7 +141,14 @@ fn windows_handle_enumerator_skips_reparse_and_rejects_root_swap() {
         let mut scanner = DocumentScanner::new(state.clone(), ScanPolicy::default()).unwrap();
         let result = scanner.rescan(&root, || Ok(())).unwrap();
         assert_eq!(result.visited_files, 1);
-        assert_eq!(scanner.current_uris(&root, || Ok(())).unwrap().unwrap().len(), 1);
+        assert_eq!(
+            scanner
+                .current_uris(&root, || Ok(()))
+                .unwrap()
+                .unwrap()
+                .len(),
+            1
+        );
     }
     let mut scanner = DocumentScanner::new(state.clone(), ScanPolicy::default()).unwrap();
     scanner.rescan(&root, || Ok(())).unwrap();
