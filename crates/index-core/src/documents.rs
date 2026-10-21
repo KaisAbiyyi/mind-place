@@ -9,7 +9,10 @@ use mind_place_state::{
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension, TransactionBehavior};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use std::{fs, path::{Path, PathBuf}};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 const APPLICATION_ID: i64 = 0x4D504446; // MPDF; never confused with conversation index.
 const MAX_RESULTS: usize = 25;
@@ -24,7 +27,9 @@ CREATE TABLE document_meta(root_id TEXT PRIMARY KEY, generation INTEGER NOT NULL
 ";
 
 #[derive(Clone, Debug)]
-pub struct DocumentIndex { path: PathBuf }
+pub struct DocumentIndex {
+    path: PathBuf,
+}
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub struct DocumentIndexReport {
@@ -59,8 +64,11 @@ fn format_for_uri(uri: &str) -> Option<DocumentFormat> {
 /// Phrase-quote the entire user input. Never interpolate raw input into FTS SQL.
 fn literal_query(input: &str) -> Result<String> {
     let trimmed = input.trim();
-    if trimmed.is_empty() || trimmed.len() > 256
-        || trimmed.chars().any(|c| c.is_control() && !c.is_whitespace())
+    if trimmed.is_empty()
+        || trimmed.len() > 256
+        || trimmed
+            .chars()
+            .any(|c| c.is_control() && !c.is_whitespace())
     {
         return Err(IndexError::InvalidQuery);
     }
@@ -78,7 +86,8 @@ impl DocumentIndex {
         let existed = path.exists();
         let db = Connection::open_with_flags(
             &path,
-            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE
+            OpenFlags::SQLITE_OPEN_READ_WRITE
+                | OpenFlags::SQLITE_OPEN_CREATE
                 | OpenFlags::SQLITE_OPEN_NOFOLLOW,
         )?;
         configure(&db)?;
@@ -93,9 +102,12 @@ impl DocumentIndex {
             return Err(IndexError::InvalidIndex);
         }
         let health: String = db.query_row("PRAGMA quick_check(1)", [], |r| r.get(0))?;
-        if health != "ok" { return Err(IndexError::InvalidIndex); }
+        if health != "ok" {
+            return Err(IndexError::InvalidIndex);
+        }
         // Detect damaged or altered projections before using their derived text.
-        let _: i64 = db.query_row("SELECT COUNT(*) FROM document_meta", [], |r| r.get(0))
+        let _: i64 = db
+            .query_row("SELECT COUNT(*) FROM document_meta", [], |r| r.get(0))
             .map_err(|_| IndexError::InvalidIndex)?;
         Ok(Self { path })
     }
@@ -103,11 +115,14 @@ impl DocumentIndex {
     fn connection(&self) -> Result<Connection> {
         safe_path(&self.path)?;
         let db = Connection::open_with_flags(
-            &self.path, OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+            &self.path,
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
         )?;
         configure(&db)?;
         let id: i64 = db.query_row("PRAGMA application_id", [], |r| r.get(0))?;
-        if id != APPLICATION_ID { return Err(IndexError::InvalidIndex); }
+        if id != APPLICATION_ID {
+            return Err(IndexError::InvalidIndex);
+        }
         Ok(db)
     }
 
@@ -122,21 +137,34 @@ impl DocumentIndex {
         check()?;
         let mut scanner = DocumentScanner::new(state.clone(), ScanPolicy::default())?;
         let scan = scanner.rescan(root_id, || lease(&mut check))?;
-        if !scan.complete { return Err(IndexError::InvalidEvidence); }
-        let uris = scanner.current_uris(root_id, || lease(&mut check))?
+        if !scan.complete {
+            return Err(IndexError::InvalidEvidence);
+        }
+        let uris = scanner
+            .current_uris(root_id, || lease(&mut check))?
             .ok_or(IndexError::InvalidEvidence)?;
         let objects = DocumentObjectStore::open(state.clone())?;
         let mut db = self.connection()?;
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute("DELETE FROM document_fts WHERE root_id=?1", [root_id])?;
-        let previous: Option<i64> = tx.query_row(
-            "SELECT generation FROM document_meta WHERE root_id=?1",
-            [root_id], |r| r.get(0),
-        ).optional()?;
-        let generation = previous.unwrap_or(0).checked_add(1).ok_or(IndexError::InvalidIndex)?;
+        let previous: Option<i64> = tx
+            .query_row(
+                "SELECT generation FROM document_meta WHERE root_id=?1",
+                [root_id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let generation = previous
+            .unwrap_or(0)
+            .checked_add(1)
+            .ok_or(IndexError::InvalidIndex)?;
         let mut report = DocumentIndexReport {
-            root_id: root_id.to_owned(), scanned_files: uris.len(),
-            indexed_files: 0, skipped_files: 0, indexed_chunks: 0, generation,
+            root_id: root_id.to_owned(),
+            scanned_files: uris.len(),
+            indexed_files: 0,
+            skipped_files: 0,
+            indexed_chunks: 0,
+            generation,
         };
         for uri in uris {
             check()?;
@@ -154,7 +182,8 @@ impl DocumentIndex {
             let bytes = objects.read_version(&uri, &head.id, || lease(&mut check))?;
             // A source can mutate after the scan; a version alone never proves
             // the indexed bytes are still the live approved file.
-            let live = state.read_document_bytes(&uri, ExtractionLimits::default().max_input_bytes)?;
+            let live =
+                state.read_document_bytes(&uri, ExtractionLimits::default().max_input_bytes)?;
             if Sha256::digest(&live).as_slice() != Sha256::digest(&bytes).as_slice() {
                 return Err(IndexError::InvalidEvidence);
             }
@@ -164,12 +193,20 @@ impl DocumentIndex {
             let extracted = match extracted {
                 Ok(value) => value,
                 Err(ExtractionError::Revoked) => return Err(IndexError::Revoked),
-                Err(ExtractionError::Invalid | ExtractionError::Unsupported | ExtractionError::Limit(_)) => {
+                Err(
+                    ExtractionError::Invalid
+                    | ExtractionError::Unsupported
+                    | ExtractionError::Limit(_),
+                ) => {
                     report.skipped_files += 1;
                     continue;
                 }
             };
-            if objects.current_version(&uri, || lease(&mut check))?.map(|v| v.id) != Some(head.id.clone()) {
+            if objects
+                .current_version(&uri, || lease(&mut check))?
+                .map(|v| v.id)
+                != Some(head.id.clone())
+            {
                 return Err(IndexError::InvalidEvidence);
             }
             for chunk in extracted.chunks {
@@ -184,10 +221,13 @@ impl DocumentIndex {
             report.indexed_files += 1;
         }
         check()?;
-        state.document_root(root_id)?.filter(|r| r.is_approved())
+        state
+            .document_root(root_id)?
+            .filter(|r| r.is_approved())
             .ok_or(IndexError::Revoked)?;
         // Root permission + native identity must remain live at the commit boundary.
-        scanner.current_uris(root_id, || lease(&mut check))?
+        scanner
+            .current_uris(root_id, || lease(&mut check))?
             .ok_or(IndexError::Revoked)?;
         tx.execute(
             "INSERT INTO document_meta(root_id,generation) VALUES(?1,?2)
@@ -209,7 +249,9 @@ impl DocumentIndex {
         limit: usize,
         mut check: impl FnMut() -> Result<()>,
     ) -> Result<Vec<DocumentHit>> {
-        if limit == 0 || limit > MAX_RESULTS { return Err(IndexError::InvalidQuery); }
+        if limit == 0 || limit > MAX_RESULTS {
+            return Err(IndexError::InvalidQuery);
+        }
         let expression = literal_query(query)?;
         check()?;
         let db = self.connection()?;
@@ -222,8 +264,11 @@ impl DocumentIndex {
         )?;
         let rows = statement.query_map(params![expression, MAX_CANDIDATES], |r| {
             Ok(DocumentHit {
-                uri: r.get(0)?, version_id: r.get(1)?,
-                section: r.get(2)?, snippet: r.get(3)?, score: r.get(4)?,
+                uri: r.get(0)?,
+                version_id: r.get(1)?,
+                section: r.get(2)?,
+                snippet: r.get(3)?,
+                score: r.get(4)?,
             })
         })?;
         let candidates: Vec<_> = rows.collect::<std::result::Result<_, _>>()?;
@@ -239,28 +284,49 @@ impl DocumentIndex {
                 Ok(head) => head,
                 Err(StateError::InvalidValue | StateError::DocumentDenied) => None,
                 Err(error) => return Err(error.into()),
-            }) else { continue };
-            if head.id != candidate.version_id { continue; }
-            if head.byte_length > ExtractionLimits::default().max_input_bytes as u64 { continue; }
+            }) else {
+                continue;
+            };
+            if head.id != candidate.version_id {
+                continue;
+            }
+            if head.byte_length > ExtractionLimits::default().max_input_bytes as u64 {
+                continue;
+            }
             verified_bytes = verified_bytes.saturating_add(head.byte_length as usize);
-            if verified_bytes > 64 * 1024 * 1024 { break; }
+            if verified_bytes > 64 * 1024 * 1024 {
+                break;
+            }
             // Prove the indexed immutable revision still matches authorized source bytes.
-            let fresh = match state.read_document_bytes(
-                &candidate.uri, ExtractionLimits::default().max_input_bytes
-            ) {
+            let fresh = match state
+                .read_document_bytes(&candidate.uri, ExtractionLimits::default().max_input_bytes)
+            {
                 Ok(bytes) => bytes,
-                Err(StateError::InvalidValue | StateError::DocumentDenied | StateError::DocumentChanged) => continue,
+                Err(
+                    StateError::InvalidValue
+                    | StateError::DocumentDenied
+                    | StateError::DocumentChanged,
+                ) => continue,
                 Err(StateError::Io(_)) => continue, // Renamed/deleted files are not results.
                 Err(error) => return Err(error.into()),
             };
             if fresh.len() as u64 != head.byte_length
                 || format!("{:x}", Sha256::digest(&fresh)) != head.content_hash
-            { continue; }
+            {
+                continue;
+            }
             check()?;
-            if objects.current_version(&candidate.uri, || lease(&mut check))?.map(|v| v.id)
-                != Some(candidate.version_id.clone()) { continue; }
+            if objects
+                .current_version(&candidate.uri, || lease(&mut check))?
+                .map(|v| v.id)
+                != Some(candidate.version_id.clone())
+            {
+                continue;
+            }
             hits.push(candidate);
-            if hits.len() == limit { break; }
+            if hits.len() == limit {
+                break;
+            }
         }
         check()?;
         Ok(hits)
@@ -283,12 +349,19 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let idx = DocumentIndex::open(tmp.path().join("document-index.sqlite3")).unwrap();
         let db = idx.connection().unwrap();
-        db.execute("INSERT INTO document_fts(root_id,uri,version_id,section,content)
-                     VALUES('root','mpdoc://root/x/a.md','v','title','a bounded hello example')", []).unwrap();
-        let count: i64 = db.query_row(
-            "SELECT COUNT(*) FROM document_fts WHERE document_fts MATCH ?1",
-            [literal_query("bounded hello").unwrap()], |r| r.get(0),
-        ).unwrap();
+        db.execute(
+            "INSERT INTO document_fts(root_id,uri,version_id,section,content)
+                     VALUES('root','mpdoc://root/x/a.md','v','title','a bounded hello example')",
+            [],
+        )
+        .unwrap();
+        let count: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM document_fts WHERE document_fts MATCH ?1",
+                [literal_query("bounded hello").unwrap()],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(count, 1);
         assert!(DocumentIndex::open(tmp.path().join("document-index.sqlite3")).is_ok());
     }
