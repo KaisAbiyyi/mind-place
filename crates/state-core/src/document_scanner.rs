@@ -158,7 +158,12 @@ impl DocumentScanner {
             .state
             .document_root(root_id)?
             .ok_or(StateError::DocumentDenied)?;
-        if !root.is_approved() || self.state.authorized_binding(root_id).is_err() {
+        if !root.is_approved() {
+            return Err(StateError::DocumentDenied);
+        }
+        let binding = self.state.authorized_binding(root_id)
+            .map_err(|_| StateError::DocumentDenied)?;
+        if crate::ntfs::root_identity(Path::new(&root.canonical_path))? != binding {
             return Err(StateError::DocumentDenied);
         }
         let result = self.known.get(root_id).map(|v| v.iter().cloned().collect());
@@ -247,6 +252,10 @@ impl DocumentScanner {
             };
             let source = self.state.clone();
             let root_id = root_id.to_owned();
+            let probe = file.try_clone()?;
+            let original_modified = attributes.modified().ok();
+            let original_identity = metadata.file_identity.clone();
+            let original_size = metadata.byte_length;
             let mut check = || {
                 unlock_guard()?;
                 source
@@ -254,6 +263,13 @@ impl DocumentScanner {
                     .map_err(|_| StateError::DocumentDenied)?;
                 if crate::ntfs::root_identity(root_path)? != expected {
                     return Err(StateError::DocumentDenied);
+                }
+                let live = probe.metadata()?;
+                if live.len() != original_size
+                    || live.modified().ok() != original_modified
+                    || crate::ntfs::document_file_identity(&probe)? != original_identity
+                {
+                    return Err(StateError::DocumentChanged);
                 }
                 Ok(())
             };
