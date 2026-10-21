@@ -206,12 +206,14 @@ impl DocumentScanner {
         }
         let mut discovered = BTreeSet::new();
         let mut excluded = 0usize;
+        let mut visited_entries = 0usize;
         self.walk(
             root_path,
             expected,
             &[],
             &mut discovered,
             &mut excluded,
+            &mut visited_entries,
             &mut unlock_guard,
         )?;
         let mut report = ScanReport {
@@ -310,6 +312,7 @@ impl DocumentScanner {
         segments: &[String],
         found: &mut BTreeSet<Vec<String>>,
         excluded: &mut usize,
+        visited_entries: &mut usize,
         unlock_guard: &mut impl FnMut() -> Result<()>,
     ) -> Result<()> {
         unlock_guard()?;
@@ -319,9 +322,10 @@ impl DocumentScanner {
         // Every listing is bound to an NT directory handle under the original
         // approved root identity. No path-based metadata/read_dir traversal.
         let entries = crate::ntfs::directory_entries(root_path, expected, segments)?;
-        if entries.len() > self.policy.max_files
-            || found.len() + entries.len() > self.policy.max_files
-        {
+        *visited_entries = visited_entries
+            .checked_add(entries.len())
+            .ok_or(StateError::DocumentLimit)?;
+        if *visited_entries > self.policy.max_files {
             return Err(StateError::DocumentLimit);
         }
         for entry in entries {
@@ -334,7 +338,7 @@ impl DocumentScanner {
                 if self.policy.excluded_dir(&entry.name) {
                     *excluded += 1;
                 } else {
-                    self.walk(root_path, expected, &child, found, excluded, unlock_guard)?;
+                    self.walk(root_path, expected, &child, found, excluded, visited_entries, unlock_guard)?;
                 }
             } else if self.policy.included(Path::new(&entry.name)) {
                 found.insert(child);
