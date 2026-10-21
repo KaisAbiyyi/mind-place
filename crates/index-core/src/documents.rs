@@ -6,7 +6,7 @@ use mind_place_documents::{extract_with_check, DocumentFormat, ExtractionError, 
 use mind_place_state::{
     DocumentObjectStore, DocumentScanner, ScanPolicy, StateError, StateStore, VirtualDocumentPath,
 };
-use rusqlite::{params, Connection, OpenFlags, TransactionBehavior};
+use rusqlite::{params, Connection, OpenFlags, OptionalExtension, TransactionBehavior};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{fs, path::{Path, PathBuf}};
