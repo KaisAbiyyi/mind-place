@@ -125,7 +125,7 @@ fn encode_segment(value: &str) -> String {
     let mut s = String::new();
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
     for byte in value.as_bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-') {
+        if byte.is_ascii_alphanumeric() || matches!(*byte, b'.' | b'_' | b'-') {
             s.push(char::from(*byte));
         } else {
             s.push('%');
