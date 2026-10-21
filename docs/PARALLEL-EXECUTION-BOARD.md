@@ -6,14 +6,15 @@
 
 Say `ambil MP-4E` (or `ambil 4E` in Mind Place context). The agent first **checks latest GitHub task claims/PRs, the current roadmap and dependencies**, then declares `CLAIM MP-4E` with unique session ID, resource locks, branch and base SHA before editing. If claimed by another agent, do **REPORT_ONLY** or request fenced transfer; do not silently duplicate the work. Descriptive unit IDs are stable, vendor-neutral, and independent of ChatGPT/Codex/Gemini identity. GitHub comments alone are not atomic claims: serialize conflicting units without a real coordinator.
 
-Historical Cloud 1A–1E, 2A–2D, 3A–3D are complete. **3E currently has existing PR #14 and is NOT unassigned; do not steal it.** `3L1/3L2/3U` remain mandatory after 3E cloud merge, and are not proved by CI. Rows below are *eligible work descriptions*, not assertions that their dependencies have passed. `LOCAL` and `HUMAN` cannot be taken as generic cloud implementations.
+Historical Cloud 1A–1E, 2A–2D, 3A–3E are merged (#14: `5546504`). **Owner priority 2026-10-20: MP-3F bundles the official helper before local qualification.** MP-3F is claimed by Codex local (session `20261020-bundled-helper`, generation 1), PR #17. `3L1/3L2/3U` remain mandatory and are not proved by CI. Rows below are *eligible work descriptions*, not assertions that their dependencies have passed. `LOCAL` and `HUMAN` cannot be taken as generic cloud implementations.
 
 ## Task dependency registry (all remaining named units)
 
 | Task ID | Deliverable | Required predecessors | Exclusive logical resource | Gate / parallel note |
 |---|---|---|---|---|
-| `MP-3E` | Cloud MCP adversarial security and simulated tunnel review | `MP-3D` | `mcp-security` | PR #14 ACTIVE; no second writer |
-| `MP-3L1` | Real Windows local MCP client qualification | `MP-3E` | `native-mcp` | LOCAL; no cloud simulation substitute |
+| `MP-3E` | Cloud MCP adversarial security and simulated tunnel review | `MP-3D` | `mcp-security` | MERGED #14; local/user gates pending |
+| `MP-3F` | Bundle verified official Windows helper and remove manual copy | `MP-3E` | `windows-packaging/hosted-helper-resolution/hosted-setup-copy` | TOP PRIORITY; Codex local claim, PR #17 |
+| `MP-3L1` | Real Windows local MCP client qualification | `MP-3F` | `native-mcp` | LOCAL; no cloud simulation substitute |
 | `MP-3L2` | Official hosted tunnel remote proof | `MP-3L1` | `hosted-account` | LOCAL; requires scoped real access |
 | `MP-3U` | Actual ChatGPT source continuity and revocation acceptance | `MP-3L2` | `human-acceptance` | HUMAN |
 | `MP-4A` | Approved-root registry, virtual namespace and contract | `MP-3U` | `folder-identity/state-schema` | C |

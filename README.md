@@ -92,6 +92,8 @@ npm run dist:win
 
 Generated output is written under `target/`, `release/`, `dist/`, and `outputs/`; these paths are intentionally not versioned. Third-party license notices are regenerated as part of the build.
 
+Windows x64 builds include the official OpenAI tunnel helper for optional hosted ChatGPT access. The build downloads a pinned release, verifies its archive/executable/notices against `scripts/tunnel-client.lock.json`, and stages the helper in both the NSIS installer and portable payload. Later builds revalidate and reuse the local cache. The installed app verifies the executable before launch; users do not download or copy a helper themselves. The helper is never downloaded at runtime. Tunnel/workspace setup, unlock and explicit remote-access consent are still required.
+
 The GitHub `Release build` workflow repeats the release checks on Windows and uploads the installer, portable ZIP, and SHA-256 checksums as workflow artifacts. Tag names must match the desktop version, for example `v0.2.5`.
 
 ## Browser setup

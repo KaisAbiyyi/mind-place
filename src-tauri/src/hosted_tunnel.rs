@@ -4,7 +4,8 @@ use super::{begin_unlocked, finish_unlocked, AppState};
 use mind_place_integration::ClientAuthority;
 use mind_place_state::{ClientCapability, StateStore};
 use serde::Serialize;
-use std::io::Write;
+use std::fs::{File, OpenOptions};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::Ordering;
@@ -18,6 +19,8 @@ const CLIENT_NAME: &str = "Mind Place hosted tunnel (ephemeral read-only)";
 /// Process and identity are owned by the unlocked desktop, not by remote MCP.
 pub(crate) struct HostedTunnel {
     child: Child,
+    // Keep the verified Windows image non-writable/non-replaceable while running.
+    _binary_guard: File,
     _config: tempfile::NamedTempFile,
     client_id: String,
     tunnel_id: String,
@@ -76,11 +79,15 @@ fn valid_runtime_key(key: &str) -> bool {
 
 /// Fixed adjacent binary, never a shell command, URL, user-controlled executable path
 /// or auto-downloaded code. Refuse symlinks escaping the app directory.
-fn trusted_client_binary() -> Result<PathBuf, String> {
+fn trusted_client_binary() -> Result<(PathBuf, File), String> {
     let app = std::env::current_exe().map_err(|_| "MP_TUNNEL_BINARY:Cannot locate app")?;
     let parent = app
         .parent()
         .ok_or("MP_TUNNEL_BINARY:Cannot locate app directory")?;
+    adjacent_client_binary(parent)
+}
+
+fn adjacent_client_binary(parent: &Path) -> Result<(PathBuf, File), String> {
     let expected = parent.join(if cfg!(windows) {
         "tunnel-client.exe"
     } else {
@@ -88,14 +95,64 @@ fn trusted_client_binary() -> Result<PathBuf, String> {
     });
     let actual = expected
         .canonicalize()
-        .map_err(|_| "MP_TUNNEL_BINARY:Install official tunnel-client beside Mind Place")?;
+        .map_err(|_| "MP_TUNNEL_BINARY:Bundled helper missing; repair or reinstall Mind Place")?;
     let trusted_parent = parent
         .canonicalize()
         .map_err(|_| "MP_TUNNEL_BINARY:Cannot verify app directory")?;
     if actual.parent() != Some(trusted_parent.as_path()) || !actual.is_file() {
         return Err("MP_TUNNEL_BINARY:Untrusted helper path".into());
     }
-    Ok(actual)
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.share_mode(1); // FILE_SHARE_READ only: no writes/deletes during use.
+    }
+    let mut file = options
+        .open(&actual)
+        .map_err(|_| "MP_TUNNEL_BINARY:Cannot open bundled helper; repair Mind Place")?;
+    #[cfg(windows)]
+    {
+        use sha2::{Digest, Sha256};
+        let pin: serde_json::Value =
+            serde_json::from_str(include_str!("../../scripts/tunnel-client.lock.json"))
+                .map_err(|_| "MP_TUNNEL_INTEGRITY:Invalid compiled helper pin")?;
+        let expected_size = pin["executable"]["bytes"]
+            .as_u64()
+            .ok_or("MP_TUNNEL_INTEGRITY:Missing compiled helper size")?;
+        let expected_hash = pin["executable"]["sha256"]
+            .as_str()
+            .ok_or("MP_TUNNEL_INTEGRITY:Missing compiled helper checksum")?;
+        let metadata = file
+            .metadata()
+            .map_err(|_| "MP_TUNNEL_INTEGRITY:Cannot inspect bundled helper")?;
+        if !metadata.is_file() || metadata.len() != expected_size {
+            return Err(
+                "MP_TUNNEL_INTEGRITY:Bundled helper damaged; repair or reinstall Mind Place".into(),
+            );
+        }
+        let mut hasher = Sha256::new();
+        let mut buffer = [0_u8; 65536];
+        let mut total = 0_u64;
+        loop {
+            let read = file
+                .read(&mut buffer)
+                .map_err(|_| "MP_TUNNEL_INTEGRITY:Cannot verify bundled helper")?;
+            if read == 0 {
+                break;
+            }
+            total += read as u64;
+            if total > expected_size {
+                return Err("MP_TUNNEL_INTEGRITY:Bundled helper size changed".into());
+            }
+            hasher.update(&buffer[..read]);
+        }
+        if total != expected_size || format!("{:x}", hasher.finalize()) != expected_hash {
+            return Err("MP_TUNNEL_INTEGRITY:Bundled helper checksum mismatch; repair or reinstall Mind Place".into());
+        }
+    }
+    Ok((actual, file))
 }
 
 fn build_client_command(
@@ -174,8 +231,8 @@ fn launch_client(
     id: &str,
     api_key: &str,
     credential: &str,
-) -> Result<(Child, tempfile::NamedTempFile), String> {
-    let binary = trusted_client_binary()?;
+) -> Result<(Child, tempfile::NamedTempFile, File), String> {
+    let (binary, binary_guard) = trusted_client_binary()?;
     // Private temporary file contains NO secrets: settings arrive via child environment.
     // Keeping this handle alive also prevents accidental profile substitution on disk.
     let mut config = tempfile::NamedTempFile::new()
@@ -190,7 +247,7 @@ fn launch_client(
     let child = build_client_command(binary, config.path(), id, api_key, credential)
         .spawn()
         .map_err(|_| "MP_TUNNEL_SPAWN:Could not start installed tunnel-client".to_string())?;
-    Ok((child, config))
+    Ok((child, config, binary_guard))
 }
 
 fn revoke_ephemeral(state: &AppState, client_id: &str) -> Result<(), String> {
@@ -318,15 +375,17 @@ pub(super) fn start_hosted_tunnel(
         .issue(CLIENT_NAME, &[ClientCapability::Read])
         .map_err(|_| "MP_TUNNEL_AUTHORITY:Cannot create read-only client".to_string())?;
     let client_id = issued.client.id.clone();
-    let (child, config) = match launch_client(&tunnel_id, &api_key, issued.credential()) {
-        Ok(process) => process,
-        Err(error) => {
-            let _ = revoke_ephemeral(&state, &client_id);
-            return Err(error);
-        }
-    };
+    let (child, config, binary_guard) =
+        match launch_client(&tunnel_id, &api_key, issued.credential()) {
+            Ok(process) => process,
+            Err(error) => {
+                let _ = revoke_ephemeral(&state, &client_id);
+                return Err(error);
+            }
+        };
     let tunnel = HostedTunnel {
         child,
+        _binary_guard: binary_guard,
         _config: config,
         client_id: client_id.clone(),
         tunnel_id: tunnel_id.clone(),
@@ -357,6 +416,42 @@ pub(super) fn stop_hosted_tunnel(state: State<'_, AppState>) -> Result<HostedTun
 #[cfg(test)]
 mod tests {
     use super::{valid_runtime_key, valid_tunnel_id, HEADER_REF, MCP_ORIGIN};
+    #[test]
+    #[cfg(windows)]
+    fn phase_3f_rejects_tampered_adjacent_helper() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("tunnel-client.exe"),
+            b"not the official executable",
+        )
+        .unwrap();
+        assert!(super::adjacent_client_binary(dir.path()).is_err());
+    }
+    #[test]
+    #[cfg(windows)]
+    fn phase_3f_pinned_helper_is_accepted_and_locked_against_replacement() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(super::adjacent_client_binary(dir.path()).is_err());
+        // Cargo's test executable lives in debug/deps; the real app is in debug.
+        let staged = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/debug");
+        let (official, _guard) = super::adjacent_client_binary(&staged).unwrap();
+        let copy = dir.path().join("tunnel-client.exe");
+        std::fs::copy(official, &copy).unwrap();
+        let (_, guard) = super::adjacent_client_binary(dir.path()).unwrap();
+        let version = std::process::Command::new(&copy)
+            .arg("--version")
+            .output()
+            .unwrap();
+        assert!(version.status.success());
+        assert!(String::from_utf8_lossy(&version.stdout).contains("0.0.16"));
+        assert!(std::fs::OpenOptions::new().write(true).open(&copy).is_err());
+        drop(guard);
+        // Same-size corruption must be detected by digest, not only metadata.
+        let mut altered = std::fs::OpenOptions::new().write(true).open(&copy).unwrap();
+        std::io::Write::write_all(&mut altered, b"bad-image").unwrap();
+        drop(altered);
+        assert!(super::adjacent_client_binary(dir.path()).is_err());
+    }
     #[test]
     fn accepts_only_documented_tunnel_identifiers() {
         assert!(valid_tunnel_id(&format!("tunnel_{}", "a".repeat(32))));
@@ -480,6 +575,7 @@ mod tests {
             .unwrap();
         let mut hosted = super::HostedTunnel {
             child,
+            _binary_guard: std::fs::File::open(std::env::current_exe().unwrap()).unwrap(),
             _config: tempfile::NamedTempFile::new().unwrap(),
             client_id: "client:v1:simulated".into(),
             tunnel_id: format!("tunnel_{}", "a".repeat(32)),
@@ -533,6 +629,7 @@ mod tests {
             mcp: std::sync::Arc::new(std::sync::Mutex::new(None)),
             hosted: std::sync::Arc::new(std::sync::Mutex::new(Some(super::HostedTunnel {
                 child,
+                _binary_guard: std::fs::File::open(std::env::current_exe().unwrap()).unwrap(),
                 _config: tempfile::NamedTempFile::new().unwrap(),
                 client_id: id,
                 tunnel_id: format!("tunnel_{}", "c".repeat(32)),

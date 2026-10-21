@@ -4,6 +4,8 @@
 
 ## Transport selection
 
+**MP-3F packaging update (2026-10-20, PR #17):** the Windows installer and portable build now stage the pinned official helper and verify its bytes before launch. The manual helper-install steps retained below describe the historical 3D design; follow the current 3F/3E handoff instead. Account setup and explicit consent still apply.
+
 Use the **official OpenAI Secure MCP Tunnel** (`openai/tunnel-client`) rather than creating an
 Internet-facing listener or a Cloudflare Quick Tunnel. The helper makes outbound requests to
 OpenAI's tunnel service and forwards the permitted `main` MCP channel to the existing

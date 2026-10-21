@@ -1,6 +1,6 @@
 # Phase 3E — MCP and hosted tunnel cloud security qualification
 
-**Status:** cloud implementation in PR qualification; no real remote ChatGPT or user-device proof.
+**Status:** merged in PR #14 at `55465041cf9f2e2df05eeeccec9ac3249df1cc0c`, with Windows CI PASS. MP-3F now adds bundled-helper packaging before local qualification. No real remote ChatGPT or user-device proof.
 
 ## Threat model and security invariants
 
@@ -82,10 +82,9 @@ encryption-at-rest claim is made for existing archives.
 
 ### 3L2 — official hosted private tunnel (local/network executor)
 
-1. Obtain the current official `openai/tunnel-client` Windows release from
-   https://github.com/openai/tunnel-client and **verify published checksum/origin**.
-   Place `tunnel-client.exe` beside `Mind Place.exe`. Do not download an arbitrary
-   similarly named binary.
+1. Use the MP-3F Windows installer or portable package with its bundled official
+   helper. Build-time pins and pre-launch integrity verification replace manual
+   helper download/copy. Repair/reinstall the package if the helper is missing or damaged.
 2. Provision an authorized Secure MCP Tunnel in the owner's OpenAI Platform workspace,
    assign the intended ChatGPT workspace, and obtain the private tunnel ID and runtime
    API key with appropriate Tunnels Read + Use permission. Do not share keys in chat.

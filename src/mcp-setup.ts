@@ -27,7 +27,7 @@ export function mountLocalMcpSetup(parent: HTMLElement, invoke: Invoke, clipboar
     '<h4>Hosted ChatGPT connection (Secure MCP Tunnel)</h4>',
     '<p>This uses the official outbound-only tunnel-client; it does not publish a public MCP URL.',
     ' Queries and selected archive evidence will traverse the OpenAI service when your remote client requests them.</p>',
-    '<p>Install the verified official tunnel-client executable beside Mind Place. Do not use a third-party binary.</p>',
+    '<p>The official tunnel helper is included with Mind Place for Windows x64. No separate download is needed.</p>',
     '<label class="search-label" for="hosted-tunnel-id">Existing OpenAI tunnel ID</label>',
     '<input id="hosted-tunnel-id" spellcheck="false" autocapitalize="off" autocomplete="off"',
     ' placeholder="tunnel_..." maxlength="48">',
@@ -196,9 +196,12 @@ export function mountLocalMcpSetup(parent: HTMLElement, invoke: Invoke, clipboar
           break;
         }
       }
-    } catch {
+    } catch (error) {
       if (section.isConnected) {
-        state.textContent = "MCP operation failed; check local setup, tunnel ID, and runtime key.";
+        const message = String(error);
+        state.textContent = /MP_TUNNEL_(BINARY|INTEGRITY):/.test(message)
+          ? "The bundled tunnel helper is missing or damaged. Repair or reinstall Mind Place, then try again."
+          : "MCP operation failed; check local setup, tunnel ID, and runtime key.";
         await refreshHostedStatus();
       }
     } finally {
