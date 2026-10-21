@@ -7,6 +7,7 @@ use mind_place_archive::{
     ArchiveStore, AssetResult, Conversation, ConversationSummary, ExportResult, ImportReceipt,
     SnapshotSummary, NATIVE_HOST_NAME,
 };
+use mind_place_index::documents::{DocumentHit, DocumentIndex, DocumentIndexReport};
 use mind_place_index::{
     ContextInspection, ContextPack, ContextRequest, FetchInspection, FetchRequest, FetchResponse,
     IndexError, IndexStats, IndexStore, RetrievalRequest, RetrievalResponse, SearchHit,
@@ -443,6 +444,42 @@ async fn revoke_document_root(state: State<'_, AppState>, root_id: String) -> Re
     finish_unlocked(&state, lease)
 }
 
+/// Owner-triggered scan only. Never run implicitly at boot or from MCP.
+#[tauri::command]
+async fn refresh_document_root_index(
+    state: State<'_, AppState>,
+    root_id: String,
+) -> Result<DocumentIndexReport, String> {
+    let state_path = state.state_path.clone();
+    let document_index_path = state.index_path.with_file_name("document-index.sqlite3");
+    index_task(&state, move |lease, security| {
+        let authority = StateStore::open(state_path)?;
+        let projection = DocumentIndex::open(document_index_path)?;
+        projection.refresh_root(&authority, &root_id, || {
+            security.validate_lease(lease).map_err(|_| IndexError::Revoked)
+        })
+    }).await
+}
+
+/// Owner search only: checks live root grant, immutable head, native source
+/// content hash and lock lease before any derived snippet is disclosed.
+#[tauri::command]
+async fn search_document_index(
+    state: State<'_, AppState>,
+    query: String,
+    limit: Option<usize>,
+) -> Result<Vec<DocumentHit>, String> {
+    let state_path = state.state_path.clone();
+    let document_index_path = state.index_path.with_file_name("document-index.sqlite3");
+    index_task(&state, move |lease, security| {
+        let authority = StateStore::open(state_path)?;
+        let projection = DocumentIndex::open(document_index_path)?;
+        projection.search(&authority, &query, limit.unwrap_or(20), || {
+            security.validate_lease(lease).map_err(|_| IndexError::Revoked)
+        })
+    }).await
+}
+
 #[tauri::command]
 async fn list_conversations(
     state: State<'_, AppState>,
@@ -687,6 +724,8 @@ fn main() {
             stage_document_root,
             approve_document_root,
             revoke_document_root,
+            refresh_document_root_index,
+            search_document_index,
             list_conversations,
             read_conversation,
             list_snapshots,
