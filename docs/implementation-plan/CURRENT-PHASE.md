@@ -81,7 +81,7 @@ Current execution order after the security-first reprioritization:
    - no schema migration, raw data rewrite, MCP exposure, or local/manual qualification (`C1 / L0 / U0`);
    - details and caveats: [phase-2d-retrieval-qualification.md](phase-2d-retrieval-qualification.md).
 
-**Phase 2 is complete** (`C4 / L0 / U0`), with all four units 2A–2D cloud qualified and merged. Phases 3A–3D have merged to `main`; Phase 3E is under cloud qualification. No local Windows pull is required until the Phase 3E handoff.
+**Phase 2 is complete** (`C4 / L0 / U0`), with all four units 2A–2D cloud qualified and merged. Phases 3A–3F have merged to `main`; Phase 3 awaits local 3L1/3L2 and owner 3U acceptance.
 
 ## Phase 3 — shared-brain MCP
 
@@ -100,7 +100,7 @@ Current execution order after the security-first reprioritization:
 4. **Phase 3D — secure hosted tunnel + owner setup — DONE.** [PR #13](https://github.com/KaisAbiyyi/mind-place/pull/13) squash-merged into `main` at `f8ccfef14767a1e1462e8ac7c6145ff6bb75b087` after [Windows CI 39172822022](https://github.com/KaisAbiyyi/mind-place/actions/runs/39172822022) passed. Owner-consented outbound OpenAI Secure MCP Tunnel, ephemeral read-only credential, lock/stop lifecycle and ChatGPT setup UI. No public endpoint. Remote request proof reserved for 3L2/3U.
 
 5. **Phase 3E — security and E2E cloud qualification — MERGED.** PR #14 squash-merged at `55465041cf9f2e2df05eeeccec9ac3249df1cc0c`, with Windows PR CI PASS. Simulated transport and protocol conformance over actual loopback TCP, stale/rotated bearer and read-admin escalation denial, strict header adversarial cases, native helper exit isolation, periodic unexpected-exit revocation and fail-closed authority failure. See [Phase 3E handoff](phase-3e-security-qualification.md). **No real hosted tunnel or end-user qualification is claimed.**
-6. **Phase 3F — bundled official tunnel helper — TOP PRIORITY / IMPLEMENTED, LOCAL PACKAGING PASS, PR REVIEW.** Owner request 2026-10-20: Windows installer and portable app include the verified helper so users do not download/copy it themselves. PR #17, code checkpoint `d27fa09`; [bounded contract and receipt](phase-3f-bundled-tunnel-helper.md). Full local baseline, native helper tests, NSIS and portable ZIP checks pass. CI-green integration precedes 3L1/3L2/3U. Account setup and explicit remote consent remain required.
+6. **Phase 3F — bundled official tunnel helper — DONE / MERGED.** [PR #17](https://github.com/KaisAbiyyi/mind-place/pull/17) squash-merged to `main` on 2026-10-21 at `f9d1313ac3301e69ccb3fba5d2426c0985940fb8`; final-head [Windows product CI PASS](https://github.com/KaisAbiyyi/mind-place/actions/runs/39305453977). Windows installer/portable bundle the verified helper; no user download/copy required. [Contract and receipt](phase-3f-bundled-tunnel-helper.md). Local 3L1, 3L2 and user 3U are NOT RUN; actual account setup, explicit consent and provenance/revocation proof remain required.
 
 ## Phase 1A explicit boundary
 
@@ -116,4 +116,4 @@ Do not weaken Phase 1A to fake those later guarantees. UI/documentation must sta
 
 ## Handoff rule
 
-A cloud unit is complete only when its PR/branch is CI-green and its final SHA is reported. If a bug is fixed, rerun the relevant checks before merge. The immediate priority is **MP-3F bundled helper packaging**, then local 3L1/3L2 and hosted 3U qualification. Do not misreport build/CI/package evidence as a real tunnel or ChatGPT account proof.
+A cloud unit is complete only when its PR/branch is CI-green and its final SHA is reported. If a bug is fixed, rerun the relevant checks before merge. The immediate priority is **local MP-3L1**, then real hosted MP-3L2 and user MP-3U qualification. MP-4A is gated by MP-3U acceptance. Do not misreport build/CI/package evidence as a real tunnel or ChatGPT account proof.
