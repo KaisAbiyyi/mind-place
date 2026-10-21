@@ -88,7 +88,11 @@ fn validate_root_id(id: &str) -> Result<()> {
     let Some(hex) = id.strip_prefix(ROOT_ID_PREFIX) else {
         return Err(StateError::InvalidValue);
     };
-    if hex.len() != 64 || !hex.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()) {
+    if hex.len() != 64
+        || !hex
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+    {
         return Err(StateError::InvalidValue);
     }
     Ok(())
@@ -104,17 +108,30 @@ fn root_digest(path: &str) -> String {
 }
 
 fn validate_segment(value: &str) -> Result<()> {
-    if value.is_empty() || value.len() > MAX_COMPONENT_BYTES ||
-        value == "." || value == ".." ||
-        value.ends_with('.') || value.ends_with(' ') ||
-        value.chars().any(|c| c.is_control() || matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '%'))
+    if value.is_empty()
+        || value.len() > MAX_COMPONENT_BYTES
+        || value == "."
+        || value == ".."
+        || value.ends_with('.')
+        || value.ends_with(' ')
+        || value.chars().any(|c| {
+            c.is_control()
+                || matches!(
+                    c,
+                    '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '%'
+                )
+        })
     {
         return Err(StateError::InvalidValue);
     }
     let stem = value.split('.').next().unwrap_or("").to_ascii_uppercase();
-    if matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$") ||
-        (stem.len() == 4 && (stem.starts_with("COM") || stem.starts_with("LPT")) &&
-            stem.as_bytes()[3].is_ascii_digit() && stem.as_bytes()[3] != b'0')
+    if matches!(
+        stem.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+    ) || (stem.len() == 4
+        && (stem.starts_with("COM") || stem.starts_with("LPT"))
+        && stem.as_bytes()[3].is_ascii_digit()
+        && stem.as_bytes()[3] != b'0')
     {
         return Err(StateError::InvalidValue);
     }
@@ -244,13 +261,15 @@ impl StateStore {
     pub fn document_root(&self, id: &str) -> Result<Option<DocumentRoot>> {
         validate_root_id(id)?;
         let db = self.connection()?;
-        let found = db.query_row(
-            "SELECT r.id,r.canonical_path,r.approval_state,d.path_digest
+        let found = db
+            .query_row(
+                "SELECT r.id,r.canonical_path,r.approval_state,d.path_digest
              FROM document_root_registry d JOIN source_roots r ON r.id=d.root_id
              WHERE d.root_id=?1",
-            [id],
-            |row| Ok((row_root(row)?, row.get::<_, String>(3)?)),
-        ).optional()?;
+                [id],
+                |row| Ok((row_root(row)?, row.get::<_, String>(3)?)),
+            )
+            .optional()?;
         match found {
             Some((root, digest)) => {
                 validate_binding(&root, &digest)?;
@@ -265,7 +284,7 @@ impl StateStore {
         let db = self.connection()?;
         let mut statement = db.prepare(
             "SELECT r.id,r.canonical_path,r.approval_state,d.path_digest
-             FROM document_root_registry d JOIN source_roots r ON r.id=d.root_id ORDER BY r.id"
+             FROM document_root_registry d JOIN source_roots r ON r.id=d.root_id ORDER BY r.id",
         )?;
         let rows = statement.query_map([], |row| Ok((row_root(row)?, row.get::<_, String>(3)?)))?;
         let mut roots = Vec::new();
@@ -279,9 +298,14 @@ impl StateStore {
 
     /// Strict registry lookup, not a path resolver/open primitive. MP-4B must
     /// validate current authorization and a filesystem HANDLE before reading.
-    pub fn require_approved_document_uri(&self, uri: &str) -> Result<(DocumentRoot, VirtualDocumentPath)> {
+    pub fn require_approved_document_uri(
+        &self,
+        uri: &str,
+    ) -> Result<(DocumentRoot, VirtualDocumentPath)> {
         let virtual_path = VirtualDocumentPath::parse(uri)?;
-        let root = self.document_root(&virtual_path.root_id)?.ok_or(StateError::InvalidValue)?;
+        let root = self
+            .document_root(&virtual_path.root_id)?
+            .ok_or(StateError::InvalidValue)?;
         if !root.is_approved() {
             return Err(StateError::InvalidValue);
         }
