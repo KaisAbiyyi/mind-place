@@ -24,6 +24,7 @@ export interface ReaderOptions {
   root: HTMLElement;
   invoke: Invoke;
   clipboard?: ClipboardWriter;
+  onLock?: () => void;
 }
 
 export interface ReaderHandle {
@@ -74,6 +75,7 @@ const STATIC_APP_SHELL = `
       <header class="reader-toolbar">
         <div class="toolbar-context"><span class="context-mark" aria-hidden="true"></span><span>Conversation reader</span></div>
         <div class="toolbar-actions">
+          <button class="quiet-button" type="button" data-action="lock">Lock</button>
           <span id="action-status" class="action-status" role="status" aria-live="polite"></span>
           <button class="quiet-button" type="button" data-action="copy-answer" disabled>Copy answer</button>
           <button class="primary-button" type="button" data-action="export-markdown" disabled>
@@ -95,7 +97,7 @@ const STATIC_APP_SHELL = `
     <div id="setup-content" class="setup-content">
       <p class="list-note">Loading setup details…</p>
     </div>
-    <div class="dialog-footer"><button class="quiet-button" type="button" data-action="close-setup">Done</button></div>
+    <div class="dialog-footer"><button class="quiet-button" type="button" data-action="lock">Lock</button><button class="quiet-button" type="button" data-action="close-setup">Done</button></div>
   </dialog>
 `;
 
@@ -167,9 +169,9 @@ export function renderMessageContent(document: Document, message: Pick<Message, 
   return content;
 }
 
-export function mountReader({ root, invoke, clipboard }: ReaderOptions): ReaderHandle {
+export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: ReaderOptions): ReaderHandle {
   const document = root.ownerDocument;
-  const safeClipboard = clipboard ?? {
+  const clipboardWriter = clipboard ?? {
     writeText: (value: string) => document.defaultView?.navigator.clipboard?.writeText(value)
       ?? Promise.reject(new Error("Clipboard access is unavailable in this app window.")),
   };
@@ -185,6 +187,20 @@ export function mountReader({ root, invoke, clipboard }: ReaderOptions): ReaderH
   let selectedSnapshotId: string | null = null;
   let exportedMarkdown = "";
   let alive = true;
+  const invoke: Invoke = async <T>(command: string, args?: Record<string, unknown>) => {
+    if (!alive) throw new Error("MP_UI_SESSION_EXPIRED");
+    const result = await nativeInvoke<T>(command, args);
+    if (!alive) throw new Error("MP_UI_SESSION_EXPIRED");
+    return result;
+  };
+  const safeClipboard: ClipboardWriter = {
+    writeText: (value) => alive
+      ? clipboardWriter.writeText(value)
+      : Promise.reject(new Error("MP_UI_SESSION_EXPIRED")),
+  };
+  for (const button of root.querySelectorAll<HTMLButtonElement>("[data-action='lock']")) {
+    button.hidden = !onLock;
+  }
 
   const get = <T extends HTMLElement>(selector: string): T => {
     const element = root.querySelector<T>(selector);
@@ -805,12 +821,14 @@ export function mountReader({ root, invoke, clipboard }: ReaderOptions): ReaderH
   };
 
   const clickHandler = (event: Event) => {
+    if (!alive) return;
     const target = event.target;
     if (!(target instanceof document.defaultView!.Element)) return;
     const actionElement = target.closest<HTMLElement>("[data-action]");
     if (actionElement) {
       const action = actionElement.dataset.action;
-      if (action === "refresh") void loadConversations(true);
+      if (action === "lock") onLock?.();
+      else if (action === "refresh") void loadConversations(true);
       else if (action === "retry-selection" && selectedId) void selectConversation(selectedId);
       else if (action === "open-setup") {
         if (typeof dialog.showModal === "function") {
@@ -866,6 +884,17 @@ export function mountReader({ root, invoke, clipboard }: ReaderOptions): ReaderH
       selectionVersion++;
       listVersion++;
       setupVersion++;
+      summaries = [];
+      loadedConversation = null;
+      loadedSnapshots = [];
+      selectedId = null;
+      selectedSnapshotId = null;
+      exportedMarkdown = "";
+      for (const input of root.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input, textarea")) input.value = "";
+      setupContent.replaceChildren();
+      if (dialog.open) {
+        try { dialog.close(); } catch { dialog.removeAttribute("open"); }
+      }
       root.removeEventListener("click", clickHandler);
       root.removeEventListener("change", changeHandler);
       search.removeEventListener("input", searchHandler);
