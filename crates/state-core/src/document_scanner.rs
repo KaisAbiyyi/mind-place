@@ -293,7 +293,6 @@ impl DocumentScanner {
                     self.walk(&entry.path(), &child, found, excluded, unlock_guard)?;
                 }
             } else if md.is_file() && self.policy.included(Path::new(&name)) {
-                VirtualDocumentPath::from_segments("_", &child).ok(); // validation below uses real root.
                 found.insert(child);
                 if found.len() > self.policy.max_files {
                     return Err(StateError::DocumentLimit);
