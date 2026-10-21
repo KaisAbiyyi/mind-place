@@ -159,3 +159,28 @@ fn windows_handle_enumerator_skips_reparse_and_rejects_root_swap() {
     assert!(scanner.rescan(&root, || Ok(())).is_err());
     assert!(scanner.needs_rescan(&root));
 }
+
+
+#[cfg(windows)]
+#[test]
+fn windows_global_traversal_budget_and_total_bytes_are_bounded() {
+    let (dir, state, root) = fixture();
+    let path = dir.path().join("approved-documents");
+    fs::create_dir(path.join("first")).unwrap();
+    fs::create_dir(path.join("second")).unwrap();
+    fs::write(path.join("first").join("a.md"), b"hello").unwrap();
+    fs::write(path.join("second").join("b.md"), b"world").unwrap();
+
+    let mut small = ScanPolicy::default();
+    small.max_files = 3; // root 2 dirs + first child, second child exceeds cap
+    let mut scanner = DocumentScanner::new(state.clone(), small).unwrap();
+    assert!(matches!(scanner.rescan(&root, || Ok(())), Err(StateError::DocumentLimit)));
+    assert!(scanner.needs_rescan(&root));
+    assert_eq!(scanner.current_uris(&root, || Ok(())).unwrap(), None);
+
+    let mut small = ScanPolicy::default();
+    small.max_total_bytes = 6; // 5 + 5 > 6 across folders
+    let mut scanner = DocumentScanner::new(state, small).unwrap();
+    assert!(matches!(scanner.rescan(&root, || Ok(())), Err(StateError::DocumentLimit)));
+    assert!(scanner.needs_rescan(&root));
+}
