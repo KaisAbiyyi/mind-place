@@ -252,8 +252,8 @@ fn parse_xml(ctx: &mut Context<'_>, bytes: &[u8]) -> Result<String> {
                     return Err(ExtractionError::Limit("xml_depth"));
                 }
                 let name = e.name();
-                let local = name
-                    .as_ref()
+                let name_bytes: &[u8] = name.as_ref();
+                let local = name_bytes
                     .rsplit(|c: &u8| *c == b':')
                     .next()
                     .unwrap_or_default();
@@ -266,8 +266,8 @@ fn parse_xml(ctx: &mut Context<'_>, bytes: &[u8]) -> Result<String> {
                     return Err(ExtractionError::Invalid);
                 }
                 let name = e.name();
-                let local = name
-                    .as_ref()
+                let name_bytes: &[u8] = name.as_ref();
+                let local = name_bytes
                     .rsplit(|c: &u8| *c == b':')
                     .next()
                     .unwrap_or_default();
