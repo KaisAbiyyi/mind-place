@@ -350,7 +350,15 @@ impl DocumentScanner {
                 if self.policy.excluded_dir(&entry.name) {
                     *excluded += 1;
                 } else {
-                    self.walk(root_path, expected, &child, found, excluded, visited_entries, unlock_guard)?;
+                    self.walk(
+                        root_path,
+                        expected,
+                        &child,
+                        found,
+                        excluded,
+                        visited_entries,
+                        unlock_guard,
+                    )?;
                 }
             } else if self.policy.included(Path::new(&entry.name)) {
                 found.insert(child);
