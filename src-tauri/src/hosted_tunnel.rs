@@ -631,6 +631,7 @@ mod tests {
             state_path,
             index_path: dir.path().join("index.sqlite3"),
             authority_ready: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            document_authority_gate: std::sync::Arc::new(std::sync::Mutex::new(())),
             mcp: std::sync::Arc::new(std::sync::Mutex::new(None)),
             hosted: std::sync::Arc::new(std::sync::Mutex::new(Some(super::HostedTunnel {
                 child,

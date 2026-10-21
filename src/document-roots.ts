@@ -1,5 +1,7 @@
 import type { Invoke } from "./reader.js";
 
+const REVOKE_CONFIRM_WINDOW_MS = 15_000;
+
 export interface DocumentRoot {
   id: string;
   canonical_path: string;
@@ -14,10 +16,10 @@ export function mountDocumentRootSetup(parent: HTMLElement, invoke: Invoke): voi
   section.className = "document-root-setup";
   const heading = doc.createElement("h3");
   heading.className = "setup-section-title";
-  heading.textContent = "Personal document folders — staging only";
+  heading.textContent = "Personal document folders — owner permissions";
   const explanation = doc.createElement("p");
   explanation.textContent =
-    "Registering a folder only creates a pending identity. Mind Place will not read or index its files. Owner approval and protected NTFS access arrive in a later phase.";
+    "Staging only records a pending identity. Approve explicitly to permit future bounded document reads. Revocation is permanent. Scanning and indexing are not enabled yet.";
   const form = doc.createElement("form");
   form.className = "document-root-form";
   const label = doc.createElement("label");
@@ -60,6 +62,74 @@ export function mountDocumentRootSetup(parent: HTMLElement, invoke: Invoke): voi
         const details = doc.createElement("small");
         details.textContent = ` ${root.approval_state.toUpperCase()} · ${root.virtual_prefix}`;
         item.append(name, details);
+        if (root.approval_state === "pending") {
+          const approve = doc.createElement("button");
+          approve.type = "button";
+          approve.className = "quiet-button";
+          approve.dataset.action = "approve-root";
+          approve.textContent = "Approve folder access";
+          approve.addEventListener("click", () => {
+            if (!section.isConnected) return;
+            approve.disabled = true;
+            status.textContent = "Checking folder identity and recording owner approval…";
+            void invoke<DocumentRoot>("approve_document_root", { rootId: root.id })
+              .then(async () => {
+                if (!section.isConnected) return;
+                status.textContent = "Approved. Scanning and indexing remain disabled.";
+                await refresh();
+              })
+              .catch((error: unknown) => {
+                if (section.isConnected) status.textContent = `Approval denied: ${String(error)}`;
+              })
+              .finally(() => { if (section.isConnected) approve.disabled = false; });
+          });
+          item.append(approve);
+        }
+        if (root.approval_state !== "revoked") {
+          const revoke = doc.createElement("button");
+          revoke.type = "button";
+          revoke.className = "quiet-button";
+          revoke.dataset.action = "revoke-root";
+          revoke.textContent = "Revoke";
+          let armedAt: number | null = null;
+          let resetTimer: ReturnType<typeof setTimeout> | undefined;
+          const disarm = () => {
+            armedAt = null;
+            if (resetTimer !== undefined) clearTimeout(resetTimer);
+            resetTimer = undefined;
+            if (!revoke.disabled) revoke.textContent = "Revoke";
+          };
+          revoke.addEventListener("blur", () => {
+            if (!revoke.disabled) disarm();
+          });
+          revoke.addEventListener("click", () => {
+            if (!section.isConnected) return;
+            const now = Date.now();
+            if (armedAt === null || now - armedAt >= REVOKE_CONFIRM_WINDOW_MS) {
+              disarm();
+              armedAt = now;
+              revoke.textContent = "Confirm permanent revoke (15s)";
+              status.textContent = "Click again within 15 seconds to permanently revoke this folder.";
+              resetTimer = setTimeout(() => {
+                if (revoke.isConnected) disarm();
+              }, REVOKE_CONFIRM_WINDOW_MS);
+              return;
+            }
+            disarm();
+            revoke.disabled = true;
+            void invoke<void>("revoke_document_root", { rootId: root.id })
+              .then(async () => {
+                if (!section.isConnected) return;
+                status.textContent = "Document root permanently revoked.";
+                await refresh();
+              })
+              .catch((error: unknown) => {
+                if (section.isConnected) status.textContent = `Revocation failed: ${String(error)}`;
+              })
+              .finally(() => { if (section.isConnected) revoke.disabled = false; });
+          });
+          item.append(revoke);
+        }
         list.append(item);
       }
     } catch {

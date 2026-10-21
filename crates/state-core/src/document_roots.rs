@@ -4,7 +4,7 @@ use crate::{safe_path, Result, StateError, StateStore};
 use rusqlite::{params, OptionalExtension, TransactionBehavior};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use std::{fs, path::Path};
+use std::{fs, io::Read, path::Path};
 
 pub const VIRTUAL_ROOT_PREFIX: &str = "mpdoc://root/";
 const MAX_URI_BYTES: usize = 4096;
@@ -304,8 +304,66 @@ impl StateStore {
         Ok(roots)
     }
 
-    /// Strict registry lookup, not a path resolver/open primitive. MP-4B must
-    /// validate current authorization and a filesystem HANDLE before reading.
+    /// Explicit desktop-owner action only; caller must hold an active unlock
+    /// lease. No MCP client has authority to call this mutation.
+    pub fn approve_document_root(&self, id: &str) -> Result<DocumentRoot> {
+        let root = self.document_root(id)?.ok_or(StateError::InvalidValue)?;
+        if root.approval_state != "pending" {
+            return Err(StateError::InvalidValue);
+        }
+        safe_path(Path::new(&root.canonical_path))?;
+        let current = fs::canonicalize(&root.canonical_path)?;
+        if current != Path::new(&root.canonical_path) {
+            return Err(StateError::UnsafePath);
+        }
+        let (volume, file_id) = crate::ntfs::root_identity(&current)?;
+        let mut db = self.connection()?;
+        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let changed = tx.execute(
+            "UPDATE source_roots SET approval_state='approved',approved_at=unixepoch()
+             WHERE id=?1 AND approval_state='pending'
+             AND NOT EXISTS(SELECT 1 FROM root_tombstones WHERE root_id=?1)",
+            [id],
+        )?;
+        if changed != 1 {
+            return Err(StateError::InvalidValue);
+        }
+        tx.execute(
+            "INSERT INTO document_root_authorizations(root_id,volume_id,file_id)
+             VALUES(?1,?2,?3)",
+            params![id, volume.to_string(), file_id.to_string()],
+        )?;
+        tx.commit()?;
+        self.document_root(id)?.ok_or(StateError::Corrupt)
+    }
+
+    /// Terminal and tombstoned, including for previously pending roots.
+    pub fn revoke_document_root(&self, id: &str) -> Result<()> {
+        self.document_root(id)?.ok_or(StateError::InvalidValue)?;
+        self.revoke_root(id)
+    }
+
+    fn authorized_binding(&self, id: &str) -> Result<(u64, u64)> {
+        let db = self.connection()?;
+        let row: Option<(String, String)> = db
+            .query_row(
+                "SELECT a.volume_id,a.file_id FROM document_root_authorizations a
+             JOIN source_roots r ON r.id=a.root_id
+             WHERE a.root_id=?1 AND r.approval_state='approved'
+             AND NOT EXISTS(SELECT 1 FROM root_tombstones t WHERE t.root_id=a.root_id)",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        let (volume, file_id) = row.ok_or(StateError::InvalidValue)?;
+        Ok((
+            volume.parse().map_err(|_| StateError::Corrupt)?,
+            file_id.parse().map_err(|_| StateError::Corrupt)?,
+        ))
+    }
+
+    /// Logical lookup only. Does not create filesystem access or return
+    /// arbitrary native paths. A grant must be explicit and still live.
     pub fn require_approved_document_uri(
         &self,
         uri: &str,
@@ -317,6 +375,38 @@ impl StateStore {
         if !root.is_approved() {
             return Err(StateError::InvalidValue);
         }
+        self.authorized_binding(&root.id)?;
         Ok((root, virtual_path))
+    }
+
+    /// Bounded capability read: ancestors are opened relative to verified
+    /// handles, never with native path string joins.
+    /// The second authority check discards bytes if revoked during I/O.
+    pub fn read_document_bytes(&self, uri: &str, max_bytes: usize) -> Result<Vec<u8>> {
+        if max_bytes == 0 || max_bytes > 32 * 1024 * 1024 {
+            return Err(StateError::InvalidValue);
+        }
+        let (root, relative) = self.require_approved_document_uri(uri)?;
+        let binding = self.authorized_binding(&root.id)?;
+        let mut file = crate::ntfs::open_document(
+            Path::new(&root.canonical_path),
+            binding,
+            relative.segments(),
+        )?;
+        if file.metadata()?.len() > max_bytes as u64 {
+            return Err(StateError::InvalidValue);
+        }
+        let mut bytes = Vec::new();
+        file.by_ref()
+            .take(max_bytes as u64 + 1)
+            .read_to_end(&mut bytes)?;
+        if bytes.len() > max_bytes {
+            return Err(StateError::InvalidValue);
+        }
+        self.require_approved_document_uri(uri)?;
+        if self.authorized_binding(&root.id)? != binding {
+            return Err(StateError::InvalidValue);
+        }
+        Ok(bytes)
     }
 }
