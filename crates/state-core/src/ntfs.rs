@@ -113,7 +113,7 @@ mod platform {
         identity(&file, true)?;
         Ok(file)
     }
-    pub(super) fn root_identity(path: &Path) -> io::Result<(u64, u64)> {
+    pub(crate) fn root_identity(path: &Path) -> io::Result<(u64, u64)> {
         identity(&root(path)?, true)
     }
     fn child(parent: &File, segment: &str, directory: bool) -> io::Result<File> {
@@ -169,7 +169,7 @@ mod platform {
         identity(&file, directory)?;
         Ok(file)
     }
-    pub(super) fn open_document(
+    pub(crate) fn open_document(
         path: &Path,
         expected: (u64, u64),
         segments: &[String],
@@ -190,7 +190,7 @@ mod platform {
 #[cfg(not(windows))]
 mod platform {
     use super::*;
-    pub(super) fn root_identity(path: &Path) -> io::Result<(u64, u64)> {
+    pub(crate) fn root_identity(path: &Path) -> io::Result<(u64, u64)> {
         #[cfg(unix)]
         {
             use std::os::unix::fs::MetadataExt;
@@ -203,7 +203,7 @@ mod platform {
             Err(io::Error::new(io::ErrorKind::Unsupported, "NTFS only"))
         }
     }
-    pub(super) fn open_document(_: &Path, _: (u64, u64), _: &[String]) -> io::Result<File> {
+    pub(crate) fn open_document(_: &Path, _: (u64, u64), _: &[String]) -> io::Result<File> {
         Err(io::Error::new(
             io::ErrorKind::Unsupported,
             "NTFS handle containment is Windows-only",
