@@ -16,23 +16,42 @@ fn policy_is_bounded_and_watcher_reconciliation_is_not_trusted_without_rescan() 
     let (_dir, state, root) = fixture();
     let mut invalid = ScanPolicy::default();
     invalid.max_files = 0;
-    assert!(matches!(DocumentScanner::new(state.clone(), invalid), Err(StateError::InvalidValue)));
+    assert!(matches!(
+        DocumentScanner::new(state.clone(), invalid),
+        Err(StateError::InvalidValue)
+    ));
     let mut invalid = ScanPolicy::default();
     invalid.max_bytes_per_file = 64 * 1024 * 1024;
-    assert!(matches!(DocumentScanner::new(state.clone(), invalid), Err(StateError::InvalidValue)));
+    assert!(matches!(
+        DocumentScanner::new(state.clone(), invalid),
+        Err(StateError::InvalidValue)
+    ));
     let mut invalid = ScanPolicy::default();
     invalid.extensions = BTreeSet::from([".rs".to_owned()]);
-    assert!(matches!(DocumentScanner::new(state.clone(), invalid), Err(StateError::InvalidValue)));
+    assert!(matches!(
+        DocumentScanner::new(state.clone(), invalid),
+        Err(StateError::InvalidValue)
+    ));
 
     let mut scanner = DocumentScanner::new(state, ScanPolicy::default()).unwrap();
     assert!(scanner.needs_rescan(&root)); // restart never trusts old state
     assert_eq!(scanner.current_uris(&root, || Ok(())).unwrap(), None);
-    for event in [WatchEvent::Changed, WatchEvent::Deleted, WatchEvent::Renamed,
-                  WatchEvent::Overflow, WatchEvent::Disconnected] {
+    for event in [
+        WatchEvent::Changed,
+        WatchEvent::Deleted,
+        WatchEvent::Renamed,
+        WatchEvent::Overflow,
+        WatchEvent::Disconnected,
+    ] {
         scanner.watch_hint(&root, event).unwrap();
         assert!(scanner.needs_rescan(&root));
     }
-    assert!(scanner.watch_hint("root:v1:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", WatchEvent::Changed).is_err());
+    assert!(scanner
+        .watch_hint(
+            "root:v1:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            WatchEvent::Changed
+        )
+        .is_err());
 }
 
 #[cfg(windows)]
@@ -48,11 +67,26 @@ fn windows_scan_deduplicates_rescans_reconciles_rename_and_revocation() {
     let mut scanner = DocumentScanner::new(state.clone(), ScanPolicy::default()).unwrap();
     let first = scanner.rescan(&root, || Ok(())).unwrap();
     assert!(first.complete);
-    assert_eq!((first.visited_files, first.new_versions, first.unchanged_versions, first.removed_paths), (1,1,0,0));
-    assert_eq!(scanner.current_uris(&root, || Ok(())).unwrap().unwrap().len(), 1);
+    assert_eq!(
+        (
+            first.visited_files,
+            first.new_versions,
+            first.unchanged_versions,
+            first.removed_paths
+        ),
+        (1, 1, 0, 0)
+    );
+    assert_eq!(
+        scanner
+            .current_uris(&root, || Ok(()))
+            .unwrap()
+            .unwrap()
+            .len(),
+        1
+    );
 
     let second = scanner.rescan(&root, || Ok(())).unwrap();
-    assert_eq!((second.new_versions, second.unchanged_versions), (0,1));
+    assert_eq!((second.new_versions, second.unchanged_versions), (0, 1));
     fs::write(folder.join("alpha.md"), b"changed").unwrap();
     scanner.watch_hint(&root, WatchEvent::Changed).unwrap();
     assert!(scanner.current_uris(&root, || Ok(())).unwrap().is_none()); // no stale view on event
@@ -82,7 +116,11 @@ fn windows_guard_abort_never_publishes_inventory() {
     let mut checks = 0;
     let failed = scanner.rescan(&root, || {
         checks += 1;
-        if checks > 2 { Err(StateError::DocumentDenied) } else { Ok(()) }
+        if checks > 2 {
+            Err(StateError::DocumentDenied)
+        } else {
+            Ok(())
+        }
     });
     assert!(failed.is_err());
     assert!(scanner.needs_rescan(&root));
