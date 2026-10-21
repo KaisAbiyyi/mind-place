@@ -204,6 +204,7 @@ fn build_client_command(
         .arg(config)
         .arg("--health.listen-addr=127.0.0.1:0")
         .arg("--log.level=warn")
+        .arg("--log.format=struct-text")
         .env("CONTROL_PLANE_TUNNEL_ID", id)
         .env("CONTROL_PLANE_API_KEY", api_key)
         .env("MCP_SERVER_URL", MCP_ORIGIN)
@@ -506,6 +507,10 @@ mod tests {
         assert_eq!(argv[0], "run");
         assert_eq!(argv[1], "--config");
         assert_eq!(argv[2], "isolated-runtime.yaml");
+        // Bundled tunnel-client v0.0.16 exits before polling if warn level
+        // is supplied without an explicit supported log format.
+        assert!(argv.contains(&"--log.level=warn".to_string()));
+        assert!(argv.contains(&"--log.format=struct-text".to_string()));
         assert!(argv
             .iter()
             .all(|part| !part.contains(key) && !part.contains(credential)));
