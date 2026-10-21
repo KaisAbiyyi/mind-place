@@ -283,7 +283,34 @@ fn parse_xml(ctx: &mut Context<'_>, bytes: &[u8]) -> Result<String> {
             Event::CData(e) if capturing.is_some() => {
                 output.push_str(e.as_ref());
             }
-            Event::DocType(_) | Event::GeneralRef(_) => {
+            Event::GeneralRef(e) => {
+                // quick-xml 0.42 emits even predefined XML references separately.
+                // Resolve only predefined and numeric characters; never expand
+                // arbitrary named entities or external DTDs.
+                let reference: &str = e.as_ref();
+                let character = match reference {
+                    "amp" => '&',
+                    "lt" => '<',
+                    "gt" => '>',
+                    "quot" => '"',
+                    "apos" => '\'',
+                    _ => {
+                        let code = if let Some(hex) = reference.strip_prefix("#x") {
+                            u32::from_str_radix(hex, 16)
+                        } else if let Some(decimal) = reference.strip_prefix('#') {
+                            decimal.parse::<u32>()
+                        } else {
+                            return Err(ExtractionError::Unsupported);
+                        }
+                        .map_err(|_| ExtractionError::Invalid)?;
+                        char::from_u32(code).ok_or(ExtractionError::Invalid)?
+                    }
+                };
+                if capturing.is_some() {
+                    output.push(character);
+                }
+            }
+            Event::DocType(_) => {
                 return Err(ExtractionError::Unsupported);
             }
             Event::Eof => break,
