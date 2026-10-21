@@ -252,12 +252,9 @@ fn parse_xml(ctx: &mut Context<'_>, bytes: &[u8]) -> Result<String> {
                     return Err(ExtractionError::Limit("xml_depth"));
                 }
                 let name = e.name();
-                let name_bytes: &[u8] = name.as_ref();
-                let local = name_bytes
-                    .rsplit(|c: &u8| *c == b':')
-                    .next()
-                    .unwrap_or_default();
-                if local == b"t" || local == b"v" {
+                let name_str: &str = name.as_ref();
+                let local = name_str.rsplit(':').next().unwrap_or_default();
+                if local == "t" || local == "v" {
                     capturing = Some(depth);
                 }
             }
@@ -266,12 +263,9 @@ fn parse_xml(ctx: &mut Context<'_>, bytes: &[u8]) -> Result<String> {
                     return Err(ExtractionError::Invalid);
                 }
                 let name = e.name();
-                let name_bytes: &[u8] = name.as_ref();
-                let local = name_bytes
-                    .rsplit(|c: &u8| *c == b':')
-                    .next()
-                    .unwrap_or_default();
-                if local == b"p" || local == b"row" || local == b"si" || local == b"tr" {
+                let name_str: &str = name.as_ref();
+                let local = name_str.rsplit(':').next().unwrap_or_default();
+                if local == "p" || local == "row" || local == "si" || local == "tr" {
                     output.push('\n');
                 }
                 if capturing == Some(depth) {
