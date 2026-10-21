@@ -4,7 +4,7 @@ Claim: issue #25; Codex/GPT-6 managed cloud session `20261021-cloud-mp4d-01`, ge
 
 ## Contract
 
-The store accepts a bounded byte reader supplied by a trusted caller after MP-4B source-handle authorization. It never converts virtual URIs into source filesystem paths. Every operation requires a caller-supplied unlock guard plus authoritative root approval/tombstone checks. No UI/MCP entry point is added.
+The store accepts a bounded byte reader supplied by a trusted caller after MP-4B source-handle authorization. It never converts virtual URIs into source filesystem paths. Every operation requires a caller-supplied unlock/source-stability guard plus authoritative root approval/tombstone checks. The guard is validation-only (no authority mutations/writer acquisition) and runs after writer admission, before commit and before disclosure. No UI/MCP entry point is added.
 
 Raw bytes use SHA-256 with format version 1 under `document-objects/v1/sha256/<prefix>/<hash>` beside state.sqlite3. Stream to a same-directory temporary file, bound size, hash, flush, publish without overwriting, sync the containing directory, then commit authority references. Existing objects must verify before reuse. A crash can leave an unreferenced object, never a committed reference to partially published bytes; startup does not delete evidence or orphans.
 

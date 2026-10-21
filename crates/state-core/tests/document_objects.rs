@@ -146,7 +146,7 @@ fn revoked_or_pending_roots_and_failed_unlock_guards_never_disclose_versions() {
             Connection::open(state.path())
                 .unwrap()
                 .execute(
-                    "UPDATE source_roots SET approval_state='approved' WHERE id=?1",
+                    "UPDATE source_roots SET approval_state='approved',approved_at=unixepoch() WHERE id=?1",
                     [&root_id],
                 )
                 .unwrap();
@@ -276,4 +276,212 @@ fn published_orphan_is_reused_after_failed_authority_commit() {
         fs::read(object_path(dir.path(), &receipt.version.content_hash)).unwrap(),
         b"one"
     );
+}
+
+#[test]
+fn pending_forged_and_unknown_roots_never_create_objects() {
+    let (dir, state, uri) = fixture();
+    let root = dir.path().join("pending");
+    fs::create_dir(&root).unwrap();
+    let pending = state.register_document_root(&root).unwrap();
+    let pending_uri = VirtualDocumentPath::from_segments(&pending.id, &["secret.md".into()])
+        .unwrap()
+        .to_uri();
+    let store = DocumentObjectStore::open(state.clone()).unwrap();
+    assert!(store
+        .preserve(
+            &pending_uri,
+            &metadata(3, 1),
+            Cursor::new(b"one"),
+            || Ok(())
+        )
+        .is_err());
+    Connection::open(state.path())
+        .unwrap()
+        .execute(
+            "UPDATE source_roots SET approval_state='approved',approved_at=unixepoch() WHERE id=?1",
+            [&pending.id],
+        )
+        .unwrap();
+    assert!(store
+        .preserve(
+            &pending_uri,
+            &metadata(3, 1),
+            Cursor::new(b"one"),
+            || Ok(())
+        )
+        .is_err());
+    let unknown = uri.replace(
+        VirtualDocumentPath::parse(&uri).unwrap().root_id(),
+        &format!("root:v1:{}", "f".repeat(64)),
+    );
+    assert!(store
+        .preserve(&unknown, &metadata(3, 1), Cursor::new(b"one"), || Ok(()))
+        .is_err());
+    assert!(!dir.path().join("document-objects").exists());
+}
+
+#[test]
+fn guard_failure_during_fetch_discards_bytes_and_pagination_is_stable() {
+    let (_dir, state, uri) = fixture();
+    let store = DocumentObjectStore::open(state).unwrap();
+    let a = store
+        .preserve(&uri, &metadata(3, 1), Cursor::new(b"one"), || Ok(()))
+        .unwrap();
+    store
+        .preserve(&uri, &metadata(3, 2), Cursor::new(b"two"), || Ok(()))
+        .unwrap();
+    let mut calls = 0;
+    assert!(store
+        .read_version(&uri, &a.version.id, || {
+            calls += 1;
+            if calls >= 3 {
+                Err(StateError::DocumentDenied)
+            } else {
+                Ok(())
+            }
+        })
+        .is_err());
+    let all = store.versions(&uri, None, 100, || Ok(())).unwrap();
+    let first = store.versions(&uri, None, 1, || Ok(())).unwrap();
+    let second = store
+        .versions(&uri, Some(&first[0].id), 1, || Ok(()))
+        .unwrap();
+    assert_eq!([first, second].concat(), all);
+}
+
+#[cfg(unix)]
+#[test]
+fn symlinked_objects_and_object_directories_are_rejected() {
+    let (dir, state, uri) = fixture();
+    let store = DocumentObjectStore::open(state.clone()).unwrap();
+    let a = store
+        .preserve(&uri, &metadata(3, 1), Cursor::new(b"one"), || Ok(()))
+        .unwrap();
+    let object = object_path(dir.path(), &a.version.content_hash);
+    let moved = dir.path().join("outside");
+    fs::rename(&object, &moved).unwrap();
+    std::os::unix::fs::symlink(&moved, &object).unwrap();
+    assert!(store.read_version(&uri, &a.version.id, || Ok(())).is_err());
+    assert!(store
+        .preserve(&uri, &metadata(3, 1), Cursor::new(b"one"), || Ok(()))
+        .is_err());
+    let second = dir.path().join("other");
+    fs::create_dir(&second).unwrap();
+    let state = StateStore::open(second.join("state.sqlite3")).unwrap();
+    let docs = second.join("docs");
+    fs::create_dir(&docs).unwrap();
+    let root = state.register_document_root(&docs).unwrap();
+    state.approve_document_root(&root.id).unwrap();
+    let uri = VirtualDocumentPath::from_segments(&root.id, &["x".into()])
+        .unwrap()
+        .to_uri();
+    std::os::unix::fs::symlink(
+        dir.path().join("document-objects"),
+        second.join("document-objects"),
+    )
+    .unwrap();
+    assert!(DocumentObjectStore::open(state)
+        .unwrap()
+        .preserve(&uri, &metadata(3, 1), Cursor::new(b"one"), || Ok(()))
+        .is_err());
+}
+
+#[test]
+fn unlock_invalidated_while_waiting_for_writer_never_commits_document_authority() {
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc, Arc,
+    };
+    use std::time::Duration;
+    let (dir, state, uri) = fixture();
+    let store = DocumentObjectStore::open(state.clone()).unwrap();
+    let mut db = Connection::open(state.path()).unwrap();
+    let competing = db
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .unwrap();
+    let locked = Arc::new(AtomicBool::new(false));
+    let worker_locked = locked.clone();
+    let (send, recv) = mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        let mut calls = 0;
+        store.preserve(&uri, &metadata(3, 1), Cursor::new(b"one"), || {
+            calls += 1;
+            let valid = !worker_locked.load(Ordering::SeqCst);
+            // Fourth guard is the completed source stream, before writer admission.
+            if calls == 4 {
+                send.send(()).unwrap();
+            }
+            if valid {
+                Ok(())
+            } else {
+                Err(StateError::DocumentDenied)
+            }
+        })
+    });
+    recv.recv_timeout(Duration::from_secs(5)).unwrap();
+    locked.store(true, Ordering::SeqCst);
+    competing.commit().unwrap();
+    assert!(matches!(
+        worker.join().unwrap(),
+        Err(StateError::DocumentDenied)
+    ));
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM document_versions", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM document_heads", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    // Admission failed before publishing a permanent raw object.
+    let object_dir = dir.path().join("document-objects/v1/sha256");
+    if object_dir.exists() {
+        for entry in fs::read_dir(object_dir).unwrap() {
+            let path = entry.unwrap().path();
+            assert!(path.is_dir());
+            assert_eq!(fs::read_dir(path).unwrap().count(), 0);
+        }
+    }
+}
+
+#[test]
+fn guard_failure_after_object_publication_rolls_back_authority_and_retry_recovers() {
+    use sha2::{Digest, Sha256};
+    let (dir, state, uri) = fixture();
+    let store = DocumentObjectStore::open(state.clone()).unwrap();
+    let object = object_path(dir.path(), &format!("{:x}", Sha256::digest(b"one")));
+    // Inject source/lease invalidation at publication without mutating authority
+    // from inside the guard. The raw object can remain as a recoverable orphan.
+    assert!(store
+        .preserve(&uri, &metadata(3, 1), Cursor::new(b"one"), || {
+            if object.exists() {
+                Err(StateError::DocumentChanged)
+            } else {
+                Ok(())
+            }
+        })
+        .is_err());
+    let db = Connection::open(state.path()).unwrap();
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM document_versions", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM document_heads", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    let retry = store
+        .preserve(&uri, &metadata(3, 1), Cursor::new(b"one"), || Ok(()))
+        .unwrap();
+    assert!(retry.new_version);
+    assert!(retry.reused_object);
 }

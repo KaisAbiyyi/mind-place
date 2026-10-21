@@ -1,6 +1,8 @@
 //! Version 1 raw document bytes. Internal trusted API: callers authorize their
 //! source handles before supplying a reader and revalidate unlock/source state
-//! in the guard. Virtual URIs never become source filesystem paths here.
+//! in the guard. Guards must only validate: never mutate StateStore or acquire
+//! writer transactions, because they also run inside an authority transaction.
+//! Virtual URIs never become source filesystem paths here.
 use crate::{safe_path, Result, StateError, StateStore, VirtualDocumentPath};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
@@ -267,9 +269,11 @@ impl DocumentObjectStore {
         ensure_dir(path.parent().ok_or(StateError::UnsafePath)?)?;
         safe_path(&path)?;
         // Hold the authority transaction during publication, never during source
-        // reads or user callbacks. Evidence may be orphaned on rollback; never GC.
+        // reads. Nonmutating guards fence lock/source changes across SQLite waits
+        // and publication. Evidence may be orphaned on rollback; never GC.
         let mut db = self.state.connection()?;
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        guard()?;
         active_in_transaction(&tx, &root)?;
         let reused_object = match temp.persist_noclobber(&path) {
             Ok(file) => {
@@ -277,7 +281,8 @@ impl DocumentObjectStore {
                 false
             }
             Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => {
-                // Do not execute callbacks under a write transaction.
+                // Reuse verification is bounded; the nonmutating guard before
+                // commit revalidates the session/source after this work.
                 self.verified_bytes(&hash, length, &mut || Ok(()))?;
                 true
             }
@@ -324,6 +329,7 @@ impl DocumentObjectStore {
         }
         tx.execute("INSERT INTO document_heads(uri,version_id,metadata_json) VALUES(?1,?2,?3)
             ON CONFLICT(uri) DO UPDATE SET version_id=excluded.version_id,metadata_json=excluded.metadata_json,last_seen=unixepoch()",params![uri,id,signature])?;
+        guard()?;
         active_in_transaction(&tx, &root)?;
         tx.commit()?;
         self.authorize(uri, &mut guard)?;
@@ -363,6 +369,9 @@ impl DocumentObjectStore {
             Some((v, stored)) => {
                 validate_version(&v)?;
                 if stored == signature {
+                    if v.byte_length != metadata.byte_length {
+                        return Err(StateError::ObjectCorrupt);
+                    }
                     self.check_file(&self.object_path(&v.content_hash)?, v.byte_length)?;
                     Some(v)
                 } else {
