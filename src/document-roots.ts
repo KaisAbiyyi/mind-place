@@ -1,5 +1,7 @@
 import type { Invoke } from "./reader.js";
 
+const REVOKE_CONFIRM_WINDOW_MS = 15_000;
+
 export interface DocumentRoot {
   id: string;
   canonical_path: string;
@@ -89,14 +91,31 @@ export function mountDocumentRootSetup(parent: HTMLElement, invoke: Invoke): voi
           revoke.className = "quiet-button";
           revoke.dataset.action = "revoke-root";
           revoke.textContent = "Revoke";
-          let armed = false;
+          let armedAt: number | null = null;
+          let resetTimer: ReturnType<typeof setTimeout> | undefined;
+          const disarm = () => {
+            armedAt = null;
+            if (resetTimer !== undefined) clearTimeout(resetTimer);
+            resetTimer = undefined;
+            if (!revoke.disabled) revoke.textContent = "Revoke";
+          };
+          revoke.addEventListener("blur", () => {
+            if (!revoke.disabled) disarm();
+          });
           revoke.addEventListener("click", () => {
             if (!section.isConnected) return;
-            if (!armed) {
-              armed = true;
-              revoke.textContent = "Confirm permanent revoke";
+            const now = Date.now();
+            if (armedAt === null || now - armedAt >= REVOKE_CONFIRM_WINDOW_MS) {
+              disarm();
+              armedAt = now;
+              revoke.textContent = "Confirm permanent revoke (15s)";
+              status.textContent = "Click again within 15 seconds to permanently revoke this folder.";
+              resetTimer = setTimeout(() => {
+                if (revoke.isConnected) disarm();
+              }, REVOKE_CONFIRM_WINDOW_MS);
               return;
             }
+            disarm();
             revoke.disabled = true;
             void invoke<void>("revoke_document_root", { rootId: root.id })
               .then(async () => {
