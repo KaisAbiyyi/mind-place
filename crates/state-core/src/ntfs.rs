@@ -116,6 +116,10 @@ mod platform {
     pub(crate) fn root_identity(path: &Path) -> io::Result<(u64, u64)> {
         identity(&root(path)?, true)
     }
+    pub(crate) fn document_file_identity(file: &File) -> io::Result<String> {
+        let (volume, index) = identity(file, false)?;
+        Ok(format!("ntfs:{volume}:{index}"))
+    }
     fn child(parent: &File, segment: &str, directory: bool) -> io::Result<File> {
         // NT RootDirectory binds each child to a verified parent HANDLE, not
         // an attacker-swappable absolute string. OBJ_DONT_REPARSE fails closed.
@@ -203,6 +207,9 @@ mod platform {
             Err(io::Error::new(io::ErrorKind::Unsupported, "NTFS only"))
         }
     }
+    pub(crate) fn document_file_identity(_: &File) -> io::Result<String> {
+        Err(io::Error::new(io::ErrorKind::Unsupported, "NTFS only"))
+    }
     pub(crate) fn open_document(_: &Path, _: (u64, u64), _: &[String]) -> io::Result<File> {
         Err(io::Error::new(
             io::ErrorKind::Unsupported,
@@ -210,4 +217,4 @@ mod platform {
         ))
     }
 }
-pub(crate) use platform::{open_document, root_identity};
+pub(crate) use platform::{document_file_identity, open_document, root_identity};
