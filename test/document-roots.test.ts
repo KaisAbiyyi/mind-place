@@ -118,3 +118,48 @@ test("expired permanent-revoke confirmation requires a fresh two-click consent",
   await delay(0);
   assert.equal(revocations, 1, "fresh second click confirms permanent revocation");
 });
+
+
+test("explicit document indexing and search render only inert text and clear on revoke", async () => {
+  const id = "root:v1:" + "d".repeat(64);
+  const roots: DocumentRoot[] = [{
+    id, canonical_path: "C:\\Users\\Test\\Notes", approval_state: "approved",
+    virtual_prefix: "mpdoc://root/" + id,
+  }];
+  const calls: string[] = [];
+  const invoke: Invoke = async <T>(command: string) => {
+    calls.push(command);
+    if (command === "list_document_roots") return [...roots] as T;
+    if (command === "refresh_document_root_index") return {
+      root_id: id, scanned_files: 1, indexed_files: 1,
+      skipped_files: 0, indexed_chunks: 1, generation: 1,
+    } as T;
+    if (command === "search_document_index") return [{
+      uri: "mpdoc://root/" + id + "/note.md", version_id: "docver:v1:test",
+      section: "intro", snippet: "<img src=x onerror=alert(1)>", score: -1,
+    }] as T;
+    if (command === "revoke_document_root") {
+      roots[0].approval_state = "revoked";
+      return undefined as T;
+    }
+    throw new Error("unexpected command");
+  };
+  const { dom, root } = setup(invoke);
+  await delay(0);
+  assert.equal(calls.includes("refresh_document_root_index"), false);
+  root.querySelector<HTMLButtonElement>("[data-action='index-root']")!.click();
+  await delay(0);
+  assert.match(root.textContent ?? "", /Indexed 1 files/);
+  const searchForm = root.querySelector<HTMLFormElement>(".document-search-form")!;
+  searchForm.querySelector("input")!.value = "notes";
+  searchForm.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+  await delay(0);
+  assert.equal(calls.filter((call) => call === "search_document_index").length, 1);
+  assert.match(root.textContent ?? "", /<img src=x onerror=alert\(1\)>/);
+  assert.equal(root.querySelectorAll("img").length, 0, "document snippet must remain inert");
+  const revoke = root.querySelector<HTMLButtonElement>("[data-action='revoke-root']")!;
+  revoke.click();
+  revoke.click();
+  await delay(0);
+  assert.equal(root.querySelectorAll(".document-search-results li").length, 0);
+});
