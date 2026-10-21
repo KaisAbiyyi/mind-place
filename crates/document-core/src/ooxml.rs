@@ -100,7 +100,9 @@ fn central_directory<'a>(ctx: &mut Context<'_>, bytes: &'a [u8]) -> Result<Vec<E
             || name.contains('\\')
             || name.contains(':')
             || name.contains('\0')
+            || name.ends_with("//")
             || name
+                .trim_end_matches('/')
                 .split('/')
                 .any(|p| p == "." || p == ".." || p.is_empty())
         {
@@ -269,7 +271,7 @@ fn parse_xml(ctx: &mut Context<'_>, bytes: &[u8]) -> Result<String> {
                     .rsplit(|c| *c == b':')
                     .next()
                     .unwrap_or_default();
-                if matches!(local, b"p" | b"row" | b"si" | b"tr") {
+                if local == b"p" || local == b"row" || local == b"si" || local == b"tr" {
                     output.push('\n');
                 }
                 if capturing == Some(depth) {
