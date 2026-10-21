@@ -1,5 +1,6 @@
 import createDOMPurify from "dompurify";
 import { mountLocalMcpSetup } from "./mcp-setup.js";
+import { mountDocumentRootSetup } from "./document-roots.js";
 import { marked } from "marked";
 import renderMathInElement from "katex/contrib/auto-render";
 import type {
@@ -632,6 +633,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
 
     setupContent.append(connection, pathList, registered, register, divider, legacyTitle, legacyText, legacyButton, importStatus);
     mountLocalMcpSetup(setupContent, invoke, safeClipboard);
+    mountDocumentRootSetup(setupContent, invoke);
   };
 
   const loadSetup = async () => {

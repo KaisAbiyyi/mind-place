@@ -14,7 +14,7 @@ use mind_place_index::{
 };
 use mind_place_integration::transport::LocalMcpServer;
 use mind_place_security::{SecurityError, SecurityGate, SecurityStatus, UnlockLease};
-use mind_place_state::StateStore;
+use mind_place_state::{DocumentRoot, StateStore};
 use serde::Serialize;
 use std::{
     io::Write,
@@ -323,6 +323,44 @@ fn lock_security(state: State<'_, AppState>) -> SecurityStatus {
     status
 }
 
+/// Owner-only document root inventory. Never part of the MCP tool catalog.
+#[tauri::command]
+async fn list_document_roots(state: State<'_, AppState>) -> Result<Vec<DocumentRoot>, String> {
+    let lease = begin_unlocked(&state)?;
+    let db_path = state.state_path.clone();
+    let roots = tauri::async_runtime::spawn_blocking(move || {
+        let db = StateStore::open(db_path).map_err(|e| format!("{}:{}", e.code(), e))?;
+        db.list_document_roots()
+            .map_err(|e| format!("{}:{}", e.code(), e))
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    finish_unlocked(&state, lease)?;
+    Ok(roots)
+}
+
+/// Stages an existing directory as pending. No approval, scan, or document read.
+#[tauri::command]
+async fn stage_document_root(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<DocumentRoot, String> {
+    let lease = begin_unlocked(&state)?;
+    if path.is_empty() || path.len() > 4096 || path.contains('\0') {
+        return Err("MP_STATE_INVALID_VALUE:invalid directory path".into());
+    }
+    let db_path = state.state_path.clone();
+    let root = tauri::async_runtime::spawn_blocking(move || {
+        let db = StateStore::open(db_path).map_err(|e| format!("{}:{}", e.code(), e))?;
+        db.register_document_root(Path::new(&path))
+            .map_err(|e| format!("{}:{}", e.code(), e))
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    finish_unlocked(&state, lease)?;
+    Ok(root)
+}
+
 #[tauri::command]
 async fn list_conversations(
     state: State<'_, AppState>,
@@ -562,6 +600,8 @@ fn main() {
             initialize_security,
             unlock_security,
             lock_security,
+            list_document_roots,
+            stage_document_root,
             list_conversations,
             read_conversation,
             list_snapshots,

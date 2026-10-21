@@ -122,7 +122,7 @@ fn v1_upgrade_keeps_projects_and_creates_verified_v1_backup() {
     .unwrap();
     drop(db);
     let upgraded = StateStore::open(&path).unwrap();
-    assert_eq!(SCHEMA_VERSION, 3);
+    assert_eq!(SCHEMA_VERSION, 4);
     assert_eq!(
         upgraded.get_project("project:old").unwrap().unwrap().name,
         "Preserved"
