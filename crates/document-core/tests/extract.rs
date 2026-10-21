@@ -125,7 +125,7 @@ fn small_limits_and_revocation_are_fail_closed() {
 
 #[test]
 fn docx_and_pptx_and_xlsx_extract_allowlisted_xml() {
-    let word = b"<w:document xmlns:w=\"w\"><w:body><w:p><w:r><w:t>Hello &amp; world</w:t></w:r></w:p></w:body></w:document>";
+    let word = b"<w:document xmlns:w=\"w\"><w:body><w:p><w:r><w:t>Hello &amp; world &#x21;</w:t></w:r></w:p></w:body></w:document>";
     let docx = make_zip(&[
         ("word/document.xml", word, true),
         (
@@ -136,12 +136,27 @@ fn docx_and_pptx_and_xlsx_extract_allowlisted_xml() {
     ]);
     let extracted =
         extract_bytes(DocumentFormat::Docx, &docx, ExtractionLimits::default()).unwrap();
-    assert!(extracted.text.contains("Hello & world"));
+    assert!(extracted.text.contains("Hello & world !"));
     assert!(!extracted.text.contains("ignored"));
     assert!(extracted
         .chunks
         .iter()
         .all(|c| c.section == "word/document.xml"));
+
+    // Reject arbitrary named references instead of attempting DTD expansion.
+    let hostile_reference = make_zip(&[(
+        "word/document.xml",
+        b"<w:p><w:t>&unknown;</w:t></w:p>",
+        false,
+    )]);
+    assert_eq!(
+        extract_bytes(
+            DocumentFormat::Docx,
+            &hostile_reference,
+            ExtractionLimits::default()
+        ),
+        Err(ExtractionError::Unsupported)
+    );
 
     let slide = make_zip(&[(
         "ppt/slides/slide1.xml",
