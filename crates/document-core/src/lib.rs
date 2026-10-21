@@ -211,14 +211,7 @@ impl Context<'_> {
         if value.contains('\0') {
             return Err(ExtractionError::Invalid);
         }
-        let next = self
-            .output_bytes
-            .checked_add(value.len())
-            .and_then(|n| n.checked_add(1))
-            .ok_or(ExtractionError::Limit("output_bytes"))?;
-        if next > self.limits.max_output_bytes {
-            return Err(ExtractionError::Limit("output_bytes"));
-        }
+        let mut next = self.output_bytes;
         let mut start = 0;
         while start < value.len() {
             self.poll()?;
@@ -231,6 +224,13 @@ impl Context<'_> {
             }
             if self.chunks.len() >= self.limits.max_chunks {
                 return Err(ExtractionError::Limit("chunks"));
+            }
+            next = next
+                .checked_add(end - start)
+                .and_then(|n| n.checked_add(usize::from(!self.chunks.is_empty())))
+                .ok_or(ExtractionError::Limit("output_bytes"))?;
+            if next > self.limits.max_output_bytes {
+                return Err(ExtractionError::Limit("output_bytes"));
             }
             self.chunks.push(ExtractedChunk {
                 ordinal: self.chunks.len() as u32,
