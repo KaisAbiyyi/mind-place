@@ -256,20 +256,23 @@ impl DocumentIndex {
         check()?;
         let db = self.connection()?;
         let mut statement = db.prepare(
-            "SELECT uri,version_id,section,
+            "SELECT uri,version_id,section,content,
                     snippet(document_fts,4,'[',']','…',12),
                     bm25(document_fts)
              FROM document_fts WHERE document_fts MATCH ?1
              ORDER BY bm25(document_fts), uri, version_id LIMIT ?2",
         )?;
         let rows = statement.query_map(params![expression, MAX_CANDIDATES], |r| {
-            Ok(DocumentHit {
-                uri: r.get(0)?,
-                version_id: r.get(1)?,
-                section: r.get(2)?,
-                snippet: r.get(3)?,
-                score: r.get(4)?,
-            })
+            Ok((
+                DocumentHit {
+                    uri: r.get(0)?,
+                    version_id: r.get(1)?,
+                    section: r.get(2)?,
+                    snippet: r.get(4)?,
+                    score: r.get(5)?,
+                },
+                r.get::<_, String>(3)?,
+            ))
         })?;
         let candidates: Vec<_> = rows.collect::<std::result::Result<_, _>>()?;
         drop(statement);
@@ -278,7 +281,7 @@ impl DocumentIndex {
         let mut hits = Vec::new();
         // Bound verification effort even if 100 candidates match.
         let mut verified_bytes = 0usize;
-        for candidate in candidates {
+        for (candidate, indexed_chunk) in candidates {
             check()?;
             let Some(head) = (match objects.current_version(&candidate.uri, || lease(&mut check)) {
                 Ok(head) => head,
@@ -313,6 +316,28 @@ impl DocumentIndex {
             if fresh.len() as u64 != head.byte_length
                 || format!("{:x}", Sha256::digest(&fresh)) != head.content_hash
             {
+                continue;
+            }
+            // Derived FTS5 rows can be corrupted or edited. Re-extract from
+            // the verified live bytes and require a byte-for-byte original chunk
+            // before disclosing the FTS-generated snippet.
+            let Some(format) = format_for_uri(&candidate.uri) else {
+                continue;
+            };
+            let verified = extract_with_check(
+                format,
+                &fresh,
+                ExtractionLimits::default(),
+                || check().is_ok() && state.require_approved_document_uri(&candidate.uri).is_ok(),
+            );
+            let verified = match verified {
+                Ok(value) => value,
+                Err(ExtractionError::Revoked) => return Err(IndexError::Revoked),
+                Err(_) => continue,
+            };
+            if !verified.chunks.iter().any(|chunk| {
+                chunk.section == candidate.section && chunk.text == indexed_chunk
+            }) {
                 continue;
             }
             check()?;
