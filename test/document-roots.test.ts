@@ -15,12 +15,22 @@ function setup(invoke: Invoke) {
   return { dom, root };
 }
 
-test("owner setup stages pending only and never presents a filesystem grant", async () => {
+test("owner setup requires explicit grant and confirms permanent revocation", async () => {
   const calls: Array<{ command: string; args?: Record<string, unknown> }> = [];
   const roots: DocumentRoot[] = [];
   const invoke: Invoke = async <T>(command: string, args?: Record<string, unknown>) => {
     calls.push({ command, args });
     if (command === "list_document_roots") return [...roots] as T;
+    if (command === "approve_document_root") {
+      const found = roots.find((entry) => entry.id === args?.rootId)!;
+      found.approval_state = "approved";
+      return found as T;
+    }
+    if (command === "revoke_document_root") {
+      const found = roots.find((entry) => entry.id === args?.rootId)!;
+      found.approval_state = "revoked";
+      return undefined as T;
+    }
     if (command === "stage_document_root") {
       const item: DocumentRoot = {
         id: "root:v1:" + "a".repeat(64),
@@ -36,7 +46,7 @@ test("owner setup stages pending only and never presents a filesystem grant", as
   const { dom, root } = setup(invoke);
   await delay(0);
   assert.match(root.textContent ?? "", /No document folders staged/);
-  assert.match(root.textContent ?? "", /will not read or index/);
+  assert.match(root.textContent ?? "", /Staging only records a pending identity/);
   const input = root.querySelector<HTMLInputElement>("input[name='document-root-path']")!;
   input.value = "C:\\Users\\Test\\Documents";
   root.querySelector<HTMLFormElement>("form")!.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
@@ -47,7 +57,19 @@ test("owner setup stages pending only and never presents a filesystem grant", as
   assert.match(root.textContent ?? "", /PENDING/);
   assert.match(root.textContent ?? "", /No files were read or indexed/);
   assert.equal(input.value, "");
-  assert.equal(root.querySelector("[data-action='approve-root']"), null);
+  const approve = root.querySelector<HTMLButtonElement>("[data-action='approve-root']")!;
+  assert.ok(approve);
+  assert.equal(calls.some((call) => call.command === "approve_document_root"), false);
+  approve.click();
+  await delay(0);
+  assert.equal(calls.filter((call) => call.command === "approve_document_root").length, 1);
+  const revoke = root.querySelector<HTMLButtonElement>("[data-action='revoke-root']")!;
+  revoke.click();
+  assert.match(revoke.textContent ?? "", /Confirm permanent revoke/);
+  assert.equal(calls.some((call) => call.command === "revoke_document_root"), false);
+  revoke.click();
+  await delay(0);
+  assert.equal(calls.filter((call) => call.command === "revoke_document_root").length, 1);
 });
 
 test("locked registry denies staging and does not render private results after disposal", async () => {
