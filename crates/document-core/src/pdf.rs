@@ -8,7 +8,8 @@ use flate2::read::ZlibDecoder;
 use std::io::Read;
 
 fn find(haystack: &[u8], needle: &[u8], from: usize) -> Option<usize> {
-    haystack.get(from..)?
+    haystack
+        .get(from..)?
         .windows(needle.len())
         .position(|window| window == needle)
         .map(|p| p + from)
@@ -43,7 +44,9 @@ fn string_literal(bytes: &[u8], start: usize) -> Result<(Vec<u8>, usize)> {
                     b'b' => out.push(8),
                     b'f' => out.push(12),
                     b'\r' => {
-                        if bytes.get(at) == Some(&b'\n') { at += 1; }
+                        if bytes.get(at) == Some(&b'\n') {
+                            at += 1;
+                        }
                     }
                     b'\n' => {}
                     b'0'..=b'7' => {
@@ -103,27 +106,32 @@ fn hex_literal(bytes: &[u8], start: usize) -> Result<(Vec<u8>, usize)> {
 fn decode_text(bytes: &[u8]) -> String {
     if bytes.starts_with(&[0xFE, 0xFF]) {
         return String::from_utf16_lossy(
-            &bytes[2..].chunks_exact(2)
+            &bytes[2..]
+                .chunks_exact(2)
                 .map(|pair| u16::from_be_bytes([pair[0], pair[1]]))
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>(),
         );
     }
     if bytes.starts_with(&[0xFF, 0xFE]) {
         return String::from_utf16_lossy(
-            &bytes[2..].chunks_exact(2)
+            &bytes[2..]
+                .chunks_exact(2)
                 .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>(),
         );
     }
     // ASCII and Latin-1 text survive, while nontrivial glyph/CMap remapping
     // is deliberately not guessed. The warning on the document communicates it.
-    bytes.iter().filter_map(|&b| match b {
-        0 => None,
-        9 | 10 | 13 => Some(' '),
-        32..=126 => Some(char::from(b)),
-        160..=255 => Some(char::from(b)),
-        _ => None,
-    }).collect()
+    bytes
+        .iter()
+        .filter_map(|&b| match b {
+            0 => None,
+            9 | 10 | 13 => Some(' '),
+            32..=126 => Some(char::from(b)),
+            160..=255 => Some(char::from(b)),
+            _ => None,
+        })
+        .collect()
 }
 
 fn content_text(ctx: &mut Context<'_>, data: &[u8]) -> Result<String> {
@@ -131,7 +139,9 @@ fn content_text(ctx: &mut Context<'_>, data: &[u8]) -> Result<String> {
     let mut cursor = 0usize;
     while let Some(start) = find(data, b"BT", cursor) {
         ctx.poll()?;
-        let Some(stop) = find(data, b"ET", start + 2) else { break };
+        let Some(stop) = find(data, b"ET", start + 2) else {
+            break;
+        };
         let block = &data[start + 2..stop];
         let mut pos = 0;
         while pos < block.len() {
@@ -171,7 +181,9 @@ fn inflate_stream(ctx: &mut Context<'_>, compressed: &[u8]) -> Result<Vec<u8>> {
     let mut buffer = [0u8; 8192];
     loop {
         ctx.poll()?;
-        let count = reader.read(&mut buffer).map_err(|_| ExtractionError::Invalid)?;
+        let count = reader
+            .read(&mut buffer)
+            .map_err(|_| ExtractionError::Invalid)?;
         if count == 0 {
             break;
         }
@@ -197,9 +209,7 @@ pub(super) fn extract_pdf(ctx: &mut Context<'_>, bytes: &[u8]) -> Result<()> {
                 return Err(ExtractionError::Limit("pdf_objects"));
             }
         }
-        if window.starts_with(b"/Type /Page")
-            && bytes.get(n + 11) != Some(&b's')
-        {
+        if window.starts_with(b"/Type /Page") && bytes.get(n + 11) != Some(&b's') {
             page_count += 1;
             if page_count > ctx.limits.max_pages {
                 return Err(ExtractionError::Limit("pdf_pages"));
@@ -230,10 +240,11 @@ pub(super) fn extract_pdf(ctx: &mut Context<'_>, bytes: &[u8]) -> Result<()> {
         }
         let dict_start = marker.saturating_sub(512);
         let preceding = &bytes[dict_start..marker];
-        let flate = preceding.windows(b"/FlateDecode".len())
+        let flate = preceding
+            .windows(b"/FlateDecode".len())
             .any(|v| v == b"/FlateDecode");
-        let unsupported_filter = preceding.windows(b"/Filter".len())
-            .any(|v| v == b"/Filter") && !flate;
+        let unsupported_filter =
+            preceding.windows(b"/Filter".len()).any(|v| v == b"/Filter") && !flate;
         if !unsupported_filter {
             let stream = &bytes[content_at..content_end];
             let decoded = if flate {

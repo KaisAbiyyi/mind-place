@@ -40,8 +40,10 @@ fn central_directory<'a>(ctx: &mut Context<'_>, bytes: &'a [u8]) -> Result<Vec<E
     let min_at = bytes.len().saturating_sub(65_557);
     let eocd = (min_at..=bytes.len() - 22)
         .rev()
-        .find(|&p| &bytes[p..p + 4] == b"PK\x05\x06"
-            && u16at(bytes, p + 20).is_ok_and(|n| p + 22 + usize::from(n) == bytes.len()))
+        .find(|&p| {
+            &bytes[p..p + 4] == b"PK\x05\x06"
+                && u16at(bytes, p + 20).is_ok_and(|n| p + 22 + usize::from(n) == bytes.len())
+        })
         .ok_or(ExtractionError::Invalid)?;
     if u16at(bytes, eocd + 4)? != 0 || u16at(bytes, eocd + 6)? != 0 {
         return Err(ExtractionError::Unsupported);
@@ -55,12 +57,13 @@ fn central_directory<'a>(ctx: &mut Context<'_>, bytes: &'a [u8]) -> Result<Vec<E
     }
     let dir_size = u32at(bytes, eocd + 12)? as usize;
     let dir_start = u32at(bytes, eocd + 16)? as usize;
-    if dir_size == u32::MAX as usize || dir_start == u32::MAX as usize
-        || count == u16::MAX as usize
+    if dir_size == u32::MAX as usize || dir_start == u32::MAX as usize || count == u16::MAX as usize
     {
         return Err(ExtractionError::Unsupported); // ZIP64 is intentionally excluded.
     }
-    let dir_end = dir_start.checked_add(dir_size).ok_or(ExtractionError::Invalid)?;
+    let dir_end = dir_start
+        .checked_add(dir_size)
+        .ok_or(ExtractionError::Invalid)?;
     if dir_end > eocd {
         return Err(ExtractionError::Invalid);
     }
@@ -84,7 +87,8 @@ fn central_directory<'a>(ctx: &mut Context<'_>, bytes: &'a [u8]) -> Result<Vec<E
         let extra_size = usize::from(u16at(bytes, position + 30)?);
         let comment_size = usize::from(u16at(bytes, position + 32)?);
         let local_offset = u32at(bytes, position + 42)? as usize;
-        if compressed == u32::MAX as usize || expanded == u32::MAX as usize
+        if compressed == u32::MAX as usize
+            || expanded == u32::MAX as usize
             || local_offset == u32::MAX as usize
         {
             return Err(ExtractionError::Unsupported);
@@ -96,7 +100,9 @@ fn central_directory<'a>(ctx: &mut Context<'_>, bytes: &'a [u8]) -> Result<Vec<E
             || name.contains('\\')
             || name.contains(':')
             || name.contains('\0')
-            || name.split('/').any(|p| p == "." || p == ".." || p.is_empty())
+            || name
+                .split('/')
+                .any(|p| p == "." || p == ".." || p.is_empty())
         {
             return Err(ExtractionError::Invalid);
         }
@@ -106,8 +112,16 @@ fn central_directory<'a>(ctx: &mut Context<'_>, bytes: &'a [u8]) -> Result<Vec<E
         if expanded_total > ctx.limits.max_expanded_bytes {
             return Err(ExtractionError::Limit("expanded_bytes"));
         }
-        entries.push(Entry { name, method, compressed, expanded, crc32, local_offset });
-        position = position.checked_add(46)
+        entries.push(Entry {
+            name,
+            method,
+            compressed,
+            expanded,
+            crc32,
+            local_offset,
+        });
+        position = position
+            .checked_add(46)
             .and_then(|n| n.checked_add(name_size))
             .and_then(|n| n.checked_add(extra_size))
             .and_then(|n| n.checked_add(comment_size))
@@ -128,19 +142,27 @@ fn central_directory<'a>(ctx: &mut Context<'_>, bytes: &'a [u8]) -> Result<Vec<E
 
 fn is_target(format: DocumentFormat, name: &str) -> bool {
     match format {
-        DocumentFormat::Docx => name == "word/document.xml"
-            || name.starts_with("word/header") && name.ends_with(".xml")
-            || name.starts_with("word/footer") && name.ends_with(".xml")
-            || name == "word/footnotes.xml",
-        DocumentFormat::Pptx => name.starts_with("ppt/slides/slide")
-            && name.ends_with(".xml")
-            && name["ppt/slides/slide".len()..name.len() - 4]
-                .chars().all(|c| c.is_ascii_digit()),
-        DocumentFormat::Xlsx => name == "xl/sharedStrings.xml"
-            || name.starts_with("xl/worksheets/sheet")
+        DocumentFormat::Docx => {
+            name == "word/document.xml"
+                || name.starts_with("word/header") && name.ends_with(".xml")
+                || name.starts_with("word/footer") && name.ends_with(".xml")
+                || name == "word/footnotes.xml"
+        }
+        DocumentFormat::Pptx => {
+            name.starts_with("ppt/slides/slide")
                 && name.ends_with(".xml")
-                && name["xl/worksheets/sheet".len()..name.len() - 4]
-                    .chars().all(|c| c.is_ascii_digit()),
+                && name["ppt/slides/slide".len()..name.len() - 4]
+                    .chars()
+                    .all(|c| c.is_ascii_digit())
+        }
+        DocumentFormat::Xlsx => {
+            name == "xl/sharedStrings.xml"
+                || name.starts_with("xl/worksheets/sheet")
+                    && name.ends_with(".xml")
+                    && name["xl/worksheets/sheet".len()..name.len() - 4]
+                        .chars()
+                        .all(|c| c.is_ascii_digit())
+        }
         _ => false,
     }
 }
@@ -159,7 +181,8 @@ fn uncompress(ctx: &mut Context<'_>, source: &[u8], entry: &Entry<'_>) -> Result
     if local_name != entry.name.as_bytes() {
         return Err(ExtractionError::Invalid);
     }
-    let data_start = offset.checked_add(30)
+    let data_start = offset
+        .checked_add(30)
         .and_then(|n| n.checked_add(local_name_size))
         .and_then(|n| n.checked_add(local_extra_size))
         .ok_or(ExtractionError::Invalid)?;
@@ -178,11 +201,15 @@ fn uncompress(ctx: &mut Context<'_>, source: &[u8], entry: &Entry<'_>) -> Result
             let mut buffer = [0u8; 8192];
             loop {
                 ctx.poll()?;
-                let n = reader.read(&mut buffer).map_err(|_| ExtractionError::Invalid)?;
+                let n = reader
+                    .read(&mut buffer)
+                    .map_err(|_| ExtractionError::Invalid)?;
                 if n == 0 {
                     break;
                 }
-                let next = output.len().checked_add(n)
+                let next = output
+                    .len()
+                    .checked_add(n)
                     .ok_or(ExtractionError::Limit("expanded_bytes"))?;
                 if next > entry.expanded {
                     return Err(ExtractionError::Invalid);
@@ -213,7 +240,9 @@ fn parse_xml(ctx: &mut Context<'_>, bytes: &[u8]) -> Result<String> {
     let mut output = String::new();
     loop {
         ctx.poll()?;
-        let event = reader.read_event_into(&mut scratch).map_err(|_| ExtractionError::Invalid)?;
+        let event = reader
+            .read_event_into(&mut scratch)
+            .map_err(|_| ExtractionError::Invalid)?;
         match event {
             Event::Start(e) => {
                 depth += 1;
@@ -221,7 +250,11 @@ fn parse_xml(ctx: &mut Context<'_>, bytes: &[u8]) -> Result<String> {
                     return Err(ExtractionError::Limit("xml_depth"));
                 }
                 let name = e.name();
-                let local = name.as_ref().rsplit(|c| *c == b':').next().unwrap_or_default();
+                let local = name
+                    .as_ref()
+                    .rsplit(|c| *c == b':')
+                    .next()
+                    .unwrap_or_default();
                 if local == b"t" || local == b"v" {
                     capturing = Some(depth);
                 }
@@ -231,7 +264,11 @@ fn parse_xml(ctx: &mut Context<'_>, bytes: &[u8]) -> Result<String> {
                     return Err(ExtractionError::Invalid);
                 }
                 let name = e.name();
-                let local = name.as_ref().rsplit(|c| *c == b':').next().unwrap_or_default();
+                let local = name
+                    .as_ref()
+                    .rsplit(|c| *c == b':')
+                    .next()
+                    .unwrap_or_default();
                 if matches!(local, b"p" | b"row" | b"si" | b"tr") {
                     output.push('\n');
                 }
@@ -243,13 +280,14 @@ fn parse_xml(ctx: &mut Context<'_>, bytes: &[u8]) -> Result<String> {
             }
             Event::Text(e) if capturing.is_some() => {
                 let raw = std::str::from_utf8(e.as_ref()).map_err(|_| ExtractionError::Invalid)?;
-                let decoded = quick_xml::escape::unescape(raw)
-                    .map_err(|_| ExtractionError::Invalid)?;
+                let decoded =
+                    quick_xml::escape::unescape(raw).map_err(|_| ExtractionError::Invalid)?;
                 output.push_str(&decoded);
             }
             Event::CData(e) if capturing.is_some() => {
-                output.push_str(std::str::from_utf8(e.as_ref())
-                    .map_err(|_| ExtractionError::Invalid)?);
+                output.push_str(
+                    std::str::from_utf8(e.as_ref()).map_err(|_| ExtractionError::Invalid)?,
+                );
             }
             Event::DocType(_) | Event::GeneralRef(_) => {
                 return Err(ExtractionError::Unsupported);
@@ -268,7 +306,11 @@ fn parse_xml(ctx: &mut Context<'_>, bytes: &[u8]) -> Result<String> {
     Ok(output)
 }
 
-pub(super) fn extract_ooxml(ctx: &mut Context<'_>, bytes: &[u8], format: DocumentFormat) -> Result<()> {
+pub(super) fn extract_ooxml(
+    ctx: &mut Context<'_>,
+    bytes: &[u8],
+    format: DocumentFormat,
+) -> Result<()> {
     let entries = central_directory(ctx, bytes)?;
     let mut matched = 0usize;
     for entry in entries {

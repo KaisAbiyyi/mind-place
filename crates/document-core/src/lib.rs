@@ -27,9 +27,9 @@ impl DocumentFormat {
         match ext.trim_start_matches('.').to_ascii_lowercase().as_str() {
             "txt" | "log" | "csv" | "tsv" => Some(Self::PlainText),
             "md" | "mdx" | "markdown" => Some(Self::Markdown),
-            "rs" | "ts" | "tsx" | "js" | "jsx" | "py" | "json" | "toml" | "yaml"
-            | "yml" | "html" | "css" | "sql" | "go" | "java" | "c" | "cpp"
-            | "h" | "hpp" | "sh" | "ps1" | "rb" | "php" => Some(Self::Source),
+            "rs" | "ts" | "tsx" | "js" | "jsx" | "py" | "json" | "toml" | "yaml" | "yml"
+            | "html" | "css" | "sql" | "go" | "java" | "c" | "cpp" | "h" | "hpp" | "sh" | "ps1"
+            | "rb" | "php" => Some(Self::Source),
             "pdf" => Some(Self::Pdf),
             "docx" => Some(Self::Docx),
             "pptx" => Some(Self::Pptx),

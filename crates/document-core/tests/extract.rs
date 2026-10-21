@@ -71,30 +71,54 @@ fn markdown_sections_and_source_are_bounded() {
     assert!(doc.chunks.iter().any(|c| c.section == "## Next"));
     assert!(doc.text.contains("Hello"));
     assert!(doc.text.contains("World"));
-    let source = extract_bytes(DocumentFormat::Source, b"fn main() {}", ExtractionLimits::default()).unwrap();
+    let source = extract_bytes(
+        DocumentFormat::Source,
+        b"fn main() {}",
+        ExtractionLimits::default(),
+    )
+    .unwrap();
     assert!(source.text.contains("fn main"));
-    let invalid = extract_bytes(DocumentFormat::Source, b"\0secret", ExtractionLimits::default());
+    let invalid = extract_bytes(
+        DocumentFormat::Source,
+        b"\0secret",
+        ExtractionLimits::default(),
+    );
     assert_eq!(invalid, Err(ExtractionError::Invalid));
-    let invalid_utf8 = extract_bytes(DocumentFormat::PlainText, &[0xff, 0xfe], ExtractionLimits::default());
+    let invalid_utf8 = extract_bytes(
+        DocumentFormat::PlainText,
+        &[0xff, 0xfe],
+        ExtractionLimits::default(),
+    );
     assert_eq!(invalid_utf8, Err(ExtractionError::Unsupported));
 }
 
 #[test]
 fn small_limits_and_revocation_are_fail_closed() {
-    let tiny = ExtractionLimits { max_input_bytes: 3, ..ExtractionLimits::default() };
+    let tiny = ExtractionLimits {
+        max_input_bytes: 3,
+        ..ExtractionLimits::default()
+    };
     assert_eq!(
         extract_bytes(DocumentFormat::PlainText, b"1234", tiny),
         Err(ExtractionError::Limit("input_bytes"))
     );
-    let limited = ExtractionLimits { max_output_bytes: 5, ..ExtractionLimits::default() };
+    let limited = ExtractionLimits {
+        max_output_bytes: 5,
+        ..ExtractionLimits::default()
+    };
     assert_eq!(
         extract_bytes(DocumentFormat::PlainText, b"some lengthy data", limited),
         Err(ExtractionError::Limit("output_bytes"))
     );
     let mut calls = 0;
     let cancelled = extract_with_check(
-        DocumentFormat::Markdown, b"hello", ExtractionLimits::default(),
-        || { calls += 1; calls < 2 }
+        DocumentFormat::Markdown,
+        b"hello",
+        ExtractionLimits::default(),
+        || {
+            calls += 1;
+            calls < 2
+        },
     );
     assert_eq!(cancelled, Err(ExtractionError::Revoked));
 }
@@ -102,17 +126,36 @@ fn small_limits_and_revocation_are_fail_closed() {
 #[test]
 fn docx_and_pptx_and_xlsx_extract_allowlisted_xml() {
     let word = b"<w:document xmlns:w=\"w\"><w:body><w:p><w:r><w:t>Hello &amp; world</w:t></w:r></w:p></w:body></w:document>";
-    let docx = make_zip(&[("word/document.xml", word, true), ("docProps/app.xml", b"<Properties><secret>ignored</secret></Properties>", false)]);
-    let extracted = extract_bytes(DocumentFormat::Docx, &docx, ExtractionLimits::default()).unwrap();
+    let docx = make_zip(&[
+        ("word/document.xml", word, true),
+        (
+            "docProps/app.xml",
+            b"<Properties><secret>ignored</secret></Properties>",
+            false,
+        ),
+    ]);
+    let extracted =
+        extract_bytes(DocumentFormat::Docx, &docx, ExtractionLimits::default()).unwrap();
     assert!(extracted.text.contains("Hello & world"));
     assert!(!extracted.text.contains("ignored"));
-    assert!(extracted.chunks.iter().all(|c| c.section == "word/document.xml"));
+    assert!(extracted
+        .chunks
+        .iter()
+        .all(|c| c.section == "word/document.xml"));
 
-    let slide = make_zip(&[("ppt/slides/slide1.xml", b"<p:sp xmlns:p=\"p\"><a:t xmlns:a=\"a\">Presentation</a:t></p:sp>", true)]);
+    let slide = make_zip(&[(
+        "ppt/slides/slide1.xml",
+        b"<p:sp xmlns:p=\"p\"><a:t xmlns:a=\"a\">Presentation</a:t></p:sp>",
+        true,
+    )]);
     let pptx = extract_bytes(DocumentFormat::Pptx, &slide, ExtractionLimits::default()).unwrap();
     assert!(pptx.text.contains("Presentation"));
 
-    let sheet = make_zip(&[("xl/worksheets/sheet1.xml", b"<worksheet><row><c><v>42</v></c></row></worksheet>", false)]);
+    let sheet = make_zip(&[(
+        "xl/worksheets/sheet1.xml",
+        b"<worksheet><row><c><v>42</v></c></row></worksheet>",
+        false,
+    )]);
     let xlsx = extract_bytes(DocumentFormat::Xlsx, &sheet, ExtractionLimits::default()).unwrap();
     assert!(xlsx.text.contains("42"));
 }
@@ -121,7 +164,10 @@ fn docx_and_pptx_and_xlsx_extract_allowlisted_xml() {
 fn zip_bomb_declared_size_is_rejected_before_inflate() {
     let word = vec![b'A'; 64 * 1024];
     let zip = make_zip(&[("word/document.xml", &word, true)]);
-    let limits = ExtractionLimits { max_expanded_bytes: 100, ..ExtractionLimits::default() };
+    let limits = ExtractionLimits {
+        max_expanded_bytes: 100,
+        ..ExtractionLimits::default()
+    };
     assert_eq!(
         extract_bytes(DocumentFormat::Docx, &zip, limits),
         Err(ExtractionError::Limit("expanded_bytes"))
@@ -134,20 +180,38 @@ fn malformed_crc_duplicate_names_and_traversal_are_rejected() {
     let good = make_zip(&[("word/document.xml", xml, true)]);
     let mut corrupted = good.clone();
     // Central-directory CRC starts at central signature + 16.
-    let central = corrupted.windows(4).position(|w| w == b"PK\x01\x02").unwrap();
+    let central = corrupted
+        .windows(4)
+        .position(|w| w == b"PK\x01\x02")
+        .unwrap();
     corrupted[central + 16] ^= 0xA0;
     assert_eq!(
-        extract_bytes(DocumentFormat::Docx, &corrupted, ExtractionLimits::default()),
+        extract_bytes(
+            DocumentFormat::Docx,
+            &corrupted,
+            ExtractionLimits::default()
+        ),
         Err(ExtractionError::Invalid)
     );
-    let duplicates = make_zip(&[("word/document.xml", xml, false), ("word/document.xml", xml, false)]);
+    let duplicates = make_zip(&[
+        ("word/document.xml", xml, false),
+        ("word/document.xml", xml, false),
+    ]);
     assert_eq!(
-        extract_bytes(DocumentFormat::Docx, &duplicates, ExtractionLimits::default()),
+        extract_bytes(
+            DocumentFormat::Docx,
+            &duplicates,
+            ExtractionLimits::default()
+        ),
         Err(ExtractionError::Invalid)
     );
     let traversal = make_zip(&[("../word/document.xml", xml, false)]);
     assert_eq!(
-        extract_bytes(DocumentFormat::Docx, &traversal, ExtractionLimits::default()),
+        extract_bytes(
+            DocumentFormat::Docx,
+            &traversal,
+            ExtractionLimits::default()
+        ),
         Err(ExtractionError::Invalid)
     );
 }
@@ -156,12 +220,19 @@ fn malformed_crc_duplicate_names_and_traversal_are_rejected() {
 fn xml_depth_dtd_and_text_explosion_are_bounded() {
     let nested = b"<a><a><a><w:t>Hello</w:t></a></a></a>";
     let zip = make_zip(&[("word/document.xml", nested, false)]);
-    let limits = ExtractionLimits { max_xml_depth: 2, ..ExtractionLimits::default() };
+    let limits = ExtractionLimits {
+        max_xml_depth: 2,
+        ..ExtractionLimits::default()
+    };
     assert_eq!(
         extract_bytes(DocumentFormat::Docx, &zip, limits),
         Err(ExtractionError::Limit("xml_depth"))
     );
-    let hostile = make_zip(&[("word/document.xml", b"<!DOCTYPE a [<!ENTITY x \"exfil\">]><a><w:t>&x;</w:t></a>", false)]);
+    let hostile = make_zip(&[(
+        "word/document.xml",
+        b"<!DOCTYPE a [<!ENTITY x \"exfil\">]><a><w:t>&x;</w:t></a>",
+        false,
+    )]);
     assert_eq!(
         extract_bytes(DocumentFormat::Docx, &hostile, ExtractionLimits::default()),
         Err(ExtractionError::Unsupported)
@@ -174,7 +245,10 @@ fn pdf_plaintext_and_flate_streams_and_page_limits() {
     let doc = extract_bytes(DocumentFormat::Pdf, pdf, ExtractionLimits::default()).unwrap();
     assert!(doc.text.contains("Extracted page content"));
     assert!(doc.warnings.iter().any(|w| w.contains("best-effort")));
-    let limits = ExtractionLimits { max_pages: 1, ..ExtractionLimits::default() };
+    let limits = ExtractionLimits {
+        max_pages: 1,
+        ..ExtractionLimits::default()
+    };
     let two_pages = b"%PDF-1.4\n/Type /Page\n/Type /Page\nBT (X) Tj ET";
     assert_eq!(
         extract_bytes(DocumentFormat::Pdf, two_pages, limits),
@@ -184,8 +258,14 @@ fn pdf_plaintext_and_flate_streams_and_page_limits() {
 
 #[test]
 fn extension_mapping_does_not_accept_macro_enabled_office_archives() {
-    assert_eq!(DocumentFormat::from_extension(".DOCX"), Some(DocumentFormat::Docx));
-    assert_eq!(DocumentFormat::from_extension("mdx"), Some(DocumentFormat::Markdown));
+    assert_eq!(
+        DocumentFormat::from_extension(".DOCX"),
+        Some(DocumentFormat::Docx)
+    );
+    assert_eq!(
+        DocumentFormat::from_extension("mdx"),
+        Some(DocumentFormat::Markdown)
+    );
     assert_eq!(DocumentFormat::from_extension("xlsm"), None);
     assert_eq!(DocumentFormat::from_extension("docm"), None);
 }
