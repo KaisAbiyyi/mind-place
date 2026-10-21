@@ -102,6 +102,10 @@ Current execution order after the security-first reprioritization:
 5. **Phase 3E — security and E2E cloud qualification — MERGED.** PR #14 squash-merged at `55465041cf9f2e2df05eeeccec9ac3249df1cc0c`, with Windows PR CI PASS. Simulated transport and protocol conformance over actual loopback TCP, stale/rotated bearer and read-admin escalation denial, strict header adversarial cases, native helper exit isolation, periodic unexpected-exit revocation and fail-closed authority failure. See [Phase 3E handoff](phase-3e-security-qualification.md). **No real hosted tunnel or end-user qualification is claimed.**
 6. **Phase 3F — bundled official tunnel helper — DONE / MERGED.** [PR #17](https://github.com/KaisAbiyyi/mind-place/pull/17) squash-merged to `main` on 2026-10-21 at `f9d1313ac3301e69ccb3fba5d2426c0985940fb8`; final-head [Windows product CI PASS](https://github.com/KaisAbiyyi/mind-place/actions/runs/39305453977). Windows installer/portable bundle the verified helper; no user download/copy required. [Contract and receipt](phase-3f-bundled-tunnel-helper.md). Local 3L1, 3L2 and user 3U are NOT RUN; actual account setup, explicit consent and provenance/revocation proof remain required.
 
+### MP-3L1 bounded repair — manual Lock
+
+[PR #18](https://github.com/KaisAbiyyi/mind-place/pull/18), task `MP-3L1-FIX-LOCK`, adds the missing owner Lock UI and disposable reader lifecycle. Source regression and local baseline PASS; Windows CI/package qualification and installed real-client manual Lock remain pending. [Implementation summary](../implementation-summary/2026-10-21-mp-3l1-manual-lock-fix.md). Existing 3L1/3L2/3U acceptance order remains unchanged.
+
 ## Phase 1A explicit boundary
 
 Phase 1A establishes the **local process security root**. It intentionally does not yet complete:
