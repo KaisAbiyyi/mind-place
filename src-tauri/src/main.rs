@@ -330,7 +330,8 @@ async fn list_document_roots(state: State<'_, AppState>) -> Result<Vec<DocumentR
     let db_path = state.state_path.clone();
     let roots = tauri::async_runtime::spawn_blocking(move || {
         let db = StateStore::open(db_path).map_err(|e| format!("{}:{}", e.code(), e))?;
-        db.list_document_roots().map_err(|e| format!("{}:{}", e.code(), e))
+        db.list_document_roots()
+            .map_err(|e| format!("{}:{}", e.code(), e))
     })
     .await
     .map_err(|e| e.to_string())??;
@@ -340,7 +341,10 @@ async fn list_document_roots(state: State<'_, AppState>) -> Result<Vec<DocumentR
 
 /// Stages an existing directory as pending. No approval, scan, or document read.
 #[tauri::command]
-async fn stage_document_root(state: State<'_, AppState>, path: String) -> Result<DocumentRoot, String> {
+async fn stage_document_root(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<DocumentRoot, String> {
     let lease = begin_unlocked(&state)?;
     if path.is_empty() || path.len() > 4096 || path.contains('\0') {
         return Err("MP_STATE_INVALID_VALUE:invalid directory path".into());
@@ -348,7 +352,8 @@ async fn stage_document_root(state: State<'_, AppState>, path: String) -> Result
     let db_path = state.state_path.clone();
     let root = tauri::async_runtime::spawn_blocking(move || {
         let db = StateStore::open(db_path).map_err(|e| format!("{}:{}", e.code(), e))?;
-        db.register_document_root(Path::new(&path)).map_err(|e| format!("{}:{}", e.code(), e))
+        db.register_document_root(Path::new(&path))
+            .map_err(|e| format!("{}:{}", e.code(), e))
     })
     .await
     .map_err(|e| e.to_string())??;
