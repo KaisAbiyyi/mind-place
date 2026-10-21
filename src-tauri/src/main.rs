@@ -389,7 +389,8 @@ async fn approve_document_root(
         }
         security.validate_lease(lease).map_err(security_error)?;
         let db = StateStore::open(db_path).map_err(|e| format!("{}:{}", e.code(), e))?;
-        let root = db.approve_document_root(&root_id)
+        let root = db
+            .approve_document_root(&root_id)
             .map_err(|e| format!("{}:{}", e.code(), e))?;
         security.validate_lease(lease).map_err(security_error)?;
         Ok(root)
@@ -415,7 +416,8 @@ async fn revoke_document_root(state: State<'_, AppState>, root_id: String) -> Re
         }
         security.validate_lease(lease).map_err(security_error)?;
         let db = StateStore::open(db_path).map_err(|e| format!("{}:{}", e.code(), e))?;
-        let result = db.revoke_document_root(&root_id)
+        let result = db
+            .revoke_document_root(&root_id)
             .map_err(|e| format!("{}:{}", e.code(), e))?;
         security.validate_lease(lease).map_err(security_error)?;
         Ok(result)
