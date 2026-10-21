@@ -34,6 +34,8 @@ struct AppState {
     state_path: PathBuf,
     index_path: PathBuf,
     authority_ready: Arc<AtomicBool>,
+    // Serializes owner filesystem grants against Lock; prevents late approvals.
+    document_authority_gate: Arc<Mutex<()>>,
     mcp: Arc<Mutex<Option<LocalMcpServer>>>,
     hosted: Arc<Mutex<Option<hosted_tunnel::HostedTunnel>>>,
     extension_path: PathBuf,
@@ -314,8 +316,16 @@ async fn unlock_security(
 
 #[tauri::command]
 fn lock_security(state: State<'_, AppState>) -> SecurityStatus {
-    state.authority_ready.store(false, Ordering::Release);
-    let status = state.security.lock();
+    // Lock cannot complete while a prior authorized grant is committing.
+    // Conversely, a queued grant revalidates its lease after acquiring gate.
+    let status = {
+        let _gate = state
+            .document_authority_gate
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.authority_ready.store(false, Ordering::Release);
+        state.security.lock()
+    };
     // Invalidate all read leases before killing the outbound helper and local listener.
     // Revocation is best-effort while locked; all in-flight evidence is already blocked.
     let _ = hosted_tunnel::stop_and_revoke(&state);
@@ -369,10 +379,20 @@ async fn approve_document_root(
 ) -> Result<DocumentRoot, String> {
     let lease = begin_unlocked(&state)?;
     let db_path = state.state_path.clone();
+    let gate = state.document_authority_gate.clone();
+    let security = state.security.clone();
+    let authority_ready = state.authority_ready.clone();
     let root = tauri::async_runtime::spawn_blocking(move || {
+        let _gate = gate.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !authority_ready.load(Ordering::Acquire) {
+            return Err("MP_STATE_NOT_READY:authoritative state not ready".to_owned());
+        }
+        security.validate_lease(lease).map_err(security_error)?;
         let db = StateStore::open(db_path).map_err(|e| format!("{}:{}", e.code(), e))?;
-        db.approve_document_root(&root_id)
-            .map_err(|e| format!("{}:{}", e.code(), e))
+        let root = db.approve_document_root(&root_id)
+            .map_err(|e| format!("{}:{}", e.code(), e))?;
+        security.validate_lease(lease).map_err(security_error)?;
+        Ok(root)
     })
     .await
     .map_err(|e| e.to_string())??;
@@ -385,10 +405,20 @@ async fn approve_document_root(
 async fn revoke_document_root(state: State<'_, AppState>, root_id: String) -> Result<(), String> {
     let lease = begin_unlocked(&state)?;
     let db_path = state.state_path.clone();
+    let gate = state.document_authority_gate.clone();
+    let security = state.security.clone();
+    let authority_ready = state.authority_ready.clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let _gate = gate.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !authority_ready.load(Ordering::Acquire) {
+            return Err("MP_STATE_NOT_READY:authoritative state not ready".to_owned());
+        }
+        security.validate_lease(lease).map_err(security_error)?;
         let db = StateStore::open(db_path).map_err(|e| format!("{}:{}", e.code(), e))?;
-        db.revoke_document_root(&root_id)
-            .map_err(|e| format!("{}:{}", e.code(), e))
+        let result = db.revoke_document_root(&root_id)
+            .map_err(|e| format!("{}:{}", e.code(), e))?;
+        security.validate_lease(lease).map_err(security_error)?;
+        Ok(result)
     })
     .await
     .map_err(|e| e.to_string())??;
@@ -601,6 +631,7 @@ fn main() {
                 state_path,
                 index_path,
                 authority_ready: Arc::new(AtomicBool::new(false)),
+                document_authority_gate: Arc::new(Mutex::new(())),
                 mcp: Arc::new(Mutex::new(None)),
                 hosted: Arc::new(Mutex::new(None)),
                 extension_path,
