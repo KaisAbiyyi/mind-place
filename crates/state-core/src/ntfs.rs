@@ -8,7 +8,6 @@ pub(crate) struct DirectoryEntry {
     pub(crate) is_reparse: bool,
 }
 
-
 #[cfg(windows)]
 mod platform {
     use super::*;
@@ -221,7 +220,10 @@ mod platform {
     ) -> io::Result<Vec<DirectoryEntry>> {
         let mut dir = root(path)?;
         if identity(&dir, true)? != expected {
-            return Err(io::Error::new(io::ErrorKind::PermissionDenied, "approved root replaced"));
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "approved root replaced",
+            ));
         }
         for segment in segments {
             dir = child(&dir, segment, true)?;
@@ -230,7 +232,10 @@ mod platform {
         let mut buf = vec![0u8; 64 * 1024];
         let mut restart = 1u8;
         loop {
-            let mut status = IoStatusBlock { status: 0, information: 0 };
+            let mut status = IoStatusBlock {
+                status: 0,
+                information: 0,
+            };
             let rc = unsafe {
                 NtQueryDirectoryFile(
                     dir.as_raw_handle() as isize,
@@ -247,28 +252,36 @@ mod platform {
                 )
             };
             restart = 0;
-            if rc as u32 == 0x80000006 { // STATUS_NO_MORE_FILES
+            if rc as u32 == 0x80000006 {
+                // STATUS_NO_MORE_FILES
                 break;
             }
             if rc != 0 {
                 return Err(io::Error::from_raw_os_error(
-                    unsafe { RtlNtStatusToDosError(rc) } as i32
+                    unsafe { RtlNtStatusToDosError(rc) } as i32,
                 ));
             }
             if status.information < 64 || status.information > buf.len() {
-                return Err(io::Error::new(io::ErrorKind::InvalidData, "malformed directory record"));
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "malformed directory record",
+                ));
             }
             let attribute = u32::from_le_bytes(buf[56..60].try_into().unwrap());
             let size = u32::from_le_bytes(buf[60..64].try_into().unwrap()) as usize;
             if size == 0 || size % 2 != 0 || 64 + size > status.information {
-                return Err(io::Error::new(io::ErrorKind::InvalidData, "malformed directory name"));
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "malformed directory name",
+                ));
             }
             let name = String::from_utf16(
                 &buf[64..64 + size]
                     .chunks_exact(2)
                     .map(|unit| u16::from_le_bytes([unit[0], unit[1]]))
                     .collect::<Vec<_>>(),
-            ).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid UTF-16 entry"))?;
+            )
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid UTF-16 entry"))?;
             if name == "." || name == ".." {
                 continue;
             }
@@ -278,13 +291,15 @@ mod platform {
                 is_reparse: attribute & REPARSE != 0,
             });
             if names.len() > 10_000 {
-                return Err(io::Error::new(io::ErrorKind::InvalidData, "too many directory entries"));
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "too many directory entries",
+                ));
             }
         }
         names.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(names)
     }
-
 }
 #[cfg(not(windows))]
 mod platform {
@@ -319,4 +334,6 @@ mod platform {
         ))
     }
 }
-pub(crate) use platform::{directory_entries, document_file_identity, open_document, root_identity};
+pub(crate) use platform::{
+    directory_entries, document_file_identity, open_document, root_identity,
+};
