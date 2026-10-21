@@ -81,7 +81,10 @@ fn root_staging_is_idempotent_pending_only_and_revocation_is_terminal() {
     assert!(state.require_approved_document_uri(&uri).is_err());
     let db = Connection::open(state.path()).unwrap();
     assert_eq!(
-        state.approve_document_root(&first.id).unwrap().approval_state,
+        state
+            .approve_document_root(&first.id)
+            .unwrap()
+            .approval_state,
         "approved"
     );
     assert!(state.approve_document_root(&first.id).is_err());
@@ -201,9 +204,14 @@ fn forged_sql_approval_without_capability_does_not_grant_access() {
     fs::create_dir(&folder).unwrap();
     let root = state.register_document_root(&folder).unwrap();
     let uri = VirtualDocumentPath::from_segments(&root.id, &["secret.txt".into()])
-        .unwrap().to_uri();
+        .unwrap()
+        .to_uri();
     let db = Connection::open(state.path()).unwrap();
-    db.execute("UPDATE source_roots SET approval_state='approved' WHERE id=?1", [&root.id]).unwrap();
+    db.execute(
+        "UPDATE source_roots SET approval_state='approved' WHERE id=?1",
+        [&root.id],
+    )
+    .unwrap();
     assert!(state.require_approved_document_uri(&uri).is_err());
     assert!(state.approve_document_root(&root.id).is_err());
 }
@@ -216,11 +224,15 @@ fn approval_is_identity_bound_and_revocation_is_terminal() {
     fs::write(folder.join("note.md"), "authoritative").unwrap();
     let root = state.register_document_root(&folder).unwrap();
     let uri = VirtualDocumentPath::from_segments(&root.id, &["note.md".into()])
-        .unwrap().to_uri();
+        .unwrap()
+        .to_uri();
     assert!(state.read_document_bytes(&uri, 1024).is_err());
     state.approve_document_root(&root.id).unwrap();
     #[cfg(windows)]
-    assert_eq!(state.read_document_bytes(&uri, 1024).unwrap(), b"authoritative");
+    assert_eq!(
+        state.read_document_bytes(&uri, 1024).unwrap(),
+        b"authoritative"
+    );
     #[cfg(not(windows))]
     assert!(state.read_document_bytes(&uri, 1024).is_err());
     assert!(state.read_document_bytes(&uri, 0).is_err());
@@ -245,23 +257,43 @@ fn windows_relative_handles_reject_escape_reparse_hardlinks_and_root_replacement
     fs::write(root_path.join("allowed.txt"), "ok").unwrap();
     let root = state.register_document_root(&root_path).unwrap();
     state.approve_document_root(&root.id).unwrap();
-    let uri = |segments: &[String]| VirtualDocumentPath::from_segments(&root.id, segments)
-        .unwrap().to_uri();
-    assert_eq!(state.read_document_bytes(&uri(&["allowed.txt".into()]), 16).unwrap(), b"ok");
-    assert!(state.read_document_bytes(&uri(&["allowed.txt".into()]), 1).is_err());
+    let uri = |segments: &[String]| {
+        VirtualDocumentPath::from_segments(&root.id, segments)
+            .unwrap()
+            .to_uri()
+    };
+    assert_eq!(
+        state
+            .read_document_bytes(&uri(&["allowed.txt".into()]), 16)
+            .unwrap(),
+        b"ok"
+    );
+    assert!(state
+        .read_document_bytes(&uri(&["allowed.txt".into()]), 1)
+        .is_err());
     // An NTFS hardlink may point to a file originally outside the approved root.
     if fs::hard_link(outside.join("secret.txt"), root_path.join("linked.txt")).is_ok() {
-        assert!(state.read_document_bytes(&uri(&["linked.txt".into()]), 128).is_err());
+        assert!(state
+            .read_document_bytes(&uri(&["linked.txt".into()]), 128)
+            .is_err());
     }
     // Symlink creation may require Windows developer mode; verify if available.
-    if std::os::windows::fs::symlink_file(outside.join("secret.txt"), root_path.join("escape.txt")).is_ok() {
-        assert!(state.read_document_bytes(&uri(&["escape.txt".into()]), 128).is_err());
+    if std::os::windows::fs::symlink_file(outside.join("secret.txt"), root_path.join("escape.txt"))
+        .is_ok()
+    {
+        assert!(state
+            .read_document_bytes(&uri(&["escape.txt".into()]), 128)
+            .is_err());
     }
     let prior = home.path().join("prior");
     fs::rename(&root_path, &prior).unwrap();
     fs::create_dir(&root_path).unwrap();
     fs::write(root_path.join("allowed.txt"), "replaced").unwrap();
-    assert!(state.read_document_bytes(&uri(&["allowed.txt".into()]), 128).is_err());
-    assert!(StateStore::open(state.path()).unwrap()
-        .read_document_bytes(&uri(&["allowed.txt".into()]), 128).is_err());
+    assert!(state
+        .read_document_bytes(&uri(&["allowed.txt".into()]), 128)
+        .is_err());
+    assert!(StateStore::open(state.path())
+        .unwrap()
+        .read_document_bytes(&uri(&["allowed.txt".into()]), 128)
+        .is_err());
 }

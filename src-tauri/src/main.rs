@@ -364,7 +364,8 @@ async fn stage_document_root(
 /// Explicit authenticated desktop owner grant. NEVER expose via MCP.
 #[tauri::command]
 async fn approve_document_root(
-    state: State<'_, AppState>, root_id: String,
+    state: State<'_, AppState>,
+    root_id: String,
 ) -> Result<DocumentRoot, String> {
     let lease = begin_unlocked(&state)?;
     let db_path = state.state_path.clone();
@@ -372,23 +373,25 @@ async fn approve_document_root(
         let db = StateStore::open(db_path).map_err(|e| format!("{}:{}", e.code(), e))?;
         db.approve_document_root(&root_id)
             .map_err(|e| format!("{}:{}", e.code(), e))
-    }).await.map_err(|e| e.to_string())??;
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     finish_unlocked(&state, lease)?;
     Ok(root)
 }
 
 /// Immediate, terminal owner revocation. Tombstones deny future reads.
 #[tauri::command]
-async fn revoke_document_root(
-    state: State<'_, AppState>, root_id: String,
-) -> Result<(), String> {
+async fn revoke_document_root(state: State<'_, AppState>, root_id: String) -> Result<(), String> {
     let lease = begin_unlocked(&state)?;
     let db_path = state.state_path.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let db = StateStore::open(db_path).map_err(|e| format!("{}:{}", e.code(), e))?;
         db.revoke_document_root(&root_id)
             .map_err(|e| format!("{}:{}", e.code(), e))
-    }).await.map_err(|e| e.to_string())??;
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     finish_unlocked(&state, lease)
 }
 
