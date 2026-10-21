@@ -368,6 +368,33 @@ mod tests {
         assert!(literal_query(&"x".repeat(257)).is_err());
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn windows_owner_document_index_search_mutation_and_revocation() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = StateStore::open(dir.path().join("authority/state.sqlite3")).unwrap();
+        let folder = dir.path().join("approved");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("notes.md"), "alpha uniquephrase beta").unwrap();
+        let root = state.register_document_root(&folder).unwrap();
+        state.approve_document_root(&root.id).unwrap();
+        let index = DocumentIndex::open(dir.path().join("document-index.sqlite3")).unwrap();
+        let first = index.refresh_root(&state, &root.id, || Ok(())).unwrap();
+        assert_eq!(first.indexed_files, 1);
+        assert!(first.indexed_chunks > 0);
+        assert_eq!(index.search(&state, "uniquephrase", 10, || Ok(())).unwrap().len(), 1);
+
+        // A current file edit must suppress stale projections even prior to rescan.
+        std::fs::write(folder.join("notes.md"), "completely changed").unwrap();
+        assert!(index.search(&state, "uniquephrase", 10, || Ok(())).unwrap().is_empty());
+        let second = index.refresh_root(&state, &root.id, || Ok(())).unwrap();
+        assert_eq!(second.generation, first.generation + 1);
+        assert!(index.search(&state, "uniquephrase", 10, || Ok(())).unwrap().is_empty());
+        assert_eq!(index.search(&state, "changed", 10, || Ok(())).unwrap().len(), 1);
+        state.revoke_document_root(&root.id).unwrap();
+        assert!(index.search(&state, "changed", 10, || Ok(())).unwrap().is_empty());
+    }
+
     #[test]
     fn unapproved_derived_fts_candidates_never_disclose() {
         let tmp = tempfile::tempdir().unwrap();
