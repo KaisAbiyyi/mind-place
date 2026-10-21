@@ -201,6 +201,7 @@ impl DocumentScanner {
         let mut excluded = 0usize;
         self.walk(
             root_path,
+            expected,
             &[],
             &mut discovered,
             &mut excluded,
