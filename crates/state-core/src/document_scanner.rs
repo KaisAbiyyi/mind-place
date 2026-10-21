@@ -20,12 +20,14 @@ use std::{
 const MAX_SCAN_ENTRIES: usize = 10_000;
 const MAX_DEPTH: usize = 24;
 const MAX_READ_BYTES: u64 = 32 * 1024 * 1024;
+const MAX_SCAN_TOTAL_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ScanPolicy {
     pub max_files: usize,
     pub max_depth: usize,
     pub max_bytes_per_file: u64,
+    pub max_total_bytes: u64,
     pub extensions: BTreeSet<String>,
     pub excluded_dirs: BTreeSet<String>,
 }
@@ -35,6 +37,7 @@ impl Default for ScanPolicy {
             max_files: MAX_SCAN_ENTRIES,
             max_depth: MAX_DEPTH,
             max_bytes_per_file: MAX_READ_BYTES,
+            max_total_bytes: 512 * 1024 * 1024,
             extensions: [
                 "md", "markdown", "txt", "json", "jsonl", "pdf", "docx", "pptx", "xlsx", "rs",
                 "ts", "tsx", "js", "jsx", "py", "go", "toml",
@@ -57,6 +60,8 @@ impl ScanPolicy {
             || self.max_depth > MAX_DEPTH
             || self.max_bytes_per_file == 0
             || self.max_bytes_per_file > MAX_READ_BYTES
+            || self.max_total_bytes == 0
+            || self.max_total_bytes > MAX_SCAN_TOTAL_BYTES
             || self.extensions.len() > 128
             || self.extensions.iter().any(|v| {
                 v.is_empty()
@@ -226,6 +231,7 @@ impl DocumentScanner {
             complete: false,
         };
         let mut next = BTreeSet::new();
+        let mut total_bytes = 0u64;
         for segments in discovered {
             unlock_guard()?;
             let path = VirtualDocumentPath::from_segments(root_id, &segments)?;
@@ -242,6 +248,12 @@ impl DocumentScanner {
             if attributes.len() > self.policy.max_bytes_per_file {
                 report.excluded_paths += 1;
                 continue;
+            }
+            total_bytes = total_bytes
+                .checked_add(attributes.len())
+                .ok_or(StateError::DocumentLimit)?;
+            if total_bytes > self.policy.max_total_bytes {
+                return Err(StateError::DocumentLimit);
             }
             let metadata = DocumentMetadata {
                 file_identity: crate::ntfs::document_file_identity(&file)?,
