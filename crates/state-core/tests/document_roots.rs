@@ -80,12 +80,11 @@ fn root_staging_is_idempotent_pending_only_and_revocation_is_terminal() {
         .to_uri();
     assert!(state.require_approved_document_uri(&uri).is_err());
     let db = Connection::open(state.path()).unwrap();
-    // Simulate future MP-4B *explicit owner grant* only for the lookup contract.
-    db.execute(
-        "UPDATE source_roots SET approval_state='approved', approved_at=unixepoch() WHERE id=?1",
-        [&first.id],
-    )
-    .unwrap();
+    assert_eq!(
+        state.approve_document_root(&first.id).unwrap().approval_state,
+        "approved"
+    );
+    assert!(state.approve_document_root(&first.id).is_err());
     assert!(state.require_approved_document_uri(&uri).is_ok());
     state.revoke_root(&first.id).unwrap();
     assert!(state.require_approved_document_uri(&uri).is_err());
@@ -175,7 +174,7 @@ fn schema_v3_migrates_without_adopting_historical_approved_roots() {
     db.execute("INSERT INTO source_roots(id,canonical_path,approval_state,approved_at) VALUES('legacy','/legacy/secret','approved',unixepoch())", []).unwrap();
     db.pragma_update(None, "user_version", 3).unwrap();
     drop(db);
-    assert_eq!(SCHEMA_VERSION, 4);
+    assert_eq!(SCHEMA_VERSION, 5);
     let state = StateStore::open(&path).unwrap();
     assert_eq!(
         state.root("legacy").unwrap().unwrap().approval_state,
@@ -186,11 +185,83 @@ fn schema_v3_migrates_without_adopting_historical_approved_roots() {
     let version: i64 = sql
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 4);
+    assert_eq!(version, 5);
     assert_eq!(
         fs::read_dir(home.path().join("state-backups"))
             .unwrap()
             .count(),
         1
     );
+}
+
+#[test]
+fn forged_sql_approval_without_capability_does_not_grant_access() {
+    let (home, state) = store();
+    let folder = home.path().join("documents");
+    fs::create_dir(&folder).unwrap();
+    let root = state.register_document_root(&folder).unwrap();
+    let uri = VirtualDocumentPath::from_segments(&root.id, &["secret.txt".into()])
+        .unwrap().to_uri();
+    let db = Connection::open(state.path()).unwrap();
+    db.execute("UPDATE source_roots SET approval_state='approved' WHERE id=?1", [&root.id]).unwrap();
+    assert!(state.require_approved_document_uri(&uri).is_err());
+    assert!(state.approve_document_root(&root.id).is_err());
+}
+
+#[test]
+fn approval_is_identity_bound_and_revocation_is_terminal() {
+    let (home, state) = store();
+    let folder = home.path().join("approved");
+    fs::create_dir(&folder).unwrap();
+    fs::write(folder.join("note.md"), "authoritative").unwrap();
+    let root = state.register_document_root(&folder).unwrap();
+    let uri = VirtualDocumentPath::from_segments(&root.id, &["note.md".into()])
+        .unwrap().to_uri();
+    assert!(state.read_document_bytes(&uri, 1024).is_err());
+    state.approve_document_root(&root.id).unwrap();
+    #[cfg(windows)]
+    assert_eq!(state.read_document_bytes(&uri, 1024).unwrap(), b"authoritative");
+    #[cfg(not(windows))]
+    assert!(state.read_document_bytes(&uri, 1024).is_err());
+    assert!(state.read_document_bytes(&uri, 0).is_err());
+    assert!(state.read_document_bytes(&uri, 33 * 1024 * 1024).is_err());
+    state.revoke_document_root(&root.id).unwrap();
+    assert!(state.require_approved_document_uri(&uri).is_err());
+    assert!(state.read_document_bytes(&uri, 1024).is_err());
+    assert!(state.approve_document_root(&root.id).is_err());
+    assert!(state.revoke_document_root(&root.id).is_err());
+    assert!(state.register_document_root(&folder).is_err());
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_relative_handles_reject_escape_reparse_hardlinks_and_root_replacement() {
+    let (home, state) = store();
+    let root_path = home.path().join("granted");
+    let outside = home.path().join("outside");
+    fs::create_dir(&root_path).unwrap();
+    fs::create_dir(&outside).unwrap();
+    fs::write(outside.join("secret.txt"), "secret").unwrap();
+    fs::write(root_path.join("allowed.txt"), "ok").unwrap();
+    let root = state.register_document_root(&root_path).unwrap();
+    state.approve_document_root(&root.id).unwrap();
+    let uri = |segments: &[String]| VirtualDocumentPath::from_segments(&root.id, segments)
+        .unwrap().to_uri();
+    assert_eq!(state.read_document_bytes(&uri(&["allowed.txt".into()]), 16).unwrap(), b"ok");
+    assert!(state.read_document_bytes(&uri(&["allowed.txt".into()]), 1).is_err());
+    // An NTFS hardlink may point to a file originally outside the approved root.
+    if fs::hard_link(outside.join("secret.txt"), root_path.join("linked.txt")).is_ok() {
+        assert!(state.read_document_bytes(&uri(&["linked.txt".into()]), 128).is_err());
+    }
+    // Symlink creation may require Windows developer mode; verify if available.
+    if std::os::windows::fs::symlink_file(outside.join("secret.txt"), root_path.join("escape.txt")).is_ok() {
+        assert!(state.read_document_bytes(&uri(&["escape.txt".into()]), 128).is_err());
+    }
+    let prior = home.path().join("prior");
+    fs::rename(&root_path, &prior).unwrap();
+    fs::create_dir(&root_path).unwrap();
+    fs::write(root_path.join("allowed.txt"), "replaced").unwrap();
+    assert!(state.read_document_bytes(&uri(&["allowed.txt".into()]), 128).is_err());
+    assert!(StateStore::open(state.path()).unwrap()
+        .read_document_bytes(&uri(&["allowed.txt".into()]), 128).is_err());
 }
