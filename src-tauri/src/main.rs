@@ -756,7 +756,8 @@ mod document_authority_regression_tests {
                 entered_tx.send(()).unwrap(); // holding the production gate
                 release_rx.recv_timeout(Duration::from_secs(10)).unwrap();
                 let db = StateStore::open(db_path).unwrap();
-                db.approve_document_root(&root_id).map_err(|e| e.to_string())
+                db.approve_document_root(&root_id)
+                    .map_err(|e| e.to_string())
             })
         });
         entered_rx.recv_timeout(Duration::from_secs(10)).unwrap();
@@ -775,7 +776,12 @@ mod document_authority_regression_tests {
         assert!(done_rx.recv_timeout(Duration::from_millis(100)).is_err());
         release_tx.send(()).unwrap();
         assert!(approval.join().unwrap().is_ok());
-        assert!(done_rx.recv_timeout(Duration::from_secs(10)).unwrap().locked);
+        assert!(
+            done_rx
+                .recv_timeout(Duration::from_secs(10))
+                .unwrap()
+                .locked
+        );
         locking.join().unwrap();
         assert!(security.status().locked);
     }
