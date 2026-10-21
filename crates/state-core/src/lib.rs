@@ -9,8 +9,8 @@ use std::{
 };
 mod clients;
 mod document_roots;
-mod ntfs;
 mod identity;
+mod ntfs;
 pub use clients::{ClientAuditEvent, ClientCapability, ClientRecord};
 pub use document_roots::{DocumentRoot, VirtualDocumentPath, VIRTUAL_ROOT_PREFIX};
 pub use identity::{canonical_source_id, SourceDescriptor, SourceKey};
