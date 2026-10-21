@@ -36,7 +36,7 @@ PASS package/build verification:
 - Portable ZIP: `release/Mind-Place-MP-3F-windows-x64-portable.zip`, 12,848,765 bytes, SHA-256 `b29dd77923d5310cff246a7868b15e8b836e9d1caffd58f2b32b5a09ea40b85e`.
 - Local generated proof: `outputs/phase-3f-package-proof.json`, including app/helper hashes and the preserved working-tree Cargo.lock digest. Binaries, ZIP and generated proof/logs are intentionally untracked.
 
-PENDING: latest GitHub Windows CI and PR integration. Local gates above are independently observed; this is not a merged milestone. Installer compilation/resource mapping and portable ZIP contents are verified; installed GUI behavior is not inferred from them.
+MERGED: PR #17 squash-merged to `main` at `f9d1313ac3301e69ccb3fba5d2426c0985940fb8` on 2026-10-21 after final PR-head [Windows CI PASS](https://github.com/KaisAbiyyi/mind-place/actions/runs/39305453977). Local package gates above are independently observed; installed-app qualification remains pending. Installer compilation/resource mapping and portable ZIP contents are verified; installed GUI behavior is not inferred from them.
 
 NOT RUN: installed-app GUI acceptance, real local Codex/Claude MCP qualification (3L1), real official tunnel/account/network calls (3L2), owner ChatGPT continuity/revocation acceptance (3U). Those gates remain mandatory; no public endpoint or account resource was created.
 
