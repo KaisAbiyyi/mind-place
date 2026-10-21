@@ -12,8 +12,7 @@ use crate::{
 use serde::Serialize;
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs,
-    io,
+    fs, io,
     path::{Path, PathBuf},
     time::UNIX_EPOCH,
 };
@@ -38,8 +37,8 @@ impl Default for ScanPolicy {
             max_depth: MAX_DEPTH,
             max_bytes_per_file: MAX_READ_BYTES,
             extensions: [
-                "md", "markdown", "txt", "json", "jsonl", "pdf", "docx", "pptx",
-                "xlsx", "rs", "ts", "tsx", "js", "jsx", "py", "go", "toml",
+                "md", "markdown", "txt", "json", "jsonl", "pdf", "docx", "pptx", "xlsx", "rs",
+                "ts", "tsx", "js", "jsx", "py", "go", "toml",
             ]
             .into_iter()
             .map(str::to_owned)
@@ -61,7 +60,11 @@ impl ScanPolicy {
             || self.max_bytes_per_file > MAX_READ_BYTES
             || self.extensions.len() > 128
             || self.extensions.iter().any(|v| {
-                v.is_empty() || v.len() > 20 || !v.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+                v.is_empty()
+                    || v.len() > 20
+                    || !v
+                        .bytes()
+                        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
             })
         {
             return Err(StateError::InvalidValue);
@@ -127,7 +130,9 @@ impl DocumentScanner {
     /// Invalidation always requests a full reconciliation, even for one file.
     /// This deliberately avoids trusting lost, reordered or duplicate events.
     pub fn watch_hint(&mut self, root_id: &str, _event: WatchEvent) -> Result<()> {
-        self.state.document_root(root_id)?.ok_or(StateError::DocumentDenied)?;
+        self.state
+            .document_root(root_id)?
+            .ok_or(StateError::DocumentDenied)?;
         self.dirty.insert(root_id.to_owned());
         Ok(())
     }
@@ -150,13 +155,18 @@ impl DocumentScanner {
         if self.needs_rescan(root_id) {
             return Ok(None);
         }
-        let root = self.state.document_root(root_id)?.ok_or(StateError::DocumentDenied)?;
+        let root = self
+            .state
+            .document_root(root_id)?
+            .ok_or(StateError::DocumentDenied)?;
         if !root.is_approved() || self.state.authorized_binding(root_id).is_err() {
             return Err(StateError::DocumentDenied);
         }
         let result = self.known.get(root_id).map(|v| v.iter().cloned().collect());
         unlock_guard()?;
-        self.state.authorized_binding(root_id).map_err(|_| StateError::DocumentDenied)?;
+        self.state
+            .authorized_binding(root_id)
+            .map_err(|_| StateError::DocumentDenied)?;
         Ok(result)
     }
 
@@ -171,12 +181,18 @@ impl DocumentScanner {
     ) -> Result<ScanReport> {
         self.dirty.insert(root_id.to_owned());
         unlock_guard()?;
-        let root = self.state.document_root(root_id)?.ok_or(StateError::DocumentDenied)?;
+        let root = self
+            .state
+            .document_root(root_id)?
+            .ok_or(StateError::DocumentDenied)?;
         if !root.is_approved() {
             self.known.remove(root_id);
             return Err(StateError::DocumentDenied);
         }
-        let expected = self.state.authorized_binding(root_id).map_err(|_| StateError::DocumentDenied)?;
+        let expected = self
+            .state
+            .authorized_binding(root_id)
+            .map_err(|_| StateError::DocumentDenied)?;
         let root_path = Path::new(&root.canonical_path);
         if crate::ntfs::root_identity(root_path)? != expected {
             self.known.remove(root_id);
@@ -184,7 +200,13 @@ impl DocumentScanner {
         }
         let mut discovered = BTreeSet::new();
         let mut excluded = 0usize;
-        self.walk(root_path, &[], &mut discovered, &mut excluded, &mut unlock_guard)?;
+        self.walk(
+            root_path,
+            &[],
+            &mut discovered,
+            &mut excluded,
+            &mut unlock_guard,
+        )?;
         let mut report = ScanReport {
             root_id: root_id.to_owned(),
             visited_files: discovered.len(),
@@ -215,7 +237,9 @@ impl DocumentScanner {
             let metadata = DocumentMetadata {
                 file_identity: crate::ntfs::document_file_identity(&file)?,
                 byte_length: attributes.len(),
-                modified_ns: attributes.modified().ok()
+                modified_ns: attributes
+                    .modified()
+                    .ok()
                     .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
                     .and_then(|d| u64::try_from(d.as_nanos()).ok())
                     .unwrap_or(0),
@@ -225,14 +249,17 @@ impl DocumentScanner {
             let root_id = root_id.to_owned();
             let mut check = || {
                 unlock_guard()?;
-                source.authorized_binding(&root_id)
+                source
+                    .authorized_binding(&root_id)
                     .map_err(|_| StateError::DocumentDenied)?;
                 if crate::ntfs::root_identity(root_path)? != expected {
                     return Err(StateError::DocumentDenied);
                 }
                 Ok(())
             };
-            let receipt = self.objects.preserve(&uri, &metadata, &mut file, &mut check)?;
+            let receipt = self
+                .objects
+                .preserve(&uri, &metadata, &mut file, &mut check)?;
             if receipt.new_version {
                 report.new_versions += 1;
             } else {
@@ -247,8 +274,11 @@ impl DocumentScanner {
             self.known.remove(root_id);
             return Err(StateError::DocumentDenied);
         }
-        report.removed_paths = self.known.get(root_id)
-            .map(|old| old.difference(&next).count()).unwrap_or(0);
+        report.removed_paths = self
+            .known
+            .get(root_id)
+            .map(|old| old.difference(&next).count())
+            .unwrap_or(0);
         report.complete = true;
         self.known.insert(root_id.to_owned(), next);
         self.dirty.remove(root_id);
@@ -274,13 +304,18 @@ impl DocumentScanner {
             return Err(StateError::DocumentDenied);
         }
         let mut entries = fs::read_dir(directory)?.collect::<io::Result<Vec<_>>>()?;
-        if entries.len() > self.policy.max_files || found.len() + entries.len() > self.policy.max_files {
+        if entries.len() > self.policy.max_files
+            || found.len() + entries.len() > self.policy.max_files
+        {
             return Err(StateError::DocumentLimit);
         }
         entries.sort_by_key(|entry| entry.file_name());
         for entry in entries {
             unlock_guard()?;
-            let name = entry.file_name().into_string().map_err(|_| StateError::InvalidValue)?;
+            let name = entry
+                .file_name()
+                .into_string()
+                .map_err(|_| StateError::InvalidValue)?;
             let mut child = segments.to_vec();
             child.push(name.clone());
             let md = fs::symlink_metadata(entry.path())?;
