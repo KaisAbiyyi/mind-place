@@ -29,11 +29,19 @@ impl DocumentRoot {
 /// A logical address only. Never pass the relative path to File::open directly.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct VirtualDocumentPath {
-    pub root_id: String,
-    pub segments: Vec<String>,
+    root_id: String,
+    segments: Vec<String>,
 }
 
 impl VirtualDocumentPath {
+    pub fn root_id(&self) -> &str {
+        &self.root_id
+    }
+
+    pub fn segments(&self) -> &[String] {
+        &self.segments
+    }
+
     pub fn from_segments(root_id: &str, segments: &[String]) -> Result<Self> {
         validate_root_id(root_id)?;
         if segments.is_empty() || segments.len() > MAX_COMPONENTS {
