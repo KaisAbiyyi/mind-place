@@ -392,15 +392,19 @@ impl DocumentObjectStore {
     ) -> Result<Option<DocumentVersion>> {
         self.authorize(uri, &mut guard)?;
         let db = self.state.connection()?;
-        let value = db.query_row(
-            "SELECT v.id,v.uri,v.content_hash,o.byte_length
+        let value = db
+            .query_row(
+                "SELECT v.id,v.uri,v.content_hash,o.byte_length
              FROM document_heads h JOIN document_versions v ON v.id=h.version_id AND v.uri=h.uri
              JOIN document_objects o ON o.content_hash=v.content_hash
              WHERE h.uri=?1",
-            [uri],
-            read_row,
-        ).optional()?;
-        if let Some(ref version) = value { validate_version(version)?; }
+                [uri],
+                read_row,
+            )
+            .optional()?;
+        if let Some(ref version) = value {
+            validate_version(version)?;
+        }
         self.authorize(uri, &mut guard)?;
         Ok(value)
     }
