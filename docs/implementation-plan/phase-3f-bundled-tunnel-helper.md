@@ -1,8 +1,8 @@
 # MP-3F — bundled official Windows tunnel helper
 
-Priority: **TOP PRIORITY in Phase 3**, requested by the owner on 2026-10-20. Execute before MP-3L1/3L2/3U; those gates still require real client/account evidence. Scope: remove manual helper download/copy from the Windows installation experience. Tunnel/workspace provisioning and owner consent remain explicit.
+Priority: **DONE / merged 2026-10-21**, requested by the owner on 2026-10-20. Execute before MP-3L1/3L2/3U; those gates still require real client/account evidence. Scope: remove manual helper download/copy from the Windows installation experience. Tunnel/workspace provisioning and owner consent remain explicit.
 
-CLAIM: mind-place/MP-3F; agent=Codex local; session=20261020-bundled-helper; generation=1; status=RUNNING; base/checkpoint=55465041cf9f2e2df05eeeccec9ac3249df1cc0c; branch=feature/phase-3f-bundled-tunnel-helper; locks=windows-packaging,hosted-helper-resolution,hosted-setup-copy; dependencies=MP-3E merged (#14). No open PRs or claims were found before this claim. Local implementation is explicitly authorized by this request. Existing Cargo.lock changes belong to prior local work and are excluded from this unit except for its own new direct dependency edge.
+CLAIM: mind-place/MP-3F; agent=Codex local; session=20261020-bundled-helper; generation=1; status=MERGED; base/checkpoint=55465041cf9f2e2df05eeeccec9ac3249df1cc0c; branch=feature/phase-3f-bundled-tunnel-helper; locks=windows-packaging,hosted-helper-resolution,hosted-setup-copy; dependencies=MP-3E merged (#14). No open PRs or claims were found before this claim. Local implementation is explicitly authorized by this request. Existing Cargo.lock changes belong to prior local work and are excluded from this unit except for its own new direct dependency edge.
 
 Acceptance:
 
@@ -17,4 +17,4 @@ Implementation: pin the existing v0.0.16 release and published asset checksums, 
 
 ## Completion receipt
 
-Code checkpoint `d27fa0987a4ad626b741321ae67ccb0c2767f72a`, PR #17. Status: **IMPLEMENTED / LOCAL PACKAGING PASS / REVIEW**, not merged. Full baseline, Windows NSIS, portable ZIP integrity and native helper tests passed. Independent review found no Critical/Important issues. Latest GitHub CI/integration and 3L1/3L2/3U remain pending. [Dated implementation summary](../implementation-summary/2026-10-20-phase-3f-bundled-tunnel-helper.md) records artifact hashes, test counts, minor limitations and preserved unrelated lockfile work. Claim moves to REVIEW; no overlapping writer is authorized by this receipt.
+Code checkpoint `d27fa0987a4ad626b741321ae67ccb0c2767f72a`, PR #17. Status: **DONE / SQUASH-MERGED**, `f9d1313ac3301e69ccb3fba5d2426c0985940fb8` on 2026-10-21. Full baseline, Windows NSIS, portable ZIP integrity and native helper tests passed. Independent review found no Critical/Important issues. Final PR head [Windows CI](https://github.com/KaisAbiyyi/mind-place/actions/runs/39305453977) PASS; 3L1/3L2/3U remain pending. [Dated implementation summary](../implementation-summary/2026-10-20-phase-3f-bundled-tunnel-helper.md) records artifact hashes, test counts, minor limitations and preserved unrelated lockfile work. Claim concluded at merge; downstream work must use separate task IDs and claims.
