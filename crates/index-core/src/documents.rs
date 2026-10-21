@@ -382,17 +382,38 @@ mod tests {
         let first = index.refresh_root(&state, &root.id, || Ok(())).unwrap();
         assert_eq!(first.indexed_files, 1);
         assert!(first.indexed_chunks > 0);
-        assert_eq!(index.search(&state, "uniquephrase", 10, || Ok(())).unwrap().len(), 1);
+        assert_eq!(
+            index
+                .search(&state, "uniquephrase", 10, || Ok(()))
+                .unwrap()
+                .len(),
+            1
+        );
 
         // A current file edit must suppress stale projections even prior to rescan.
         std::fs::write(folder.join("notes.md"), "completely changed").unwrap();
-        assert!(index.search(&state, "uniquephrase", 10, || Ok(())).unwrap().is_empty());
+        assert!(index
+            .search(&state, "uniquephrase", 10, || Ok(()))
+            .unwrap()
+            .is_empty());
         let second = index.refresh_root(&state, &root.id, || Ok(())).unwrap();
         assert_eq!(second.generation, first.generation + 1);
-        assert!(index.search(&state, "uniquephrase", 10, || Ok(())).unwrap().is_empty());
-        assert_eq!(index.search(&state, "changed", 10, || Ok(())).unwrap().len(), 1);
+        assert!(index
+            .search(&state, "uniquephrase", 10, || Ok(()))
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            index
+                .search(&state, "changed", 10, || Ok(()))
+                .unwrap()
+                .len(),
+            1
+        );
         state.revoke_document_root(&root.id).unwrap();
-        assert!(index.search(&state, "changed", 10, || Ok(())).unwrap().is_empty());
+        assert!(index
+            .search(&state, "changed", 10, || Ok(()))
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
@@ -406,10 +427,20 @@ mod tests {
         db.execute(
             "INSERT INTO document_fts(root_id,uri,version_id,section,content)
              VALUES(?1,?2,?3,?4,?5)",
-            params![root, uri, "docver:v1:fake", "secret", "confidential evidence"],
-        ).unwrap();
+            params![
+                root,
+                uri,
+                "docver:v1:fake",
+                "secret",
+                "confidential evidence"
+            ],
+        )
+        .unwrap();
         drop(db);
-        assert!(index.search(&state, "confidential", 20, || Ok(())).unwrap().is_empty());
+        assert!(index
+            .search(&state, "confidential", 20, || Ok(()))
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
