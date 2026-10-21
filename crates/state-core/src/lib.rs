@@ -10,8 +10,8 @@ use std::{
 mod clients;
 mod document_roots;
 mod identity;
-pub use document_roots::{DocumentRoot, VirtualDocumentPath, VIRTUAL_ROOT_PREFIX};
 pub use clients::{ClientAuditEvent, ClientCapability, ClientRecord};
+pub use document_roots::{DocumentRoot, VirtualDocumentPath, VIRTUAL_ROOT_PREFIX};
 pub use identity::{canonical_source_id, SourceDescriptor, SourceKey};
 
 pub const APPLICATION_ID: i64 = 0x4D504C43;
@@ -454,7 +454,12 @@ fn validate_version(db: &Connection, version: i64) -> Result<()> {
     if !(1..=SCHEMA_VERSION).contains(&version) || user_version(db)? != version {
         return Err(StateError::Corrupt);
     }
-    for (step, migration) in [(1, MIGRATION_V1), (2, MIGRATION_V2), (3, MIGRATION_V3), (4, MIGRATION_V4)] {
+    for (step, migration) in [
+        (1, MIGRATION_V1),
+        (2, MIGRATION_V2),
+        (3, MIGRATION_V3),
+        (4, MIGRATION_V4),
+    ] {
         if step > version {
             break;
         }
