@@ -14,10 +14,10 @@ export function mountDocumentRootSetup(parent: HTMLElement, invoke: Invoke): voi
   section.className = "document-root-setup";
   const heading = doc.createElement("h3");
   heading.className = "setup-section-title";
-  heading.textContent = "Personal document folders — staging only";
+  heading.textContent = "Personal document folders — owner permissions";
   const explanation = doc.createElement("p");
   explanation.textContent =
-    "Registering a folder only creates a pending identity. Mind Place will not read or index its files. Owner approval and protected NTFS access arrive in a later phase.";
+    "Staging only records a pending identity. Approve explicitly to permit future bounded document reads. Revocation is permanent. Scanning and indexing are not enabled yet.";
   const form = doc.createElement("form");
   form.className = "document-root-form";
   const label = doc.createElement("label");
@@ -60,6 +60,57 @@ export function mountDocumentRootSetup(parent: HTMLElement, invoke: Invoke): voi
         const details = doc.createElement("small");
         details.textContent = ` ${root.approval_state.toUpperCase()} · ${root.virtual_prefix}`;
         item.append(name, details);
+        if (root.approval_state === "pending") {
+          const approve = doc.createElement("button");
+          approve.type = "button";
+          approve.className = "quiet-button";
+          approve.dataset.action = "approve-root";
+          approve.textContent = "Approve folder access";
+          approve.addEventListener("click", () => {
+            if (!section.isConnected) return;
+            approve.disabled = true;
+            status.textContent = "Checking folder identity and recording owner approval…";
+            void invoke<DocumentRoot>("approve_document_root", { rootId: root.id })
+              .then(async () => {
+                if (!section.isConnected) return;
+                status.textContent = "Approved. Scanning and indexing remain disabled.";
+                await refresh();
+              })
+              .catch((error: unknown) => {
+                if (section.isConnected) status.textContent = `Approval denied: ${String(error)}`;
+              })
+              .finally(() => { if (section.isConnected) approve.disabled = false; });
+          });
+          item.append(approve);
+        }
+        if (root.approval_state !== "revoked") {
+          const revoke = doc.createElement("button");
+          revoke.type = "button";
+          revoke.className = "quiet-button";
+          revoke.dataset.action = "revoke-root";
+          revoke.textContent = "Revoke";
+          let armed = false;
+          revoke.addEventListener("click", () => {
+            if (!section.isConnected) return;
+            if (!armed) {
+              armed = true;
+              revoke.textContent = "Confirm permanent revoke";
+              return;
+            }
+            revoke.disabled = true;
+            void invoke<void>("revoke_document_root", { rootId: root.id })
+              .then(async () => {
+                if (!section.isConnected) return;
+                status.textContent = "Document root permanently revoked.";
+                await refresh();
+              })
+              .catch((error: unknown) => {
+                if (section.isConnected) status.textContent = `Revocation failed: ${String(error)}`;
+              })
+              .finally(() => { if (section.isConnected) revoke.disabled = false; });
+          });
+          item.append(revoke);
+        }
         list.append(item);
       }
     } catch {
