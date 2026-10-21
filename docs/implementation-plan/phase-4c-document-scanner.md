@@ -5,7 +5,7 @@ Claim: ChatGPT Cloud, session 2026-10-22-mp4c-01, GitHub issue #29. Resource: fo
 ## Contract
 
 - Scanner runs only after an explicit owner-unlock caller invokes rescan and supplies a live unlock guard. There is no startup auto-adoption, background directory scanning, or MCP document access in MP-4C.
-- Every rescan is bounded (10,000 entries, depth 24, 32 MiB per file by default) and explicitly allows common document/source extensions while skipping cache/build directories and reparse points. Policy may only tighten these global ceilings.
+- Every rescan is bounded (10,000 total directory entries, depth 24, 32 MiB per file, and 512 MiB total read volume by default; maximum configurable total 2 GiB) and explicitly allows common document/source extensions while skipping cache/build directories and reparse points. Policy may only tighten these global ceilings.
 - Folder enumeration itself now uses NTFS handle-bound `NtQueryDirectoryFile` over 4B-verified root/directory handles; reparse points are rejected, and no path-string `read_dir` occurs. Files are also opened only by 4B NTFS handle-relative verified opens. The same approved root binding and unlock guard are rechecked during the 4D immutable content store commit.
 - The watcher contract is an invalidation API, not a claim of lossless filesystem notification. Change, deletion, rename, overflow or disconnect marks the root dirty and demands full rescan. On restart, all roots begin dirty; an incomplete/failed rescan never publishes a current inventory.
 - The in-memory inventory is never authorization or derived index state. Removed files are removed from the current inventory but immutable version history remains preserved. Current URI discovery rechecks current root approval and unlock.
