@@ -8,16 +8,20 @@ The store accepts a bounded byte reader supplied by a trusted caller after MP-4B
 
 Raw bytes use SHA-256 with format version 1 under `document-objects/v1/sha256/<prefix>/<hash>` beside state.sqlite3. Stream to a same-directory temporary file, bound size, hash, flush, publish without overwriting, sync the containing directory, then commit authority references. Existing objects must verify before reuse. A crash can leave an unreferenced object, never a committed reference to partially published bytes; startup does not delete evidence or orphans.
 
-Schema v5 adds immutable object/version records and mutable current-document observations. Document identity is canonical MP-4A virtual URI; version identity is domain-separated URI + content hash. Equal bytes share storage across documents/roots; equal bytes at the same URI reuse a version, including A→B→A. Historical versions remain accessible only under a live root grant. Revocation preserves bytes and provenance while denying future store operations.
+Schema v6 adds immutable object/version records and mutable current-document observations. Document identity is canonical MP-4A virtual URI; version identity is domain-separated URI + content hash. Equal bytes share storage across documents/roots; equal bytes at the same URI reuse a version, including A→B→A. Historical versions remain accessible only under a live root grant. Revocation preserves bytes and provenance while denying future store operations.
 
 The metadata signature (stable file identity, byte length, modification/change timestamps) is a caller-observed hint, never proof of content or filesystem authority. An explicit probe may skip content reads when the signature matches and stored object metadata is present. Force verification always reads/hashes bytes. Source changes during reading must be rejected by the future MP-4B/4C handle reader; this store validates the declared length.
 
 ## Work and verification
 
 1. Add behavior tests for version/dedup/restart, unchanged hints, root denial/revocation during reads, reader/guard failures, bounds, corruption and publication recovery.
-2. Add v4→v5 migration with verified backup and rollback tests; preserve roots, claims and source identities.
+2. Add v5→v6 migration with verified backup and rollback tests; preserve roots, claims and source identities.
 3. Implement bounded internal store API and immutable schemas; freeze MP-4A interfaces.
 4. Run focused Rust tests and full required baseline. Linux desktop build limitations must be reported; cloud Windows CI is the qualified build check.
 5. Push sanitized checkpoints; leave PR for independent critical-boundary review and CI. No merge without independent review and green CI.
 
 Cloud-only unit; no local implementation/qualification. Phase MP-4L1/MP-4L2/MP-4U remain mandatory later. No scanner, extractor, native source authorization, encryption, retention/GC, retrieval/UI, or scale claims in this unit.
+
+## Integration ordering
+
+Concurrent MP-4B PR #26 owns schema v5. This branch stacks on its checkpoint `fc3037b7f3d6b10e7d2b6f92b20bcb282acd9b03`; MP-4D adds v6 only. MP-4B must merge first; rebase onto its final SHA and rerun checks before MP-4D integration. Root approval/NTFS changes in the stack belong to MP-4B, not this unit.
