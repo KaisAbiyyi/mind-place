@@ -126,3 +126,30 @@ fn windows_guard_abort_never_publishes_inventory() {
     assert!(scanner.needs_rescan(&root));
     assert_eq!(scanner.current_uris(&root, || Ok(())).unwrap(), None);
 }
+
+
+#[cfg(windows)]
+#[test]
+fn windows_handle_enumerator_skips_reparse_and_rejects_root_swap() {
+    let (dir, state, root) = fixture();
+    let path = dir.path().join("approved-documents");
+    fs::write(path.join("allowed.md"), b"authorized").unwrap();
+    let outside = dir.path().join("outside");
+    fs::create_dir(&outside).unwrap();
+    fs::write(outside.join("secret.md"), b"not authorized").unwrap();
+    // GitHub Windows runners may restrict symlinks; exercise whenever allowed.
+    if std::os::windows::fs::symlink_dir(&outside, path.join("link")).is_ok() {
+        let mut scanner = DocumentScanner::new(state.clone(), ScanPolicy::default()).unwrap();
+        let result = scanner.rescan(&root, || Ok(())).unwrap();
+        assert_eq!(result.visited_files, 1);
+        assert_eq!(scanner.current_uris(&root, || Ok(())).unwrap().unwrap().len(), 1);
+    }
+    let mut scanner = DocumentScanner::new(state.clone(), ScanPolicy::default()).unwrap();
+    scanner.rescan(&root, || Ok(())).unwrap();
+    fs::rename(&path, dir.path().join("prior-root")).unwrap();
+    fs::create_dir(&path).unwrap();
+    fs::write(path.join("spoof.md"), b"untrusted").unwrap();
+    assert!(scanner.current_uris(&root, || Ok(())).is_err());
+    assert!(scanner.rescan(&root, || Ok(())).is_err());
+    assert!(scanner.needs_rescan(&root));
+}
