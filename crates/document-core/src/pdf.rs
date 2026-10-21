@@ -223,7 +223,7 @@ pub(super) fn extract_pdf(ctx: &mut Context<'_>, bytes: &[u8]) -> Result<()> {
         ctx.poll()?;
         scan_at = marker + 6;
         let content_at = match bytes.get(scan_at..scan_at + 2) {
-            Some(b"\r\n") => scan_at + 2,
+            Some(value) if value == b"\r\n" => scan_at + 2,
             _ if bytes.get(scan_at) == Some(&b'\n') => scan_at + 1,
             _ => continue,
         };
