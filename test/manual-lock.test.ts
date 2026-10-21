@@ -12,7 +12,7 @@ function deferred<T>() {
 }
 const unlocked = { configured: true, locked: false, epoch: 1, retry_after_ms: 0 };
 const locked = { ...unlocked, locked: true, epoch: 2 };
-const setup = { platform: "windows", archive_path: "fixture-archive", extension_path: "fixture-extension", native_host_name: "com.mindplace.capture", chrome_registered: true, edge_registered: false, legacy_available: false };
+const setup = { platform: "windows", archive_path: "fixture-archive", extension_path: "fixture-extension", native_host_name: "com.mindplace.capture", host_path: "fixture-host", extension_id: "fixture-extension-id", registered_browsers: ["chrome"], legacy_available: false };
 function fixture() {
   const dom = new JSDOM("<body><div id='app'></div></body>", { url: "https://lock.test/" });
   const root = dom.window.document.querySelector<HTMLElement>("#app")!;
