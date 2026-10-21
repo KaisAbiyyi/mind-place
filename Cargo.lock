@@ -1915,6 +1915,7 @@ name = "mind-place-index"
 version = "0.2.5"
 dependencies = [
  "mind-place-archive",
+ "mind-place-documents",
  "mind-place-state",
  "rusqlite",
  "serde",
