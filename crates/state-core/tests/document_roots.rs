@@ -208,7 +208,7 @@ fn forged_sql_approval_without_capability_does_not_grant_access() {
         .to_uri();
     let db = Connection::open(state.path()).unwrap();
     db.execute(
-        "UPDATE source_roots SET approval_state='approved' WHERE id=?1",
+        "UPDATE source_roots SET approval_state='approved',approved_at=unixepoch() WHERE id=?1",
         [&root.id],
     )
     .unwrap();
