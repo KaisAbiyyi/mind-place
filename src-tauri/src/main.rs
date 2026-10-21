@@ -34,6 +34,8 @@ struct AppState {
     state_path: PathBuf,
     index_path: PathBuf,
     authority_ready: Arc<AtomicBool>,
+    // Serializes owner filesystem grants against Lock; prevents late approvals.
+    document_authority_gate: Arc<Mutex<()>>,
     mcp: Arc<Mutex<Option<LocalMcpServer>>>,
     hosted: Arc<Mutex<Option<hosted_tunnel::HostedTunnel>>>,
     extension_path: PathBuf,
@@ -58,6 +60,37 @@ fn security_error(error: SecurityError) -> String {
         Some(retry_after_ms) => format!("{}:{retry_after_ms}:{}", error.code(), error),
         None => format!("{}:{}", error.code(), error),
     }
+}
+
+/// Lock and privileged document-root writes share this gate. The lease must
+/// still be live *inside* the gate before any persistent grant is committed.
+fn with_document_authority<T>(
+    gate: &Mutex<()>,
+    ready: &AtomicBool,
+    security: &SecurityGate,
+    lease: UnlockLease,
+    operation: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    let _guard = gate.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if !ready.load(Ordering::Acquire) {
+        return Err("MP_STATE_NOT_READY:authoritative state not ready".to_owned());
+    }
+    security.validate_lease(lease).map_err(security_error)?;
+    let result = operation()?;
+    security.validate_lease(lease).map_err(security_error)?;
+    Ok(result)
+}
+
+/// All document grants that committed before this returns were serialized
+/// before the epoch revocation. Queued grants must fail validation afterward.
+fn lock_document_authority(
+    gate: &Mutex<()>,
+    ready: &AtomicBool,
+    security: &SecurityGate,
+) -> SecurityStatus {
+    let _guard = gate.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    ready.store(false, Ordering::Release);
+    security.lock()
 }
 
 fn begin_unlocked(state: &AppState) -> Result<UnlockLease, String> {
@@ -314,8 +347,13 @@ async fn unlock_security(
 
 #[tauri::command]
 fn lock_security(state: State<'_, AppState>) -> SecurityStatus {
-    state.authority_ready.store(false, Ordering::Release);
-    let status = state.security.lock();
+    // Lock cannot complete while a prior authorized grant is committing.
+    // Conversely, a queued grant revalidates its lease after acquiring gate.
+    let status = lock_document_authority(
+        &state.document_authority_gate,
+        &state.authority_ready,
+        &state.security,
+    );
     // Invalidate all read leases before killing the outbound helper and local listener.
     // Revocation is best-effort while locked; all in-flight evidence is already blocked.
     let _ = hosted_tunnel::stop_and_revoke(&state);
@@ -369,10 +407,15 @@ async fn approve_document_root(
 ) -> Result<DocumentRoot, String> {
     let lease = begin_unlocked(&state)?;
     let db_path = state.state_path.clone();
+    let gate = state.document_authority_gate.clone();
+    let security = state.security.clone();
+    let authority_ready = state.authority_ready.clone();
     let root = tauri::async_runtime::spawn_blocking(move || {
-        let db = StateStore::open(db_path).map_err(|e| format!("{}:{}", e.code(), e))?;
-        db.approve_document_root(&root_id)
-            .map_err(|e| format!("{}:{}", e.code(), e))
+        with_document_authority(&gate, &authority_ready, &security, lease, || {
+            let db = StateStore::open(db_path).map_err(|e| format!("{}:{}", e.code(), e))?;
+            db.approve_document_root(&root_id)
+                .map_err(|e| format!("{}:{}", e.code(), e))
+        })
     })
     .await
     .map_err(|e| e.to_string())??;
@@ -385,10 +428,15 @@ async fn approve_document_root(
 async fn revoke_document_root(state: State<'_, AppState>, root_id: String) -> Result<(), String> {
     let lease = begin_unlocked(&state)?;
     let db_path = state.state_path.clone();
+    let gate = state.document_authority_gate.clone();
+    let security = state.security.clone();
+    let authority_ready = state.authority_ready.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let db = StateStore::open(db_path).map_err(|e| format!("{}:{}", e.code(), e))?;
-        db.revoke_document_root(&root_id)
-            .map_err(|e| format!("{}:{}", e.code(), e))
+        with_document_authority(&gate, &authority_ready, &security, lease, || {
+            let db = StateStore::open(db_path).map_err(|e| format!("{}:{}", e.code(), e))?;
+            db.revoke_document_root(&root_id)
+                .map_err(|e| format!("{}:{}", e.code(), e))
+        })
     })
     .await
     .map_err(|e| e.to_string())??;
@@ -601,6 +649,7 @@ fn main() {
                 state_path,
                 index_path,
                 authority_ready: Arc::new(AtomicBool::new(false)),
+                document_authority_gate: Arc::new(Mutex::new(())),
                 mcp: Arc::new(Mutex::new(None)),
                 hosted: Arc::new(Mutex::new(None)),
                 extension_path,
@@ -659,4 +708,115 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("Mind Place failed to start");
+}
+
+#[cfg(test)]
+mod document_authority_regression_tests {
+    use super::*;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    fn setup() -> (
+        tempfile::TempDir,
+        SecurityGate,
+        Arc<Mutex<()>>,
+        Arc<AtomicBool>,
+        PathBuf,
+        String,
+    ) {
+        let home = tempfile::tempdir().unwrap();
+        let security = SecurityGate::open(home.path().join("security.json")).unwrap();
+        security.initialize(b"concurrency-test-secret").unwrap();
+        let db_path = home.path().join("state.sqlite3");
+        let db = StateStore::open(&db_path).unwrap();
+        let folder = home.path().join("docs");
+        std::fs::create_dir(&folder).unwrap();
+        let id = db.register_document_root(&folder).unwrap().id;
+        (
+            home,
+            security,
+            Arc::new(Mutex::new(())),
+            Arc::new(AtomicBool::new(true)),
+            db_path,
+            id,
+        )
+    }
+
+    #[test]
+    fn approval_in_progress_commits_before_lock_can_complete() {
+        let (_home, security, gate, ready, db_path, root_id) = setup();
+        let lease = security.require_unlocked().unwrap();
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let worker_gate = gate.clone();
+        let worker_ready = ready.clone();
+        let worker_security = security.clone();
+        let approval = std::thread::spawn(move || {
+            with_document_authority(&worker_gate, &worker_ready, &worker_security, lease, || {
+                entered_tx.send(()).unwrap(); // holding the production gate
+                release_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+                let db = StateStore::open(db_path).unwrap();
+                db.approve_document_root(&root_id)
+                    .map_err(|e| e.to_string())
+            })
+        });
+        entered_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        let lock_gate = gate.clone();
+        let lock_ready = ready.clone();
+        let lock_security = security.clone();
+        let (starting_tx, starting_rx) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel();
+        let locking = std::thread::spawn(move || {
+            starting_tx.send(()).unwrap();
+            let status = lock_document_authority(&lock_gate, &lock_ready, &lock_security);
+            done_tx.send(status).unwrap();
+        });
+        starting_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        // A Lock must not return while the approval holds the same gate.
+        assert!(done_rx.recv_timeout(Duration::from_millis(100)).is_err());
+        release_tx.send(()).unwrap();
+        assert!(approval.join().unwrap().is_ok());
+        assert!(
+            done_rx
+                .recv_timeout(Duration::from_secs(10))
+                .unwrap()
+                .locked
+        );
+        locking.join().unwrap();
+        assert!(security.status().locked);
+    }
+
+    #[test]
+    fn approval_queued_before_lock_is_denied_after_epoch_revocation() {
+        let (_home, security, gate, ready, db_path, root_id) = setup();
+        let lease = security.require_unlocked().unwrap();
+        // Hold the exact gate Lock uses, then queue an approval with a live lease.
+        let lock_guard = gate.lock().unwrap();
+        let worker_gate = gate.clone();
+        let worker_ready = ready.clone();
+        let worker_security = security.clone();
+        let db_path_for_worker = db_path.clone();
+        let id_for_worker = root_id.clone();
+        let (queued_tx, queued_rx) = mpsc::channel();
+        let approval = std::thread::spawn(move || {
+            queued_tx.send(()).unwrap();
+            with_document_authority(&worker_gate, &worker_ready, &worker_security, lease, || {
+                let db = StateStore::open(db_path_for_worker).unwrap();
+                db.approve_document_root(&id_for_worker)
+                    .map_err(|e| e.to_string())
+            })
+        });
+        queued_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        // Revoke the epoch while owning the Lock gate, before releasing it.
+        ready.store(false, Ordering::Release);
+        assert!(security.lock().locked);
+        drop(lock_guard);
+        assert!(approval.join().unwrap().is_err());
+        let db = StateStore::open(db_path).unwrap();
+        assert_eq!(
+            db.document_root(&root_id).unwrap().unwrap().approval_state,
+            "pending",
+            "queued approval must never persist after Lock"
+        );
+    }
 }
