@@ -161,7 +161,9 @@ impl DocumentScanner {
         if !root.is_approved() {
             return Err(StateError::DocumentDenied);
         }
-        let binding = self.state.authorized_binding(root_id)
+        let binding = self
+            .state
+            .authorized_binding(root_id)
             .map_err(|_| StateError::DocumentDenied)?;
         if crate::ntfs::root_identity(Path::new(&root.canonical_path))? != binding {
             return Err(StateError::DocumentDenied);
