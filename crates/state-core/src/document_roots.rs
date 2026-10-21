@@ -345,16 +345,21 @@ impl StateStore {
 
     fn authorized_binding(&self, id: &str) -> Result<(u64, u64)> {
         let db = self.connection()?;
-        let row: Option<(String, String)> = db.query_row(
-            "SELECT a.volume_id,a.file_id FROM document_root_authorizations a
+        let row: Option<(String, String)> = db
+            .query_row(
+                "SELECT a.volume_id,a.file_id FROM document_root_authorizations a
              JOIN source_roots r ON r.id=a.root_id
              WHERE a.root_id=?1 AND r.approval_state='approved'
              AND NOT EXISTS(SELECT 1 FROM root_tombstones t WHERE t.root_id=a.root_id)",
-            [id], |row| Ok((row.get(0)?, row.get(1)?)),
-        ).optional()?;
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
         let (volume, file_id) = row.ok_or(StateError::InvalidValue)?;
-        Ok((volume.parse().map_err(|_| StateError::Corrupt)?,
-            file_id.parse().map_err(|_| StateError::Corrupt)?))
+        Ok((
+            volume.parse().map_err(|_| StateError::Corrupt)?,
+            file_id.parse().map_err(|_| StateError::Corrupt)?,
+        ))
     }
 
     /// Logical lookup only. Does not create filesystem access or return
@@ -384,13 +389,17 @@ impl StateStore {
         let (root, relative) = self.require_approved_document_uri(uri)?;
         let binding = self.authorized_binding(&root.id)?;
         let mut file = crate::ntfs::open_document(
-            Path::new(&root.canonical_path), binding, relative.segments()
+            Path::new(&root.canonical_path),
+            binding,
+            relative.segments(),
         )?;
         if file.metadata()?.len() > max_bytes as u64 {
             return Err(StateError::InvalidValue);
         }
         let mut bytes = Vec::new();
-        file.by_ref().take(max_bytes as u64 + 1).read_to_end(&mut bytes)?;
+        file.by_ref()
+            .take(max_bytes as u64 + 1)
+            .read_to_end(&mut bytes)?;
         if bytes.len() > max_bytes {
             return Err(StateError::InvalidValue);
         }
