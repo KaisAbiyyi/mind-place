@@ -261,7 +261,8 @@ pub(super) fn extract_pdf(ctx: &mut Context<'_>, bytes: &[u8]) -> Result<()> {
     }
     if streams == 0 {
         ctx.expanded(bytes.len())?;
-        ctx.emit("PDF content", &content_text(ctx, bytes)?)?;
+        let text = content_text(ctx, bytes)?;
+        ctx.emit("PDF content", &text)?;
     }
     ctx.warn("PDF text is best-effort: no OCR, font CMap mapping, encrypted content or embedded image text.");
     if streams > supported_streams {

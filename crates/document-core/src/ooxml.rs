@@ -254,7 +254,7 @@ fn parse_xml(ctx: &mut Context<'_>, bytes: &[u8]) -> Result<String> {
                 let name = e.name();
                 let local = name
                     .as_ref()
-                    .rsplit(|c| *c == b':')
+                    .rsplit(|c: &u8| *c == b':')
                     .next()
                     .unwrap_or_default();
                 if local == b"t" || local == b"v" {
@@ -268,7 +268,7 @@ fn parse_xml(ctx: &mut Context<'_>, bytes: &[u8]) -> Result<String> {
                 let name = e.name();
                 let local = name
                     .as_ref()
-                    .rsplit(|c| *c == b':')
+                    .rsplit(|c: &u8| *c == b':')
                     .next()
                     .unwrap_or_default();
                 if local == b"p" || local == b"row" || local == b"si" || local == b"tr" {
@@ -281,15 +281,13 @@ fn parse_xml(ctx: &mut Context<'_>, bytes: &[u8]) -> Result<String> {
                 depth -= 1;
             }
             Event::Text(e) if capturing.is_some() => {
-                let raw = std::str::from_utf8(e.as_ref()).map_err(|_| ExtractionError::Invalid)?;
+                let raw: &str = e.as_ref();
                 let decoded =
                     quick_xml::escape::unescape(raw).map_err(|_| ExtractionError::Invalid)?;
                 output.push_str(&decoded);
             }
             Event::CData(e) if capturing.is_some() => {
-                output.push_str(
-                    std::str::from_utf8(e.as_ref()).map_err(|_| ExtractionError::Invalid)?,
-                );
+                output.push_str(e.as_ref());
             }
             Event::DocType(_) | Event::GeneralRef(_) => {
                 return Err(ExtractionError::Unsupported);
