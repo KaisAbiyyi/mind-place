@@ -324,20 +324,19 @@ impl DocumentIndex {
             let Some(format) = format_for_uri(&candidate.uri) else {
                 continue;
             };
-            let verified = extract_with_check(
-                format,
-                &fresh,
-                ExtractionLimits::default(),
-                || check().is_ok() && state.require_approved_document_uri(&candidate.uri).is_ok(),
-            );
+            let verified = extract_with_check(format, &fresh, ExtractionLimits::default(), || {
+                check().is_ok() && state.require_approved_document_uri(&candidate.uri).is_ok()
+            });
             let verified = match verified {
                 Ok(value) => value,
                 Err(ExtractionError::Revoked) => return Err(IndexError::Revoked),
                 Err(_) => continue,
             };
-            if !verified.chunks.iter().any(|chunk| {
-                chunk.section == candidate.section && chunk.text == indexed_chunk
-            }) {
+            if !verified
+                .chunks
+                .iter()
+                .any(|chunk| chunk.section == candidate.section && chunk.text == indexed_chunk)
+            {
                 continue;
             }
             check()?;
