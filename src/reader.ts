@@ -66,6 +66,7 @@ const STATIC_APP_SHELL = `
       </div>
       <div class="library-footer">
         <div class="offline-note"><span class="offline-dot" aria-hidden="true"></span><span>Stored on this device</span></div>
+        <button class="setup-link" type="button" data-action="open-document-search">Search indexed documents</button>
         <button class="setup-link" type="button" data-action="open-setup">
           <svg aria-hidden="true" viewBox="0 0 20 20"><path d="M10 2.5v2M10 15.5v2M2.5 10h2m11 0h2m-12.28-5.22 1.42 1.42m7.72 7.72 1.42 1.42m0-10.56-1.42 1.42m-7.72 7.72-1.42 1.42"></path><circle cx="10" cy="10" r="4"></circle></svg>
           <span>Manual capture setup</span>
@@ -832,6 +833,14 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
       if (action === "lock") onLock?.();
       else if (action === "refresh") void loadConversations(true);
       else if (action === "retry-selection" && selectedId) void selectConversation(selectedId);
+      else if (action === "open-document-search") {
+        if (typeof dialog.showModal === "function") {
+          try { dialog.showModal(); } catch { dialog.setAttribute("open", ""); }
+        } else dialog.setAttribute("open", "");
+        void loadSetup().then(() => {
+          if (alive) setupContent.querySelector<HTMLInputElement>(".document-search-form input")?.focus();
+        });
+      }
       else if (action === "open-setup") {
         if (typeof dialog.showModal === "function") {
           try { dialog.showModal(); } catch { dialog.setAttribute("open", ""); }
