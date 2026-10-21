@@ -2,24 +2,15 @@ import { invoke } from "@tauri-apps/api/core";
 import "katex/dist/katex.min.css";
 import "./style.css";
 import "./security.css";
-import { mountReader, type Invoke } from "./reader.js";
-import { mountSecurityGate } from "./security.js";
+import type { Invoke } from "./reader.js";
+import { mountApplication } from "./app.js";
 
 const root = document.querySelector<HTMLElement>("#app");
 if (!root) throw new Error("Mind Place reader root was not found.");
 
 const tauriInvoke: Invoke = <T>(command: string, args?: Record<string, unknown>) => invoke<T>(command, args);
 
-const openReader = () => {
-  mountReader({ root, invoke: tauriInvoke });
-  // The archive can already contain saved revisions before this startup.
-  // Refresh without delaying unlock or claiming the disposable index is authority.
-  void tauriInvoke("refresh_archive_index").catch(() => {
-    console.warn("Mind Place background archive indexing did not complete.");
-  });
-};
-
-mountSecurityGate({ root, invoke: tauriInvoke, onUnlocked: openReader }).catch(() => {
+mountApplication({ root, invoke: tauriInvoke }).catch(() => {
   root.innerHTML = `
     <main class="security-gate" aria-labelledby="security-failure-title">
       <section class="security-card">
