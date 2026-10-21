@@ -369,6 +369,23 @@ mod tests {
     }
 
     #[test]
+    fn unapproved_derived_fts_candidates_never_disclose() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = StateStore::open(tmp.path().join("state.sqlite3")).unwrap();
+        let index = DocumentIndex::open(tmp.path().join("document-index.sqlite3")).unwrap();
+        let db = index.connection().unwrap();
+        let root = format!("root:v1:{}", "f".repeat(64));
+        let uri = format!("mpdoc://root/{root}/private.md");
+        db.execute(
+            "INSERT INTO document_fts(root_id,uri,version_id,section,content)
+             VALUES(?1,?2,?3,?4,?5)",
+            params![root, uri, "docver:v1:fake", "secret", "confidential evidence"],
+        ).unwrap();
+        drop(db);
+        assert!(index.search(&state, "confidential", 20, || Ok(())).unwrap().is_empty());
+    }
+
+    #[test]
     fn derived_index_is_distinct_and_queryable() {
         let tmp = tempfile::tempdir().unwrap();
         let idx = DocumentIndex::open(tmp.path().join("document-index.sqlite3")).unwrap();
