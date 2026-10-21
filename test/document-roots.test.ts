@@ -85,3 +85,36 @@ test("locked registry denies staging and does not render private results after d
   await delay(0);
   assert.doesNotMatch(root.textContent ?? "", /secret/);
 });
+
+test("expired permanent-revoke confirmation requires a fresh two-click consent", async (t) => {
+  let clock = Date.now();
+  t.mock.method(Date, "now", () => clock);
+  const roots: DocumentRoot[] = [{
+    id: "root:v1:" + "c".repeat(64),
+    canonical_path: "C:\\Users\\Test\\Documents",
+    approval_state: "approved",
+    virtual_prefix: "mpdoc://root/root:v1:" + "c".repeat(64),
+  }];
+  let revocations = 0;
+  const invoke: Invoke = async <T>(command: string) => {
+    if (command === "list_document_roots") return [...roots] as T;
+    if (command === "revoke_document_root") {
+      revocations++;
+      roots[0].approval_state = "revoked";
+      return undefined as T;
+    }
+    throw new Error("unexpected command");
+  };
+  const { root } = setup(invoke);
+  await delay(0);
+  const revoke = root.querySelector<HTMLButtonElement>("[data-action='revoke-root']")!;
+  revoke.click();
+  assert.match(revoke.textContent ?? "", /Confirm permanent revoke/);
+  clock += 16_000;
+  revoke.click();
+  assert.equal(revocations, 0, "expired click must only restart the confirmation window");
+  assert.match(revoke.textContent ?? "", /Confirm permanent revoke/);
+  revoke.click();
+  await delay(0);
+  assert.equal(revocations, 1, "fresh second click confirms permanent revocation");
+});
