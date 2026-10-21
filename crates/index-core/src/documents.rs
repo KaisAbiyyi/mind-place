@@ -75,15 +75,17 @@ fn literal_query(input: &str) -> Result<String> {
     Ok(format!("\"{}\"", trimmed.replace('"', "\"\"")))
 }
 
-fn verify_document_database(db: &Connection) -> Result<()> {
+fn verify_document_database(db: &Connection, check_integrity: bool) -> Result<()> {
     let id: i64 = db.query_row("PRAGMA application_id", [], |r| r.get(0))?;
     let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     if id != APPLICATION_ID || version != 1 {
         return Err(IndexError::InvalidIndex);
     }
-    let health: String = db.query_row("PRAGMA quick_check(1)", [], |r| r.get(0))?;
-    if health != "ok" {
-        return Err(IndexError::InvalidIndex);
+    if check_integrity {
+        let health: String = db.query_row("PRAGMA quick_check(1)", [], |r| r.get(0))?;
+        if health != "ok" {
+            return Err(IndexError::InvalidIndex);
+        }
     }
     // Detect damaged or altered projections before using their derived text.
     let _: i64 = db
@@ -107,7 +109,7 @@ impl DocumentIndex {
                 &path,
                 OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
             )?;
-            verify_document_database(&ro)?;
+            verify_document_database(&ro, true)?;
         }
         let db = Connection::open_with_flags(
             &path,
@@ -121,7 +123,7 @@ impl DocumentIndex {
             db.pragma_update(None, "application_id", APPLICATION_ID)?;
             db.pragma_update(None, "user_version", 1)?;
         }
-        verify_document_database(&db)?;
+        verify_document_database(&db, false)?;
         Ok(Self { path })
     }
 
@@ -131,14 +133,14 @@ impl DocumentIndex {
             &self.path,
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
         )?;
-        verify_document_database(&ro)?;
+        verify_document_database(&ro, false)?;
         drop(ro);
         let db = Connection::open_with_flags(
             &self.path,
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
         )?;
         configure(&db)?;
-        verify_document_database(&db)?;
+        verify_document_database(&db, false)?;
         Ok(db)
     }
 
