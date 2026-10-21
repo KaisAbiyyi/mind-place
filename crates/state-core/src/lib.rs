@@ -8,25 +8,39 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 mod clients;
+mod document_objects;
 mod document_roots;
 mod identity;
 mod ntfs;
 pub use clients::{ClientAuditEvent, ClientCapability, ClientRecord};
+pub use document_objects::{
+    DocumentMetadata, DocumentObjectStore, DocumentPreserveReceipt, DocumentVersion,
+    MAX_DOCUMENT_OBJECT_BYTES,
+};
 pub use document_roots::{DocumentRoot, VirtualDocumentPath, VIRTUAL_ROOT_PREFIX};
 pub use identity::{canonical_source_id, SourceDescriptor, SourceKey};
 
 pub const APPLICATION_ID: i64 = 0x4D504C43;
-pub const SCHEMA_VERSION: i64 = 5;
+pub const SCHEMA_VERSION: i64 = 6;
 const MIN_SQLITE_NUMBER: i32 = 3_053_002;
 const MIGRATION_V1: &str = include_str!("schema_v1.sql");
 const MIGRATION_V2: &str = include_str!("schema_v2.sql");
 const MIGRATION_V3: &str = include_str!("schema_v3.sql");
 const MIGRATION_V4: &str = include_str!("schema_v4.sql");
 const MIGRATION_V5: &str = include_str!("schema_v5.sql");
+const MIGRATION_V6: &str = include_str!("schema_v6.sql");
 pub type Result<T> = std::result::Result<T, StateError>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum StateError {
+    #[error("document access denied")]
+    DocumentDenied,
+    #[error("document object integrity failure")]
+    ObjectCorrupt,
+    #[error("document resource limit exceeded")]
+    DocumentLimit,
+    #[error("document changed during reading")]
+    DocumentChanged,
     #[error("state I/O: {0}")]
     Io(#[from] std::io::Error),
     #[error("state SQLite: {0}")]
@@ -49,6 +63,10 @@ pub enum StateError {
 impl StateError {
     pub fn code(&self) -> &'static str {
         match self {
+            Self::DocumentDenied => "MP_DOCUMENT_DENIED",
+            Self::ObjectCorrupt => "MP_DOCUMENT_OBJECT_CORRUPT",
+            Self::DocumentLimit => "MP_DOCUMENT_LIMIT",
+            Self::DocumentChanged => "MP_DOCUMENT_CHANGED",
             Self::Io(_) => "MP_STATE_IO",
             Self::Sql(_) => "MP_STATE_SQL",
             Self::UnsafePath => "MP_STATE_UNSAFE_PATH",
@@ -220,6 +238,13 @@ impl StateStore {
                 tx.execute(
                     "INSERT INTO schema_migrations(version,checksum) VALUES(5,?1)",
                     [checksum(MIGRATION_V5)],
+                )?;
+            }
+            if previous_version < 6 {
+                tx.execute_batch(MIGRATION_V6)?;
+                tx.execute(
+                    "INSERT INTO schema_migrations(version,checksum) VALUES(6,?1)",
+                    [checksum(MIGRATION_V6)],
                 )?;
             }
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -469,6 +494,7 @@ fn validate_version(db: &Connection, version: i64) -> Result<()> {
         (3, MIGRATION_V3),
         (4, MIGRATION_V4),
         (5, MIGRATION_V5),
+        (6, MIGRATION_V6),
     ] {
         if step > version {
             break;
