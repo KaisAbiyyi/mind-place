@@ -377,6 +377,23 @@ impl DocumentIndex {
 mod tests {
     use super::*;
     #[test]
+    fn refuses_foreign_sqlite_without_changing_journal_or_identity() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("document-index.sqlite3");
+        let foreign = Connection::open(&path).unwrap();
+        foreign.pragma_update(None, "application_id", 123_i64).unwrap();
+        foreign.pragma_update(None, "user_version", 5_i64).unwrap();
+        foreign.execute_batch("CREATE TABLE private_evidence(secret TEXT);").unwrap();
+        drop(foreign);
+        assert!(matches!(DocumentIndex::open(&path), Err(IndexError::InvalidIndex)));
+        let ro = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+        let id: i64 = ro.query_row("PRAGMA application_id", [], |r| r.get(0)).unwrap();
+        let version: i64 = ro.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        let journal: String = ro.query_row("PRAGMA journal_mode", [], |r| r.get(0)).unwrap();
+        assert_eq!((id, version, journal.as_str()), (123, 5, "delete"));
+    }
+
+    #[test]
     fn literal_fts5_does_not_accept_operators_or_empty_queries() {
         assert_eq!(literal_query("a OR b").unwrap(), "\"a OR b\"");
         assert_eq!(literal_query("x\"y").unwrap(), "\"x\"\"y\"");
