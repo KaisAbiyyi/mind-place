@@ -33,7 +33,10 @@ try {
     & git merge-base --is-ancestor $ProductSha HEAD
     if ($LASTEXITCODE -ne 0) { throw 'Product baseline is not an ancestor of this harness' }
     # Tests, examples, scripts and receipts may differ. Product source may not.
-    $changed = @(& git diff --name-only $ProductSha -- crates src src-tauri extension Cargo.toml package.json package-lock.json)
+    $protected = @('crates', 'src', 'src-tauri', 'extension', '.cargo', 'Cargo.toml', 'package.json', 'package-lock.json', 'rust-toolchain', 'rust-toolchain.toml')
+    $changed = @(& git diff --name-only $ProductSha -- @protected)
+    $changed += @(& git ls-files --others --exclude-standard -- @protected)
+    $changed += @(& git ls-files --others --ignored --exclude-standard -- .cargo rust-toolchain rust-toolchain.toml 'crates/*/build.rs')
     $productChanges = @($changed | Where-Object { $_ -notmatch '^crates/[^/]+/(examples|tests)/' })
     if ($productChanges.Count -ne 0) { throw ('Product changes invalidate baseline: ' + ($productChanges -join ', ')) }
     $lockDelta = @(& git diff $ProductSha -- Cargo.lock)
@@ -72,6 +75,7 @@ try {
         dependency_lock = $(if ($lockDelta.Count -eq 0) { 'EXACT' } else { 'QUALIFICATION_ONLY_REFRESH_HOLD' })
         rustc = $toolchain; os = [Environment]::OSVersion.VersionString
         architecture = $env:PROCESSOR_ARCHITECTURE; filesystem = 'NTFS'; drive = $drive
+        cargo_target_relative_to_evidence = 'target'
         harness_sha256 = (Get-FileHash -LiteralPath (Join-Path $repo 'crates/index-core/examples/qualify_ntfs.rs')).Hash
         runner_sha256 = (Get-FileHash -LiteralPath $PSCommandPath).Hash
         binary_sha256 = $(if ($null -ne $native -and (Test-Path -LiteralPath $binary)) { (Get-FileHash -LiteralPath $binary).Hash } else { $null })
