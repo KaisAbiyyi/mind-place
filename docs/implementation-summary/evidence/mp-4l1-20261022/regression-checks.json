@@ -1,0 +1,44 @@
+{
+  "schema": "mind-place/mp-4l1-checks/v1",
+  "product_sha": "634a78c9d6900a387f7458aa5e2b1cc5dec1b2dd",
+  "dependency_lock": "QUALIFICATION_ONLY_REFRESH_HOLD",
+  "checks": [
+    {
+      "command": "npm run verify:repo",
+      "result": "PASS"
+    },
+    {
+      "command": "npm run typecheck",
+      "result": "PASS"
+    },
+    {
+      "passed": 111,
+      "failed": 0,
+      "result": "PASS",
+      "command": "npm run test:web"
+    },
+    {
+      "ignored": 1,
+      "failed": 0,
+      "note": "ignored scale qualification benchmark was not invoked",
+      "result": "PASS",
+      "command": "npm run test:rust",
+      "passed": 134
+    },
+    {
+      "command": "cargo fmt --all -- --check",
+      "result": "PASS"
+    },
+    {
+      "reason": "committed workspace Cargo.lock requires refresh",
+      "result": "FAIL",
+      "command": "cargo test --locked (initial exact baseline)"
+    },
+    {
+      "reason": "qualification-only artifacts; native gate failed; no product or packaging changes",
+      "result": "NOT RUN",
+      "command": "npm run build"
+    }
+  ],
+  "rust_transcript_sha256": "92F167265F18C21FC958EB316FE74158D042B3A9387B683074ACD1710D41B292"
+}
