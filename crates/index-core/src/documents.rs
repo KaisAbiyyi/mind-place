@@ -15,6 +15,7 @@ use std::{
 };
 
 const APPLICATION_ID: i64 = 0x4D504446; // MPDF; never confused with conversation index.
+const SCHEMA_VERSION: i64 = 2;
 const MAX_RESULTS: usize = 25;
 const MAX_CANDIDATES: i64 = 100;
 
@@ -81,7 +82,7 @@ fn literal_query(input: &str) -> Result<String> {
 fn verify_document_database(db: &Connection, check_integrity: bool) -> Result<()> {
     let id: i64 = db.query_row("PRAGMA application_id", [], |r| r.get(0))?;
     let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    if id != APPLICATION_ID || version != 1 {
+    if id != APPLICATION_ID || version != SCHEMA_VERSION {
         return Err(IndexError::InvalidIndex);
     }
     if check_integrity {
@@ -106,15 +107,30 @@ impl DocumentIndex {
         fs::create_dir_all(parent)?;
         safe_path(&path)?;
         let existed = path.exists();
+        let mut legacy_v1 = false;
         if existed {
-            // No WAL or writer side effects on a foreign or corrupt SQLite file.
+            // Reject foreign/corrupt DB before any mutable open or migration.
             let ro = Connection::open_with_flags(
                 &path,
                 OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
             )?;
-            verify_document_database(&ro, true)?;
+            let id: i64 = ro.query_row("PRAGMA application_id", [], |r| r.get(0))?;
+            let version: i64 = ro.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+            if id != APPLICATION_ID || !matches!(version, 1 | SCHEMA_VERSION) {
+                return Err(IndexError::InvalidIndex);
+            }
+            if version == SCHEMA_VERSION {
+                verify_document_database(&ro, true)?;
+            } else {
+                let health: String = ro.query_row("PRAGMA quick_check(1)", [], |r| r.get(0))?;
+                if health != "ok" { return Err(IndexError::InvalidIndex); }
+                // Only a known disposable v1 projection may be recreated.
+                let _: i64 = ro.query_row("SELECT COUNT(*) FROM document_meta", [], |r| r.get(0))
+                    .map_err(|_| IndexError::InvalidIndex)?;
+                legacy_v1 = true;
+            }
         }
-        let db = Connection::open_with_flags(
+        let mut db = Connection::open_with_flags(
             &path,
             OpenFlags::SQLITE_OPEN_READ_WRITE
                 | OpenFlags::SQLITE_OPEN_CREATE
@@ -124,7 +140,15 @@ impl DocumentIndex {
         if !existed {
             db.execute_batch(SCHEMA)?;
             db.pragma_update(None, "application_id", APPLICATION_ID)?;
-            db.pragma_update(None, "user_version", 1)?;
+            db.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+        } else if legacy_v1 {
+            // The old text projection was never raw evidence. Atomically rebuild
+            // its schema without touching document objects or root authority.
+            let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            tx.execute_batch("DROP TABLE document_fts; DROP TABLE document_meta;")?;
+            tx.execute_batch(SCHEMA)?;
+            tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+            tx.commit()?;
         }
         verify_document_database(&db, false)?;
         Ok(Self { path })
