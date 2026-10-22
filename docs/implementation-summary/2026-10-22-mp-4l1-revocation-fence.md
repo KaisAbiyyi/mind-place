@@ -63,3 +63,35 @@ claim that MP-4L1 has passed.
 slow filesystem operations or FTS publication may delay owner revocation or
 yield an explicit busy error requiring a retry. End-to-end owner retry UX and
 response-dispatch-time invalidation remain outside these unit tests.
+
+## Native NTFS regression rerun (Windows, 2026-10-22)
+
+Original unmodified Codex MP-4L1 `qualify_ntfs.rs` example from PR #36 was
+compiled as a temporary **untracked** example against fixed product commit
+`9be7e6a13434b18e0bb778f4b76d466512e15be0`. The example was run
+directly with a new synthetic evidence directory on the owner's D: NTFS
+volume, not via PR #36's baseline-only PowerShell wrapper. **No private
+corpus was read.**
+
+**Result: 9 PASS, 0 FAIL, 1 BLOCKED = PARTIAL.** Both original security
+failures have changed to PASS:
+
+- `revoke_before_index_commit`: generation `1 -> 1`, operation rejected,
+  zero post-revoke hits.
+- `revoke_before_search_return`: zero returned hits after second-thread
+  revoke completed.
+- Junction race: 14 swaps, 128 denied reads, 14 confirmed live-junction
+  denials, zero outside reads.
+- Symlink setup: `BLOCKED` by Windows error 1314 (insufficient symbolic-link
+  creation privilege). This environment gate is not silently waived.
+
+Sanitized machine-readable receipt:
+[`2026-10-22-mp-4l1-native-recheck.json`](2026-10-22-mp-4l1-native-recheck.json).
+Its SHA-256 is
+`248d2e982491456a9285423ab1968504013c9b361420dd0a9b652d49fe77f4ef`.
+The copied harness SHA-256 is
+`9640e79ece8113454576fe7574eaebe0f6df88e552686b5c26a686f278a4120a`.
+Full native transcript and untouched fixture corpus are retained **locally**
+at `D:\projects\mind-place-mp4l1-fix-evidence\run-02`. A full MP-4L1
+acceptance remains gated on the Windows symlink-capable rerun and the
+coordinated MP-4L1 executor's sign-off; 4L2/4U are still later gates.
