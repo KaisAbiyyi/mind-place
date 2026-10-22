@@ -273,11 +273,8 @@ impl DocumentIndex {
             report.indexed_files += 1;
         }
         check()?;
-        state
-            .document_root(root_id)?
-            .filter(|r| r.is_approved())
-            .ok_or(IndexError::Revoked)?;
-        // Root permission + native identity must remain live at the commit boundary.
+        // Reconcile the latest inventory before the final authority fence.
+        // Do not invoke the potentially blocking caller lease inside the fence.
         scanner
             .current_uris(root_id, || lease(&mut check))?
             .ok_or(IndexError::Revoked)?;
@@ -287,8 +284,12 @@ impl DocumentIndex {
             params![root_id, generation],
         )?;
         check()?;
-        tx.commit()?;
-        check()?;
+        // The grant must still be live at publication. A concurrent revoke
+        // cannot finish between this authority check and the FTS commit.
+        state.with_approved_document_roots(&[root_id.to_owned()], || {
+            tx.commit()?;
+            Ok::<(), IndexError>(())
+        })?;
         Ok(report)
     }
 
@@ -418,13 +419,170 @@ impl DocumentIndex {
             }
         }
         check()?;
-        Ok(hits)
+        if hits.is_empty() {
+            return Ok(hits);
+        }
+        // A revoke can complete after a candidate's live-byte verification.
+        // Revalidate EVERY root in the response while holding the shared
+        // authority writer fence; fail closed even for a mixed-root result.
+        let roots = hits
+            .iter()
+            .map(|hit| VirtualDocumentPath::parse(&hit.uri).map(|uri| uri.root_id().to_owned()))
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        state.with_approved_document_roots(&roots, || Ok::<_, IndexError>(hits))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(windows)]
+    use std::sync::{Arc, Mutex};
+
+    #[cfg(windows)]
+    fn approved_fixture() -> (tempfile::TempDir, StateStore, DocumentIndex, String) {
+        let dir = tempfile::tempdir().unwrap();
+        let state = StateStore::open(dir.path().join("authority/state.sqlite3")).unwrap();
+        let folder = dir.path().join("approved");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("notes.md"), "safefixture uniquephrase text").unwrap();
+        let root = state.register_document_root(&folder).unwrap();
+        state.approve_document_root(&root.id).unwrap();
+        let index = DocumentIndex::open(dir.path().join("document-index.sqlite3")).unwrap();
+        (dir, state, index, root.id)
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn revoke_on_second_thread_at_final_search_lease_never_discloses() {
+        let (_dir, state, index, root_id) = approved_fixture();
+        index.refresh_root(&state, &root_id, || Ok(())).unwrap();
+        let mut total = 0;
+        assert_eq!(
+            index
+                .search(&state, "uniquephrase", 10, || {
+                    total += 1;
+                    Ok(())
+                })
+                .unwrap()
+                .len(),
+            1
+        );
+        let mut checkpoint = 0;
+        let mut revoked = false;
+        let result = index.search(&state, "uniquephrase", 10, || {
+            checkpoint += 1;
+            if checkpoint == total {
+                let db = state.clone();
+                let id = root_id.clone();
+                std::thread::spawn(move || db.revoke_document_root(&id).unwrap())
+                    .join()
+                    .unwrap();
+                revoked = true;
+            }
+            Ok(())
+        });
+        assert!(revoked, "the final search boundary was not exercised");
+        assert!(
+            !matches!(result, Ok(ref hits) if !hits.is_empty()),
+            "completed root revoke disclosed a hit"
+        );
+        assert!(index
+            .search(&state, "uniquephrase", 10, || Ok(()))
+            .unwrap()
+            .is_empty());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn revoke_on_second_thread_at_final_refresh_lease_cannot_commit_generation() {
+        let (_dir, state, index, root_id) = approved_fixture();
+        let mut total = 0;
+        let first = index
+            .refresh_root(&state, &root_id, || {
+                total += 1;
+                Ok(())
+            })
+            .unwrap();
+        let mut checkpoint = 0;
+        let mut revoked = false;
+        let result = index.refresh_root(&state, &root_id, || {
+            checkpoint += 1;
+            if checkpoint == total {
+                let db = state.clone();
+                let id = root_id.clone();
+                std::thread::spawn(move || db.revoke_document_root(&id).unwrap())
+                    .join()
+                    .unwrap();
+                revoked = true;
+            }
+            Ok(())
+        });
+        assert!(revoked, "the final commit boundary was not exercised");
+        assert!(
+            result.is_err(),
+            "revocation must abort projection publication"
+        );
+        let generation: i64 = index
+            .connection()
+            .unwrap()
+            .query_row(
+                "SELECT generation FROM document_meta WHERE root_id=?1",
+                [&root_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(generation, first.generation);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn final_disclosure_fence_denies_mixed_root_response_after_revoke() {
+        let (dir, state, index, first_id) = approved_fixture();
+        let second_folder = dir.path().join("second");
+        std::fs::create_dir(&second_folder).unwrap();
+        std::fs::write(second_folder.join("notes.md"), "another uniquephrase").unwrap();
+        let second = state.register_document_root(&second_folder).unwrap();
+        state.approve_document_root(&second.id).unwrap();
+        index.refresh_root(&state, &first_id, || Ok(())).unwrap();
+        index.refresh_root(&state, &second.id, || Ok(())).unwrap();
+        assert_eq!(
+            index
+                .search(&state, "uniquephrase", 10, || Ok(()))
+                .unwrap()
+                .len(),
+            2
+        );
+        let last_guard = Arc::new(Mutex::new(0usize));
+        let mut total = 0;
+        index
+            .search(&state, "uniquephrase", 10, || {
+                total += 1;
+                Ok(())
+            })
+            .unwrap();
+        let counter = last_guard.clone();
+        let result = index.search(&state, "uniquephrase", 10, || {
+            let mut calls = counter.lock().unwrap();
+            *calls += 1;
+            if *calls == total {
+                let db = state.clone();
+                let id = first_id.clone();
+                std::thread::spawn(move || db.revoke_document_root(&id).unwrap())
+                    .join()
+                    .unwrap();
+            }
+            Ok(())
+        });
+        assert!(
+            !matches!(result, Ok(ref hits) if hits.iter().any(|h| h.uri.contains(&first_id))),
+            "mixed result included a revoked root"
+        );
+        let remaining = index.search(&state, "uniquephrase", 10, || Ok(())).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert!(remaining[0].uri.contains(&second.id));
+    }
+
     #[test]
     fn legacy_document_projection_rebuilds_without_touching_source_data() {
         let tmp = tempfile::tempdir().unwrap();
