@@ -4,6 +4,16 @@ This is the high-level roadmap for Mind Place. It is intentionally less rigid th
 
 Where an older implementation plan conflicts with this document, this document is the current product direction.
 
+## P0 · AGPLv3 → MIT license migration (top priority, 22 October 2026)
+
+**Decision:** Make Mind Place permissively MIT-licensed for future releases so users can adapt, fork and distribute personal or proprietary variants. Current `LICENSE` on `main` is GNU AGPLv3; the policy change is about downstream distribution/network-source copyleft, **not** about a restriction on private modifications (already permitted by AGPLv3). Track as **MP-LIC-00 / P0 / NOW**, [GitHub issue #33](https://github.com/KaisAbiyyi/mind-place/issues/33), [Notion execution task](https://app.notion.com/p/401c4a6aaf7381778e6fe0d3ed83da62).
+
+- Rights gate first: inventory first-party authors/contributions, upstream material and inherited code; seek all necessary copyright-owner permissions or remove/rewrite non-relicensable parts.
+- Compatibility gate: check dependencies, bundled assets/executables and vendored code; preserve third-party license terms and notices, do not claim other authors' code as MIT.
+- Implementation: change first-party root LICENSE to canonical MIT text and correct copyright details; reconcile README, SPDX/manifests, file headers, distribution/installer notices, CI checks and release communications.
+- Acceptance: reviewed and CI-green cloud PR with documented rights provenance, correctly scoped MIT declaration for future tag(s), mandatory third-party notices, and explicit explanation that previously distributed AGPL versions retain their historical grants.
+- Coordination: resource lock `license-governance/release-notices`, independent of currently claimed MP-4F `document-integration/retrieval`; both can be Now in the Notion board as genuinely parallel work. **Ready/unclaimed is not Claimed or Done.**
+
 ## 1. The product we are actually building
 
 Mind Place is not a ChatGPT memory plugin. It is a **local continuity and knowledge layer for AI in general**.
