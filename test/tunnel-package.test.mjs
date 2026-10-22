@@ -40,7 +40,7 @@ test('Windows portable payload includes the verified helper, notices and receipt
       background: { service_worker: 'worker.mjs', type: 'module' },
     }));
     fs.writeFileSync(path.join(root, 'notices'), 'product notices');
-    fs.writeFileSync(path.join(root, 'license'), 'AGPL');
+    fs.writeFileSync(path.join(root, 'license'), 'MIT License\nfixture');
     fs.writeFileSync(path.join(helper, 'tunnel-client.exe'), 'helper fixture');
     fs.mkdirSync(path.join(helper, 'resources'));
     fs.writeFileSync(path.join(helper, 'resources', 'LICENSES.txt'), 'upstream licenses fixture');
@@ -51,6 +51,8 @@ test('Windows portable payload includes the verified helper, notices and receipt
     stageProduct(source, output, extension, path.join(root, 'notices'), path.join(root, 'license'), { directory: helper, pin });
     assert.equal(fs.readFileSync(path.join(output, 'tunnel-client.exe'), 'utf8'), 'helper fixture');
     assert.ok(fs.existsSync(path.join(output, 'tunnel', 'LICENSES.txt')));
+    assert.equal(fs.readFileSync(path.join(output, 'LICENSE'), 'utf8'), 'MIT License\nfixture');
+    assert.equal(fs.readFileSync(path.join(output, 'THIRD-PARTY-NOTICES.txt'), 'utf8'), 'product notices');
     assert.ok(fs.existsSync(path.join(output, 'tunnel', 'receipt.json')));
     fs.writeFileSync(path.join(output, 'cloudflared.exe'), 'unrelated executable');
     assert.throws(() => stageProduct(source, output, extension, path.join(root, 'notices'), path.join(root, 'license'), { directory: helper, pin }), /Unexpected legacy payload/);

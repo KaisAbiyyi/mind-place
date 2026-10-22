@@ -17,8 +17,20 @@ if (!cargoVersion) throw new Error('Cannot read workspace version from Cargo.tom
 if (product.version !== cargoVersion || product.version !== tauri.version) {
   throw new Error(`Version mismatch: package=${product.version}, cargo=${cargoVersion}, tauri=${tauri.version}`);
 }
-if (product.license !== 'AGPL-3.0-or-later' || cargoLicense !== product.license) {
-  throw new Error(`License mismatch: package=${product.license}, cargo=${cargoLicense}`);
+if (product.license !== 'MIT' || cargoLicense !== product.license || readJson('package-lock.json').packages[''].license !== 'MIT') {
+  throw new Error(`License mismatch: package=${product.license}, cargo=${cargoLicense}, npm-lock=${readJson('package-lock.json').packages[''].license}`);
+}
+const licenseText = fs.readFileSync(path.join(root, 'LICENSE'), 'utf8');
+if (!licenseText.startsWith('MIT License\n\nCopyright (c) 2026 Kais Abiyyi\n') ||
+    !licenseText.includes('Permission is hereby granted, free of charge') ||
+    !licenseText.includes('THE SOFTWARE IS PROVIDED "AS IS"')) {
+  throw new Error('Canonical MIT LICENSE or first-party copyright notice missing');
+}
+const activeDeclarations = ['README.md', 'CONTRIBUTING.md', 'package.json', 'package-lock.json', 'Cargo.toml'];
+for (const file of activeDeclarations) {
+  if (/AGPL-3\\.0-or-later|GNU Affero General Public License v3/i.test(fs.readFileSync(path.join(root, file), 'utf8'))) {
+    throw new Error(`Stale first-party AGPL declaration in ${file}`);
+  }
 }
 
 if (extension.manifest_version !== 3) throw new Error('Capture extension must use Manifest V3');
