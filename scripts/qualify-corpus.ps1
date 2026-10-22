@@ -1,8 +1,8 @@
 param(
-    [Parameter(Mandatory = $true)][string]$EvidenceDirectory,
-    [string]$ProductSha = '5301ad773d32a5ac88ba5ec9dcc1232c8b8e8f10'
+    [Parameter(Mandatory = $true)][string]$EvidenceDirectory
 )
 $ErrorActionPreference = 'Stop'
+$ProductSha = '5301ad773d32a5ac88ba5ec9dcc1232c8b8e8f10'
 if ($env:OS -ne 'Windows_NT') { throw 'MP-4L2 requires native Windows' }
 if ($ProductSha -cnotmatch '^[0-9a-f]{40}$') { throw 'Supply the full exact product SHA' }
 $repo = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot)).TrimEnd('\')

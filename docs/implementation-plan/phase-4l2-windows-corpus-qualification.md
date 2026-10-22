@@ -35,6 +35,8 @@ Parser checks assert bounded input bytes, output bytes, chunk count, ZIP declare
 
 The local evidence directory contains the original native `native-receipt.json`, `run-metadata.json`, source/output hashes, and separate build/runtime transcripts. Public task evidence deliberately excludes fixture contents and machine-local absolute source paths.
 
+The independent repeat `mp4l2-20261022-run04` also returned **PASS** (2/2 cases, Cargo exit 0) on harness HEAD `0a7eb989eba5ec24b3c74dd882fedd250b86bc16`, against the same pinned product baseline. Run04 recorded initial scan/index **2,658 / 9,423 ms**, no-op scan/index **3,010 / 8,987 ms**, and edited-file scan/index **3,164 / 10,000 ms**. The run04 native receipt SHA-256 is `1DE15066BF572E9B58FFBC31A06C46A536C96ECA4AD81D4591D2562403C15764`. A subsequent hardening change removes the runner's caller-supplied baseline override; a negative invocation with `-ProductSha` fails before any evidence directory is created.
+
 ## Remaining acceptance boundary
 
 The generated corpus validates native Windows behavior and the integration between scanning, immutable storage, parsing and search. The phase plan additionally asks for **a representative user-approved real document folder** to establish realistic document distributions, initial/no-op/changed-file latency and PDF/Office extraction coverage. That dataset has not been selected or scanned in this run. Consequently the synthetic-native case is **PASS**, while the full MP-4L2 real-corpus acceptance remains **PARTIAL / LOCAL gate** until evidence from an explicitly approved folder is available. MP-4U owner UX acceptance is separate and follows MP-4L2.
