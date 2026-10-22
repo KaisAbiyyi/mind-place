@@ -40,4 +40,4 @@ The final build is required when desktop, native host, extension packaging, or r
 
 Use Conventional Commits where practical, keep unrelated changes separate, and explain user-visible behavior plus verification in the pull request. Avoid committing generated build output, local archives, release artifacts, or credentials.
 
-By submitting a contribution to this repository, you agree that your contribution is licensed under the repository's GNU Affero General Public License v3.0-or-later terms. Do not submit code that cannot legally be distributed under those terms, and preserve required third-party notices when incorporating compatible open-source work.
+By submitting a new contribution to this repository, you agree to license that contribution under the MIT License in the repository root, provided you own or control the necessary rights. This applies to new submissions only and is not retroactive permission to relicense earlier contributors' work. Do not submit code or assets under incompatible terms; disclose third-party origin and retain all legally required attribution and notices. See [license transition and provenance](./docs/licensing/MIT-TRANSITION.md).

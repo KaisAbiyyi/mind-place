@@ -4,7 +4,7 @@
 
 ## P0 · License migration — MP-LIC-00 (22 October 2026)
 
-**TOP PRIORITY / NOW — READY, UNCLAIMED.** [Issue #33](https://github.com/KaisAbiyyi/mind-place/issues/33) and the [Notion task](https://app.notion.com/p/401c4a6aaf7381778e6fe0d3ed83da62) track the **AGPLv3 → MIT** migration for future Mind Place releases. Root `LICENSE` currently declares GNU AGPLv3. Before changing it, audit contributor copyrights, upstream/vendored content, assets and dependency notices; secure permission or rewrite code that cannot be relicensed. Update MIT LICENSE, SPDX/package metadata, README, legal/installer notices, CI checks and release notes together. Existing AGPL-licensed releases keep their historical license grants. Do **not** mark done from a mere file replacement.
+**TOP PRIORITY / NOW — CLAIMED by ChatGPT Cloud on 2026-10-22, `feat/mp-lic-00-mit-relicense`; acceptance pending rights/compatibility + PR CI.** [Issue #33](https://github.com/KaisAbiyyi/mind-place/issues/33) and the [Notion task](https://app.notion.com/p/401c4a6aaf7381778e6fe0d3ed83da62) track the **AGPLv3 → MIT** migration for future Mind Place releases. Root `LICENSE` on `main` at claim baseline declares GNU AGPLv3; the dedicated branch proposes MIT pending approval. Before changing it, audit contributor copyrights, upstream/vendored content, assets and dependency notices; secure permission or rewrite code that cannot be relicensed. Update MIT LICENSE, SPDX/package metadata, README, legal/installer notices, CI checks and release notes together. Existing AGPL-licensed releases keep their historical license grants. Do **not** mark done from a mere file replacement.
 
 This governance work uses the independent `license-governance/release-notices` lock; it can execute in parallel with the already-claimed `MP-4F` (`document-integration/retrieval`) without taking over or delaying its unrelated technical implementation. The Notion three-column Current State is the **live** focus/claim authority; this section records priority/dependencies, not a competing snapshot. The plan does not authorize unreviewed relicensing.
 
@@ -18,7 +18,7 @@ Historical Cloud 1A–1E, 2A–2D, 3A–3F are merged (3E #14: `5546504`; 3F #17
 
 | Task ID | Deliverable | Required predecessors | Exclusive logical resource | Gate / parallel note |
 |---|---|---|---|---|
-| `MP-LIC-00` | **P0: rights-cleared AGPLv3 → MIT licensing and release notices** | Independent; legal rights audit must PASS before license switch | `license-governance/release-notices` | CLOUD; NOW/Ready, unclaimed; parallel with MP-4F; MIT release blocked until cleared; [#33](https://github.com/KaisAbiyyi/mind-place/issues/33) |
+| `MP-LIC-00` | **P0: rights-cleared AGPLv3 → MIT licensing and release notices** | Independent; legal rights audit must PASS before license switch | `license-governance/release-notices` | CLOUD; NOW/Claimed ChatGPT, dedicated licensing branch; parallel with MP-4F; MIT release blocked until cleared; [#33](https://github.com/KaisAbiyyi/mind-place/issues/33) |
 | `MP-3E` | Cloud MCP adversarial security and simulated tunnel review | `MP-3D` | `mcp-security` | MERGED #14; local/user gates pending |
 | `MP-3F` | Bundle verified official Windows helper and remove manual copy | `MP-3E` | `windows-packaging/hosted-helper-resolution/hosted-setup-copy` | DONE; #17 squash-merged `f9d1313`, Windows CI PASS |
 | `MP-3L1` | Real Windows local MCP client qualification | `MP-3F` | `native-mcp` | LOCAL; no cloud simulation substitute |
