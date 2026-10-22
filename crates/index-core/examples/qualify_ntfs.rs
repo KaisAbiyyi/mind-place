@@ -11,7 +11,7 @@ mod native {
     use std::{
         fs,
         path::{Path, PathBuf},
-        process::Command,
+        process::{Command, Stdio},
         sync::{
             atomic::{AtomicBool, AtomicUsize, Ordering},
             Arc, Barrier,
@@ -91,14 +91,22 @@ mod native {
     }
     // Invoke only PowerShell's native cmdlet with literal argument binding; no cmd /c.
     fn junction(link: &Path, target: &Path) {
-        let result = Command::new("powershell.exe").args(["-NoProfile", "-NonInteractive", "-Command",
+        let mut child = Command::new("powershell.exe").args(["-NoProfile", "-NonInteractive", "-Command",
             "& { param($link, $target) $ErrorActionPreference='Stop'; New-Item -ItemType Junction -Path $link -Target $target | Out-Null }"])
-            .arg(link).arg(target).output().unwrap();
-        assert!(
-            result.status.success(),
-            "junction fixture creation failed: {}",
-            String::from_utf8_lossy(&result.stderr)
-        );
+            .arg(link).arg(target).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap();
+        let deadline = Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                assert!(status.success(), "junction fixture creation failed");
+                return;
+            }
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("junction fixture process timed out");
+            }
+            thread::sleep(std::time::Duration::from_millis(2));
+        }
     }
     fn junctions() -> Value {
         let f = Fixture::new();
@@ -265,18 +273,31 @@ mod native {
         let gate = Arc::new(Barrier::new(2));
         let stop = Arc::new(AtomicBool::new(false));
         let swaps = Arc::new(AtomicUsize::new(0));
+        let live = Arc::new(AtomicBool::new(false));
+        let observed_live = Arc::new(AtomicUsize::new(0));
+        let worker_live = live.clone();
+        let worker_observed = observed_live.clone();
+        let deadline = Instant::now() + std::time::Duration::from_secs(45);
         let (worker_gate, worker_stop, worker_swaps) = (gate.clone(), stop.clone(), swaps.clone());
         let worker = thread::spawn(move || {
             worker_gate.wait();
             // A bounded real adversarial writer: no recursive moves/deletes.
             for _ in 0..32 {
-                if worker_stop.load(Ordering::SeqCst) {
+                if worker_stop.load(Ordering::SeqCst) || Instant::now() >= deadline {
                     break;
                 }
                 retry_mutation(|| fs::rename(&slot, &parked));
                 junction(&slot, &outside);
                 worker_swaps.fetch_add(1, Ordering::SeqCst);
-                thread::sleep(std::time::Duration::from_millis(5));
+                let previous = worker_observed.load(Ordering::SeqCst);
+                worker_live.store(true, Ordering::SeqCst);
+                let overlap_deadline = Instant::now() + std::time::Duration::from_millis(100);
+                while worker_observed.load(Ordering::SeqCst) == previous
+                    && Instant::now() < overlap_deadline
+                {
+                    thread::sleep(std::time::Duration::from_millis(1));
+                }
+                worker_live.store(false, Ordering::SeqCst);
                 retry_mutation(|| fs::remove_dir(&slot));
                 retry_mutation(|| fs::rename(&parked, &slot));
             }
@@ -286,14 +307,19 @@ mod native {
         let mut denied = 0;
         let mut leaked = 0;
         // Continue through at least one completed swap, with a bounded deadline.
-        let deadline = Instant::now() + std::time::Duration::from_secs(45);
         while (allowed + denied < 128 || swaps.load(Ordering::SeqCst) < 2)
             && Instant::now() < deadline
         {
-            match f
+            let epoch = swaps.load(Ordering::SeqCst);
+            let before_live = live.load(Ordering::SeqCst);
+            let read = f
                 .state
-                .read_document_bytes(&f.uri(&["slot", "secret.md"]), 1024)
-            {
+                .read_document_bytes(&f.uri(&["slot", "secret.md"]), 1024);
+            if before_live && live.load(Ordering::SeqCst) && swaps.load(Ordering::SeqCst) == epoch {
+                assert!(read.is_err(), "read through a live junction was accepted");
+                observed_live.fetch_add(1, Ordering::SeqCst);
+            }
+            match read {
                 Ok(bytes) if bytes == b"allowedcanary" => allowed += 1,
                 Ok(_) => {
                     leaked += 1;
@@ -311,7 +337,11 @@ mod native {
             "insufficient native swap coverage"
         );
         assert!(denied > 0, "race did not overlap an absent/reparse entry");
-        json!({"status":"PASS","allowed_reads":allowed,"denied_reads":denied,"swaps":swaps.load(Ordering::SeqCst),"outside_reads":leaked})
+        assert!(
+            observed_live.load(Ordering::SeqCst) > 0,
+            "no proven read overlap with a live junction"
+        );
+        json!({"status":"PASS","allowed_reads":allowed,"denied_reads":denied,"live_junction_denials":observed_live.load(Ordering::SeqCst),"swaps":swaps.load(Ordering::SeqCst),"outside_reads":leaked})
     }
     fn revoke_scan() -> Value {
         let f = Fixture::new();

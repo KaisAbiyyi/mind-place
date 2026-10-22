@@ -6,12 +6,23 @@ param(
 $ErrorActionPreference = 'Stop'
 if ($env:OS -ne 'Windows_NT') { throw 'MP-4L1 requires native Windows' }
 if ($ProductSha -notmatch '^[0-9a-f]{40}$') { throw 'Product SHA must contain exactly 40 lowercase hexadecimal characters' }
-$repo = Split-Path -Parent $PSScriptRoot
+$repo = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot)).TrimEnd('\')
 $evidence = [IO.Path]::GetFullPath($EvidenceDirectory)
 if (-not [IO.Path]::IsPathRooted($EvidenceDirectory)) { throw 'Evidence path must be absolute' }
-if ($evidence.StartsWith($repo.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
+if ($evidence.TrimEnd('\').Equals($repo, [StringComparison]::OrdinalIgnoreCase) -or $evidence.StartsWith($repo + '\', [StringComparison]::OrdinalIgnoreCase)) {
     throw 'Keep qualification fixtures outside the repository'
 }
+if ($evidence -notmatch '^[A-Za-z]:\\') { throw 'Use a local NTFS drive path' }
+$ancestor = $evidence
+while ($ancestor) {
+    if (Test-Path -LiteralPath $ancestor) {
+        if ((Get-Item -Force -LiteralPath $ancestor).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            throw 'Evidence path must not traverse a junction or reparse point'
+        }
+    }
+    $ancestor = Split-Path -Parent $ancestor
+}
+if (Test-Path -LiteralPath $evidence) { throw 'Evidence directory already exists; select a fresh run directory' }
 $drive = [IO.Path]::GetPathRoot($evidence).TrimEnd('\').TrimEnd(':')
 if ((Get-Volume -DriveLetter $drive).FileSystem -ne 'NTFS') { throw 'Evidence volume must be NTFS' }
 Push-Location $repo
@@ -29,16 +40,17 @@ try {
     if ($lockDelta.Count -ne 0 -and -not $AllowQualificationLockRefresh) {
         throw 'Lockfile differs from baseline; preserve the failure and use explicit qualification-only override'
     }
-    New-Item -ItemType Directory -Force -Path $evidence, (Join-Path $evidence 'fixtures') | Out-Null
+    New-Item -ItemType Directory -Path $evidence | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $evidence 'fixtures') | Out-Null
     $lockDelta | Set-Content -Encoding UTF8 (Join-Path $evidence 'qualification-lock.diff')
-    foreach ($name in @('MP_NTFS_FIXTURES', 'MP_NTFS_RECEIPT', 'MP_NTFS_PRODUCT_SHA')) {
+    foreach ($name in @('MP_NTFS_FIXTURES', 'MP_NTFS_RECEIPT', 'MP_NTFS_PRODUCT_SHA', 'CARGO_TARGET_DIR')) {
         $saved[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
     }
     $env:MP_NTFS_FIXTURES = Join-Path $evidence 'fixtures'
     $env:MP_NTFS_RECEIPT = Join-Path $evidence 'native-receipt.json'
     $env:MP_NTFS_PRODUCT_SHA = $ProductSha
-    # Each invocation uses its own receipt; never accept a previous successful run.
-    if (Test-Path -LiteralPath $env:MP_NTFS_RECEIPT) { Remove-Item -LiteralPath $env:MP_NTFS_RECEIPT }
+    # Avoid writing native binaries into any other checkout's shared target.
+    $env:CARGO_TARGET_DIR = Join-Path $evidence 'target'
     $toolchain = (& rustc -Vv) -join "`n"
     $head = (& git rev-parse HEAD).Trim()
     & cargo run --locked -p mind-place-index --example qualify_ntfs 2>&1 | Tee-Object -FilePath (Join-Path $evidence 'native-transcript.log')
