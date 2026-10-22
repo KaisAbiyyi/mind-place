@@ -73,3 +73,6 @@ jobs:
 
       - name: Build desktop app
         run: npm run build
+
+      - name: Verify portable MIT license and third-party notices
+        run: npm run verify:distribution-license

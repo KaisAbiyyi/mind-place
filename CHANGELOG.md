@@ -4,6 +4,15 @@ All notable user-facing changes to Mind Place are documented here.
 
 The project follows Semantic Versioning while the desktop app remains pre-1.0. The browser extension has an independent version because Chrome extension updates may ship without changing the desktop binary.
 
+## Unreleased — first rights-cleared MIT distribution (pending release gate)
+
+### License and attribution
+
+- Target first-party license: MIT, replacing AGPL-3.0-or-later for source revisions distributed after the relicensing rights and third-party review gate passes.
+- Existing AGPL-licensed source/binary distributions remain valid under their original grants; there is no retroactive revocation.
+- Bundled dependencies and the OpenAI tunnel helper remain under their respective upstream license terms; the Windows package must continue including third-party notices.
+- See [MIT transition audit](./docs/licensing/MIT-TRANSITION.md) for remaining provenance gates and the effective commit/tag to record after approval. No new MIT release tag has been published by this change.
+
 ## 0.2.5 — 2026-10-16
 
 ### Added

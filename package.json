@@ -1,7 +1,7 @@
 {
   "name": "mind-place",
   "private": true,
-  "license": "AGPL-3.0-or-later",
+  "license": "MIT",
   "version": "0.2.5",
   "type": "module",
   "scripts": {
@@ -11,6 +11,7 @@
     "build": "node scripts/tauri.mjs build --no-bundle",
     "typecheck": "tsc --noEmit",
     "verify:repo": "node scripts/verify-repo.mjs",
+    "verify:distribution-license": "node scripts/verify-release-license.mjs",
     "test:web": "node --import tsx --test --test-concurrency=1 test/*.test.mjs test/*.test.ts",
     "test:rust": "cargo test -p mind-place-archive -p mind-place-capture-host -p mind-place-security -p mind-place-state -p mind-place-index -p mind-place-integration -p mind-place-documents",
     "test": "npm run verify:repo && npm run test:web && npm run test:rust",

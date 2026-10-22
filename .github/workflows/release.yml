@@ -60,6 +60,9 @@ jobs:
       - name: Build installer and portable package
         run: npm run dist:win
 
+      - name: Verify portable MIT license and third-party notices
+        run: npm run verify:distribution-license
+
       - name: Prepare release assets
         id: assets
         shell: pwsh
