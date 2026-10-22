@@ -479,20 +479,22 @@ async fn refresh_document_root_index(
     })
     .await?;
     let lease = begin_unlocked(&state)?;
-    let auto_refresh_active = state.document_refresh.activate(&state, &polling_root, lease);
+    let auto_refresh_active = state
+        .document_refresh
+        .activate(&state, &polling_root, lease);
     if let Err(error) = finish_unlocked(&state, lease) {
         state.document_refresh.deactivate(&polling_root);
         return Err(error);
     }
-    Ok(DocumentRefreshResponse { report, auto_refresh_active })
+    Ok(DocumentRefreshResponse {
+        report,
+        auto_refresh_active,
+    })
 }
 
 /// Owner can pause periodic filesystem reads without withdrawing approval.
 #[tauri::command]
-fn pause_document_root_refresh(
-    state: State<'_, AppState>,
-    root_id: String,
-) -> Result<(), String> {
+fn pause_document_root_refresh(state: State<'_, AppState>, root_id: String) -> Result<(), String> {
     let lease = begin_unlocked(&state)?;
     state.document_refresh.deactivate(&root_id);
     finish_unlocked(&state, lease)
