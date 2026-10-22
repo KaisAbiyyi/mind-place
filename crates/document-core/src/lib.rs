@@ -8,6 +8,9 @@ mod pdf;
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 
+/// Current deterministic extraction contract; indexed projections record this revision.
+pub const EXTRACTOR_REVISION: &str = "mp-4e:1";
+
 const CHUNK_BYTES: usize = 4096;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
