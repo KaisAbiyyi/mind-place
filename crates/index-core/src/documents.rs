@@ -2,7 +2,9 @@
 //! Only explicit owner-triggered rescans create generations; searches revalidate
 //! current authoritative heads AND live source bytes before disclosing snippets.
 use crate::{configure, safe_path, IndexError, Result};
-use mind_place_documents::{extract_with_check, DocumentFormat, ExtractionError, ExtractionLimits, EXTRACTOR_REVISION};
+use mind_place_documents::{
+    extract_with_check, DocumentFormat, ExtractionError, ExtractionLimits, EXTRACTOR_REVISION,
+};
 use mind_place_state::{
     DocumentObjectStore, DocumentScanner, ScanPolicy, StateError, StateStore, VirtualDocumentPath,
 };
@@ -123,9 +125,12 @@ impl DocumentIndex {
                 verify_document_database(&ro, true)?;
             } else {
                 let health: String = ro.query_row("PRAGMA quick_check(1)", [], |r| r.get(0))?;
-                if health != "ok" { return Err(IndexError::InvalidIndex); }
+                if health != "ok" {
+                    return Err(IndexError::InvalidIndex);
+                }
                 // Only a known disposable v1 projection may be recreated.
-                let _: i64 = ro.query_row("SELECT COUNT(*) FROM document_meta", [], |r| r.get(0))
+                let _: i64 = ro
+                    .query_row("SELECT COUNT(*) FROM document_meta", [], |r| r.get(0))
                     .map_err(|_| IndexError::InvalidIndex)?;
                 legacy_v1 = true;
             }
@@ -319,7 +324,11 @@ impl DocumentIndex {
                     score: r.get(5)?,
                     extractor_revision: r.get(6)?,
                     warnings: serde_json::from_str(&r.get::<_, String>(7)?).map_err(|e| {
-                        rusqlite::Error::FromSqlConversionFailure(7, rusqlite::types::Type::Text, Box::new(e))
+                        rusqlite::Error::FromSqlConversionFailure(
+                            7,
+                            rusqlite::types::Type::Text,
+                            Box::new(e),
+                        )
                     })?,
                 },
                 r.get::<_, String>(3)?,
@@ -383,7 +392,9 @@ impl DocumentIndex {
                 Err(ExtractionError::Revoked) => return Err(IndexError::Revoked),
                 Err(_) => continue,
             };
-            if candidate.extractor_revision != EXTRACTOR_REVISION || candidate.warnings != verified.warnings {
+            if candidate.extractor_revision != EXTRACTOR_REVISION
+                || candidate.warnings != verified.warnings
+            {
                 continue;
             }
             if !verified
@@ -426,15 +437,20 @@ mod tests {
             );
             CREATE TABLE document_meta(root_id TEXT PRIMARY KEY, generation INTEGER NOT NULL);
             INSERT INTO document_meta VALUES('legacy', 1);",
-        ).unwrap();
-        db.pragma_update(None, "application_id", APPLICATION_ID).unwrap();
+        )
+        .unwrap();
+        db.pragma_update(None, "application_id", APPLICATION_ID)
+            .unwrap();
         db.pragma_update(None, "user_version", 1).unwrap();
         drop(db);
         let idx = DocumentIndex::open(&path).unwrap();
         let connection = idx.connection().unwrap();
-        let version: i64 = connection.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        let version: i64 = connection
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
         let old_roots: i64 = connection
-            .query_row("SELECT COUNT(*) FROM document_meta", [], |r| r.get(0)).unwrap();
+            .query_row("SELECT COUNT(*) FROM document_meta", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(version, SCHEMA_VERSION);
         assert_eq!(old_roots, 0);
         assert!(DocumentIndex::open(path).is_ok());
@@ -498,13 +514,21 @@ mod tests {
         assert!(initial[0].warnings.is_empty());
         // Malformed or forged parser provenance must never be returned.
         let conn = index.connection().unwrap();
-        conn.execute("UPDATE document_fts SET extractor_revision='forged'", []).unwrap();
-        assert!(index.search(&state, "uniquephrase", 10, || Ok(())).unwrap().is_empty());
+        conn.execute("UPDATE document_fts SET extractor_revision='forged'", [])
+            .unwrap();
+        assert!(index
+            .search(&state, "uniquephrase", 10, || Ok(()))
+            .unwrap()
+            .is_empty());
         conn.execute(
             "UPDATE document_fts SET extractor_revision=?1, extractor_warnings_json='[\"forged\"]'",
             [EXTRACTOR_REVISION],
-        ).unwrap();
-        assert!(index.search(&state, "uniquephrase", 10, || Ok(())).unwrap().is_empty());
+        )
+        .unwrap();
+        assert!(index
+            .search(&state, "uniquephrase", 10, || Ok(()))
+            .unwrap()
+            .is_empty());
         drop(conn);
 
         // A current file edit must suppress stale projections even prior to rescan.
