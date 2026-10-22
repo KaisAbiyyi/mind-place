@@ -2,7 +2,7 @@
 //! Only explicit owner-triggered rescans create generations; searches revalidate
 //! current authoritative heads AND live source bytes before disclosing snippets.
 use crate::{configure, safe_path, IndexError, Result};
-use mind_place_documents::{extract_with_check, DocumentFormat, ExtractionError, ExtractionLimits};
+use mind_place_documents::{extract_with_check, DocumentFormat, ExtractionError, ExtractionLimits, EXTRACTOR_REVISION};
 use mind_place_state::{
     DocumentObjectStore, DocumentScanner, ScanPolicy, StateError, StateStore, VirtualDocumentPath,
 };
@@ -17,8 +17,6 @@ use std::{
 const APPLICATION_ID: i64 = 0x4D504446; // MPDF; never confused with conversation index.
 const MAX_RESULTS: usize = 25;
 const MAX_CANDIDATES: i64 = 100;
-/// Bump when extractor semantics change; never confuse derived metadata with source authority.
-pub const EXTRACTOR_REVISION: &str = "mp-4e:1";
 
 const SCHEMA: &str = "
 CREATE VIRTUAL TABLE document_fts USING fts5(
