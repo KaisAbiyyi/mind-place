@@ -633,7 +633,7 @@ mod tests {
             authority_ready: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
             document_authority_gate: std::sync::Arc::new(std::sync::Mutex::new(())),
             document_refresh: std::sync::Arc::new(
-                super::document_refresh::DocumentRefreshRegistry::default(),
+                crate::DocumentRefreshRegistry::default(),
             ),
             mcp: std::sync::Arc::new(std::sync::Mutex::new(None)),
             hosted: std::sync::Arc::new(std::sync::Mutex::new(Some(super::HostedTunnel {
