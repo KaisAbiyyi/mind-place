@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $true)][string]$EvidenceDirectory,
-    [string]$ProductSha = '634a78c9d6900a387f7458aa5e2b1cc5dec1b2dd',
+    [string]$ProductSha = '6b93b05d55a795fb4fcac11cdfeb8fa6dff5b2f9',
     [switch]$AllowQualificationLockRefresh
 )
 $ErrorActionPreference = 'Stop'
