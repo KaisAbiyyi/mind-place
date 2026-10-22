@@ -133,11 +133,14 @@ test("explicit document indexing and search render only inert text and clear on 
     if (command === "refresh_document_root_index") return {
       root_id: id, scanned_files: 1, indexed_files: 1,
       skipped_files: 0, indexed_chunks: 1, generation: 1,
+      auto_refresh_active: true,
     } as T;
     if (command === "search_document_index") return [{
       uri: "mpdoc://root/" + id + "/note.md", version_id: "docver:v1:test",
       section: "intro", snippet: "<img src=x onerror=alert(1)>", score: -1,
+      extractor_revision: "mp-4e:1", warnings: ["<script>unsafe</script>"],
     }] as T;
+    if (command === "pause_document_root_refresh") return undefined as T;
     if (command === "revoke_document_root") {
       roots[0].approval_state = "revoked";
       return undefined as T;
@@ -150,6 +153,7 @@ test("explicit document indexing and search render only inert text and clear on 
   root.querySelector<HTMLButtonElement>("[data-action='index-root']")!.click();
   await delay(0);
   assert.match(root.textContent ?? "", /Indexed 1 files/);
+  assert.match(root.textContent ?? "", /Automatic 5-minute refresh enabled/);
   const searchForm = root.querySelector<HTMLFormElement>(".document-search-form")!;
   searchForm.querySelector("input")!.value = "notes";
   searchForm.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
@@ -157,6 +161,12 @@ test("explicit document indexing and search render only inert text and clear on 
   assert.equal(calls.filter((call) => call === "search_document_index").length, 1);
   assert.match(root.textContent ?? "", /<img src=x onerror=alert\(1\)>/);
   assert.equal(root.querySelectorAll("img").length, 0, "document snippet must remain inert");
+  assert.equal(root.querySelectorAll("script").length, 0, "parser warnings must remain inert");
+  assert.match(root.textContent ?? "", /Extractor mp-4e:1/);
+  root.querySelector<HTMLButtonElement>("[data-action='pause-root-refresh']")!.click();
+  await delay(0);
+  assert.equal(calls.filter((call) => call === "pause_document_root_refresh").length, 1);
+  assert.match(root.textContent ?? "", /Periodic folder refresh paused/);
   const revoke = root.querySelector<HTMLButtonElement>("[data-action='revoke-root']")!;
   revoke.click();
   revoke.click();
