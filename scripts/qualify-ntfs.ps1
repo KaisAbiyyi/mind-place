@@ -5,6 +5,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 if ($env:OS -ne 'Windows_NT') { throw 'MP-4L1 requires native Windows' }
+if ($ProductSha -notmatch '^[0-9a-f]{40}$') { throw 'Product SHA must contain exactly 40 lowercase hexadecimal characters' }
 $repo = Split-Path -Parent $PSScriptRoot
 $evidence = [IO.Path]::GetFullPath($EvidenceDirectory)
 if (-not [IO.Path]::IsPathRooted($EvidenceDirectory)) { throw 'Evidence path must be absolute' }

@@ -233,6 +233,22 @@ mod native {
             .needs_rescan(&f.id));
         json!({"status":"PASS","watch_hints":5,"lost_event_reconciliation":"explicit_full_rescan","raw_version_preserved":true})
     }
+    fn retry_mutation(mut action: impl FnMut() -> std::io::Result<()>) {
+        let deadline = Instant::now() + std::time::Duration::from_secs(3);
+        loop {
+            match action() {
+                Ok(()) => return,
+                Err(error)
+                    if matches!(error.raw_os_error(), Some(5 | 32))
+                        && Instant::now() < deadline =>
+                {
+                    // NTFS may transiently deny rename/delete while a reader owns a handle.
+                    thread::sleep(std::time::Duration::from_millis(2));
+                }
+                Err(error) => panic!("fixture mutation failed: {error}"),
+            }
+        }
+    }
     fn junction_race() -> Value {
         let f = Fixture::new();
         let outside = f.outside();
@@ -240,6 +256,12 @@ mod native {
         let parked = f.home.join("parked");
         fs::create_dir(&slot).unwrap();
         fs::write(slot.join("secret.md"), "allowedcanary").unwrap();
+        assert_eq!(
+            f.state
+                .read_document_bytes(&f.uri(&["slot", "secret.md"]), 1024)
+                .unwrap(),
+            b"allowedcanary"
+        );
         let gate = Arc::new(Barrier::new(2));
         let stop = Arc::new(AtomicBool::new(false));
         let swaps = Arc::new(AtomicUsize::new(0));
@@ -251,12 +273,12 @@ mod native {
                 if worker_stop.load(Ordering::SeqCst) {
                     break;
                 }
-                fs::rename(&slot, &parked).unwrap();
+                retry_mutation(|| fs::rename(&slot, &parked));
                 junction(&slot, &outside);
                 worker_swaps.fetch_add(1, Ordering::SeqCst);
                 thread::sleep(std::time::Duration::from_millis(5));
-                fs::remove_dir(&slot).unwrap();
-                fs::rename(&parked, &slot).unwrap();
+                retry_mutation(|| fs::remove_dir(&slot));
+                retry_mutation(|| fs::rename(&parked, &slot));
             }
         });
         gate.wait();
@@ -279,6 +301,7 @@ mod native {
                 }
                 Err(_) => denied += 1,
             }
+            thread::sleep(std::time::Duration::from_millis(1));
         }
         stop.store(true, Ordering::SeqCst);
         worker.join().unwrap();
@@ -312,6 +335,26 @@ mod native {
             .is_err());
         json!({"status":"PASS","revoke_checkpoint":4,"inventory_published":false})
     }
+    fn revoker(
+        f: &Fixture,
+    ) -> (
+        std::sync::mpsc::SyncSender<()>,
+        std::sync::mpsc::Receiver<()>,
+        thread::JoinHandle<()>,
+    ) {
+        let state = f.state.clone();
+        let root = f.id.clone();
+        let (trigger, start) = std::sync::mpsc::sync_channel(1);
+        let (finish, completed) = std::sync::mpsc::sync_channel(1);
+        let worker = thread::spawn(move || {
+            start
+                .recv_timeout(std::time::Duration::from_secs(10))
+                .unwrap();
+            state.revoke_document_root(&root).unwrap();
+            finish.send(()).unwrap();
+        });
+        (trigger, completed, worker)
+    }
     fn revoke_index_commit() -> Value {
         let f = Fixture::new();
         fs::write(f.root.join("safe.md"), "allowedcanary").unwrap();
@@ -323,17 +366,22 @@ mod native {
             })
             .unwrap();
         let previous = f.generation();
+        let (revoke, completed, worker) = revoker(&f);
         let mut calls = 0;
         let mut revoked = false;
         let result = f.index.refresh_root(&f.state, &f.id, || {
             calls += 1;
             // Last pre-commit unlock checkpoint, after root identity validation.
             if calls == baseline - 1 {
-                f.state.revoke_document_root(&f.id).unwrap();
+                revoke.send(()).unwrap();
+                completed
+                    .recv_timeout(std::time::Duration::from_secs(10))
+                    .unwrap();
                 revoked = true;
             }
             Ok(())
         });
+        worker.join().unwrap();
         assert!(revoked, "revoke checkpoint not reached");
         let generation = f.generation();
         let hits = f.hits("allowedcanary");
@@ -359,14 +407,19 @@ mod native {
         );
         let mut calls = 0;
         let mut revoked = false;
+        let (revoke, completed, worker) = revoker(&f);
         let result = f.index.search(&f.state, "allowedcanary", 25, || {
             calls += 1;
             if calls == baseline {
-                f.state.revoke_document_root(&f.id).unwrap();
+                revoke.send(()).unwrap();
+                completed
+                    .recv_timeout(std::time::Duration::from_secs(10))
+                    .unwrap();
                 revoked = true;
             }
             Ok(())
         });
+        worker.join().unwrap();
         assert!(revoked, "final search checkpoint not reached");
         let disclosed = result.as_ref().map(|hits| hits.len()).unwrap_or(0);
         assert_eq!(f.hits("allowedcanary"), 0); // Subsequent requests are fenced.
