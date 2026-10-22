@@ -215,6 +215,75 @@ fn validate_binding(root: &DocumentRoot, digest: &str) -> Result<()> {
 }
 
 impl StateStore {
+    /// Serializes the final publication/disclosure boundary against a completed
+    /// root revocation. The authority database owns the grant, not a caller's
+    /// unlock lease or the disposable FTS projection.
+    ///
+    /// Hold the SQLite IMMEDIATE transaction only around a small, synchronous
+    /// final action. Never perform scanning, extraction or callback-based lease
+    /// checkpoints inside it: those could await a concurrent revoke and deadlock.
+    pub fn with_approved_document_roots<T, E>(
+        &self,
+        root_ids: &[String],
+        publish: impl FnOnce() -> std::result::Result<T, E>,
+    ) -> std::result::Result<T, E>
+    where
+        E: From<StateError>,
+    {
+        let mut db = self.connection().map_err(E::from)?;
+        let tx = db
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(StateError::from)
+            .map_err(E::from)?;
+        for id in root_ids {
+            validate_root_id(id).map_err(E::from)?;
+            let row = tx
+                .query_row(
+                    "SELECT r.id,r.canonical_path,r.approval_state,d.path_digest,a.volume_id,a.file_id
+                     FROM document_root_registry d
+                     JOIN source_roots r ON r.id=d.root_id
+                     JOIN document_root_authorizations a ON a.root_id=d.root_id
+                     WHERE d.root_id=?1
+                     AND r.approval_state='approved'
+                     AND NOT EXISTS(SELECT 1 FROM root_tombstones t WHERE t.root_id=d.root_id)",
+                    [id],
+                    |row| {
+                        Ok((
+                            row_root(row)?,
+                            row.get::<_, String>(3)?,
+                            row.get::<_, String>(4)?,
+                            row.get::<_, String>(5)?,
+                        ))
+                    },
+                )
+                .optional()
+                .map_err(StateError::from)
+                .map_err(E::from)?;
+            let (root, digest, volume, file_id) =
+                row.ok_or(StateError::DocumentDenied).map_err(E::from)?;
+            validate_binding(&root, &digest).map_err(E::from)?;
+            let binding = (
+                volume
+                    .parse::<u64>()
+                    .map_err(|_| StateError::Corrupt)
+                    .map_err(E::from)?,
+                file_id
+                    .parse::<u64>()
+                    .map_err(|_| StateError::Corrupt)
+                    .map_err(E::from)?,
+            );
+            let current = crate::ntfs::root_identity(Path::new(&root.canonical_path))
+                .map_err(|_| StateError::DocumentDenied)
+                .map_err(E::from)?;
+            if current != binding {
+                return Err(E::from(StateError::DocumentDenied));
+            }
+        }
+        let result = publish()?;
+        tx.commit().map_err(StateError::from).map_err(E::from)?;
+        Ok(result)
+    }
+
     /// Explicitly stage an existing folder. This only examines path metadata.
     /// Staging never approves, scans, indexes, reads, or creates a filesystem grant.
     /// Caller (Tauri) must require a current authenticated unlock lease.

@@ -9,6 +9,56 @@ fn store() -> (tempfile::TempDir, StateStore) {
     (home, db)
 }
 
+#[cfg(windows)]
+#[test]
+fn finished_revocation_cannot_overtake_an_active_publication_fence() {
+    use std::{sync::mpsc, time::Duration};
+
+    let (home, state) = store();
+    let folder = home.path().join("approved");
+    fs::create_dir(&folder).unwrap();
+    let id = state.register_document_root(&folder).unwrap().id;
+    state.approve_document_root(&id).unwrap();
+    let (entered_tx, entered_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let publisher_store = state.clone();
+    let publisher_id = id.clone();
+    let publisher = std::thread::spawn(move || {
+        publisher_store.with_approved_document_roots(
+            &[publisher_id],
+            || -> Result<(), StateError> {
+                entered_tx.send(()).unwrap();
+                release_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+                Ok(())
+            },
+        )
+    });
+    entered_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+
+    let (started_tx, started_rx) = mpsc::channel();
+    let (revoked_tx, revoked_rx) = mpsc::channel();
+    let revoke_state = state.clone();
+    let revoke_id = id.clone();
+    let revoker = std::thread::spawn(move || {
+        started_tx.send(()).unwrap();
+        revoke_state.revoke_document_root(&revoke_id).unwrap();
+        revoked_tx.send(()).unwrap();
+    });
+    started_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    assert!(
+        revoked_rx.recv_timeout(Duration::from_millis(150)).is_err(),
+        "revocation must not complete while a publication fence holds authority"
+    );
+    release_tx.send(()).unwrap();
+    publisher.join().unwrap().unwrap();
+    revoked_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    revoker.join().unwrap();
+    assert!(!state.document_root(&id).unwrap().unwrap().is_approved());
+    assert!(state
+        .with_approved_document_roots(&[id], || Ok::<_, StateError>(()))
+        .is_err());
+}
+
 #[test]
 fn namespace_round_trip_and_strict_rejection() {
     let root = format!("root:v1:{}", "a".repeat(64));
