@@ -1,7 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod document_refresh;
 mod hosted_tunnel;
 mod mcp_commands;
+
+use document_refresh::DocumentRefreshRegistry;
 
 use mind_place_archive::{
     ArchiveStore, AssetResult, Conversation, ConversationSummary, ExportResult, ImportReceipt,
@@ -37,6 +40,7 @@ struct AppState {
     authority_ready: Arc<AtomicBool>,
     // Serializes owner filesystem grants against Lock; prevents late approvals.
     document_authority_gate: Arc<Mutex<()>>,
+    document_refresh: Arc<DocumentRefreshRegistry>,
     mcp: Arc<Mutex<Option<LocalMcpServer>>>,
     hosted: Arc<Mutex<Option<hosted_tunnel::HostedTunnel>>>,
     extension_path: PathBuf,
@@ -355,6 +359,7 @@ fn lock_security(state: State<'_, AppState>) -> SecurityStatus {
         &state.authority_ready,
         &state.security,
     );
+    state.document_refresh.deactivate_all();
     // Invalidate all read leases before killing the outbound helper and local listener.
     // Revocation is best-effort while locked; all in-flight evidence is already blocked.
     let _ = hosted_tunnel::stop_and_revoke(&state);
@@ -432,6 +437,7 @@ async fn revoke_document_root(state: State<'_, AppState>, root_id: String) -> Re
     let gate = state.document_authority_gate.clone();
     let security = state.security.clone();
     let authority_ready = state.authority_ready.clone();
+    let revoked_root = root_id.clone();
     tauri::async_runtime::spawn_blocking(move || {
         with_document_authority(&gate, &authority_ready, &security, lease, || {
             let db = StateStore::open(db_path).map_err(|e| format!("{}:{}", e.code(), e))?;
@@ -441,18 +447,28 @@ async fn revoke_document_root(state: State<'_, AppState>, root_id: String) -> Re
     })
     .await
     .map_err(|e| e.to_string())??;
+    state.document_refresh.deactivate(&revoked_root);
     finish_unlocked(&state, lease)
 }
 
-/// Owner-triggered scan only. Never run implicitly at boot or from MCP.
+/// Owner-triggered scan only. The optional periodic schedule only begins after
+/// this explicit action; no boot or MCP task may enroll document roots.
+#[derive(Serialize)]
+struct DocumentRefreshResponse {
+    #[serde(flatten)]
+    report: DocumentIndexReport,
+    auto_refresh_active: bool,
+}
+
 #[tauri::command]
 async fn refresh_document_root_index(
     state: State<'_, AppState>,
     root_id: String,
-) -> Result<DocumentIndexReport, String> {
+) -> Result<DocumentRefreshResponse, String> {
     let state_path = state.state_path.clone();
     let document_index_path = state.index_path.with_file_name("document-index.sqlite3");
-    index_task(&state, move |lease, security| {
+    let polling_root = root_id.clone();
+    let report = index_task(&state, move |lease, security| {
         let authority = StateStore::open(state_path)?;
         let projection = DocumentIndex::open(document_index_path)?;
         projection.refresh_root(&authority, &root_id, || {
@@ -461,7 +477,25 @@ async fn refresh_document_root_index(
                 .map_err(|_| IndexError::Revoked)
         })
     })
-    .await
+    .await?;
+    let lease = begin_unlocked(&state)?;
+    let auto_refresh_active = state.document_refresh.activate(&state, &polling_root, lease);
+    if let Err(error) = finish_unlocked(&state, lease) {
+        state.document_refresh.deactivate(&polling_root);
+        return Err(error);
+    }
+    Ok(DocumentRefreshResponse { report, auto_refresh_active })
+}
+
+/// Owner can pause periodic filesystem reads without withdrawing approval.
+#[tauri::command]
+fn pause_document_root_refresh(
+    state: State<'_, AppState>,
+    root_id: String,
+) -> Result<(), String> {
+    let lease = begin_unlocked(&state)?;
+    state.document_refresh.deactivate(&root_id);
+    finish_unlocked(&state, lease)
 }
 
 /// Owner search only: checks live root grant, immutable head, native source
@@ -693,6 +727,7 @@ fn main() {
                 index_path,
                 authority_ready: Arc::new(AtomicBool::new(false)),
                 document_authority_gate: Arc::new(Mutex::new(())),
+                document_refresh: Arc::new(DocumentRefreshRegistry::default()),
                 mcp: Arc::new(Mutex::new(None)),
                 hosted: Arc::new(Mutex::new(None)),
                 extension_path,
@@ -731,6 +766,7 @@ fn main() {
             approve_document_root,
             revoke_document_root,
             refresh_document_root_index,
+            pause_document_root_refresh,
             search_document_index,
             list_conversations,
             read_conversation,
