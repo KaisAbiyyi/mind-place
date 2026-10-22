@@ -114,7 +114,10 @@ impl DocumentRefreshRegistry {
 
     fn deactivate_matching(&self, root_id: &str, token: &Arc<AtomicBool>) {
         let mut workers = self.workers.lock().unwrap_or_else(|e| e.into_inner());
-        if workers.get(root_id).is_some_and(|w| Arc::ptr_eq(&w.active, token)) {
+        if workers
+            .get(root_id)
+            .is_some_and(|w| Arc::ptr_eq(&w.active, token))
+        {
             workers.remove(root_id);
         }
     }
@@ -162,7 +165,10 @@ mod tests {
         let current = thread::current();
         registry.workers.lock().unwrap().insert(
             root.into(),
-            Worker { active: new.clone(), thread: current },
+            Worker {
+                active: new.clone(),
+                thread: current,
+            },
         );
         registry.deactivate_matching(root, &old);
         assert!(registry.workers.lock().unwrap().contains_key(root));
