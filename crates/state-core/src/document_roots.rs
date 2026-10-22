@@ -235,6 +235,7 @@ impl StateStore {
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(StateError::from)
             .map_err(E::from)?;
+        let mut pinned_roots = Vec::with_capacity(root_ids.len());
         for id in root_ids {
             validate_root_id(id).map_err(E::from)?;
             let row = tx
@@ -272,15 +273,14 @@ impl StateStore {
                     .map_err(|_| StateError::Corrupt)
                     .map_err(E::from)?,
             );
-            let current = crate::ntfs::root_identity(Path::new(&root.canonical_path))
+            let pinned = crate::ntfs::pin_root_identity(Path::new(&root.canonical_path), binding)
                 .map_err(|_| StateError::DocumentDenied)
                 .map_err(E::from)?;
-            if current != binding {
-                return Err(E::from(StateError::DocumentDenied));
-            }
+            pinned_roots.push(pinned);
         }
         let result = publish()?;
         tx.commit().map_err(StateError::from).map_err(E::from)?;
+        drop(pinned_roots);
         Ok(result)
     }
 

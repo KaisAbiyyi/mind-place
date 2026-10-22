@@ -18,8 +18,9 @@ earlier in the pipeline did not make the final boundary atomic.
 - `StateStore::with_approved_document_roots` opens an IMMEDIATE transaction
   against the **authority** SQLite DB, checks terminal tombstones, current
   approval, registered root/digest, authorized volume/file IDs and **native
-  root identity**, then executes a short synchronous final action before
-  releasing the transaction. A concurrent authority revoke cannot finish
+  root identity**, pins the approved Windows directory with a no-delete-share
+  handle across the short final action, then releases the transaction. A
+  concurrent root rename/replacement or authority revoke cannot finish
   during the fenced action. No scanning, parsing or caller callback waits
   occur within the writer fence.
 - `DocumentIndex::refresh_root` completes its costly source/inventory
@@ -41,7 +42,9 @@ earlier in the pipeline did not make the final boundary atomic.
   a mixed-root search. A fourth `mind-place-state` test holds the live
   publication fence, proves a concurrent revoke **cannot** complete during
   the action, releases it, and proves terminal revocation wins thereafter.
-- Windows index `documents` tests: 9/9 PASS. Authority fence test: PASS.
+  A fifth test proves an NTFS rename fails while the directory is pinned,
+  and a root replacement after release does not inherit approval.
+- Windows index `documents` tests: 9/9 PASS. Root authority tests: 9/9 PASS.
 - `cargo test --locked` default Rust workspace: PASS.
 - `cargo test --locked -p mind-place --bin mind-place`: 13 PASS,
   1 pre-existing ignored after staging build-only assets.
@@ -55,3 +58,8 @@ including a real NTFS fixture on D:. Symlink setup may remain BLOCKED by
 Windows privilege error 1314. MP-4L2 representative corpus and MP-4U
 installed-owner acceptance are separate gates. This document is not a
 claim that MP-4L1 has passed.
+
+**Review limitation:** SQLite's 5-second writer busy timeout means unusually
+slow filesystem operations or FTS publication may delay owner revocation or
+yield an explicit busy error requiring a retry. End-to-end owner retry UX and
+response-dispatch-time invalidation remain outside these unit tests.

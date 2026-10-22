@@ -136,6 +136,23 @@ mod platform {
     pub(crate) fn root_identity(path: &Path) -> io::Result<(u64, u64)> {
         identity(&root(path)?, true)
     }
+    /// Pin the approved NTFS directory across the final publication/disclosure
+    /// boundary. Omitting FILE_SHARE_DELETE prevents a concurrent rename,
+    /// deletion or root replacement while the handle is live.
+    pub(crate) fn pin_root_identity(path: &Path, expected: (u64, u64)) -> io::Result<File> {
+        let file = OpenOptions::new()
+            .read(true)
+            .share_mode(0x1 | 0x2) // FILE_SHARE_READ | FILE_SHARE_WRITE (no DELETE)
+            .custom_flags(BACKUP_SEMANTICS | OPEN_REPARSE)
+            .open(path)?;
+        if identity(&file, true)? != expected {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "approved root replaced before publication",
+            ));
+        }
+        Ok(file)
+    }
     pub(crate) fn document_file_identity(file: &File) -> io::Result<String> {
         let (volume, index) = identity(file, false)?;
         Ok(format!("ntfs:{volume}:{index}"))
@@ -304,6 +321,16 @@ mod platform {
 #[cfg(not(windows))]
 mod platform {
     use super::*;
+    pub(crate) fn pin_root_identity(path: &Path, expected: (u64, u64)) -> io::Result<File> {
+        let file = File::open(path)?;
+        if root_identity(path)? != expected {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "approved root replaced before publication",
+            ));
+        }
+        Ok(file)
+    }
     pub(crate) fn root_identity(path: &Path) -> io::Result<(u64, u64)> {
         #[cfg(unix)]
         {
@@ -335,5 +362,5 @@ mod platform {
     }
 }
 pub(crate) use platform::{
-    directory_entries, document_file_identity, open_document, root_identity,
+    directory_entries, document_file_identity, open_document, pin_root_identity, root_identity,
 };
