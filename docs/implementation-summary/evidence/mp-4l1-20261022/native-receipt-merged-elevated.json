@@ -1,0 +1,97 @@
+{
+  "cases": [
+    {
+      "case": "junction_containment",
+      "elapsed_ms": 725,
+      "junctions_created": 2,
+      "outside_hits": 0,
+      "status": "PASS"
+    },
+    {
+      "case": "symlink_containment",
+      "elapsed_ms": 162,
+      "outside_hits": 0,
+      "status": "PASS",
+      "symlinks_created": 2
+    },
+    {
+      "case": "hardlink_and_atomic_generation",
+      "elapsed_ms": 295,
+      "generation_unchanged": true,
+      "outside_hits": 0,
+      "status": "PASS"
+    },
+    {
+      "case": "root_replacement_restart",
+      "elapsed_ms": 346,
+      "restart_denied": true,
+      "stale_hits": 0,
+      "status": "PASS"
+    },
+    {
+      "case": "missed_events_reconciliation",
+      "elapsed_ms": 1726,
+      "lost_event_reconciliation": "explicit_full_rescan",
+      "raw_version_preserved": true,
+      "status": "PASS",
+      "watch_hints": 5
+    },
+    {
+      "allowed_reads": 0,
+      "case": "concurrent_junction_swap",
+      "denied_reads": 128,
+      "elapsed_ms": 1560,
+      "live_junction_denials": 6,
+      "outside_reads": 0,
+      "status": "PASS",
+      "swaps": 7
+    },
+    {
+      "case": "revoke_during_scan",
+      "elapsed_ms": 170,
+      "inventory_published": false,
+      "revoke_checkpoint": 4,
+      "status": "PASS"
+    },
+    {
+      "case": "revoke_before_index_commit",
+      "elapsed_ms": 595,
+      "expected": "revocation before commit aborts publication",
+      "generation_after": 1,
+      "generation_before": 1,
+      "guard_calls": 33,
+      "operation_ok": false,
+      "post_revoke_hits": 0,
+      "revoke_checkpoint": 33,
+      "status": "PASS"
+    },
+    {
+      "case": "revoke_before_search_return",
+      "elapsed_ms": 590,
+      "expected": "zero disclosure when root is revoked before search returns",
+      "guard_calls": 13,
+      "returned_hits": 0,
+      "revoke_checkpoint": 13,
+      "revoked_before_return": true,
+      "status": "PASS"
+    },
+    {
+      "case": "lock_guard_boundary",
+      "elapsed_ms": 559,
+      "generation_unchanged": true,
+      "lock_guard_denied": true,
+      "status": "PASS"
+    }
+  ],
+  "fixture_retention": "kept outside repository for inspection; no recursive cleanup",
+  "not_run": [
+    "MP-4L2 representative corpus",
+    "MP-4U owner UI acceptance",
+    "five-minute scheduler wall-clock timing"
+  ],
+  "product_sha": "6b93b05d55a795fb4fcac11cdfeb8fa6dff5b2f9",
+  "schema": "mind-place/mp-4l1/v1",
+  "scope": "local native NTFS core APIs; synthetic fixtures; no installed UI or private corpus",
+  "status": "PASS",
+  "task_id": "MP-4L1"
+}

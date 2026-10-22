@@ -1,0 +1,61 @@
+{
+    "status":  "PASS",
+    "native_exit":  0,
+    "product_sha":  "6b93b05d55a795fb4fcac11cdfeb8fa6dff5b2f9",
+    "binary_sha256":  "c5a848762bc39ac64b4e8fd2510469903d097727a936fd09b8a588b167eb022a",
+    "harness_sha256":  "9640e79ece8113454576fe7574eaebe0f6df88e552686b5c26a686f278a4120a",
+    "administrator":  true,
+    "executed_at_utc":  "2026-10-22T06:38:40.7470417Z",
+    "case_results":  [
+                         {
+                             "status":  "PASS",
+                             "name":  "junction_containment",
+                             "reason":  null
+                         },
+                         {
+                             "status":  "PASS",
+                             "name":  "symlink_containment",
+                             "reason":  null
+                         },
+                         {
+                             "status":  "PASS",
+                             "name":  "hardlink_and_atomic_generation",
+                             "reason":  null
+                         },
+                         {
+                             "status":  "PASS",
+                             "name":  "root_replacement_restart",
+                             "reason":  null
+                         },
+                         {
+                             "status":  "PASS",
+                             "name":  "missed_events_reconciliation",
+                             "reason":  null
+                         },
+                         {
+                             "status":  "PASS",
+                             "name":  "concurrent_junction_swap",
+                             "reason":  null
+                         },
+                         {
+                             "status":  "PASS",
+                             "name":  "revoke_during_scan",
+                             "reason":  null
+                         },
+                         {
+                             "status":  "PASS",
+                             "name":  "revoke_before_index_commit",
+                             "reason":  null
+                         },
+                         {
+                             "status":  "PASS",
+                             "name":  "revoke_before_search_return",
+                             "reason":  null
+                         },
+                         {
+                             "status":  "PASS",
+                             "name":  "lock_guard_boundary",
+                             "reason":  null
+                         }
+                     ]
+}
