@@ -20,6 +20,7 @@ const MAX_CHUNK_BYTES: usize = 4096;
 const SCHEMA: &str = include_str!("schema_v1.sql");
 
 pub mod context;
+pub mod documents;
 pub mod fetch;
 pub mod inspection;
 pub use context::{

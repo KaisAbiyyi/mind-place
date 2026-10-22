@@ -383,6 +383,32 @@ impl DocumentObjectStore {
         self.authorize(uri, &mut guard)?;
         Ok(result)
     }
+    /// Authoritative current head; immutable historical versions are not search-current.
+    /// Every caller supplies the live session guard; approval is rechecked after read.
+    pub fn current_version(
+        &self,
+        uri: &str,
+        mut guard: impl FnMut() -> Result<()>,
+    ) -> Result<Option<DocumentVersion>> {
+        self.authorize(uri, &mut guard)?;
+        let db = self.state.connection()?;
+        let value = db
+            .query_row(
+                "SELECT v.id,v.uri,v.content_hash,o.byte_length
+             FROM document_heads h JOIN document_versions v ON v.id=h.version_id AND v.uri=h.uri
+             JOIN document_objects o ON o.content_hash=v.content_hash
+             WHERE h.uri=?1",
+                [uri],
+                read_row,
+            )
+            .optional()?;
+        if let Some(ref version) = value {
+            validate_version(version)?;
+        }
+        self.authorize(uri, &mut guard)?;
+        Ok(value)
+    }
+
     /// Bounded, stable-ID pagination. No object-hash lookup API is exposed.
     pub fn versions(
         &self,
