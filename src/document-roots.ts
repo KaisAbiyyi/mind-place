@@ -8,6 +8,8 @@ export interface DocumentSearchHit {
   section: string;
   snippet: string;
   score: number;
+  extractor_revision: string;
+  warnings: string[];
 }
 
 export interface DocumentIndexReport {
@@ -17,6 +19,7 @@ export interface DocumentIndexReport {
   skipped_files: number;
   indexed_chunks: number;
   generation: number;
+  auto_refresh_active: boolean;
 }
 
 export interface DocumentRoot {
@@ -36,7 +39,7 @@ export function mountDocumentRootSetup(parent: HTMLElement, invoke: Invoke): voi
   heading.textContent = "Personal document folders — owner permissions";
   const explanation = doc.createElement("p");
   explanation.textContent =
-    "Staging only records a pending identity. Approve explicitly, then manually index that folder to make bounded document search available. Revocation is permanent.";
+    "Staging only records a pending identity. Approve explicitly, then select Index folder to discover files and begin a 5-minute refresh schedule until paused, locked or revoked. Revocation is permanent.";
   const form = doc.createElement("form");
   form.className = "document-root-form";
   const label = doc.createElement("label");
@@ -136,7 +139,7 @@ export function mountDocumentRootSetup(parent: HTMLElement, invoke: Invoke): voi
             void invoke<DocumentIndexReport>("refresh_document_root_index", { rootId: root.id })
               .then((report) => {
                 if (!section.isConnected) return;
-                status.textContent = `Indexed ${report.indexed_files} files / ${report.indexed_chunks} chunks (${report.skipped_files} skipped). Generation ${report.generation}.`;
+                status.textContent = `Indexed ${report.indexed_files} files / ${report.indexed_chunks} chunks (${report.skipped_files} skipped). Generation ${report.generation}. ${report.auto_refresh_active ? "Automatic 5-minute refresh enabled until Lock, Pause or Revoke." : "Automatic refresh capacity reached; manual indexing remains available."}`;
               })
               .catch((error: unknown) => {
                 if (section.isConnected) status.textContent = `Document indexing failed: ${String(error)}`;
@@ -144,6 +147,23 @@ export function mountDocumentRootSetup(parent: HTMLElement, invoke: Invoke): voi
               .finally(() => { if (section.isConnected) index.disabled = false; });
           });
           item.append(index);
+          const pause = doc.createElement("button");
+          pause.type = "button";
+          pause.className = "quiet-button";
+          pause.dataset.action = "pause-root-refresh";
+          pause.textContent = "Pause automatic refresh";
+          pause.addEventListener("click", () => {
+            pause.disabled = true;
+            void invoke<void>("pause_document_root_refresh", { rootId: root.id })
+              .then(() => {
+                if (section.isConnected) status.textContent = "Periodic folder refresh paused. Manual indexing remains available.";
+              })
+              .catch((error: unknown) => {
+                if (section.isConnected) status.textContent = `Could not pause folder refresh: ${String(error)}`;
+              })
+              .finally(() => { if (section.isConnected) pause.disabled = false; });
+          });
+          item.append(pause);
         }
         if (root.approval_state !== "revoked") {
           const revoke = doc.createElement("button");
@@ -224,6 +244,9 @@ export function mountDocumentRootSetup(parent: HTMLElement, invoke: Invoke): voi
           const excerpt = doc.createElement("p");
           excerpt.textContent = hit.snippet;
           item.append(title, part, excerpt);
+          const caveats = doc.createElement("small");
+          caveats.textContent = `Extractor ${hit.extractor_revision}${hit.warnings.length ? " · " + hit.warnings.join("; ") : ""}`;
+          item.append(caveats);
           results.append(item);
         }
       })
