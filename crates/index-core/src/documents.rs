@@ -415,6 +415,32 @@ impl DocumentIndex {
 mod tests {
     use super::*;
     #[test]
+    fn legacy_document_projection_rebuilds_without_touching_source_data() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("document-index.sqlite3");
+        let db = Connection::open(&path).unwrap();
+        db.execute_batch(
+            "CREATE VIRTUAL TABLE document_fts USING fts5(
+                root_id UNINDEXED, uri UNINDEXED, version_id UNINDEXED,
+                section UNINDEXED, content, tokenize='unicode61'
+            );
+            CREATE TABLE document_meta(root_id TEXT PRIMARY KEY, generation INTEGER NOT NULL);
+            INSERT INTO document_meta VALUES('legacy', 1);",
+        ).unwrap();
+        db.pragma_update(None, "application_id", APPLICATION_ID).unwrap();
+        db.pragma_update(None, "user_version", 1).unwrap();
+        drop(db);
+        let idx = DocumentIndex::open(&path).unwrap();
+        let connection = idx.connection().unwrap();
+        let version: i64 = connection.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        let old_roots: i64 = connection
+            .query_row("SELECT COUNT(*) FROM document_meta", [], |r| r.get(0)).unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+        assert_eq!(old_roots, 0);
+        assert!(DocumentIndex::open(path).is_ok());
+    }
+
+    #[test]
     fn refuses_foreign_sqlite_without_changing_journal_or_identity() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("document-index.sqlite3");
@@ -466,13 +492,20 @@ mod tests {
         let first = index.refresh_root(&state, &root.id, || Ok(())).unwrap();
         assert_eq!(first.indexed_files, 1);
         assert!(first.indexed_chunks > 0);
-        assert_eq!(
-            index
-                .search(&state, "uniquephrase", 10, || Ok(()))
-                .unwrap()
-                .len(),
-            1
-        );
+        let initial = index.search(&state, "uniquephrase", 10, || Ok(())).unwrap();
+        assert_eq!(initial.len(), 1);
+        assert_eq!(initial[0].extractor_revision, EXTRACTOR_REVISION);
+        assert!(initial[0].warnings.is_empty());
+        // Malformed or forged parser provenance must never be returned.
+        let conn = index.connection().unwrap();
+        conn.execute("UPDATE document_fts SET extractor_revision='forged'", []).unwrap();
+        assert!(index.search(&state, "uniquephrase", 10, || Ok(())).unwrap().is_empty());
+        conn.execute(
+            "UPDATE document_fts SET extractor_revision=?1, extractor_warnings_json='[\"forged\"]'",
+            [EXTRACTOR_REVISION],
+        ).unwrap();
+        assert!(index.search(&state, "uniquephrase", 10, || Ok(())).unwrap().is_empty());
+        drop(conn);
 
         // A current file edit must suppress stale projections even prior to rescan.
         std::fs::write(folder.join("notes.md"), "completely changed").unwrap();
@@ -509,14 +542,11 @@ mod tests {
         let root = format!("root:v1:{}", "f".repeat(64));
         let uri = format!("mpdoc://root/{root}/private.md");
         db.execute(
-            "INSERT INTO document_fts(root_id,uri,version_id,section,content)
-             VALUES(?1,?2,?3,?4,?5)",
+            "INSERT INTO document_fts(root_id,uri,version_id,section,content,extractor_revision,extractor_warnings_json)
+             VALUES(?1,?2,?3,?4,?5,?6,?7)",
             params![
-                root,
-                uri,
-                "docver:v1:fake",
-                "secret",
-                "confidential evidence"
+                root, uri, "docver:v1:fake", "secret",
+                "confidential evidence", EXTRACTOR_REVISION, "[]"
             ],
         )
         .unwrap();
