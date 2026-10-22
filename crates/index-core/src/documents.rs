@@ -17,11 +17,14 @@ use std::{
 const APPLICATION_ID: i64 = 0x4D504446; // MPDF; never confused with conversation index.
 const MAX_RESULTS: usize = 25;
 const MAX_CANDIDATES: i64 = 100;
+/// Bump when extractor semantics change; never confuse derived metadata with source authority.
+pub const EXTRACTOR_REVISION: &str = "mp-4e:1";
 
 const SCHEMA: &str = "
 CREATE VIRTUAL TABLE document_fts USING fts5(
   root_id UNINDEXED, uri UNINDEXED, version_id UNINDEXED,
-  section UNINDEXED, content, tokenize='unicode61'
+  section UNINDEXED, content, extractor_revision UNINDEXED,
+  extractor_warnings_json UNINDEXED, tokenize='unicode61'
 );
 CREATE TABLE document_meta(root_id TEXT PRIMARY KEY, generation INTEGER NOT NULL);
 ";
@@ -48,6 +51,8 @@ pub struct DocumentHit {
     pub section: String,
     pub snippet: String,
     pub score: f64,
+    pub extractor_revision: String,
+    pub warnings: Vec<String>,
 }
 
 fn lease(check: &mut impl FnMut() -> Result<()>) -> std::result::Result<(), StateError> {
@@ -227,12 +232,14 @@ impl DocumentIndex {
             {
                 return Err(IndexError::InvalidEvidence);
             }
+            let warnings_json = serde_json::to_string(&extracted.warnings)
+                .map_err(|_| IndexError::InvalidEvidence)?;
             for chunk in extracted.chunks {
                 check()?;
                 tx.execute(
-                    "INSERT INTO document_fts(root_id,uri,version_id,section,content)
-                     VALUES(?1,?2,?3,?4,?5)",
-                    params![root_id, uri, head.id, chunk.section, chunk.text],
+                    "INSERT INTO document_fts(root_id,uri,version_id,section,content,extractor_revision,extractor_warnings_json)
+                     VALUES(?1,?2,?3,?4,?5,?6,?7)",
+                    params![root_id, uri, head.id, chunk.section, chunk.text, EXTRACTOR_REVISION, warnings_json],
                 )?;
                 report.indexed_chunks += 1;
             }
@@ -276,7 +283,7 @@ impl DocumentIndex {
         let mut statement = db.prepare(
             "SELECT uri,version_id,section,content,
                     snippet(document_fts,4,'[',']','…',12),
-                    bm25(document_fts)
+                    bm25(document_fts),extractor_revision,extractor_warnings_json
              FROM document_fts WHERE document_fts MATCH ?1
              ORDER BY bm25(document_fts), uri, version_id LIMIT ?2",
         )?;
@@ -288,6 +295,10 @@ impl DocumentIndex {
                     section: r.get(2)?,
                     snippet: r.get(4)?,
                     score: r.get(5)?,
+                    extractor_revision: r.get(6)?,
+                    warnings: serde_json::from_str(&r.get::<_, String>(7)?).map_err(|e| {
+                        rusqlite::Error::FromSqlConversionFailure(7, rusqlite::types::Type::Text, Box::new(e))
+                    })?,
                 },
                 r.get::<_, String>(3)?,
             ))
@@ -350,6 +361,9 @@ impl DocumentIndex {
                 Err(ExtractionError::Revoked) => return Err(IndexError::Revoked),
                 Err(_) => continue,
             };
+            if candidate.extractor_revision != EXTRACTOR_REVISION || candidate.warnings != verified.warnings {
+                continue;
+            }
             if !verified
                 .chunks
                 .iter()
