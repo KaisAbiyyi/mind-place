@@ -28,7 +28,7 @@ if (!licenseText.startsWith('MIT License\n\nCopyright (c) 2026 Kais Abiyyi\n') |
 }
 const activeDeclarations = ['README.md', 'CONTRIBUTING.md', 'package.json', 'package-lock.json', 'Cargo.toml'];
 for (const file of activeDeclarations) {
-  if (/AGPL-3\\.0-or-later|GNU Affero General Public License v3/i.test(fs.readFileSync(path.join(root, file), 'utf8'))) {
+  if (/AGPL-3\.0-or-later|GNU Affero General Public License v3/i.test(fs.readFileSync(path.join(root, file), 'utf8'))) {
     throw new Error(`Stale first-party AGPL declaration in ${file}`);
   }
 }
