@@ -9,8 +9,9 @@ $repo = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot)).TrimEnd('\')
 if (-not [IO.Path]::IsPathRooted($EvidenceDirectory)) { throw 'Evidence directory must be absolute' }
 $evidence = [IO.Path]::GetFullPath($EvidenceDirectory)
 if ($evidence -notmatch '^D:\\') { throw 'Qualification output must use local D: NTFS' }
-if ($evidence.TrimEnd('\').Equals($repo, [StringComparison]::OrdinalIgnoreCase) -or
-    $evidence.StartsWith($repo + '\', [StringComparison]::OrdinalIgnoreCase)) {
+$separator = [IO.Path]::DirectorySeparatorChar
+if ($evidence.TrimEnd($separator).Equals($repo, [StringComparison]::OrdinalIgnoreCase) -or
+    $evidence.StartsWith($repo + $separator, [StringComparison]::OrdinalIgnoreCase)) {
     throw 'Keep qualification evidence and binaries outside the checkout'
 }
 $ancestor = $evidence
@@ -56,9 +57,26 @@ try {
     $env:CARGO_TARGET_DIR = Join-Path $evidence 'target'
     $rustc = (& rustc -Vv) -join "`n"
     $head = (& git rev-parse HEAD).Trim()
-    & cargo run --locked -p mind-place-index --example qualify_corpus 2>&1 |
-        Tee-Object -FilePath (Join-Path $evidence 'native-transcript.log')
-    $nativeExit = $LASTEXITCODE
+    $cargoExe = (Get-Command cargo -ErrorAction Stop).Source
+    $stdoutPath = Join-Path $evidence 'native-stdout.log'
+    $stderrPath = Join-Path $evidence 'native-stderr.log'
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = $cargoExe
+    $startInfo.Arguments = 'run --locked -p mind-place-index --example qualify_corpus'
+    $startInfo.WorkingDirectory = $repo
+    $startInfo.UseShellExecute = $false
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $cargoProcess = [System.Diagnostics.Process]::Start($startInfo)
+    $stdoutTask = $cargoProcess.StandardOutput.ReadToEndAsync()
+    $stderrTask = $cargoProcess.StandardError.ReadToEndAsync()
+    $cargoProcess.WaitForExit()
+    $nativeExit = $cargoProcess.ExitCode
+    [IO.File]::WriteAllText($stdoutPath, $stdoutTask.GetAwaiter().GetResult())
+    [IO.File]::WriteAllText($stderrPath, $stderrTask.GetAwaiter().GetResult())
+    $cargoProcess.Dispose()
+    Get-Content -LiteralPath $stderrPath
+    Get-Content -LiteralPath $stdoutPath
     $native = if (Test-Path -LiteralPath $env:MP_CORPUS_RECEIPT) {
         Get-Content -Raw -LiteralPath $env:MP_CORPUS_RECEIPT | ConvertFrom-Json
     } else { $null }

@@ -9,11 +9,7 @@ mod native {
     };
     use rusqlite::Connection;
     use serde_json::{json, Value};
-    use std::{
-        fs,
-        path::{Path, PathBuf},
-        time::Instant,
-    };
+    use std::{fs, path::PathBuf, time::Instant};
 
     fn crc32(bytes: &[u8]) -> u32 {
         let mut crc = !0u32;
@@ -75,7 +71,6 @@ mod native {
     }
 
     struct Fixture {
-        home: PathBuf,
         root: PathBuf,
         state: StateStore,
         id: String,
@@ -98,7 +93,6 @@ mod native {
             state.approve_document_root(&id).unwrap();
             let index = DocumentIndex::open(home.join("document-index.sqlite3")).unwrap();
             Self {
-                home,
                 root,
                 state,
                 id,
@@ -158,6 +152,21 @@ mod native {
         );
         fs::create_dir(f.root.join(".git")).unwrap();
         fs::write(f.root.join(".git/never-index.md"), b"paperlotussecret").unwrap();
+        // Mixed sizes and nested trees make the timing less dominated by startup.
+        fs::create_dir(f.root.join("project")).unwrap();
+        for n in 0..24 {
+            let name = match n % 3 {
+                0 => format!("project/notes-{n:02}.md"),
+                1 => format!("project/source-{n:02}.rs"),
+                _ => format!("project/trace-{n:02}.txt"),
+            };
+            let header = format!("Corpus file {n}: benchlotus{n:02}\n");
+            let payload = format!(
+                "{header}{}",
+                "lorem ipsum corpus evidence.\n".repeat(32 * (1 + n % 4))
+            );
+            fs::write(f.root.join(name), payload.as_bytes()).unwrap();
+        }
     }
 
     fn corpus() -> Value {
@@ -170,9 +179,9 @@ mod native {
         let indexed_at = Instant::now();
         let initial_index = f.index.refresh_root(&f.state, &f.id, || Ok(())).unwrap();
         let initial_index_ms = indexed_at.elapsed().as_secs_f64() * 1000.;
-        assert!(first.complete && first.new_versions == 7 && first.visited_files == 7);
-        assert_eq!(initial_index.indexed_files, 7);
-        assert_eq!(f.object_count(), 6, "same bytes in two files must dedup");
+        assert!(first.complete && first.new_versions == 31 && first.visited_files == 31);
+        assert_eq!(initial_index.indexed_files, 31);
+        assert_eq!(f.object_count(), 30, "same bytes in two files must dedup");
         for (term, hits) in [
             ("paperlotusmd", 2),
             ("paperlotusrust", 1),
@@ -204,9 +213,9 @@ mod native {
         let reindex_at = Instant::now();
         let reindex = f.index.refresh_root(&f.state, &f.id, || Ok(())).unwrap();
         let noop_index_ms = reindex_at.elapsed().as_secs_f64() * 1000.;
-        assert!(noop.complete && noop.new_versions == 0 && noop.unchanged_versions == 7);
-        assert_eq!(f.object_count(), 6);
-        assert_eq!(reindex.indexed_files, 7);
+        assert!(noop.complete && noop.new_versions == 0 && noop.unchanged_versions == 31);
+        assert_eq!(f.object_count(), 30);
+        assert_eq!(reindex.indexed_files, 31);
 
         f.write("notes.md", b"# Changed\npaperlotusrevision live revision\n");
         let changed_at = Instant::now();
@@ -215,10 +224,10 @@ mod native {
         let changed_index_at = Instant::now();
         f.index.refresh_root(&f.state, &f.id, || Ok(())).unwrap();
         let changed_index_ms = changed_index_at.elapsed().as_secs_f64() * 1000.;
-        assert!(changed.complete && changed.new_versions == 1 && changed.unchanged_versions == 6);
+        assert!(changed.complete && changed.new_versions == 1 && changed.unchanged_versions == 30);
         assert_eq!(f.hits("paperlotusmd"), 1);
         assert_eq!(f.hits("paperlotusrevision"), 1);
-        assert_eq!(f.object_count(), 7);
+        assert_eq!(f.object_count(), 31);
         let current = objects
             .current_version(&note_uri, || Ok(()))
             .unwrap()
@@ -251,7 +260,7 @@ mod native {
             "changed_scan_ms":changed_ms,"changed_index_ms":changed_index_ms,
             "new_versions_initial":first.new_versions,"unchanged_versions_noop":noop.unchanged_versions,
             "new_versions_after_edit":changed.new_versions,"immutable_history_versions":2,
-            "object_count_initial":6,"object_count_after_edit":7,
+            "object_count_initial":30,"object_count_after_edit":31,
             "duplicate_source_files_share_object":true,"stale_search_rejected":true})
     }
 
