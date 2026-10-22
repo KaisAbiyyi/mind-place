@@ -1,6 +1,6 @@
 # MP-LIC-00 — MIT transition, copyright provenance, and release gate
 
-Status: **proposed in a dedicated cloud PR; do not infer legal approval or a released MIT tag from this document.** Baseline: `main` commit `e9c1edd31a74318ba6b9266b01c56b7da3a8ee71` (22 October 2026), AGPL-3.0-or-later. Task: [#33](https://github.com/KaisAbiyyi/mind-place/issues/33).
+Status: **first-party MIT source transition proposed in PR #34; effective on the eventual merge commit, with no MIT release tag published yet.** Baseline: `main` commit `e9c1edd31a74318ba6b9266b01c56b7da3a8ee71` (22 October 2026), AGPL-3.0-or-later. Task: [#33](https://github.com/KaisAbiyyi/mind-place/issues/33).
 
 ## Provenance inventory
 
@@ -11,15 +11,16 @@ Status: **proposed in a dedicated cloud PR; do not infer legal approval or a rel
 - **Rust lockfile:** `Cargo.lock` contains 446 crate/version entries but does not itself declare all licenses. Windows CI runs `scripts/generate-notices.mjs` using target `cargo metadata` and emits third-party license texts into the package. **Review generated Windows third-party notices and dual-license selections before clearing this gate.** In particular, account for separately licensed dependencies and platform libraries.
 - **Bundled binary:** Windows builds download a pinned, SHA-verified OpenAI `tunnel-client.exe` helper and stage upstream `tunnel/` notice files plus `THIRD-PARTY-NOTICES.txt`. The root MIT license never supersedes third-party notices.
 
-## Blocking approval checklist
+## Ownership, compatibility and release record
 
-- [ ] Copyright owner confirms that all first-party source, original icon assets, documentation, tests, and any AI-assisted contributions in the current tree are within their right to relicense, or documents each permission/removal/rewrite.
-- [ ] Resolve employer/client/university assignments (if applicable) and any outside contributions not covered by the repository owner's licensing authority; a commit author is not a legal rights certificate.
-- [ ] Independently review the actual **Windows production** dependency/notice inventory and bundled helper's upstream license and obligations. Preserve mandatory attributions; flag any incompatible first-party code.
-- [ ] Independent PR diff review, final-head Windows CI/installer/portable checks (including MIT vs third-party notices), and confirmation that no active first-party AGPL declaration remains.
-- [ ] Only then merge and record the exact MIT-effective `main` commit, first MIT release tag and corresponding packaged-artifact notices. The owner makes the release decision.
+- **Owner's 2026-10-22 confirmation:** The repository owner explicitly states that Mind Place has been their own repository from its beginning, and requests licensing their original Mind Place work under MIT. All 103 recorded baseline commits bear the owner's Git author identity. This is authorization and provenance evidence for the owner's first-party work, not a grant over any independently owned imported asset, prior employer/client/university-owned contribution, or bundled dependency. If credible contrary evidence of another rights holder appears, remove/replace affected material or obtain written permission before distributing that material under MIT.
+- **First-party source license:** The root MIT license applies only to the owner's original Mind Place source and assets in the revision that merges this PR and later MIT-tagged distributions. No previously distributed AGPL copy loses its AGPL license grant.
+- **Bundled helper:** The pinned OpenAI tunnel-client v0.0.16 upstream LICENSE is Apache-2.0 and its NOTICE attributes Copyright 2026 OpenAI, verified from the upstream tagged source on 2026-10-22. Both are pinned as resources, copied into the Windows package and referenced in the third-party notice inventory. The bundled OpenAI helper is **not** relicensed MIT.
+- **Dependency notices:** The npm SPDX inventory below contains no third-party AGPL/GPL declarations. Windows packaging generates dependency-specific notices using `cargo metadata`, npm production dependencies and pinned helper resources; CI tests the portable license and notice presence. A generated full runtime notice review should be retained with the **first MIT Windows release artifacts**; a source CI check alone is not proof of every bundled binary's licensing.
+- **Integration:** PR #34 contains no overlapping path changes with the new MP-4F / MP-4L1 product security changes, and was merged forward from current `main` using the two-parent integration commit. Confirm final-head Windows CI and independent review before source merge.
+- **Release:** No MIT tag/installer is claimed published by this PR. Before first public MIT Windows binary release, review actual installer/portable notices and record release tag, SHA256 manifests, and MIT-effective main SHA in issue #33 / Notion. If any newly discovered rights exception requires remediation, hold that release pending resolution.
 
-**Rights attestation evidence:** Not yet filed. Attach a dated owner-authored statement or permissions evidence to [issue #33](https://github.com/KaisAbiyyi/mind-place/issues/33) before treating this task as cleared.
+**Maintainer rights note:** This records the owner's direct confirmation that Mind Place is their original repository. It is not a claim to the copyright of third-party dependencies, external upstream libraries or separately licensed helper executables.
 
 ## Distribution rule
 
