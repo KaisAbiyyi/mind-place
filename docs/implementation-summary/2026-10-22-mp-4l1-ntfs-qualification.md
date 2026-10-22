@@ -1,10 +1,24 @@
 # MP-4L1 — local Windows NTFS qualification
 
+## Latest result — full local native qualification PASS (2026-10-22)
+
+- **Product under test:** merged first-party product commit `6b93b05d55a795fb4fcac11cdfeb8fa6dff5b2f9`, including fixes from security PR #38. Windows product CI #294 and storage 10K/100K/1M CI #137 previously passed.
+- **Full original Codex harness:** **10 PASS / 0 FAIL / 0 BLOCKED**; `native_exit:0`. The original harness source is unmodified (SHA-256 `9640e79ece8113454576fe7574eaebe0f6df88e552686b5c26a686f278a4120a`). The executable was recompiled from the exact merged product code (SHA-256 `c5a848762bc39ac64b4e8fd2510469903d097727a936fd09b8a588b167eb022a`).
+- **Symlink blocker resolved without changing product code or permanent Windows settings:** A normal-user control run at that exact SHA returned **9 PASS / 0 FAIL / 1 BLOCKED** because native `std::os::windows::fs::symlink_file` creation returned Windows privilege error 1314. A one-time administrator-approved process reran the same harness on native D: NTFS; both real file and directory symlinks were created and denied by the Mind Place boundary: `symlinks_created:2`, `outside_hits:0`. No privilege was added to the normal-user process and Developer Mode remained unchanged.
+- **Revocation fixes independently requalified:** search returns zero disclosed revoked hits; index generation remains 1→1 after revoke; junction race has zero outside-data reads. All ten synthetic native cases passed.
+- **Durable evidence:** [merged-code native receipt](evidence/mp-4l1-20261022/native-receipt-merged-elevated.json) and [native receipt metadata](evidence/mp-4l1-20261022/run-metadata-merged-elevated.json). Original on-disk complete transcript and fixtures remain under `D:\\projects\\mind-place-mp4l1-fix-evidence\\run-04-elevated`. Raw native receipt SHA-256 `76c501ee12ee2b787229664926d730808b2c473c8c7bc383b2e3bc2312cbb81e`; the JSON here preserves its semantic result (potential trailing newline differences do not change the native receipt).
+- **Scope:** native Windows NTFS core qualification. MP-4L2 representative private corpus, MP-4U installed-app owner acceptance and real wall-clock scheduling remain **separate**, not silently marked PASS.
+- **Worktree/ownership:** The Codex-owned local checkout and unrelated WIP were not edited; this follow-up was performed by ChatGPT through a separate D: detached main checkout and a bounded elevated native fixture runner, then added to this evidence PR after user requested resolution. The original historical failing baseline below is retained verbatim as a security regression record.
+
+---
+
+## Historical result — pre-fix baseline (superseded)
+
 Claim: Codex (GPT-6), desktop local Windows, session `20261022-mp4l1-01`, generation 1; lock `windows-fs`; [issue #35](https://github.com/KaisAbiyyi/mind-place/issues/35). Live Notion task is **Claimed**. Owner explicitly requested this unit. No other unit is taken over.
 
 Product baseline: `634a78c9d6900a387f7458aa5e2b1cc5dec1b2dd` (MP-4F #32 merged, final-head Windows product and storage 10K/100K/1M CI PASS). `git pull --ff-only` completed before qualification. Original checkout's unrelated `Cargo.lock` is preserved. Isolated qualification checkout has unchanged product source.
 
-## Outcome: FAIL; ownership remains Claimed
+## Original pre-fix outcome: FAIL (archived, not current)
 
 - DONE: prerequisite/claim checks, pull, isolated branch, native harness and PowerShell evidence runner.
 - DONE: final native D: NTFS fixture run-05 at harness `eed5dd97f257269720015551d681fca92281d057`: **7 PASS, 2 FAIL, 1 BLOCKED**. Revoke executes on a separate thread; the security callback synchronizes only and continues returning a valid unlock lease. [Native receipt](evidence/mp-4l1-20261022/native-receipt.json), [runtime/source/binary hashes](evidence/mp-4l1-20261022/run-metadata.json), [regression checks](evidence/mp-4l1-20261022/regression-checks.json).
