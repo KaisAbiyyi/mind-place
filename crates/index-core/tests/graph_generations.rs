@@ -29,6 +29,7 @@ fn graph() -> GraphProjection {
             from: a.identity,
             to: b.identity,
             relation: GraphRelation::Contains,
+            origin: mind_place_index::GraphOrigin::Deterministic,
             evidence: GraphEvidence {
                 source_ref: "file:verified".into(),
                 source_revision: "rev:1".into(),
