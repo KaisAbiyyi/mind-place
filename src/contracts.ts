@@ -82,6 +82,14 @@ export interface LegacyImportResult {
   errors: string[];
 }
 
+export interface GenericImportReceipt {
+  format: "json" | "markdown" | "html";
+  raw_sha256: string;
+  raw_preserved: boolean;
+  saved: { id: string; snapshot_id: string; unchanged: boolean; message_count: number } | null;
+  errors: string[];
+}
+
 export interface ExportResult {
   path: string;
   markdown: string;

@@ -12,6 +12,7 @@ import type {
   ConversationSummary,
   ExportResult,
   LegacyImportResult,
+  GenericImportReceipt,
   Message,
   SetupInfo,
 } from "./contracts.js";
@@ -638,6 +639,26 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     importStatus.setAttribute("aria-live", "polite");
 
     setupContent.append(connection, pathList, registered, register, divider, legacyTitle, legacyText, legacyButton, importStatus);
+    const genericTitle = document.createElement("h3");
+    genericTitle.className = "setup-section-title";
+    genericTitle.textContent = "Import a generic transcript";
+    const genericInfo = document.createElement("p");
+    genericInfo.textContent = "Explicit local JSON, Markdown or HTML transcript import. The original file bytes are kept in the archive. Role labels are required; no URLs are fetched.";
+    const genericFile = document.createElement("input");
+    genericFile.type = "file";
+    genericFile.accept = ".json,.md,.markdown,.html,.htm";
+    genericFile.dataset.genericFile = "true";
+    genericFile.setAttribute("aria-label", "Choose a transcript file to import");
+    const genericButton = document.createElement("button");
+    genericButton.type = "button";
+    genericButton.className = "quiet-button import-button";
+    genericButton.dataset.action = "import-generic";
+    genericButton.textContent = "Import selected transcript";
+    const genericStatus = document.createElement("p");
+    genericStatus.dataset.genericStatus = "true";
+    genericStatus.setAttribute("role", "status");
+    genericStatus.setAttribute("aria-live", "polite");
+    setupContent.append(document.createElement("hr"), genericTitle, genericInfo, genericFile, genericButton, genericStatus);
     mountLocalMcpSetup(setupContent, invoke, safeClipboard);
     mountDocumentRootSetup(setupContent, invoke);
   };
@@ -818,6 +839,48 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     }
   };
 
+  const importGeneric = async (button: HTMLButtonElement) => {
+    const input = setupContent.querySelector<HTMLInputElement>("[data-generic-file]");
+    const status = setupContent.querySelector<HTMLElement>("[data-generic-status]");
+    const file = input?.files?.[0];
+    if (!file) {
+      if (status) status.textContent = "Choose a JSON, Markdown or HTML file first.";
+      return;
+    }
+    const suffix = file.name.toLowerCase().split(".").pop();
+    const format = suffix === "json" ? "json" : suffix === "md" || suffix === "markdown"
+      ? "markdown" : suffix === "html" || suffix === "htm" ? "html" : null;
+    if (!format || !file.size || file.size > 8 * 1024 * 1024) {
+      if (status) status.textContent = "Unsupported extension, empty file, or more than 8 MiB.";
+      return;
+    }
+    button.disabled = true;
+    if (status) status.textContent = "Importing selected transcript…";
+    try {
+      // Fatal decoding prevents a lossy UTF-8 replacement; retaining BOM preserves raw bytes.
+      const raw = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true })
+        .decode(await file.arrayBuffer());
+      const result = await invoke<GenericImportReceipt>("import_generic_text", { format, raw });
+      if (!alive) return;
+      if (result.saved) {
+        if (status) status.textContent = result.saved.unchanged
+          ? "Already imported. Raw source is retained."
+          : "Imported " + result.saved.message_count + " messages; raw source retained.";
+        setActionStatus("Transcript imported");
+        await loadConversations();
+      } else {
+        if (status) status.textContent = "Raw source retained, but transcript was not normalized: " + result.errors.join("; ");
+        setActionStatus("Import needs a supported explicit transcript structure", true);
+      }
+    } catch (error) {
+      if (!alive) return;
+      if (status) status.textContent = "Import failed: " + errorMessage(error);
+      setActionStatus("Import failed: " + errorMessage(error), true);
+    } finally {
+      if (alive && button.isConnected) button.disabled = false;
+    }
+  };
+
   const closeSetup = () => {
     setupContent.querySelector("[data-mcp-secret]")?.replaceChildren();
     if (typeof dialog.close === "function") {
@@ -886,6 +949,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
       } else if (action === "register-chrome" || action === "register-edge") {
         void registerBrowser(action.slice("register-".length) as "chrome" | "edge", actionElement as HTMLButtonElement);
       } else if (action === "import-legacy") void importLegacy(actionElement as HTMLButtonElement);
+      else if (action === "import-generic") void importGeneric(actionElement as HTMLButtonElement);
       return;
     }
     const row = target.closest<HTMLElement>("[data-conversation-id]");
