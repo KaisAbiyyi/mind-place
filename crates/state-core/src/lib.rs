@@ -13,6 +13,7 @@ mod document_roots;
 mod document_scanner;
 mod identity;
 mod memory;
+mod memory_ranking;
 mod ntfs;
 pub use clients::{ClientAuditEvent, ClientCapability, ClientRecord};
 pub use document_objects::{
@@ -23,9 +24,12 @@ pub use document_roots::{DocumentRoot, VirtualDocumentPath, VIRTUAL_ROOT_PREFIX}
 pub use document_scanner::{DocumentScanner, ScanPolicy, ScanReport, WatchEvent};
 pub use identity::{canonical_source_id, SourceDescriptor, SourceKey};
 pub use memory::{ClaimEvidence, ClaimRevision, ClaimState, ClaimTransition};
+pub use memory_ranking::{
+    serialize_ranked_context, ClaimRelation, RankedClaim, RankingMode, RankingPolicy, RelationKind,
+};
 
 pub const APPLICATION_ID: i64 = 0x4D504C43;
-pub const SCHEMA_VERSION: i64 = 7;
+pub const SCHEMA_VERSION: i64 = 8;
 const MIN_SQLITE_NUMBER: i32 = 3_053_002;
 const MIGRATION_V1: &str = include_str!("schema_v1.sql");
 const MIGRATION_V2: &str = include_str!("schema_v2.sql");
@@ -34,6 +38,7 @@ const MIGRATION_V4: &str = include_str!("schema_v4.sql");
 const MIGRATION_V5: &str = include_str!("schema_v5.sql");
 const MIGRATION_V6: &str = include_str!("schema_v6.sql");
 const MIGRATION_V7: &str = include_str!("schema_v7.sql");
+const MIGRATION_V8: &str = include_str!("schema_v8.sql");
 pub type Result<T> = std::result::Result<T, StateError>;
 
 #[derive(Debug, thiserror::Error)]
@@ -257,6 +262,13 @@ impl StateStore {
                 tx.execute(
                     "INSERT INTO schema_migrations(version,checksum) VALUES(7,?1)",
                     [checksum(MIGRATION_V7)],
+                )?;
+            }
+            if previous_version < 8 {
+                tx.execute_batch(MIGRATION_V8)?;
+                tx.execute(
+                    "INSERT INTO schema_migrations(version,checksum) VALUES(8,?1)",
+                    [checksum(MIGRATION_V8)],
                 )?;
             }
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -523,6 +535,7 @@ fn validate_version(db: &Connection, version: i64) -> Result<()> {
         (5, MIGRATION_V5),
         (6, MIGRATION_V6),
         (7, MIGRATION_V7),
+        (8, MIGRATION_V8),
     ] {
         if step > version {
             break;
