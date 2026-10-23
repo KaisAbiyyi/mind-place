@@ -146,9 +146,53 @@ pub fn conversation_id_from_url(source: &str) -> Result<String> {
     Ok(id.to_ascii_lowercase())
 }
 
+fn gemini_conversation_id_from_url(source: &str) -> Result<String> {
+    let url = url::Url::parse(source)
+        .map_err(|_| invalid("Open a saved Gemini conversation before capturing"))?;
+    if url.scheme() != "https"
+        || url.host_str() != Some("gemini.google.com")
+        || url.port().is_some()
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
+        return Err(invalid("Capture must belong to the official Gemini site"));
+    }
+    for (key, value) in url.query_pairs() {
+        let key = key.to_ascii_lowercase();
+        if ["temporary", "incognito", "private"]
+            .iter()
+            .any(|needle| key.contains(needle))
+            && !matches!(value.to_ascii_lowercase().as_str(), "false" | "0" | "no")
+        {
+            return Err(invalid("Private Gemini conversations are excluded from capture"));
+        }
+    }
+    let parts: Vec<_> = url.path().split('/').filter(|part| !part.is_empty()).collect();
+    let id = match parts.as_slice() {
+        ["app", id] => *id,
+        ["u", account, "app", id]
+            if !account.is_empty()
+                && account.len() <= 3
+                && account.bytes().all(|byte| byte.is_ascii_digit()) =>
+        {
+            *id
+        }
+        _ => return Err(invalid("Open a saved Gemini conversation before capturing")),
+    };
+    if !(8..=128).contains(&id.len())
+        || !id.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+    {
+        return Err(invalid("Invalid Gemini conversation identity"));
+    }
+    Ok(id.to_owned())
+}
+
 fn validate(c: &mut Capture) -> Result<()> {
-    if c.schema_version != 1 || c.provider != "chatgpt" {
+    if c.schema_version != 1 || !matches!(c.provider.as_str(), "chatgpt" | "gemini") {
         return Err(invalid("Unsupported archive schema or provider"));
+    }
+    if c.provider == "gemini" && c.capture_method != "manual-dom" {
+        return Err(invalid("Gemini capture is explicit manual DOM only"));
     }
     if !matches!(
         c.capture_method.as_str(),
@@ -164,14 +208,23 @@ fn validate(c: &mut Capture) -> Result<()> {
             "A DOM read cannot prove complete conversation history",
         ));
     }
-    if c.source_url.len() > 32768
-        || conversation_id_from_url(&c.source_url)? != c.conversation_id.to_ascii_lowercase()
-    {
-        return Err(invalid(
-            "Capture URL and conversation identity do not match",
-        ));
+    if c.source_url.len() > 32768 {
+        return Err(invalid("Capture URL exceeds its size limit"));
     }
-    c.conversation_id = c.conversation_id.to_ascii_lowercase();
+    let canonical_id = match c.provider.as_str() {
+        "chatgpt" => conversation_id_from_url(&c.source_url)?,
+        "gemini" => gemini_conversation_id_from_url(&c.source_url)?,
+        _ => return Err(invalid("Unsupported archive provider")),
+    };
+    let supplied_id = if c.provider == "chatgpt" {
+        c.conversation_id.to_ascii_lowercase()
+    } else {
+        c.conversation_id.clone()
+    };
+    if canonical_id != supplied_id {
+        return Err(invalid("Capture URL and conversation identity do not match"));
+    }
+    c.conversation_id = canonical_id;
     if c.title.trim().is_empty() || c.title.len() > 1024 {
         return Err(invalid("Conversation title is missing or too long"));
     }

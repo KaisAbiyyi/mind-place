@@ -258,3 +258,37 @@ fn foreign_database_is_never_overwritten() {
         .unwrap();
     assert_eq!(value, "keep");
 }
+
+#[test]
+fn gemini_and_chatgpt_have_distinct_indexed_source_identities_and_revisions() {
+    let rig = Rig::new();
+    let original_chat = rig.archive.save(capture("chatgptonlyindexword")).unwrap();
+    let mut gemini = capture("geminifirstindexword");
+    gemini.provider = "gemini".into();
+    gemini.conversation_id = "AbCd1234efGh5678".into();
+    gemini.source_url = "https://gemini.google.com/app/AbCd1234efGh5678".into();
+    gemini.messages[1].model = Some("gemini-synthetic".into());
+    let first = rig.archive.save(gemini.clone()).unwrap();
+    let old_raw = rig.raw(&first.id, &first.snapshot_id);
+    rig.index.sync(&rig.archive, &rig.state).unwrap();
+    let hit = rig.index.search("geminifirstindexword", false, 10).unwrap();
+    assert_eq!(hit.len(), 1);
+    let expected = canonical_source_id(&SourceDescriptor {
+        provider: "gemini",
+        source_namespace: "mind-place-gemini-archive-v1",
+        source_kind: "conversation",
+        key: SourceKey::External("AbCd1234efGh5678"),
+    }).unwrap();
+    assert_eq!(hit[0].source_id, expected);
+    assert_ne!(first.id, original_chat.id);
+    assert_eq!(rig.index.search("chatgptonlyindexword", false, 10).unwrap().len(), 1);
+
+    gemini.messages[0].text = "geminiregeneratedindexword".into();
+    let second = rig.archive.save(gemini).unwrap();
+    assert_ne!(first.snapshot_id, second.snapshot_id);
+    rig.index.sync(&rig.archive, &rig.state).unwrap();
+    assert!(rig.index.search("geminifirstindexword", false, 10).unwrap().is_empty());
+    assert_eq!(rig.index.search("geminifirstindexword", true, 10).unwrap().len(), 1);
+    assert_eq!(rig.index.search("geminiregeneratedindexword", false, 10).unwrap().len(), 1);
+    assert_eq!(rig.raw(&first.id, &first.snapshot_id), old_raw);
+}

@@ -36,7 +36,11 @@ Limits remain 4 MiB per message, 10,000 collected messages, 31 MiB capture JSON,
 ## Provider adapters
 
 Manual and opt-in automatic saving dispatch through `providers/index.mjs`.
-ChatGPT is the only registered provider; `capture.mjs` re-exports its serialized
-capture helpers for compatibility. See
+ChatGPT and Gemini are registered providers; `capture.mjs` re-exports ChatGPT's
+serialized capture helpers for compatibility. Gemini supports explicit manual
+loaded-only capture on strictly matched saved /app/ conversation routes, with
+no history scrolling or automatic observer. Gemini is read only through activeTab
+permission; no additional host permission is requested. The native archive
+independently validates Gemini identity and saves immutable partial revisions. See
 [`phase-7a-capture-adapters.md`](../docs/implementation-plan/phase-7a-capture-adapters.md)
 for the versioned interface, normalized evidence contract and qualification limits.
