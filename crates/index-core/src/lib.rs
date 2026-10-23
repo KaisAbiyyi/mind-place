@@ -14,14 +14,16 @@ use std::{
 };
 
 const APPLICATION_ID: i64 = 0x4D504958; // MPIX, deliberately distinct from state.
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 const NAMESPACE: &str = "mind-place-chatgpt-archive-v1";
 const MAX_CHUNK_BYTES: usize = 4096;
 const SCHEMA: &str = include_str!("schema_v1.sql");
+const GRAPH_SCHEMA: &str = include_str!("schema_v2.sql");
 
 pub mod context;
 pub mod documents;
 pub mod fetch;
+pub mod graph;
 pub mod inspection;
 pub use context::{
     ContextBudget, ContextExcerpt, ContextGroup, ContextPack, ContextPreset, ContextRequest,
@@ -29,6 +31,10 @@ pub use context::{
 pub mod retrieval;
 pub use fetch::{
     FetchBudget, FetchCursor, FetchGranularity, FetchRequest, FetchResponse, FetchSegment,
+};
+pub use graph::{
+    GraphEdge, GraphEvidence, GraphKind, GraphNode, GraphNodeRef, GraphProjection,
+    GraphProjectionStats, GraphRelation,
 };
 pub use inspection::{ContextInspection, FetchInspection, RetrievalTrace, SearchInspection};
 pub use retrieval::{
@@ -137,13 +143,22 @@ fn configure(db: &Connection) -> Result<()> {
     Ok(())
 }
 
+fn expected_schema_hash(version: i64) -> String {
+    let mut hash = Sha256::new();
+    hash.update(SCHEMA.as_bytes());
+    if version == SCHEMA_VERSION {
+        hash.update(GRAPH_SCHEMA.as_bytes());
+    }
+    format!("{:x}", hash.finalize())
+}
+
 fn verify(db: &Connection, check_integrity: bool) -> Result<()> {
     let app_id: i64 = db.query_row("PRAGMA application_id", [], |r| r.get(0))?;
     if app_id != APPLICATION_ID {
         return Err(IndexError::ForeignDatabase);
     }
     let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    if version != SCHEMA_VERSION {
+    if version != 1 && version != SCHEMA_VERSION {
         return Err(IndexError::InvalidIndex);
     }
     if check_integrity {
@@ -159,7 +174,7 @@ fn verify(db: &Connection, check_integrity: bool) -> Result<()> {
             |r| r.get(0),
         )
         .map_err(|_| IndexError::InvalidIndex)?;
-    if schema_hash != format!("{:x}", Sha256::digest(SCHEMA.as_bytes())) {
+    if schema_hash != expected_schema_hash(version) {
         return Err(IndexError::InvalidIndex);
     }
     Ok(())
@@ -192,13 +207,28 @@ impl IndexStore {
         if !existed {
             let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
             tx.execute_batch(SCHEMA)?;
+            tx.execute_batch(GRAPH_SCHEMA)?;
             tx.pragma_update(None, "application_id", APPLICATION_ID)?;
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             tx.execute(
                 "INSERT INTO index_meta(key,value) VALUES('schema_hash',?1)",
-                [format!("{:x}", Sha256::digest(SCHEMA.as_bytes()))],
+                [expected_schema_hash(SCHEMA_VERSION)],
             )?;
             tx.commit()?;
+        } else {
+            let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+            if version == 1 {
+                // A pre-MP-6A index is derived but may contain useful FTS data.
+                // Migrate atomically without touching immutable archives or state.
+                let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+                tx.execute_batch(GRAPH_SCHEMA)?;
+                tx.execute(
+                    "UPDATE index_meta SET value=?1 WHERE key='schema_hash'",
+                    [expected_schema_hash(SCHEMA_VERSION)],
+                )?;
+                tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+                tx.commit()?;
+            }
         }
         verify(&db, false)?;
         Ok(Self { path })
@@ -355,6 +385,7 @@ impl IndexStore {
             "DELETE FROM revisions WHERE seen_generation != ?1",
             [generation],
         )?;
+        graph::refresh_archive_graph(&tx)?;
         tx.execute(
             "UPDATE index_meta SET value=?1 WHERE key='generation'",
             [generation.to_string()],
