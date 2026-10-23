@@ -431,6 +431,7 @@ pub(crate) fn refresh_archive_graph(tx: &Transaction<'_>) -> Result<()> {
             from: conversation,
             to: revision.clone(),
             relation: GraphRelation::Version,
+            origin: GraphOrigin::Deterministic,
             evidence: evidence.clone(),
         });
         edges.push(GraphEdge {
