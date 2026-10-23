@@ -2,7 +2,7 @@
 
 This file is the small execution-order pointer for cloud agents. Strategy lives in `../BIG-IMPLEMENTATION-PLAN.md`; detailed design notes live beside this file. If older phase labels conflict with this file, follow this file for the current execution order.
 
-## Current execution gate — 2026-10-23
+## Current execution gate � 2026-10-23
 
 **MP-4L2 DONE:** [PR #42](https://github.com/KaisAbiyyi/mind-place/pull/42) merged at `6454d23fe5f54e19067efa0a69e80b28315d25ad`; final Windows CI + storage CI PASS and exact merged-SHA real Windows document qualification 10/10 PASS. [Implementation receipt](../implementation-summary/2026-10-23-mp-4l2-native-parser-recovery.md); [qualification evidence](../qualification/2026-10-23-mp-4l2-release.json).
 
@@ -10,15 +10,15 @@ This file is the small execution-order pointer for cloud agents. Strategy lives 
 
 ## Baseline
 
-- **Phase 0 â€” current archive foundation: DONE / qualified compatibility floor.**
+- **Phase 0 — current archive foundation: DONE / qualified compatibility floor.**
 - GitHub/cloud is implementation source of truth.
 - Local Windows is a qualification target only when a phase explicitly requires device/browser/account behavior.
 
-## Phase 1 â€” durable brain foundation
+## Phase 1 — durable brain foundation
 
 Current execution order after the security-first reprioritization:
 
-1. **Phase 1A â€” security root and fail-closed unlock architecture** â€” DONE. PR #1 squash-merged into `main` at `e19d5f36a80441cdd9938e395a07bfad43ef4f63` after Windows CI #25 passed.
+1. **Phase 1A — security root and fail-closed unlock architecture** — DONE. PR #1 squash-merged into `main` at `e19d5f36a80441cdd9938e395a07bfad43ef4f63` after Windows CI #25 passed.
    - versioned local security state;
    - memory-hard secret verifier;
    - locked-by-default process startup;
@@ -27,27 +27,27 @@ Current execution order after the security-first reprioritization:
    - first-run secret confirmation and fail-closed unlock UI;
    - security dependencies are committed in `Cargo.lock`; no temporary lockfile-refresh workflow remains in `main`;
    - no claim of encryption-at-rest yet.
-2. **Phase 1B â€” authoritative `state.sqlite3`** â€” DONE. PR #2 squash-merged into `main` at `32278f6a2a71a5211c429d86b5e377284d95acf0` after Windows CI run `39099905432` passed.
+2. **Phase 1B — authoritative `state.sqlite3`** — DONE. PR #2 squash-merged into `main` at `32278f6a2a71a5211c429d86b5e377284d95acf0` after Windows CI run `39099905432` passed.
    - migrations/backups;
    - authoritative mutable state;
    - root ACL/tombstones;
    - memory-claim/project/topic/scope foundations;
    - durable security/client state that belongs in the authority store.
-3. **Phase 1C â€” stable identity and authority durability** â€” DONE. PR #3 squash-merged into `main` at `d007e80b079471bcb66661fb90feba907d837dc2` after Windows CI run `39105339145` passed.
+3. **Phase 1C — stable identity and authority durability** — DONE. PR #3 squash-merged into `main` at `d007e80b079471bcb66661fb90feba907d837dc2` after Windows CI run `39105339145` passed.
    - versioned provider-neutral IDs from deterministic, length-framed source origin tuples;
    - authoritative `source_identities` mapping in `state.sqlite3` schema v2;
    - FK-backed memory claim evidence references independent of disposable indexes;
    - verified V1 snapshots, fail-closed orphan evidence, atomic rollback/recovery and restart/tamper tests;
    - explicit identity contract at `phase-1c-source-identity.md`.
-4. **Phase 1D â€” rebuildable `index.sqlite3` + FTS5** â€” DONE. PR #4 squash-merged into `main` at `ccbb6e9ffadce1ebaefde3d328e3936725156823` after Windows CI run `39108537645` passed.
+4. **Phase 1D — rebuildable `index.sqlite3` + FTS5** — DONE. PR #4 squash-merged into `main` at `ccbb6e9ffadce1ebaefde3d328e3936725156823` after Windows CI run `39108537645` passed.
    - separate disposable index and source/revision/chunk catalog for ChatGPT archive;
    - external-content FTS5 with incremental, transactional rebuild and current/history lookup;
    - Phase 1C canonical source IDs reused in authoritative `state.sqlite3`;
    - bounded chunking and tamper/cancellation/rebuild regression tests;
    - unlock-lease guarded Tauri commands and post-unlock startup refresh;
    - documented contract and limits at `phase-1d-derived-index.md`.
-5. **Phase 1E â€” storage/performance qualification** â€” DONE. PR #5 squash-merged into `main` at `78853d35e0439c6fd201a667b6ba156bf22fb132` after [Windows product CI run 39112178143](https://github.com/KaisAbiyyi/mind-place/actions/runs/39112178143) and [storage qualification run 39112178136](https://github.com/KaisAbiyyi/mind-place/actions/runs/39112178136) both passed.
-   - actual archiveâ†’FTS5 benchmark at 10K/100K/1M messages with CI JSON receipts;
+5. **Phase 1E — storage/performance qualification** — DONE. PR #5 squash-merged into `main` at `78853d35e0439c6fd201a667b6ba156bf22fb132` after [Windows product CI run 39112178143](https://github.com/KaisAbiyyi/mind-place/actions/runs/39112178143) and [storage qualification run 39112178136](https://github.com/KaisAbiyyi/mind-place/actions/runs/39112178136) both passed.
+   - actual archive→FTS5 benchmark at 10K/100K/1M messages with CI JSON receipts;
    - measured Windows initial index 0.951/9.083/87.610 seconds and full rebuild 0.792/8.746/79.856 seconds;
    - deletion/rebuild preserves raw evidence hashes, authoritative source IDs, curated claim/evidence and projects;
    - all tiers passed SQLite/FTS/FK integrity, schema/migration and index regression checks;
@@ -56,29 +56,29 @@ Current execution order after the security-first reprioritization:
 
 **Phase 1 is complete** and remained cloud-only (`C5 / L0 / U0`). No device/manual gate is required.
 
-## Phase 2 â€” universal retrieval kernel
+## Phase 2 — universal retrieval kernel
 
-1. **Phase 2A â€” search requests + structured filters** â€” **DONE**. [PR #6](https://github.com/KaisAbiyyi/mind-place/pull/6) squash-merged into `main` at `d7790973cc8ae3ef32f11eaad938b652de96a7cf`. Windows [product CI 39114819537](https://github.com/KaisAbiyyi/mind-place/actions/runs/39114819537) and [storage qualification 39114819541](https://github.com/KaisAbiyyi/mind-place/actions/runs/39114819541) all passed.
+1. **Phase 2A — search requests + structured filters** — **DONE**. [PR #6](https://github.com/KaisAbiyyi/mind-place/pull/6) squash-merged into `main` at `d7790973cc8ae3ef32f11eaad938b652de96a7cf`. Windows [product CI 39114819537](https://github.com/KaisAbiyyi/mind-place/actions/runs/39114819537) and [storage qualification 39114819541](https://github.com/KaisAbiyyi/mind-place/actions/runs/39114819541) all passed.
    - typed multi-query input with weighted FTS5 lexical and exact-phrase ranking;
    - bounded, intersecting metadata/provider/model/role/source/date filters and explicit historical revision lookup;
    - deterministic stable-provenance compact hit contract, with no disposable index row IDs;
    - unlock-lease guarded `search_retrieval` Tauri command and regression fixtures;
    - no state/index migration and no local/manual gate (`C1 / L0 / U0`);
    - details, limits and handoff: [phase-2a-retrieval.md](phase-2a-retrieval.md).
-2. **Phase 2B â€” progressive fetch and budgets** â€” **DONE**. [PR #7](https://github.com/KaisAbiyyi/mind-place/pull/7) squash-merged into `main` at `5672b49ed508eb07e9331180e987a1313a8f9773`. Windows [product CI 39116420328](https://github.com/KaisAbiyyi/mind-place/actions/runs/39116420328) and [storage qualification 39116420331](https://github.com/KaisAbiyyi/mind-place/actions/runs/39116420331) all passed.
+2. **Phase 2B — progressive fetch and budgets** — **DONE**. [PR #7](https://github.com/KaisAbiyyi/mind-place/pull/7) squash-merged into `main` at `5672b49ed508eb07e9331180e987a1313a8f9773`. Windows [product CI 39116420328](https://github.com/KaisAbiyyi/mind-place/actions/runs/39116420328) and [storage qualification 39116420331](https://github.com/KaisAbiyyi/mind-place/actions/runs/39116420331) all passed.
    - exact-source/snapshot message, window and revision fetch with canonical identity and integrity checks;
    - Unicode-safe resumable cursors, byte/token-estimate/latency bounds and explicit truncated/freshness receipts;
    - unlock-lease guarded `fetch_retrieval` Tauri command and negative/security regression fixtures;
    - no index/state schema migration, and no local/manual gate (`C1 / L0 / U0`);
    - details, limitations and cloud handoff: [phase-2b-progressive-fetch.md](phase-2b-progressive-fetch.md).
-3. **Phase 2C â€” context builder and retrieval policies** â€” **DONE**. [PR #8](https://github.com/KaisAbiyyi/mind-place/pull/8) squash-merged into `main` at `326969be7de7fd0d5e93affb6cdda165ef1c8b8c`. Windows [product CI 39119472142](https://github.com/KaisAbiyyi/mind-place/actions/runs/39119472142) and [storage qualification 39119472075](https://github.com/KaisAbiyyi/mind-place/actions/runs/39119472075) passed.
+3. **Phase 2C — context builder and retrieval policies** — **DONE**. [PR #8](https://github.com/KaisAbiyyi/mind-place/pull/8) squash-merged into `main` at `326969be7de7fd0d5e93affb6cdda165ef1c8b8c`. Windows [product CI 39119472142](https://github.com/KaisAbiyyi/mind-place/actions/runs/39119472142) and [storage qualification 39119472075](https://github.com/KaisAbiyyi/mind-place/actions/runs/39119472075) passed.
    - compose Phase 2A lexical retrieval with Phase 2B snapshot-authenticated source fetch;
    - bounded source-diverse context packs, overlap dedupe and original evidence provenance;
    - `fast`, `balanced`, `source_first`, `challenge`, and capture-time `historical` presets;
    - unlock-lease guarded `build_retrieval_context`, ranking metadata correction and security regression tests;
    - no schema migration, local/manual gate not required (`C1 / L0 / U0`);
    - details/limits: [phase-2c-context-policies.md](phase-2c-context-policies.md).
-4. **Phase 2D â€” observability and retrieval qualification** â€” **DONE**. [PR #9](https://github.com/KaisAbiyyi/mind-place/pull/9) squash-merged at `77a3f15607d143b94ae4b51c2dd95b98e1abf91b`. Windows [product CI 39123680880](https://github.com/KaisAbiyyi/mind-place/actions/runs/39123680880) and [storage/performance qualification 39123680905](https://github.com/KaisAbiyyi/mind-place/actions/runs/39123680905) all passed.
+4. **Phase 2D — observability and retrieval qualification** — **DONE**. [PR #9](https://github.com/KaisAbiyyi/mind-place/pull/9) squash-merged at `77a3f15607d143b94ae4b51c2dd95b98e1abf91b`. Windows [product CI 39123680880](https://github.com/KaisAbiyyi/mind-place/actions/runs/39123680880) and [storage/performance qualification 39123680905](https://github.com/KaisAbiyyi/mind-place/actions/runs/39123680905) all passed.
    - ephemeral metadata-only search/context/fetch traces and unlock-lease guarded local inspectors;
    - per-query BM25/exact score explanation with stable provenance, without confusing ranking score with confidence;
    - deterministic ranking, privacy, revocation and rebuild regression tests;
@@ -87,28 +87,28 @@ Current execution order after the security-first reprioritization:
    - no schema migration, raw data rewrite, MCP exposure, or local/manual qualification (`C1 / L0 / U0`);
    - details and caveats: [phase-2d-retrieval-qualification.md](phase-2d-retrieval-qualification.md).
 
-**Phase 2 is complete** (`C4 / L0 / U0`), with all four units 2Aâ€“2D cloud qualified and merged. Phases 3Aâ€“3F have merged to `main`; Phase 3 awaits local 3L1/3L2 and owner 3U acceptance.
+**Phase 2 is complete** (`C4 / L0 / U0`), with all four units 2A–2D cloud qualified and merged. Phases 3A–3F have merged to `main`; Phase 3 awaits local 3L1/3L2 and owner 3U acceptance.
 
-## Phase 3 â€” shared-brain MCP
+## Phase 3 — shared-brain MCP
 
-1. **Phase 3A â€” protocol-independent integration core** â€” **DONE**. [PR #10](https://github.com/KaisAbiyyi/mind-place/pull/10) squash-merged to `main` at `a42c90fc4f874e870f3f0a669340af27bd672bcc` after [Windows CI run 39125313066](https://github.com/KaisAbiyyi/mind-place/actions/runs/39125313066) passed (format, repository, typecheck, SQLite, full tests, desktop build).
+1. **Phase 3A — protocol-independent integration core** — **DONE**. [PR #10](https://github.com/KaisAbiyyi/mind-place/pull/10) squash-merged to `main` at `a42c90fc4f874e870f3f0a669340af27bd672bcc` after [Windows CI run 39125313066](https://github.com/KaisAbiyyi/mind-place/actions/runs/39125313066) passed (format, repository, typecheck, SQLite, full tests, desktop build).
    - read-only `memory_search`, `memory_fetch` and `context_build` contracts, protocol-neutral discovery and bounded all-or-nothing batches;
    - mandatory injected live read authorization plus unlock-epoch checks (3B supplies real client identities);
    - no HTTP/MCP listener yet; no local/manual gate required;
    - details: [phase-3a-shared-brain-core.md](phase-3a-shared-brain-core.md).
-2. **Phase 3B â€” client authorization â€” DONE.** [PR #11](https://github.com/KaisAbiyyi/mind-place/pull/11) squash-merged to `main` at `b88a26f28a6a601f9b307049946d7b9547e1907c` after [Windows CI 39129016103](https://github.com/KaisAbiyyi/mind-place/actions/runs/39129016103) and [storage qualification 39129016073](https://github.com/KaisAbiyyi/mind-place/actions/runs/39129016073) (10K/100K/1M) all passed.
+2. **Phase 3B — client authorization — DONE.** [PR #11](https://github.com/KaisAbiyyi/mind-place/pull/11) squash-merged to `main` at `b88a26f28a6a601f9b307049946d7b9547e1907c` after [Windows CI 39129016103](https://github.com/KaisAbiyyi/mind-place/actions/runs/39129016103) and [storage qualification 39129016073](https://github.com/KaisAbiyyi/mind-place/actions/runs/39129016073) (10K/100K/1M) all passed.
    - authoritative state schema v3 for secret-hashed client credentials, policy revisions and metadata-only append-only audit;
    - explicit read/write/admin grants, live revocation, token rotation and terminal identity revoke;
    - credential-gated Phase 3A read batch admission and authorization on each evidence boundary;
    - no transport, user setup wizard or manual Windows gate yet; [Phase 3B handoff](phase-3b-client-authorization.md).
-3. **Phase 3C â€” local MCP transport â€” DONE.** [PR #12](https://github.com/KaisAbiyyi/mind-place/pull/12) squash-merged to `main` at `0a1d4e6630f6b3d93061403db6fe2b82194b3fbc`. [Windows CI 39150596022](https://github.com/KaisAbiyyi/mind-place/actions/runs/39150596022) and [10K/100K/1M storage qualification 39150596005](https://github.com/KaisAbiyyi/mind-place/actions/runs/39150596005) passed.
+3. **Phase 3C — local MCP transport — DONE.** [PR #12](https://github.com/KaisAbiyyi/mind-place/pull/12) squash-merged to `main` at `0a1d4e6630f6b3d93061403db6fe2b82194b3fbc`. [Windows CI 39150596022](https://github.com/KaisAbiyyi/mind-place/actions/runs/39150596022) and [10K/100K/1M storage qualification 39150596005](https://github.com/KaisAbiyyi/mind-place/actions/runs/39150596005) passed.
    - Strict explicit owner-started loopback MCP; no public listener; read-only Streamable HTTP, bounds, revocation and lifecycle.
-4. **Phase 3D â€” secure hosted tunnel + owner setup â€” DONE.** [PR #13](https://github.com/KaisAbiyyi/mind-place/pull/13) squash-merged into `main` at `f8ccfef14767a1e1462e8ac7c6145ff6bb75b087` after [Windows CI 39172822022](https://github.com/KaisAbiyyi/mind-place/actions/runs/39172822022) passed. Owner-consented outbound OpenAI Secure MCP Tunnel, ephemeral read-only credential, lock/stop lifecycle and ChatGPT setup UI. No public endpoint. Remote request proof reserved for 3L2/3U.
+4. **Phase 3D — secure hosted tunnel + owner setup — DONE.** [PR #13](https://github.com/KaisAbiyyi/mind-place/pull/13) squash-merged into `main` at `f8ccfef14767a1e1462e8ac7c6145ff6bb75b087` after [Windows CI 39172822022](https://github.com/KaisAbiyyi/mind-place/actions/runs/39172822022) passed. Owner-consented outbound OpenAI Secure MCP Tunnel, ephemeral read-only credential, lock/stop lifecycle and ChatGPT setup UI. No public endpoint. Remote request proof reserved for 3L2/3U.
 
-5. **Phase 3E â€” security and E2E cloud qualification â€” MERGED.** PR #14 squash-merged at `55465041cf9f2e2df05eeeccec9ac3249df1cc0c`, with Windows PR CI PASS. Simulated transport and protocol conformance over actual loopback TCP, stale/rotated bearer and read-admin escalation denial, strict header adversarial cases, native helper exit isolation, periodic unexpected-exit revocation and fail-closed authority failure. See [Phase 3E handoff](phase-3e-security-qualification.md). **No real hosted tunnel or end-user qualification is claimed.**
-6. **Phase 3F â€” bundled official tunnel helper â€” DONE / MERGED.** [PR #17](https://github.com/KaisAbiyyi/mind-place/pull/17) squash-merged to `main` on 2026-10-21 at `f9d1313ac3301e69ccb3fba5d2426c0985940fb8`; final-head [Windows product CI PASS](https://github.com/KaisAbiyyi/mind-place/actions/runs/39305453977). Windows installer/portable bundle the verified helper; no user download/copy required. [Contract and receipt](phase-3f-bundled-tunnel-helper.md). Local 3L1, 3L2 and user 3U are NOT RUN; actual account setup, explicit consent and provenance/revocation proof remain required.
+5. **Phase 3E — security and E2E cloud qualification — MERGED.** PR #14 squash-merged at `55465041cf9f2e2df05eeeccec9ac3249df1cc0c`, with Windows PR CI PASS. Simulated transport and protocol conformance over actual loopback TCP, stale/rotated bearer and read-admin escalation denial, strict header adversarial cases, native helper exit isolation, periodic unexpected-exit revocation and fail-closed authority failure. See [Phase 3E handoff](phase-3e-security-qualification.md). **No real hosted tunnel or end-user qualification is claimed.**
+6. **Phase 3F — bundled official tunnel helper — DONE / MERGED.** [PR #17](https://github.com/KaisAbiyyi/mind-place/pull/17) squash-merged to `main` on 2026-10-21 at `f9d1313ac3301e69ccb3fba5d2426c0985940fb8`; final-head [Windows product CI PASS](https://github.com/KaisAbiyyi/mind-place/actions/runs/39305453977). Windows installer/portable bundle the verified helper; no user download/copy required. [Contract and receipt](phase-3f-bundled-tunnel-helper.md). Local 3L1, 3L2 and user 3U are NOT RUN; actual account setup, explicit consent and provenance/revocation proof remain required.
 
-### MP-3L1 bounded repair â€” manual Lock
+### MP-3L1 bounded repair — manual Lock
 
 [PR #18](https://github.com/KaisAbiyyi/mind-place/pull/18), task `MP-3L1-FIX-LOCK`, adds the missing owner Lock UI and disposable reader lifecycle. Source regression and local baseline PASS; Windows CI/package qualification and installed real-client manual Lock remain pending. [Implementation summary](../implementation-summary/2026-10-21-mp-3l1-manual-lock-fix.md). Existing 3L1/3L2/3U acceptance order remains unchanged.
 
