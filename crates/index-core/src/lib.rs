@@ -14,16 +14,18 @@ use std::{
 };
 
 const APPLICATION_ID: i64 = 0x4D504958; // MPIX, deliberately distinct from state.
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 const NAMESPACE: &str = "mind-place-chatgpt-archive-v1";
 const MAX_CHUNK_BYTES: usize = 4096;
 const SCHEMA: &str = include_str!("schema_v1.sql");
 const GRAPH_SCHEMA: &str = include_str!("schema_v2.sql");
+const GRAPH_GENERATION_SCHEMA: &str = include_str!("schema_v3.sql");
 
 pub mod context;
 pub mod documents;
 pub mod fetch;
 pub mod graph;
+pub mod graph_generation;
 pub mod graph_query;
 pub mod inspection;
 pub use context::{
@@ -37,6 +39,7 @@ pub use graph::{
     GraphEdge, GraphEvidence, GraphKind, GraphNode, GraphNodeRef, GraphProjection,
     GraphProjectionStats, GraphRelation,
 };
+pub use graph_generation::{GraphActivation, GraphGeneration, GraphInputHashes};
 pub use graph_query::{
     GraphCommunities, GraphCommunity, GraphDirection, GraphNeighborhood, GraphNeighborhoodRequest,
     GraphQueryEdge, GraphQueryNode,
@@ -71,6 +74,8 @@ pub enum IndexError {
     Revoked,
     #[error("invalid index query")]
     InvalidQuery,
+    #[error("stale derived graph generation; retry against the current fence")]
+    StaleGeneration,
 }
 
 impl IndexError {
@@ -86,6 +91,7 @@ impl IndexError {
             Self::InvalidEvidence => "MP_INDEX_INVALID_EVIDENCE",
             Self::Revoked => "MP_INDEX_REVOKED",
             Self::InvalidQuery => "MP_INDEX_INVALID_QUERY",
+            Self::StaleGeneration => "MP_INDEX_STALE_GENERATION",
         }
     }
 }
@@ -151,8 +157,11 @@ fn configure(db: &Connection) -> Result<()> {
 fn expected_schema_hash(version: i64) -> String {
     let mut hash = Sha256::new();
     hash.update(SCHEMA.as_bytes());
-    if version == SCHEMA_VERSION {
+    if version >= 2 {
         hash.update(GRAPH_SCHEMA.as_bytes());
+    }
+    if version >= 3 {
+        hash.update(GRAPH_GENERATION_SCHEMA.as_bytes());
     }
     format!("{:x}", hash.finalize())
 }
@@ -163,7 +172,7 @@ fn verify(db: &Connection, check_integrity: bool) -> Result<()> {
         return Err(IndexError::ForeignDatabase);
     }
     let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    if version != 1 && version != SCHEMA_VERSION {
+    if !(1..=SCHEMA_VERSION).contains(&version) {
         return Err(IndexError::InvalidIndex);
     }
     if check_integrity {
@@ -213,6 +222,7 @@ impl IndexStore {
             let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
             tx.execute_batch(SCHEMA)?;
             tx.execute_batch(GRAPH_SCHEMA)?;
+            tx.execute_batch(GRAPH_GENERATION_SCHEMA)?;
             tx.pragma_update(None, "application_id", APPLICATION_ID)?;
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             tx.execute(
@@ -222,11 +232,14 @@ impl IndexStore {
             tx.commit()?;
         } else {
             let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-            if version == 1 {
-                // A pre-MP-6A index is derived but may contain useful FTS data.
-                // Migrate atomically without touching immutable archives or state.
+            if version < SCHEMA_VERSION {
+                // Preserve existing FTS + MP-6A graph data. Both derived-schema
+                // upgrades commit together; neither touches archives or state.
                 let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-                tx.execute_batch(GRAPH_SCHEMA)?;
+                if version == 1 {
+                    tx.execute_batch(GRAPH_SCHEMA)?;
+                }
+                tx.execute_batch(GRAPH_GENERATION_SCHEMA)?;
                 tx.execute(
                     "UPDATE index_meta SET value=?1 WHERE key='schema_hash'",
                     [expected_schema_hash(SCHEMA_VERSION)],
