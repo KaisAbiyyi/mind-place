@@ -5,7 +5,8 @@ interface Registered { id: string; display_name: string; state: string; policy_r
 interface HostedStatus { running: boolean; tunnel_id: string | null; connection_verified: boolean; }
 /** Owner-only UI. MCP clients cannot invoke these commands. */
 export function mountLocalMcpSetup(parent: HTMLElement, invoke: Invoke, clipboard: ClipboardWriter): void {
-  const section = document.createElement("section");
+  const doc = parent.ownerDocument;
+  const section = doc.createElement("section");
   section.className = "setup-mcp";
   section.innerHTML = [
     '<h3 class="setup-section-title">Local AI connections (MCP)</h3>',
@@ -44,7 +45,7 @@ export function mountLocalMcpSetup(parent: HTMLElement, invoke: Invoke, clipboar
     ' Stop or lock Mind Place to close remote read access.</p>',
     '</div>',
   ].join("");
-  parent.append(document.createElement("hr"), section);
+  parent.append(doc.createElement("hr"), section);
   const state = section.querySelector<HTMLElement>("[data-mcp-status]")!;
   const secret = section.querySelector<HTMLElement>("[data-mcp-secret]")!;
   const hostedState = section.querySelector<HTMLElement>("[data-hosted-status]")!;
@@ -85,14 +86,14 @@ export function mountLocalMcpSetup(parent: HTMLElement, invoke: Invoke, clipboar
         cursor = undefined;
       }
       for (const client of page) {
-        const row = document.createElement("div");
+        const row = doc.createElement("div");
         row.className = "register-actions";
         row.setAttribute("role", "listitem");
-        const label = document.createElement("span");
+        const label = doc.createElement("span");
         label.textContent = client.display_name + " (" + client.state + ")";
         row.append(label);
         if (client.state !== "revoked") {
-          const revoke = document.createElement("button");
+          const revoke = doc.createElement("button");
           revoke.type = "button";
           revoke.className = "quiet-button";
           revoke.dataset.mcpAction = "revoke";
@@ -114,7 +115,7 @@ export function mountLocalMcpSetup(parent: HTMLElement, invoke: Invoke, clipboar
   void loadClients(true);
   section.addEventListener("click", async (event) => {
     const target = event.target;
-    if (!(target instanceof Element)) return;
+    if (!(target instanceof doc.defaultView!.Element)) return;
     const button = target.closest<HTMLButtonElement>("[data-mcp-action]");
     if (!button || button.disabled) return;
     button.disabled = true;
@@ -156,17 +157,17 @@ export function mountLocalMcpSetup(parent: HTMLElement, invoke: Invoke, clipboar
           const result = await invoke<Issued>("issue_local_mcp_reader", { displayName });
           if (!section.isConnected) break;
           secret.replaceChildren();
-          const note = document.createElement("p");
+          const note = doc.createElement("p");
           note.textContent = "Copy this credential now. It is displayed only once.";
-          const token = document.createElement("code");
+          const token = doc.createElement("code");
           token.dataset.mcpToken = result.client_id;
           token.textContent = result.credential;
-          const copy = document.createElement("button");
+          const copy = doc.createElement("button");
           copy.type = "button";
           copy.className = "quiet-button";
           copy.dataset.mcpAction = "copy";
           copy.textContent = "Copy credential";
-          const revoke = document.createElement("button");
+          const revoke = doc.createElement("button");
           revoke.type = "button";
           revoke.className = "quiet-button";
           revoke.dataset.mcpAction = "revoke";
