@@ -464,6 +464,18 @@ impl DocumentIndex {
         {
             return Err(IndexError::Revoked);
         }
+        // Only documents in the published owner-triggered index can be previewed.
+        // A head alone is not evidence of successful extraction or indexing.
+        let db = self.connection()?;
+        let indexed: i64 = db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM document_fts WHERE uri=?1 AND version_id=?2)",
+            params![uri, version_id],
+            |row| row.get(0),
+        )?;
+        if indexed == 0 {
+            return Err(IndexError::InvalidEvidence);
+        }
+        drop(db);
         // Re-read the current authorized file through NTFS handle containment,
         // not a cached FTS row or an arbitrary path supplied by the browser.
         let bytes = state.read_document_bytes(uri, ExtractionLimits::default().max_input_bytes)?;
