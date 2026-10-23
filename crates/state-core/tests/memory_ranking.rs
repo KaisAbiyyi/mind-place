@@ -845,3 +845,66 @@ fn corrected_supersedes_edges_do_not_create_false_cycles() {
         "superseded"
     );
 }
+
+#[test]
+fn writer_rejects_129th_incident_edge_before_reader_can_be_poisoned() {
+    let (_dir, state, source) = fixture();
+    make_claim(&state, "claim:hub", "Current hub claim", true, &source);
+    for i in 0..128 {
+        let id = format!("claim:leaf:{i}");
+        make_claim(&state, &id, "Evidence-bearing related claim", true, &source);
+        state
+            .add_claim_relation(
+                &id,
+                "claim:hub",
+                RelationKind::Supports,
+                &source,
+                "Bounded relation",
+            )
+            .unwrap();
+    }
+    let before = state
+        .rank_claims(&["claim:hub"], &policy(RankingMode::Balanced, None))
+        .unwrap();
+    assert_eq!(before.len(), 1);
+    assert_eq!(before[0].disposition, "current_candidate");
+
+    make_claim(&state, "claim:leaf:128", "One more related claim", true, &source);
+    assert!(matches!(
+        state.add_claim_relation(
+            "claim:leaf:128",
+            "claim:hub",
+            RelationKind::Supports,
+            &source,
+            "Would exceed reader cap",
+        ),
+        Err(StateError::InvalidValue)
+    ));
+
+    state
+        .resolve_claim_relation(
+            "claim:leaf:0",
+            "claim:hub",
+            RelationKind::Supports,
+            &source,
+            "Older supporting edge no longer applies",
+        )
+        .unwrap();
+    assert!(matches!(
+        state.add_claim_relation(
+            "claim:leaf:128",
+            "claim:hub",
+            RelationKind::Supports,
+            &source,
+            "Resolved edge must remain immutable historical entry",
+        ),
+        Err(StateError::InvalidValue)
+    ));
+    assert_eq!(
+        state
+            .rank_claims(&["claim:hub"], &policy(RankingMode::Balanced, None))
+            .unwrap()[0]
+            .disposition,
+        "current_candidate"
+    );
+}
