@@ -72,7 +72,7 @@ impl IndexStore {
         input: GraphInputHashes,
         expected_generation: Option<i64>,
         lifetime: Duration,
-        verify_revision: impl FnMut() -> Result<String> + 'a,
+        mut verify_revision: impl FnMut() -> Result<String> + 'a,
     ) -> Result<GraphMaintenanceJob<'a>> {
         validate_field(scope)?;
         if scope == ARCHIVE_SCOPE || !scope.starts_with("derived:") {
@@ -100,7 +100,16 @@ impl IndexStore {
         if current.as_ref().map(|g| g.generation) != expected_generation {
             return Err(IndexError::StaleGeneration);
         }
-        let mut job = GraphMaintenanceJob {
+        // Finish all potentially expensive issuance checks before the short
+        // capability lifetime begins. On Windows, root identity pinning can
+        // exceed a millisecond even when the grant remains valid.
+        if verify_revision()? != source_revision {
+            return Err(IndexError::Revoked);
+        }
+        security
+            .validate_lease(lease)
+            .map_err(|_| IndexError::Revoked)?;
+        let job = GraphMaintenanceJob {
             index: self,
             authority,
             security,
@@ -119,7 +128,6 @@ impl IndexStore {
             cancelled: false,
             committed: None,
         };
-        job.check_authority()?;
         Ok(job)
     }
 }
