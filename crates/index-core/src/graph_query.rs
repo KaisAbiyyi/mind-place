@@ -95,10 +95,7 @@ pub struct GraphCommunities {
 }
 
 fn validate_scope(scope: &str) -> Result<()> {
-    if scope.trim().is_empty()
-        || scope.len() > MAX_SCOPE_BYTES
-        || scope.as_bytes().contains(&0)
-    {
+    if scope.trim().is_empty() || scope.len() > MAX_SCOPE_BYTES || scope.as_bytes().contains(&0) {
         return Err(IndexError::InvalidQuery);
     }
     Ok(())
@@ -130,7 +127,12 @@ fn parse_relation(relation: &str) -> Result<GraphRelation> {
     })
 }
 
-fn load_node(db: &Connection, scope: &str, id: &str, depth: usize) -> Result<Option<GraphQueryNode>> {
+fn load_node(
+    db: &Connection,
+    scope: &str,
+    id: &str,
+    depth: usize,
+) -> Result<Option<GraphQueryNode>> {
     let row: Option<(String, String, String, String)> = db
         .query_row(
             "SELECT n.kind,n.canonical_key,n.label,n.source_ref
@@ -192,11 +194,22 @@ fn graph_edges_for(
          ORDER BY e.id LIMIT ?5",
     )?;
     let rows = stmt.query_map(
-        params![scope, node_id, direction.as_str(), seen_ids_json, limit as i64],
+        params![
+            scope,
+            node_id,
+            direction.as_str(),
+            seen_ids_json,
+            limit as i64
+        ],
         |r| {
             Ok((
-                r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?,
-                r.get(4)?, r.get(5)?, r.get(6)?,
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?,
+                r.get(6)?,
             ))
         },
     )?;
@@ -325,8 +338,11 @@ impl IndexStore {
             )?;
             let rows = stmt.query_map(params![scope, (max_nodes + 1) as i64], |r| {
                 Ok((
-                    r.get::<_, String>(0)?, r.get::<_, String>(1)?,
-                    r.get::<_, String>(2)?, r.get::<_, String>(3)?, r.get::<_, String>(4)?,
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, String>(4)?,
                 ))
             })?;
             rows.map(|row| {
@@ -339,11 +355,15 @@ impl IndexStore {
                     source_ref,
                     depth: 0,
                 })
-            }).collect::<Result<_>>()?
+            })
+            .collect::<Result<_>>()?
         };
         if all_nodes.len() > max_nodes {
             check()?;
-            return Ok(GraphCommunities { communities: vec![], truncated: true });
+            return Ok(GraphCommunities {
+                communities: vec![],
+                truncated: true,
+            });
         }
         check()?;
         let all_edges: Vec<GraphQueryEdge> = {
@@ -357,23 +377,37 @@ impl IndexStore {
             )?;
             let rows = stmt.query_map(params![scope, (max_edges + 1) as i64], |r| {
                 Ok((
-                    r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?,
-                    r.get(4)?, r.get(5)?, r.get(6)?,
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                    r.get(6)?,
                 ))
             })?;
             rows.map(|row| edge_from_row(row?)).collect::<Result<_>>()?
         };
         if all_edges.len() > max_edges {
             check()?;
-            return Ok(GraphCommunities { communities: vec![], truncated: true });
+            return Ok(GraphCommunities {
+                communities: vec![],
+                truncated: true,
+            });
         }
         let by_id: BTreeMap<_, _> = all_nodes.into_iter().map(|n| (n.id.clone(), n)).collect();
-        let mut adjacency: BTreeMap<String, BTreeSet<String>> =
-            by_id.keys().map(|id| (id.clone(), BTreeSet::new())).collect();
+        let mut adjacency: BTreeMap<String, BTreeSet<String>> = by_id
+            .keys()
+            .map(|id| (id.clone(), BTreeSet::new()))
+            .collect();
         for edge in &all_edges {
-            adjacency.get_mut(&edge.from_node).ok_or(IndexError::InvalidIndex)?
+            adjacency
+                .get_mut(&edge.from_node)
+                .ok_or(IndexError::InvalidIndex)?
                 .insert(edge.to_node.clone());
-            adjacency.get_mut(&edge.to_node).ok_or(IndexError::InvalidIndex)?
+            adjacency
+                .get_mut(&edge.to_node)
+                .ok_or(IndexError::InvalidIndex)?
                 .insert(edge.from_node.clone());
         }
         let mut unseen: BTreeSet<_> = by_id.keys().cloned().collect();
@@ -385,7 +419,9 @@ impl IndexStore {
             let mut members = Vec::new();
             let mut kinds = BTreeMap::<String, usize>::new();
             while let Some(id) = frontier.pop_front() {
-                *kinds.entry(by_id[&id].kind.as_str().to_owned()).or_default() += 1;
+                *kinds
+                    .entry(by_id[&id].kind.as_str().to_owned())
+                    .or_default() += 1;
                 members.push(id.clone());
                 for next in &adjacency[&id] {
                     if unseen.remove(next) {
@@ -395,7 +431,8 @@ impl IndexStore {
             }
             members.sort();
             let member_set: BTreeSet<_> = members.iter().cloned().collect();
-            let edge_count = all_edges.iter()
+            let edge_count = all_edges
+                .iter()
                 .filter(|e| member_set.contains(&e.from_node) && member_set.contains(&e.to_node))
                 .count();
             communities.push(GraphCommunity {
@@ -411,6 +448,9 @@ impl IndexStore {
         communities.truncate(MAX_COMMUNITIES);
         check()?;
         tx.commit()?;
-        Ok(GraphCommunities { communities, truncated })
+        Ok(GraphCommunities {
+            communities,
+            truncated,
+        })
     }
 }
