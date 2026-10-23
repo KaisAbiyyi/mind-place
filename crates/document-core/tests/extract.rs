@@ -343,3 +343,10 @@ fn pdf_previous_stream_filter_does_not_bleed_into_plain_stream() {
     let doc = extract_bytes(DocumentFormat::Pdf, bytes, ExtractionLimits::default()).unwrap();
     assert!(doc.text.contains("visible second stream"));
 }
+
+#[test]
+fn pdf_nonstream_filter_dictionary_does_not_bleed() {
+    let bytes = b"%PDF-1.7\n1 0 obj\n<< /Filter /DCTDecode >>\nendobj\n2 0 obj\n<< /Length 30 >>\nstream\nBT (current dictionary only) Tj ET\nendstream\nendobj";
+    let doc = extract_bytes(DocumentFormat::Pdf, bytes, ExtractionLimits::default()).unwrap();
+    assert!(doc.text.contains("current dictionary only"));
+}
