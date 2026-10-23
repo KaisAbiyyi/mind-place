@@ -8,8 +8,7 @@ use document_refresh::DocumentRefreshRegistry;
 
 use mind_place_archive::{
     ArchiveStore, AssetResult, Conversation, ConversationSummary, ExportResult,
-    GenericImportReceipt, ImportReceipt,
-    SnapshotSummary, NATIVE_HOST_NAME,
+    GenericImportReceipt, ImportReceipt, SnapshotSummary, NATIVE_HOST_NAME,
 };
 use mind_place_index::documents::{DocumentHit, DocumentIndex, DocumentIndexReport};
 use mind_place_index::{
