@@ -37,9 +37,9 @@ pub mod documents;
 pub mod fetch;
 pub mod graph;
 pub mod graph_generation;
-pub mod graphify;
 pub mod graph_maintenance;
 pub mod graph_query;
+pub mod graphify;
 pub mod inspection;
 pub use context::{
     ContextBudget, ContextExcerpt, ContextGroup, ContextPack, ContextPreset, ContextRequest,
@@ -53,14 +53,14 @@ pub use graph::{
     GraphProjectionStats, GraphRelation,
 };
 pub use graph_generation::{GraphActivation, GraphGeneration, GraphInputHashes};
-pub use graphify::{
-    graphify_prompt, inferred_edge, qualify_graphify_batch, submit_graphify_batch,
-    GraphifyProfile, GraphifyPromptInput, GraphifyQualification,
-};
 pub use graph_maintenance::{GraphBatchReceipt, GraphMaintenanceBatch, GraphMaintenanceJob};
 pub use graph_query::{
     GraphCommunities, GraphCommunity, GraphDirection, GraphNeighborhood, GraphNeighborhoodRequest,
     GraphQueryEdge, GraphQueryNode,
+};
+pub use graphify::{
+    graphify_prompt, inferred_edge, qualify_graphify_batch, submit_graphify_batch, GraphifyProfile,
+    GraphifyPromptInput, GraphifyQualification,
 };
 pub use inspection::{ContextInspection, FetchInspection, RetrievalTrace, SearchInspection};
 pub use retrieval::{
