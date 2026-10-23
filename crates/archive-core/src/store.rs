@@ -165,7 +165,8 @@ fn validate(c: &mut Capture) -> Result<()> {
         return Err(invalid("Unsupported capture method"));
     }
     if !matches!(c.completeness.as_str(), "partial" | "complete")
-        || (matches!(c.capture_method.as_str(), "manual-dom" | "automatic-dom")
+        || ((c.provider == "generic"
+            || matches!(c.capture_method.as_str(), "manual-dom" | "automatic-dom"))
             && c.completeness != "partial")
     {
         return Err(invalid(
@@ -374,6 +375,18 @@ impl ArchiveStore {
 
     pub fn save(&self, mut capture: Capture) -> Result<SaveReceipt> {
         validate(&mut capture)?;
+        if capture.provider == "generic" {
+            // A generic locator is meaningful only when its immutable raw source exists.
+            // Do not accept a fabricated generic capture without preserved evidence.
+            let raw = self.root.join("imports").join("generic")
+                .join(format!("{}.raw", capture.conversation_id));
+            no_link(&self.root.join("imports"))?;
+            no_link(&self.root.join("imports").join("generic"))?;
+            let raw_bytes = bounded_read(&raw, crate::MAX_GENERIC_IMPORT_BYTES)?;
+            if digest(&raw_bytes) != capture.conversation_id {
+                return Err(invalid("Generic capture has no matching preserved raw source"));
+            }
+        }
         let _lock = self.lock()?;
         let id = digest(format!("{}:{}", capture.provider, capture.conversation_id).as_bytes());
         let dir = self.conversation_dir(&id)?;
