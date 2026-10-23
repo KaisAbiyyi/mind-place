@@ -178,7 +178,9 @@ fn validate(c: &mut Capture) -> Result<()> {
     }
     if c.provider == "chatgpt" {
         if conversation_id_from_url(&c.source_url)? != c.conversation_id.to_ascii_lowercase() {
-            return Err(invalid("Capture URL and conversation identity do not match"));
+            return Err(invalid(
+                "Capture URL and conversation identity do not match",
+            ));
         }
         c.conversation_id = c.conversation_id.to_ascii_lowercase();
     }
@@ -378,13 +380,18 @@ impl ArchiveStore {
         if capture.provider == "generic" {
             // A generic locator is meaningful only when its immutable raw source exists.
             // Do not accept a fabricated generic capture without preserved evidence.
-            let raw = self.root.join("imports").join("generic")
+            let raw = self
+                .root
+                .join("imports")
+                .join("generic")
                 .join(format!("{}.raw", capture.conversation_id));
             no_link(&self.root.join("imports"))?;
             no_link(&self.root.join("imports").join("generic"))?;
             let raw_bytes = bounded_read(&raw, crate::MAX_GENERIC_IMPORT_BYTES)?;
             if digest(&raw_bytes) != capture.conversation_id {
-                return Err(invalid("Generic capture has no matching preserved raw source"));
+                return Err(invalid(
+                    "Generic capture has no matching preserved raw source",
+                ));
             }
         }
         let _lock = self.lock()?;
