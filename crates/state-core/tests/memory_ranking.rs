@@ -586,3 +586,122 @@ fn ranking_fails_closed_if_authority_source_is_tampered_after_open() {
         Err(StateError::Corrupt)
     ));
 }
+
+#[test]
+fn mistaken_contradiction_can_be_resolved_without_rewriting_historical_truth() {
+    let (_dir, state, source) = fixture();
+    make_claim(&state, "claim:a", "Verified claim A", true, &source);
+    make_claim(&state, "claim:b", "Verified claim B", true, &source);
+    let contested_at = state
+        .add_claim_relation(
+            "claim:a",
+            "claim:b",
+            RelationKind::Contradicts,
+            &source,
+            "Suspected conflict",
+        )
+        .unwrap()
+        .recorded_at_ms;
+    let disputed = state
+        .rank_claims(
+            &["claim:a", "claim:b"],
+            &policy(RankingMode::Balanced, Some(contested_at)),
+        )
+        .unwrap();
+    assert_eq!(disputed.len(), 2);
+    assert!(disputed.iter().all(|item| item.disposition == "contested"));
+    let resolution = state
+        .resolve_claim_relation(
+            "claim:a",
+            "claim:b",
+            RelationKind::Contradicts,
+            &source,
+            "Evidence proved the relation incorrect",
+        )
+        .unwrap();
+    assert!(resolution.recorded_at_ms > contested_at);
+    let historical = state
+        .rank_claims(
+            &["claim:a", "claim:b"],
+            &policy(RankingMode::Balanced, Some(contested_at)),
+        )
+        .unwrap();
+    assert!(historical.iter().all(|item| item.disposition == "contested"));
+    let current = state
+        .rank_claims(
+            &["claim:a", "claim:b"],
+            &policy(RankingMode::Balanced, Some(resolution.recorded_at_ms)),
+        )
+        .unwrap();
+    assert!(current
+        .iter()
+        .all(|item| item.disposition == "current_candidate"));
+    assert!(state
+        .resolve_claim_relation(
+            "claim:a",
+            "claim:b",
+            RelationKind::Contradicts,
+            &source,
+            "Duplicate resolution",
+        )
+        .is_err());
+    let raw = Connection::open(state.path()).unwrap();
+    assert!(raw
+        .execute("DELETE FROM memory_claim_relation_resolutions", [])
+        .is_err());
+    assert!(raw
+        .execute(
+            "UPDATE memory_claim_relation_resolutions SET reason='rewritten'",
+            []
+        )
+        .is_err());
+    let reopened = StateStore::open(state.path()).unwrap();
+    assert!(reopened
+        .rank_claims(&["claim:b"], &policy(RankingMode::Balanced, None))
+        .unwrap()
+        .iter()
+        .all(|item| item.disposition == "current_candidate"));
+}
+
+#[test]
+fn tampered_resolution_evidence_also_fails_closed() {
+    let (_dir, state, source) = fixture();
+    let correction_source = state
+        .register_source(&SourceDescriptor {
+            provider: "chatgpt",
+            source_namespace: "account-1",
+            source_kind: "conversation",
+            key: SourceKey::External("correction-source-2"),
+        })
+        .unwrap();
+    make_claim(&state, "claim:a", "Address A", true, &source);
+    make_claim(&state, "claim:b", "Address B", true, &source);
+    state
+        .add_claim_relation(
+            "claim:a",
+            "claim:b",
+            RelationKind::Contradicts,
+            &source,
+            "Suspected conflict",
+        )
+        .unwrap();
+    state
+        .resolve_claim_relation(
+            "claim:a",
+            "claim:b",
+            RelationKind::Contradicts,
+            &correction_source,
+            "Correction",
+        )
+        .unwrap();
+    let raw = Connection::open(state.path()).unwrap();
+    raw.execute(
+        "UPDATE source_identities SET source_key='tampered-correction' WHERE id=?1",
+        [&correction_source],
+    )
+    .unwrap();
+    assert!(matches!(
+        state.rank_claims(&["claim:a"], &policy(RankingMode::Balanced, None)),
+        Err(StateError::Corrupt)
+    ));
+}
