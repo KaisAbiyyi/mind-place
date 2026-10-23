@@ -399,3 +399,47 @@ fn scope_boundaries_do_not_reveal_private_claims_or_accept_cross_scope_edges() {
         Err(StateError::InvalidValue)
     ));
 }
+
+#[test]
+fn immutable_numeric_confidence_only_breaks_otherwise_equal_inferences() {
+    let (_dir, state, source) = fixture();
+    let raw = Connection::open(state.path()).unwrap();
+    raw.pragma_update(None, "foreign_keys", "ON").unwrap();
+    for (id, confidence) in [("claim:low", 0.2), ("claim:high", 0.9)] {
+        let item = claim(id, "Same inferred statement", false);
+        raw.execute(
+            "INSERT INTO memory_claims(id,statement,asserted_by,epistemic_origin,status,confidence)
+             VALUES(?1,?2,?3,?4,?5,?6)",
+            rusqlite::params![
+                item.id,
+                item.statement,
+                item.asserted_by,
+                item.epistemic_origin,
+                item.status,
+                confidence
+            ],
+        )
+        .unwrap();
+        raw.execute(
+            "INSERT INTO memory_claim_events(claim_id,revision,event_type,payload_json,recorded_at_ms)
+             VALUES(?1,1,'created',?2,1000000000000)",
+            rusqlite::params![id, serde_json::to_string(&item).unwrap()],
+        )
+        .unwrap();
+        raw.execute(
+            "INSERT INTO memory_claim_event_evidence
+             (claim_id,revision,source_ref,evidence_kind)
+             VALUES(?1,1,?2,'support')",
+            rusqlite::params![id, source],
+        )
+        .unwrap();
+    }
+    let ranked = state
+        .rank_claims(
+            &["claim:low", "claim:high"],
+            &policy(RankingMode::Balanced, None),
+        )
+        .unwrap();
+    assert_eq!(ranked[0].claim.id, "claim:high");
+    assert!(ranked[0].score > ranked[1].score);
+}
