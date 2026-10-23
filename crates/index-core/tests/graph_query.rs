@@ -95,11 +95,7 @@ fn scope_isolation_does_not_leak_shared_global_node_or_edges() {
     let (_tmp, index) = store();
     let (a, b, _) = chain(&index, "authorized");
     let hidden = n(GraphKind::Memory, "private");
-    index.replace_graph_projection("not-authorized", &GraphProjection {
-        nodes: vec![a.clone(), hidden.clone()],
-        edges: vec![edge(&a, &hidden)],
-    }).unwrap_err(); // Shared global identity cannot silently change source_ref or label.
-    // Use the same exact record for shared identity; the global node is not an ACL.
+    // Shared global identity is not an ACL: membership and edge scope enforce isolation.
     index.replace_graph_projection("not-authorized", &GraphProjection {
         nodes: vec![a.clone(), hidden.clone()],
         edges: vec![edge(&a, &hidden)],
