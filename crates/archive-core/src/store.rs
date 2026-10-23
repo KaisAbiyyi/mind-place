@@ -195,7 +195,6 @@ fn gemini_conversation_id_from_url(source: &str) -> Result<String> {
     Ok(id.to_owned())
 }
 
-// An independent origin-to-identity check for Claude; legacy ChatGPT remains unchanged.
 fn claude_conversation_id_from_url(source: &str) -> Result<String> {
     let url = url::Url::parse(source).map_err(|_| invalid("Invalid Claude conversation URL"))?;
     if url.scheme() != "https"
@@ -223,20 +222,34 @@ fn claude_conversation_id_from_url(source: &str) -> Result<String> {
 }
 
 fn validate(c: &mut Capture) -> Result<()> {
-    if c.schema_version != 1 || !matches!(c.provider.as_str(), "chatgpt" | "gemini" | "claude") {
+    if c.schema_version != 1
+        || !matches!(
+            c.provider.as_str(),
+            "chatgpt" | "gemini" | "generic" | "claude"
+        )
+    {
         return Err(invalid("Unsupported archive schema or provider"));
     }
     if matches!(c.provider.as_str(), "gemini" | "claude") && c.capture_method != "manual-dom" {
-        return Err(invalid("This provider supports explicit manual DOM only"));
+        return Err(invalid("Gemini capture is explicit manual DOM only"));
     }
-    if !matches!(
+    if c.provider == "generic" {
+        // A generic import must not claim a browser-provider source.
+        if c.capture_method != "generic-import"
+            || !hex_id(&c.conversation_id)
+            || c.source_url != format!("mindplace-import://generic/{}", c.conversation_id)
+        {
+            return Err(invalid("Invalid generic source identity or capture method"));
+        }
+    } else if !matches!(
         c.capture_method.as_str(),
         "manual-dom" | "automatic-dom" | "legacy-import"
     ) {
         return Err(invalid("Unsupported capture method"));
     }
     if !matches!(c.completeness.as_str(), "partial" | "complete")
-        || (matches!(c.capture_method.as_str(), "manual-dom" | "automatic-dom")
+        || ((c.provider == "generic"
+            || matches!(c.capture_method.as_str(), "manual-dom" | "automatic-dom"))
             && c.completeness != "partial")
     {
         return Err(invalid(
@@ -250,6 +263,7 @@ fn validate(c: &mut Capture) -> Result<()> {
         "chatgpt" => conversation_id_from_url(&c.source_url)?,
         "gemini" => gemini_conversation_id_from_url(&c.source_url)?,
         "claude" => claude_conversation_id_from_url(&c.source_url)?,
+        "generic" => c.conversation_id.clone(),
         _ => return Err(invalid("Unsupported archive provider")),
     };
     let supplied_id = if matches!(c.provider.as_str(), "chatgpt" | "claude") {
@@ -456,6 +470,23 @@ impl ArchiveStore {
 
     pub fn save(&self, mut capture: Capture) -> Result<SaveReceipt> {
         validate(&mut capture)?;
+        if capture.provider == "generic" {
+            // A generic locator is meaningful only when its immutable raw source exists.
+            // Do not accept a fabricated generic capture without preserved evidence.
+            let raw = self
+                .root
+                .join("imports")
+                .join("generic")
+                .join(format!("{}.raw", capture.conversation_id));
+            no_link(&self.root.join("imports"))?;
+            no_link(&self.root.join("imports").join("generic"))?;
+            let raw_bytes = bounded_read(&raw, crate::MAX_GENERIC_IMPORT_BYTES)?;
+            if digest(&raw_bytes) != capture.conversation_id {
+                return Err(invalid(
+                    "Generic capture has no matching preserved raw source",
+                ));
+            }
+        }
         let _lock = self.lock()?;
         let id = digest(format!("{}:{}", capture.provider, capture.conversation_id).as_bytes());
         let dir = self.conversation_dir(&id)?;
