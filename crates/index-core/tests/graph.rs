@@ -260,7 +260,7 @@ fn legacy_index_migrates_without_discarding_fts_or_modifying_state() {
     let ver: i64 = db
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(ver, 3);
+    assert_eq!(ver, 4);
     assert_eq!(fs::read(state.path()).unwrap(), before_state_bytes);
     drop(db);
     assert!(IndexStore::open(&path).is_ok());
