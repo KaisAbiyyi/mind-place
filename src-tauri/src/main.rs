@@ -10,7 +10,7 @@ use mind_place_archive::{
     ArchiveStore, AssetResult, Conversation, ConversationSummary, ExportResult, ImportReceipt,
     SnapshotSummary, NATIVE_HOST_NAME,
 };
-use mind_place_index::documents::{DocumentHit, DocumentIndex, DocumentIndexReport};
+use mind_place_index::documents::{DocumentHit, DocumentIndex, DocumentIndexReport, DocumentPreview};
 use mind_place_index::{
     ContextInspection, ContextPack, ContextRequest, FetchInspection, FetchRequest, FetchResponse,
     IndexError, IndexStats, IndexStore, RetrievalRequest, RetrievalResponse, SearchHit,
@@ -522,6 +522,27 @@ async fn search_document_index(
     .await
 }
 
+/// Owner-only bounded extracted preview. Never fetch by native filesystem path.
+#[tauri::command]
+async fn preview_document_source(
+    state: State<'_, AppState>,
+    uri: String,
+    version_id: String,
+) -> Result<DocumentPreview, String> {
+    let state_path = state.state_path.clone();
+    let document_index_path = state.index_path.with_file_name("document-index.sqlite3");
+    index_task(&state, move |lease, security| {
+        let authority = StateStore::open(state_path)?;
+        let projection = DocumentIndex::open(document_index_path)?;
+        projection.preview(&authority, &uri, &version_id, || {
+            security
+                .validate_lease(lease)
+                .map_err(|_| IndexError::Revoked)
+        })
+    })
+    .await
+}
+
 #[tauri::command]
 async fn list_conversations(
     state: State<'_, AppState>,
@@ -770,6 +791,7 @@ fn main() {
             refresh_document_root_index,
             pause_document_root_refresh,
             search_document_index,
+            preview_document_source,
             list_conversations,
             read_conversation,
             list_snapshots,
