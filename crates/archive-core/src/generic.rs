@@ -3,7 +3,6 @@
 use crate::{ArchiveError, ArchiveStore, Capture, Message, Result, SaveReceipt};
 use serde::Serialize;
 use serde_json::Value;
-use std::fs;
 
 pub const MAX_GENERIC_IMPORT_BYTES: usize = 8 * 1024 * 1024;
 
@@ -52,6 +51,9 @@ fn json_messages(source: &str) -> Result<(String, Vec<Message>)> {
     let (title, records) = match &data {
         Value::Array(values) => ("Imported JSON transcript".to_owned(), values),
         Value::Object(map) => {
+            if map.keys().any(|key| !matches!(key.as_str(), "title" | "messages")) {
+                return Err(invalid("JSON transcript has unsupported top-level fields"));
+            }
             let values = map.get("messages").and_then(Value::as_array)
                 .ok_or_else(|| invalid("JSON transcript requires a messages array"))?;
             let title = map.get("title").and_then(Value::as_str)
@@ -68,6 +70,9 @@ fn json_messages(source: &str) -> Result<(String, Vec<Message>)> {
     for (index, item) in records.iter().enumerate() {
         let record = item.as_object()
             .ok_or_else(|| invalid(format!("JSON record {index} is not an object")))?;
+        if record.keys().any(|key| !matches!(key.as_str(), "role" | "content" | "text" | "id" | "authored_at" | "model" | "attachments")) {
+            return Err(invalid(format!("JSON record {index} contains unsupported fields")));
+        }
         let kind = record.get("role").and_then(Value::as_str)
             .ok_or_else(|| invalid(format!("JSON record {index} has no explicit role")))?;
         // Refuse ambiguous representations rather than picking one and dropping evidence.
@@ -260,7 +265,9 @@ impl ArchiveStore {
             return Err(invalid("Generic import source must contain 1 byte to 8 MiB"));
         }
         let sha = crate::store::digest(source);
-        let root = self.root().join("imports").join("generic");
+        let imports_root = self.root().join("imports");
+        crate::store::checked_dir(&imports_root)?;
+        let root = imports_root.join("generic");
         crate::store::checked_dir(&root)?;
         let raw_path = root.join(format!("{sha}.raw"));
         crate::store::no_link(&raw_path)?;
