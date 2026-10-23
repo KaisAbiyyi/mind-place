@@ -240,8 +240,21 @@ fn parse_xml(ctx: &mut Context<'_>, bytes: &[u8]) -> Result<String> {
     let mut depth = 0usize;
     let mut capturing: Option<usize> = None;
     let mut output = String::new();
+    let mut next_auth_byte = 0;
+    let mut auth_events = 256;
     loop {
-        ctx.poll()?;
+        // Bound work between live checks by BOTH bytes and event count. Tiny
+        // XML tokens must not each reopen SQLite; time limits still run on
+        // every event. A single oversized XML event is read atomically under
+        // the existing input/expanded caps. No text escapes before final auth.
+        if reader.buffer_position() >= next_auth_byte || auth_events >= 256 {
+            ctx.poll()?;
+            next_auth_byte = reader.buffer_position().saturating_add(4096);
+            auth_events = 0;
+        } else {
+            ctx.check_time()?;
+        }
+        auth_events += 1;
         let event = reader
             .read_event_into(&mut scratch)
             .map_err(|_| ExtractionError::Invalid)?;

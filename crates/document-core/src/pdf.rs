@@ -134,18 +134,35 @@ fn decode_text(bytes: &[u8]) -> String {
         .collect()
 }
 
+fn delimiter(b: u8) -> bool {
+    b.is_ascii_whitespace() || b"()<>[]{}/%".contains(&b)
+}
+
 fn content_text(ctx: &mut Context<'_>, data: &[u8]) -> Result<String> {
     let mut output = String::new();
     let mut cursor = 0usize;
     while let Some(start) = find(data, b"BT", cursor) {
         ctx.poll()?;
-        let Some(stop) = find(data, b"ET", start + 2) else {
-            break;
-        };
-        let block = &data[start + 2..stop];
+        let block = &data[start + 2..];
         let mut pos = 0;
         while pos < block.len() {
+            if pos % 4096 == 0 {
+                ctx.poll()?;
+            }
+            // ET inside a literal/hex string is evidence, not an operator.
+            if block[pos..].starts_with(b"ET")
+                && (pos == 0 || delimiter(block[pos - 1]))
+                && block.get(pos + 2).is_none_or(|b| delimiter(*b))
+            {
+                pos += 2;
+                break;
+            }
             match block[pos] {
+                b'%' => {
+                    while pos < block.len() && !matches!(block[pos], b'\r' | b'\n') {
+                        pos += 1;
+                    }
+                }
                 b'(' => {
                     let (literal, end) = string_literal(block, pos)?;
                     let value = decode_text(&literal);
@@ -155,7 +172,10 @@ fn content_text(ctx: &mut Context<'_>, data: &[u8]) -> Result<String> {
                     }
                     pos = end;
                 }
-                b'<' if block.get(pos + 1) != Some(&b'<') => {
+                b'<' if block.get(pos + 1) == Some(&b'<') => {
+                    pos += 2;
+                }
+                b'<' => {
                     let (literal, end) = hex_literal(block, pos)?;
                     let value = decode_text(&literal);
                     if !value.is_empty() {
@@ -170,7 +190,7 @@ fn content_text(ctx: &mut Context<'_>, data: &[u8]) -> Result<String> {
                 return Err(ExtractionError::Limit("output_bytes"));
             }
         }
-        cursor = stop + 2;
+        cursor = start + 2 + pos;
     }
     Ok(output)
 }
@@ -248,7 +268,9 @@ pub(super) fn extract_pdf(ctx: &mut Context<'_>, bytes: &[u8]) -> Result<()> {
         if !unsupported_filter {
             let stream = &bytes[content_at..content_end];
             let decoded = if flate {
-                inflate_stream(ctx, stream)?
+                // A compressed checksum can itself end in CR/LF. The zlib
+                // decoder stops at its checksum and ignores the PDF delimiter.
+                inflate_stream(ctx, &bytes[content_at..end])?
             } else {
                 ctx.expanded(stream.len())?;
                 stream.to_vec()

@@ -275,6 +275,21 @@ impl StateStore {
         }
         Ok(db)
     }
+    /// Fresh authority snapshot for hot read-only checks. Do not configure a
+    /// writable WAL connection (and its close/checkpoint work) for each poll.
+    fn read_connection(&self) -> Result<Connection> {
+        safe_path(&self.path)?;
+        let db = Connection::open_with_flags(
+            &self.path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+        )?;
+        db.busy_timeout(Duration::from_secs(5))?;
+        identity(&db)?;
+        if user_version(&db)? != SCHEMA_VERSION {
+            return Err(StateError::Corrupt);
+        }
+        Ok(db)
+    }
     /// Idempotent, durable registration; no derived/index identifier is an input.
     pub fn register_source(&self, source: &SourceDescriptor<'_>) -> Result<String> {
         let id = canonical_source_id(source)?;

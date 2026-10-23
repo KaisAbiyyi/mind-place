@@ -9,6 +9,61 @@ fn store() -> (tempfile::TempDir, StateStore) {
     (home, db)
 }
 
+#[test]
+fn fresh_read_checks_preserve_corruption_and_revocation_guards() {
+    let (home, state) = store();
+    let folder = home.path().join("approved");
+    fs::create_dir(&folder).unwrap();
+    let id = state.register_document_root(&folder).unwrap().id;
+    let uri = VirtualDocumentPath::from_segments(&id, &["note.md".into()])
+        .unwrap()
+        .to_uri();
+    assert!(state.require_approved_document_uri(&uri).is_err());
+    state.approve_document_root(&id).unwrap();
+    assert!(state.require_approved_document_uri(&uri).is_ok());
+    // A different connection commits changes between polls; no prior snapshot
+    // or grant may hide them. Closed handles also exercise WAL sidecar reopen.
+    {
+        let db = Connection::open(state.path()).unwrap();
+        db.execute_batch("DROP TRIGGER document_root_authorizations_no_update;")
+            .unwrap();
+        db.execute(
+            "UPDATE document_root_authorizations SET volume_id='invalid' WHERE root_id=?1",
+            [&id],
+        )
+        .unwrap();
+    }
+    assert!(matches!(
+        state.require_approved_document_uri(&uri),
+        Err(StateError::Corrupt)
+    ));
+    {
+        let db = Connection::open(state.path()).unwrap();
+        db.execute(
+            "UPDATE document_root_authorizations SET volume_id='1' WHERE root_id=?1",
+            [&id],
+        )
+        .unwrap();
+    }
+    assert!(state.require_approved_document_uri(&uri).is_ok());
+    state.revoke_document_root(&id).unwrap();
+    assert!(state.require_approved_document_uri(&uri).is_err());
+    {
+        let db = Connection::open(state.path()).unwrap();
+        db.execute_batch("DROP TRIGGER document_root_registry_no_update;")
+            .unwrap();
+        db.execute(
+            "UPDATE document_root_registry SET path_digest=lower(hex(zeroblob(32))) WHERE root_id=?1",
+            [&id],
+        )
+        .unwrap();
+    }
+    assert!(matches!(
+        state.require_approved_document_uri(&uri),
+        Err(StateError::Corrupt)
+    ));
+}
+
 #[cfg(windows)]
 #[test]
 fn finished_revocation_cannot_overtake_an_active_publication_fence() {
