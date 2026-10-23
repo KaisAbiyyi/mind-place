@@ -1,7 +1,7 @@
 //! MP-6B: bounded, scope-isolated queries over the disposable MP-6A graph.
 //! This module never grants access: callers must verify their unlock/permission
 //! lease in the supplied callback, including after the final SQLite read.
-use crate::{GraphKind, GraphNodeRef, GraphRelation, IndexError, IndexStore, Result};
+use crate::{GraphKind, GraphNodeRef, GraphOrigin, GraphRelation, IndexError, IndexStore, Result};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -60,7 +60,8 @@ pub struct GraphQueryEdge {
     pub from_node: String,
     pub to_node: String,
     pub relation: GraphRelation,
-    /// Read from the original deterministic projection, never invented by traversal.
+    /// Evidence origin and optional confidence come from the persisted projection.
+    pub origin: GraphOrigin,
     pub source_ref: String,
     pub source_revision: String,
     pub locator: String,
@@ -156,14 +157,22 @@ fn load_node(
     .transpose()
 }
 
-type EdgeRow = (String, String, String, String, String, String, String);
+type EdgeRow = (String, String, String, String, String, String, String, String, Option<i64>);
 
 fn edge_from_row(row: EdgeRow) -> Result<GraphQueryEdge> {
+    let origin = match (row.7.as_str(), row.8) {
+        ("deterministic", None) => GraphOrigin::Deterministic,
+        ("inferred", Some(v)) if (8_000..=10_000).contains(&v) => {
+            GraphOrigin::Inferred { confidence_bps: v as u16 }
+        }
+        _ => return Err(IndexError::InvalidIndex),
+    };
     Ok(GraphQueryEdge {
         id: row.0,
         from_node: row.1,
         to_node: row.2,
         relation: parse_relation(&row.3)?,
+        origin,
         source_ref: row.4,
         source_revision: row.5,
         locator: row.6,
@@ -182,7 +191,7 @@ fn graph_edges_for(
     // sharing a global node ID never authorizes reading another scope's edges.
     let mut stmt = db.prepare(
         "SELECT e.id,e.from_node,e.to_node,e.relation,
-                e.source_ref,e.source_revision,e.locator
+                e.source_ref,e.source_revision,e.locator,e.origin,e.confidence_bps
          FROM graph_edges e
          JOIN graph_scope_nodes f ON f.node_id=e.from_node AND f.scope=e.scope
          JOIN graph_scope_nodes t ON t.node_id=e.to_node AND t.scope=e.scope
@@ -210,6 +219,8 @@ fn graph_edges_for(
                 r.get(4)?,
                 r.get(5)?,
                 r.get(6)?,
+                r.get(7)?,
+                r.get(8)?,
             ))
         },
     )?;
@@ -369,7 +380,7 @@ impl IndexStore {
         let all_edges: Vec<GraphQueryEdge> = {
             let mut stmt = tx.prepare(
                 "SELECT e.id,e.from_node,e.to_node,e.relation,
-                        e.source_ref,e.source_revision,e.locator
+                        e.source_ref,e.source_revision,e.locator,e.origin,e.confidence_bps
                  FROM graph_edges e
                  JOIN graph_scope_nodes a ON a.scope=e.scope AND a.node_id=e.from_node
                  JOIN graph_scope_nodes b ON b.scope=e.scope AND b.node_id=e.to_node
