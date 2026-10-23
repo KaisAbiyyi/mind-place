@@ -3,7 +3,7 @@
 use crate::{IndexError, IndexStore, Result};
 use rusqlite::{params, Transaction, TransactionBehavior};
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 const MAX_GRAPH_ITEMS: usize = 100_000;
 const MAX_GRAPH_FIELD_BYTES: usize = 4096;
@@ -160,6 +160,7 @@ fn stable_id(prefix: &str, parts: &[&str]) -> String {
 }
 
 fn checked_projection(
+    scope: &str,
     projection: &GraphProjection,
 ) -> Result<(BTreeMap<String, &GraphNode>, BTreeMap<String, &GraphEdge>)> {
     if projection.nodes.len() > MAX_GRAPH_ITEMS || projection.edges.len() > MAX_GRAPH_ITEMS {
@@ -197,6 +198,7 @@ fn checked_projection(
         let id = stable_id(
             "ge",
             &[
+                scope,
                 &from,
                 &to,
                 edge.relation.as_str(),
@@ -222,10 +224,25 @@ fn replace_tx(
     projection: &GraphProjection,
 ) -> Result<GraphProjectionStats> {
     validate_field(scope)?;
-    let (nodes, edges) = checked_projection(projection)?;
+    let (nodes, edges) = checked_projection(scope, projection)?;
     tx.execute("DELETE FROM graph_edges WHERE scope=?1", [scope])?;
     tx.execute("DELETE FROM graph_scope_nodes WHERE scope=?1", [scope])?;
     for (id, node) in &nodes {
+        // Shared global identity must not allow one scope to overwrite another
+        // scope's label or source pointer silently.
+        let conflict: bool = tx.query_row(
+            "SELECT EXISTS(
+               SELECT 1 FROM graph_nodes n
+               JOIN graph_scope_nodes m ON m.node_id=n.id
+               WHERE n.id=?1 AND m.scope<>?2
+               AND (n.label<>?3 OR n.source_ref<>?4)
+             )",
+            params![id, scope, node.label, node.source_ref],
+            |r| r.get(0),
+        )?;
+        if conflict {
+            return Err(IndexError::InvalidQuery);
+        }
         tx.execute(
             "INSERT INTO graph_nodes(id,kind,canonical_key,label,source_ref)
              VALUES(?1,?2,?3,?4,?5)
@@ -341,7 +358,12 @@ pub(crate) fn refresh_archive_graph(tx: &Transaction<'_>) -> Result<()> {
             label: if title.trim().is_empty() {
                 "Untitled conversation".into()
             } else {
-                title
+                // Projection labels are bounded independently of the raw archive.
+                let mut end = title.len().min(MAX_GRAPH_FIELD_BYTES);
+                while !title.is_char_boundary(end) {
+                    end -= 1;
+                }
+                title[..end].to_owned()
             },
             source_ref: source_id.clone(),
         });
