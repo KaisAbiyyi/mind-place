@@ -433,11 +433,12 @@ impl StateStore {
             return Err(StateError::InvalidValue);
         }
         let mut db = self.connection()?;
-        let tx = db.transaction()?;
+        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let clock = memory::next_claim_clock(&tx, 0)?;
         tx.execute("INSERT INTO memory_claims(id,statement,asserted_by,epistemic_origin,status) VALUES(?1,?2,?3,?4,?5)",
             params![claim.id,claim.statement,claim.asserted_by,claim.epistemic_origin,claim.status])?;
-        tx.execute("INSERT INTO memory_claim_events(claim_id,revision,event_type,payload_json) VALUES(?1,1,'created',?2)",
-            params![claim.id,serde_json::to_string(claim).map_err(|_|StateError::InvalidValue)?])?;
+        tx.execute("INSERT INTO memory_claim_events(claim_id,revision,event_type,payload_json,recorded_at_ms) VALUES(?1,1,'created',?2,?3)",
+            params![claim.id,serde_json::to_string(claim).map_err(|_|StateError::InvalidValue)?,clock])?;
         tx.commit()?;
         Ok(())
     }
