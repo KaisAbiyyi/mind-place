@@ -155,7 +155,7 @@ fn content_text(ctx: &mut Context<'_>, data: &[u8]) -> Result<String> {
         let mut pos = 0;
         while pos < block.len() {
             let absolute = start + 2 + pos;
-            if absolute.saturating_sub(last_auth) >= 8192 {
+            if absolute.saturating_sub(last_auth) >= 32768 {
                 ctx.poll()?;
                 last_auth = absolute;
             } else {
@@ -211,9 +211,9 @@ fn content_text(ctx: &mut Context<'_>, data: &[u8]) -> Result<String> {
 fn inflate_stream(ctx: &mut Context<'_>, compressed: &[u8]) -> Result<Vec<u8>> {
     let mut reader = ZlibDecoder::new(compressed);
     let mut output = Vec::new();
-    let mut buffer = [0u8; 8192];
+    let mut buffer = [0u8; 32768];
+    ctx.poll()?;
     loop {
-        ctx.poll()?;
         let count = reader
             .read(&mut buffer)
             .map_err(|_| ExtractionError::Invalid)?;
@@ -312,8 +312,10 @@ pub(super) fn extract_pdf(ctx: &mut Context<'_>, bytes: &[u8]) -> Result<()> {
     let mut object_count = 0usize;
     let mut page_count = 0usize;
     for (n, window) in bytes.windows(11).enumerate() {
-        if n % 8192 == 0 {
+        if n % 32768 == 0 {
             ctx.poll()?;
+        } else if n % 8192 == 0 {
+            ctx.check_time()?;
         }
         if window.starts_with(b" obj") {
             object_count += 1;
