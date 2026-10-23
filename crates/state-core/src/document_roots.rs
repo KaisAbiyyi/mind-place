@@ -438,13 +438,37 @@ impl StateStore {
         uri: &str,
     ) -> Result<(DocumentRoot, VirtualDocumentPath)> {
         let virtual_path = VirtualDocumentPath::parse(uri)?;
-        let root = self
-            .document_root(&virtual_path.root_id)?
+        // One fresh statement reads all grant facts atomically. No cached grant,
+        // retained read transaction or permission boolean.
+        let db = self.read_connection()?;
+        let (root, digest, volume, file_id, tombstoned) = db
+            .query_row(
+                "SELECT r.id,r.canonical_path,r.approval_state,d.path_digest,a.volume_id,a.file_id,
+                    EXISTS(SELECT 1 FROM root_tombstones t WHERE t.root_id=r.id)
+             FROM document_root_registry d JOIN source_roots r ON r.id=d.root_id
+             LEFT JOIN document_root_authorizations a ON a.root_id=r.id
+             WHERE d.root_id=?1",
+                [&virtual_path.root_id],
+                |row| {
+                    Ok((
+                        row_root(row)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                        row.get::<_, Option<String>>(5)?,
+                        row.get::<_, bool>(6)?,
+                    ))
+                },
+            )
+            .optional()?
             .ok_or(StateError::InvalidValue)?;
-        if !root.is_approved() {
+        validate_binding(&root, &digest)?;
+        if !root.is_approved() || tombstoned {
             return Err(StateError::InvalidValue);
         }
-        self.authorized_binding(&root.id)?;
+        let volume = volume.ok_or(StateError::InvalidValue)?;
+        let file_id = file_id.ok_or(StateError::InvalidValue)?;
+        volume.parse::<u64>().map_err(|_| StateError::Corrupt)?;
+        file_id.parse::<u64>().map_err(|_| StateError::Corrupt)?;
         Ok((root, virtual_path))
     }
 

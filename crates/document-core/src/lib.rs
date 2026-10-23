@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 
 /// Current deterministic extraction contract; indexed projections record this revision.
-pub const EXTRACTOR_REVISION: &str = "mp-4e:1";
+pub const EXTRACTOR_REVISION: &str = "mp-4e:2";
 
 const CHUNK_BYTES: usize = 4096;
 
@@ -183,6 +183,10 @@ impl Context<'_> {
         if !(self.authorized)() {
             return Err(ExtractionError::Revoked);
         }
+        self.check_time()
+    }
+
+    pub fn check_time(&self) -> Result<()> {
         if self.started.elapsed() > Duration::from_millis(self.limits.max_millis) {
             return Err(ExtractionError::Limit("elapsed_millis"));
         }

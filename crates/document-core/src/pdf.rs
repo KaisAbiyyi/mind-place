@@ -134,18 +134,47 @@ fn decode_text(bytes: &[u8]) -> String {
         .collect()
 }
 
+fn delimiter(b: u8) -> bool {
+    b.is_ascii_whitespace() || b"()<>[]{}/%".contains(&b)
+}
+
 fn content_text(ctx: &mut Context<'_>, data: &[u8]) -> Result<String> {
     let mut output = String::new();
     let mut cursor = 0usize;
+    let mut last_auth = 0usize;
+    ctx.poll()?;
     while let Some(start) = find(data, b"BT", cursor) {
-        ctx.poll()?;
-        let Some(stop) = find(data, b"ET", start + 2) else {
-            break;
-        };
-        let block = &data[start + 2..stop];
+        if (start > 0 && !delimiter(data[start - 1]))
+            || data.get(start + 2).is_some_and(|b| !delimiter(*b))
+        {
+            cursor = start + 2;
+            continue;
+        }
+        ctx.check_time()?;
+        let block = &data[start + 2..];
         let mut pos = 0;
         while pos < block.len() {
+            let absolute = start + 2 + pos;
+            if absolute.saturating_sub(last_auth) >= 32768 {
+                ctx.poll()?;
+                last_auth = absolute;
+            } else {
+                ctx.check_time()?;
+            }
+            // ET inside a literal/hex string is evidence, not an operator.
+            if block[pos..].starts_with(b"ET")
+                && (pos == 0 || delimiter(block[pos - 1]))
+                && block.get(pos + 2).is_none_or(|b| delimiter(*b))
+            {
+                pos += 2;
+                break;
+            }
             match block[pos] {
+                b'%' => {
+                    while pos < block.len() && !matches!(block[pos], b'\r' | b'\n') {
+                        pos += 1;
+                    }
+                }
                 b'(' => {
                     let (literal, end) = string_literal(block, pos)?;
                     let value = decode_text(&literal);
@@ -155,7 +184,10 @@ fn content_text(ctx: &mut Context<'_>, data: &[u8]) -> Result<String> {
                     }
                     pos = end;
                 }
-                b'<' if block.get(pos + 1) != Some(&b'<') => {
+                b'<' if block.get(pos + 1) == Some(&b'<') => {
+                    pos += 2;
+                }
+                b'<' => {
                     let (literal, end) = hex_literal(block, pos)?;
                     let value = decode_text(&literal);
                     if !value.is_empty() {
@@ -170,17 +202,18 @@ fn content_text(ctx: &mut Context<'_>, data: &[u8]) -> Result<String> {
                 return Err(ExtractionError::Limit("output_bytes"));
             }
         }
-        cursor = stop + 2;
+        cursor = start + 2 + pos;
     }
+    ctx.poll()?;
     Ok(output)
 }
 
 fn inflate_stream(ctx: &mut Context<'_>, compressed: &[u8]) -> Result<Vec<u8>> {
     let mut reader = ZlibDecoder::new(compressed);
     let mut output = Vec::new();
-    let mut buffer = [0u8; 8192];
+    let mut buffer = [0u8; 32768];
+    ctx.poll()?;
     loop {
-        ctx.poll()?;
         let count = reader
             .read(&mut buffer)
             .map_err(|_| ExtractionError::Invalid)?;
@@ -193,6 +226,85 @@ fn inflate_stream(ctx: &mut Context<'_>, compressed: &[u8]) -> Result<Vec<u8>> {
     Ok(output)
 }
 
+// Lex the current dictionary rather than inheriting names from an earlier
+// object, comment or literal. Filter pipelines remain explicitly unsupported.
+fn stream_filter(bytes: &[u8]) -> Result<Option<bool>> {
+    let mut at = 0;
+    let mut depth = 0usize;
+    let mut filter = Some(false);
+    let mut closed = None;
+    while at < bytes.len() {
+        match bytes[at] {
+            b'%' => {
+                while at < bytes.len() && !matches!(bytes[at], b'\r' | b'\n') {
+                    at += 1;
+                }
+            }
+            b'(' => {
+                at = string_literal(bytes, at)?.1;
+            }
+            b'<' if bytes.get(at + 1) == Some(&b'<') => {
+                if depth == 0 {
+                    filter = Some(false);
+                    closed = None;
+                }
+                depth += 1;
+                if depth > 96 {
+                    return Err(ExtractionError::Limit("pdf_dictionary_depth"));
+                }
+                at += 2;
+            }
+            b'<' => {
+                at = hex_literal(bytes, at)?.1;
+            }
+            b'>' if bytes.get(at + 1) == Some(&b'>') => {
+                depth = depth.checked_sub(1).ok_or(ExtractionError::Invalid)?;
+                at += 2;
+                if depth == 0 {
+                    closed = Some(at);
+                }
+            }
+            b'/' => {
+                let begin = at + 1;
+                at = begin;
+                while at < bytes.len() && !delimiter(bytes[at]) {
+                    at += 1;
+                }
+                if depth == 1 && &bytes[begin..at] == b"Filter" {
+                    while at < bytes.len() && bytes[at].is_ascii_whitespace() {
+                        at += 1;
+                    }
+                    if bytes.get(at) == Some(&b'/') {
+                        let name = at + 1;
+                        at = name;
+                        while at < bytes.len() && !delimiter(bytes[at]) {
+                            at += 1;
+                        }
+                        filter = if &bytes[name..at] == b"FlateDecode" {
+                            Some(true)
+                        } else {
+                            None
+                        };
+                    } else {
+                        filter = None;
+                    }
+                }
+            }
+            _ => at += 1,
+        }
+    }
+    if depth != 0 {
+        return Err(ExtractionError::Invalid);
+    }
+    // Existing raw-content fallback without a dictionary is retained.
+    if let Some(end) = closed {
+        if bytes[end..].iter().any(|b| !b.is_ascii_whitespace()) {
+            return Err(ExtractionError::Invalid);
+        }
+    }
+    Ok(filter)
+}
+
 pub(super) fn extract_pdf(ctx: &mut Context<'_>, bytes: &[u8]) -> Result<()> {
     if !bytes.starts_with(b"%PDF-") {
         return Err(ExtractionError::Invalid);
@@ -200,8 +312,10 @@ pub(super) fn extract_pdf(ctx: &mut Context<'_>, bytes: &[u8]) -> Result<()> {
     let mut object_count = 0usize;
     let mut page_count = 0usize;
     for (n, window) in bytes.windows(11).enumerate() {
-        if n % 8192 == 0 {
+        if n % 32768 == 0 {
             ctx.poll()?;
+        } else if n % 8192 == 0 {
+            ctx.check_time()?;
         }
         if window.starts_with(b" obj") {
             object_count += 1;
@@ -221,6 +335,7 @@ pub(super) fn extract_pdf(ctx: &mut Context<'_>, bytes: &[u8]) -> Result<()> {
     let mut supported_streams = 0usize;
     while let Some(marker) = find(bytes, b"stream", scan_at) {
         ctx.poll()?;
+        let dict_start = scan_at;
         scan_at = marker + 6;
         let content_at = match bytes.get(scan_at..scan_at + 2) {
             Some(value) if value == b"\r\n" => scan_at + 2,
@@ -238,17 +353,18 @@ pub(super) fn extract_pdf(ctx: &mut Context<'_>, bytes: &[u8]) -> Result<()> {
         while content_end > content_at && matches!(bytes[content_end - 1], b'\r' | b'\n') {
             content_end -= 1;
         }
-        let dict_start = marker.saturating_sub(512);
+        // Never inherit a filter from a preceding stream. Limit dictionary
+        // inspection to the bytes since the previous endstream boundary.
         let preceding = &bytes[dict_start..marker];
-        let flate = preceding
-            .windows(b"/FlateDecode".len())
-            .any(|v| v == b"/FlateDecode");
-        let unsupported_filter =
-            preceding.windows(b"/Filter".len()).any(|v| v == b"/Filter") && !flate;
+        let filter = stream_filter(preceding)?;
+        let flate = filter == Some(true);
+        let unsupported_filter = filter.is_none();
         if !unsupported_filter {
             let stream = &bytes[content_at..content_end];
             let decoded = if flate {
-                inflate_stream(ctx, stream)?
+                // A compressed checksum can itself end in CR/LF. The zlib
+                // decoder stops at its checksum and ignores the PDF delimiter.
+                inflate_stream(ctx, &bytes[content_at..end])?
             } else {
                 ctx.expanded(stream.len())?;
                 stream.to_vec()

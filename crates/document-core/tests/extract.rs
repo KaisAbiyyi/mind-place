@@ -5,6 +5,51 @@ use mind_place_documents::{
 };
 use std::io::Write;
 
+#[test]
+fn large_ooxml_revocation_discards_all_text() {
+    let xml = format!(
+        "<document>{}</document>",
+        "<p><t>evidence</t></p>".repeat(12000)
+    );
+    let bytes = make_zip(&[("word/document.xml", xml.as_bytes(), false)]);
+    let mut checks = 0;
+    let result = extract_with_check(
+        DocumentFormat::Docx,
+        &bytes,
+        ExtractionLimits::default(),
+        || {
+            checks += 1;
+            checks < 6
+        },
+    );
+    assert_eq!(result, Err(ExtractionError::Revoked));
+    assert_eq!(checks, 6);
+}
+
+#[test]
+fn pdf_flate_checksum_linefeed_is_not_a_stream_delimiter() {
+    use flate2::write::ZlibEncoder;
+    let (compressed, expected) = (0..10000)
+        .find_map(|n| {
+            let expected = format!("checksum-{n}");
+            let content = format!("BT ({expected}) Tj ET{}", " ".repeat(n));
+            let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+            encoder.write_all(content.as_bytes()).unwrap();
+            let compressed = encoder.finish().unwrap();
+            matches!(compressed.last(), Some(10 | 13)).then_some((compressed, expected))
+        })
+        .expect("fixture checksum ends in CR or LF");
+    let mut pdf = format!(
+        "%PDF-1.7\n1 0 obj\n<< /Length {} /Filter /FlateDecode >>\nstream\n",
+        compressed.len()
+    )
+    .into_bytes();
+    pdf.extend_from_slice(&compressed);
+    pdf.extend_from_slice(b"\r\nendstream\nendobj\n%%EOF");
+    let extracted = extract_bytes(DocumentFormat::Pdf, &pdf, ExtractionLimits::default()).unwrap();
+    assert!(extracted.text.contains(&expected));
+}
+
 fn make_zip(parts: &[(&str, &[u8], bool)]) -> Vec<u8> {
     let mut data = Vec::new();
     let mut central = Vec::new();
@@ -283,4 +328,53 @@ fn extension_mapping_does_not_accept_macro_enabled_office_archives() {
     );
     assert_eq!(DocumentFormat::from_extension("xlsm"), None);
     assert_eq!(DocumentFormat::from_extension("docm"), None);
+}
+
+#[test]
+fn pdf_operator_letters_inside_literal_are_preserved() {
+    let bytes = b"%PDF-1.7\n1 0 obj\n<< /Length 50 >>\nstream\nBT (METADATA and ET inside text) Tj ET\nendstream\nendobj";
+    let doc = extract_bytes(DocumentFormat::Pdf, bytes, ExtractionLimits::default()).unwrap();
+    assert!(doc.text.contains("METADATA and ET inside text"));
+}
+
+#[test]
+fn pdf_previous_stream_filter_does_not_bleed_into_plain_stream() {
+    let bytes = b"%PDF-1.7\n1 0 obj\n<< /Filter /DCTDecode >>\nstream\nunsupported\nendstream\nendobj\n2 0 obj\n<< /Length 30 >>\nstream\nBT (visible second stream) Tj ET\nendstream\nendobj";
+    let doc = extract_bytes(DocumentFormat::Pdf, bytes, ExtractionLimits::default()).unwrap();
+    assert!(doc.text.contains("visible second stream"));
+}
+
+#[test]
+fn pdf_nonstream_filter_dictionary_does_not_bleed() {
+    let bytes = b"%PDF-1.7\n1 0 obj\n<< /Filter /DCTDecode >>\nendobj\n2 0 obj\n<< /Length 30 >>\nstream\nBT (current dictionary only) Tj ET\nendstream\nendobj";
+    let doc = extract_bytes(DocumentFormat::Pdf, bytes, ExtractionLimits::default()).unwrap();
+    assert!(doc.text.contains("current dictionary only"));
+}
+
+#[test]
+fn pdf_revoke_after_first_expanded_decode_discards_text() {
+    use flate2::write::ZlibEncoder;
+    let content = "BT (evidence) Tj ET\n".repeat(6000);
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+    encoder.write_all(content.as_bytes()).unwrap();
+    let compressed = encoder.finish().unwrap();
+    let mut pdf = format!(
+        "%PDF-1.7\n1 0 obj\n<< /Length {} /Filter /FlateDecode >>\nstream\n",
+        compressed.len()
+    )
+    .into_bytes();
+    pdf.extend_from_slice(&compressed);
+    pdf.extend_from_slice(b"\nendstream\nendobj");
+    let mut checks = 0;
+    let result = extract_with_check(
+        DocumentFormat::Pdf,
+        &pdf,
+        ExtractionLimits::default(),
+        || {
+            checks += 1;
+            checks < 5
+        },
+    );
+    assert_eq!(result, Err(ExtractionError::Revoked));
+    assert_eq!(checks, 5);
 }

@@ -1,0 +1,92 @@
+{
+  "approved_source_root": "D drive / owner-approved projects, locally staged subset",
+  "changed": {
+    "index_ms": 3497,
+    "indexed_files": 10,
+    "new_versions": 1,
+    "scan_ms": 477,
+    "skipped_files": 0,
+    "unchanged_versions": 9
+  },
+  "formats": {
+    "docx": {
+      "checked_auth_calls": 982,
+      "checked_ok": 2,
+      "checked_total_ms": 1003,
+      "errors": 0,
+      "extract_ok": 2,
+      "files": 2,
+      "nonempty": 2,
+      "warnings": 0
+    },
+    "md": {
+      "checked_auth_calls": 35,
+      "checked_ok": 3,
+      "checked_total_ms": 30,
+      "errors": 0,
+      "extract_ok": 3,
+      "files": 3,
+      "nonempty": 3,
+      "warnings": 0
+    },
+    "pdf": {
+      "checked_auth_calls": 881,
+      "checked_ok": 2,
+      "checked_total_ms": 850,
+      "errors": 0,
+      "extract_ok": 2,
+      "files": 2,
+      "nonempty": 2,
+      "warnings": 3
+    },
+    "pptx": {
+      "checked_auth_calls": 571,
+      "checked_ok": 2,
+      "checked_total_ms": 516,
+      "errors": 0,
+      "extract_ok": 2,
+      "files": 2,
+      "nonempty": 2,
+      "warnings": 2
+    },
+    "rs": {
+      "checked_auth_calls": 13,
+      "checked_ok": 1,
+      "checked_total_ms": 11,
+      "errors": 0,
+      "extract_ok": 1,
+      "files": 1,
+      "nonempty": 1,
+      "warnings": 0
+    }
+  },
+  "initial": {
+    "files": 10,
+    "index_ms": 3562,
+    "indexed_files": 10,
+    "new_versions": 10,
+    "scan_ms": 490,
+    "skipped_files": 0
+  },
+  "kind": "native_real_staged_corpus",
+  "new_search_fresh": true,
+  "noop": {
+    "index_ms": 3528,
+    "indexed_files": 10,
+    "new_versions": 0,
+    "scan_ms": 491,
+    "unchanged_versions": 10
+  },
+  "not_qualified": "Live original tree re-scan, user UI, inaccessible or unsampled files, optional XLSX if not found",
+  "old_version_readable": true,
+  "product_main_sha": "08b310b2b14639594edcf5210d9a28b8b677846f",
+  "scope": "Real sampled input files staged locally; one disposable marker edited, not original source; filenames/excerpts omitted",
+  "source_files_unchanged": true,
+  "stale_search_suppressed": true,
+  "status": "PASS",
+  "task": "MP-4L2",
+  "tested_product_sha": "60233a054974a3b0ede157fb8962c34302142b2e",
+  "version_history_two_versions": true,
+  "build_profile": "release",
+  "native_platform": "Windows x64 / D: NTFS"
+}
