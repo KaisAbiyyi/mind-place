@@ -290,3 +290,41 @@ test("source preview renders only inert verified text and is erased before revok
   await delay(0);
   assert.equal(root.querySelectorAll(".document-search-card").length, 0);
 });
+
+
+test("paused root exposes explicit resume via owner-triggered indexing", async () => {
+  const id = "root:v1:" + "7".repeat(64);
+  let scans = 0;
+  let pauses = 0;
+  const invoke: Invoke = async <T>(command: string) => {
+    if (command === "list_document_roots") return [{
+      id, canonical_path: "C:\\Approved", approval_state: "approved",
+      virtual_prefix: "mpdoc://root/" + id,
+    }] as T;
+    if (command === "refresh_document_root_index") {
+      scans++;
+      return {
+        root_id: id, scanned_files: 1, indexed_files: 1, skipped_files: 0,
+        indexed_chunks: 1, generation: scans, auto_refresh_active: true,
+      } as T;
+    }
+    if (command === "pause_document_root_refresh") {
+      pauses++;
+      return undefined as T;
+    }
+    throw Error(command);
+  };
+  const { root } = setup(invoke);
+  await delay(0);
+  root.querySelector<HTMLButtonElement>("[data-action='index-root']")!.click();
+  await delay(0);
+  root.querySelector<HTMLButtonElement>("[data-action='pause-root-refresh']")!.click();
+  await delay(0);
+  assert.equal(pauses, 1);
+  const resume = root.querySelector<HTMLButtonElement>("[data-action='pause-root-refresh']")!;
+  assert.match(resume.textContent ?? "", /Resume refresh/);
+  resume.click();
+  await delay(0);
+  assert.equal(scans, 2, "resume requires new explicit indexing");
+  assert.match(root.textContent ?? "", /refresh active/);
+});
