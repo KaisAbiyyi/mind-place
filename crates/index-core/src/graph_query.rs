@@ -157,14 +157,24 @@ fn load_node(
     .transpose()
 }
 
-type EdgeRow = (String, String, String, String, String, String, String, String, Option<i64>);
+type EdgeRow = (
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    Option<i64>,
+);
 
 fn edge_from_row(row: EdgeRow) -> Result<GraphQueryEdge> {
     let origin = match (row.7.as_str(), row.8) {
         ("deterministic", None) => GraphOrigin::Deterministic,
-        ("inferred", Some(v)) if (8_000..=10_000).contains(&v) => {
-            GraphOrigin::Inferred { confidence_bps: v as u16 }
-        }
+        ("inferred", Some(v)) if (8_000..=10_000).contains(&v) => GraphOrigin::Inferred {
+            confidence_bps: v as u16,
+        },
         _ => return Err(IndexError::InvalidIndex),
     };
     Ok(GraphQueryEdge {
