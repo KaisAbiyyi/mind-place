@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 
 const MAX_GRAPH_ITEMS: usize = 100_000;
 const MAX_GRAPH_FIELD_BYTES: usize = 4096;
-const ARCHIVE_SCOPE: &str = "archive:chatgpt";
+pub(crate) const ARCHIVE_SCOPE: &str = "archive:chatgpt";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum GraphKind {
@@ -138,7 +138,7 @@ pub struct GraphProjectionStats {
     pub edges: i64,
 }
 
-fn validate_field(value: &str) -> Result<()> {
+pub(crate) fn validate_field(value: &str) -> Result<()> {
     if value.trim().is_empty()
         || value.len() > MAX_GRAPH_FIELD_BYTES
         || value.as_bytes().contains(&0)
@@ -221,7 +221,7 @@ fn checked_projection<'a>(
 
 /// Atomically replace only one derived scope. Unrelated scoped projections remain.
 /// Edges must reference nodes declared within this scope; no hidden cross-scope reads.
-fn replace_tx(
+pub(crate) fn replace_tx(
     tx: &Transaction<'_>,
     scope: &str,
     projection: &GraphProjection,
@@ -316,6 +316,14 @@ impl IndexStore {
         let mut db = self.connection()?;
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let stats = replace_tx(&tx, scope, projection)?;
+        // Compatibility writer: never leave a trusted generation manifest
+        // pointing at rows mutated outside the fenced generation API.
+        tx.execute(
+            "UPDATE graph_generations SET generation=generation+1,active=0,
+               files_hash='',content_hash='',structure_hash='',projection_hash='',
+               nodes=0,edges=0 WHERE scope=?1",
+            [scope],
+        )?;
         check()?;
         tx.commit()?;
         Ok(stats)
