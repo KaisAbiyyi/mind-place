@@ -9,7 +9,6 @@ use serde::{Deserialize, Serialize};
 use sha2::Digest;
 use std::time::{Duration, Instant};
 
-const NAMESPACE: &str = "mind-place-chatgpt-archive-v1";
 const MAX_RESPONSE_SEGMENTS: usize = 100;
 const MAX_TEXT_BYTES: usize = 256 * 1024;
 const MAX_ESTIMATED_TOKENS: usize = 65_536;
@@ -194,12 +193,11 @@ impl IndexStore {
             .optional()?;
         let (provider, conversation_id, title, source_url, captured_at, completeness, is_current) =
             indexed.ok_or(IndexError::InvalidQuery)?;
-        if provider != "chatgpt" {
-            return Err(IndexError::InvalidEvidence);
-        }
+        let namespace =
+            super::namespace_for_provider(&provider).ok_or(IndexError::InvalidEvidence)?;
         let canonical = canonical_source_id(&SourceDescriptor {
-            provider: "chatgpt",
-            source_namespace: NAMESPACE,
+            provider: &provider,
+            source_namespace: namespace,
             source_kind: "conversation",
             key: SourceKey::External(&conversation_id),
         })?;

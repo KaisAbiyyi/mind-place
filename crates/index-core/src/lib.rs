@@ -16,6 +16,16 @@ use std::{
 const APPLICATION_ID: i64 = 0x4D504958; // MPIX, deliberately distinct from state.
 const SCHEMA_VERSION: i64 = 3;
 const NAMESPACE: &str = "mind-place-chatgpt-archive-v1";
+
+// Preserve historical ChatGPT source identity bytes; each newer provider has
+// its own explicit local archive namespace.
+pub(crate) fn namespace_for_provider(provider: &str) -> Option<&'static str> {
+    match provider {
+        "chatgpt" => Some(NAMESPACE),
+        "gemini" => Some("mind-place-gemini-archive-v1"),
+        _ => None,
+    }
+}
 const MAX_CHUNK_BYTES: usize = 4096;
 const SCHEMA: &str = include_str!("schema_v1.sql");
 const GRAPH_SCHEMA: &str = include_str!("schema_v2.sql");
@@ -326,7 +336,9 @@ impl IndexStore {
         for summary in conversations {
             check()?;
             let selected = archive.read(&summary.id, None)?;
-            if selected.capture.provider != "chatgpt"
+            let namespace =
+                namespace_for_provider(&summary.provider).ok_or(IndexError::InvalidEvidence)?;
+            if selected.capture.provider != summary.provider
                 || selected.capture.conversation_id != summary.conversation_id
                 || format!(
                     "{:x}",
@@ -337,11 +349,11 @@ impl IndexStore {
             {
                 return Err(IndexError::InvalidEvidence);
             }
-            // The namespace identifies the explicitly local ChatGPT archive import
-            // origin. Do not pretend an unobserved provider account ID exists.
+            // An explicit provider-local namespace avoids cross-provider identity
+            // collisions without pretending an unobserved account ID exists.
             let source_id = authority.register_source(&SourceDescriptor {
-                provider: "chatgpt",
-                source_namespace: NAMESPACE,
+                provider: &summary.provider,
+                source_namespace: namespace,
                 source_kind: "conversation",
                 key: SourceKey::External(&summary.conversation_id),
             })?;
