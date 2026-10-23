@@ -1,4 +1,4 @@
-import { captureConversation, parseChatGptConversationUrl } from './capture.mjs';
+import { resolveCaptureAdapter, captureMatchesIdentity } from './providers/index.mjs';
 import { NATIVE_HOST, validReceipt, withTimeout } from './native.mjs';
 import { AUTO_ORIGINS } from './automatic.mjs';
 const DEFAULT_TIMEOUT_MS = 15_000;
@@ -166,34 +166,32 @@ export function initPopup({ chromeApi = globalThis.chrome, documentRef = globalT
       showFailure('Private browsing is excluded. Open this conversation in a regular browser window to save it.');
       return;
     }
-    const identity = parseChatGptConversationUrl(tab.url);
-    if (!identity) {
-      showFailure('Open a ChatGPT conversation at chatgpt.com before saving.');
+    const selected = resolveCaptureAdapter(tab.url);
+    if (!selected || !selected.adapter.capabilities.manualDom) {
+      showFailure('Open a supported saved conversation before saving.');
       return;
     }
+    const { adapter, identity } = selected;
 
     showStatus('Reading the currently rendered conversation…');
     let frames;
     try {
       frames = await bounded(() => chromeApi.scripting.executeScript({
         target: { tabId: tab.id },
-        func: captureConversation,
+        func: adapter.capture,
       }));
     } catch {
       showFailure('Capture timed out or could not read this page. Nothing was sent to Mind Place. Make sure the conversation is open, then try again.');
       return;
     }
-    const result = frames?.[0]?.result;
+    const result = frames?.find(frame => frame.frameId === 0)?.result;
     if (!result?.ok || !result.capture) {
       showFailure(result?.error || 'The conversation could not be read from this page.');
       return;
     }
     const capture = result.capture;
-    if (capture.provider !== 'chatgpt'
-      || capture.conversation_id !== identity.conversationId
-      || capture.source_url !== identity.sourceUrl
-      || capture.capture_method !== 'manual-dom') {
-      showFailure('The page identity changed during capture. Nothing was sent to Mind Place.');
+    if (!captureMatchesIdentity(adapter, identity, capture, false)) {
+      showFailure('The page identity or capture contract changed during capture. Nothing was sent to Mind Place.');
       return;
     }
 

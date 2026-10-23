@@ -7,8 +7,8 @@ current-phase pointer predates that acceptance. GitHub issue #58 records the cla
 
 ## Design and scope
 
-Manual and automatic coordinators previously imported ChatGPT's capture function
-and duplicated provider/identity/mode checks. Both now dispatch through the same
+The manual worker, quick-save popup and automatic coordinator previously imported
+ChatGPT's capture function and duplicated provider/identity/mode checks. All now dispatch through the same
 statically bundled adapter registry and normalized admission function. ChatGPT's
 serialized DOM implementation moves intact to `extension/providers/chatgpt.mjs`;
 `extension/capture.mjs` remains a compatibility re-export. Its DOM selection,
@@ -65,8 +65,9 @@ or normalizing the observation. The native host remains an independent authority
 for archive validation, image sniffing, safe paths, immutable writes and receipts.
 This browser check does not replace native validation or grant file access.
 
-Both coordinators retain private-tab rejection, current-tab URL checks before
-submission, job cancellation and acknowledgement uncertainty behavior. Automatic
+All save paths retain private-tab rejection, current-tab URL checks before
+submission and acknowledgement uncertainty behavior. Each accepts only the
+top-frame result. Manual worker job cancellation is retained. Automatic
 saving remains off by default, permission-gated, loaded-only, debounced and
 generation-fenced on opt-out. The observer stays ChatGPT-specific and never
 scrolls; manual history loading remains explicit, bounded and cancellable.
