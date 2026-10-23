@@ -14,6 +14,7 @@ mod document_scanner;
 mod identity;
 mod memory;
 mod memory_ranking;
+mod memory_writes;
 mod ntfs;
 pub use clients::{ClientAuditEvent, ClientCapability, ClientRecord};
 pub use document_objects::{
@@ -28,9 +29,10 @@ pub use memory_ranking::{
     serialize_ranked_context, ClaimRelation, ClaimRelationResolution, RankedClaim, RankingMode,
     RankingPolicy, RelationKind,
 };
+pub use memory_writes::{MemoryWrite, MemoryWriteReceipt};
 
 pub const APPLICATION_ID: i64 = 0x4D504C43;
-pub const SCHEMA_VERSION: i64 = 8;
+pub const SCHEMA_VERSION: i64 = 9;
 const MIN_SQLITE_NUMBER: i32 = 3_053_002;
 const MIGRATION_V1: &str = include_str!("schema_v1.sql");
 const MIGRATION_V2: &str = include_str!("schema_v2.sql");
@@ -40,12 +42,15 @@ const MIGRATION_V5: &str = include_str!("schema_v5.sql");
 const MIGRATION_V6: &str = include_str!("schema_v6.sql");
 const MIGRATION_V7: &str = include_str!("schema_v7.sql");
 const MIGRATION_V8: &str = include_str!("schema_v8.sql");
+const MIGRATION_V9: &str = include_str!("schema_v9.sql");
 pub type Result<T> = std::result::Result<T, StateError>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum StateError {
     #[error("document access denied")]
     DocumentDenied,
+    #[error("memory mutation denied")]
+    MemoryDenied,
     #[error("document object integrity failure")]
     ObjectCorrupt,
     #[error("document resource limit exceeded")]
@@ -75,6 +80,7 @@ impl StateError {
     pub fn code(&self) -> &'static str {
         match self {
             Self::DocumentDenied => "MP_DOCUMENT_DENIED",
+            Self::MemoryDenied => "MP_MEMORY_DENIED",
             Self::ObjectCorrupt => "MP_DOCUMENT_OBJECT_CORRUPT",
             Self::DocumentLimit => "MP_DOCUMENT_LIMIT",
             Self::DocumentChanged => "MP_DOCUMENT_CHANGED",
@@ -270,6 +276,13 @@ impl StateStore {
                 tx.execute(
                     "INSERT INTO schema_migrations(version,checksum) VALUES(8,?1)",
                     [checksum(MIGRATION_V8)],
+                )?;
+            }
+            if previous_version < 9 {
+                tx.execute_batch(MIGRATION_V9)?;
+                tx.execute(
+                    "INSERT INTO schema_migrations(version,checksum) VALUES(9,?1)",
+                    [checksum(MIGRATION_V9)],
                 )?;
             }
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -538,6 +551,7 @@ fn validate_version(db: &Connection, version: i64) -> Result<()> {
         (6, MIGRATION_V6),
         (7, MIGRATION_V7),
         (8, MIGRATION_V8),
+        (9, MIGRATION_V9),
     ] {
         if step > version {
             break;

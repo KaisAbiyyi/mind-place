@@ -33,7 +33,7 @@ fn schema_v5_upgrade_backs_up_authority_and_never_promotes_roots() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("state.sqlite3");
     v5(&path);
-    assert_eq!(SCHEMA_VERSION, 8);
+    assert_eq!(SCHEMA_VERSION, 9);
     let state = StateStore::open(&path).unwrap();
     assert_eq!(
         state.get_project("project:existing").unwrap().unwrap().name,
