@@ -1,7 +1,8 @@
 //! MP-5B: evidence-linked relations and conservative memory ranking.
 //! No external write surface is exposed here. MP-5C owns authorization and forget.
 use crate::{
-    memory::claim_as_of_connection, source_record, valid_id, valid_text, verify_source_record,
+    memory::{claim_as_of_connection, next_claim_clock}, source_record, valid_id, valid_text,
+    verify_source_record,
     ClaimState, Result, StateError, StateStore,
 };
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
@@ -229,12 +230,19 @@ impl StateStore {
             let cycle: Option<i64> = tx
                 .query_row(
                     "WITH RECURSIVE reachable(id) AS (
-                        SELECT to_claim_id FROM memory_claim_relations
-                        WHERE from_claim_id=?1 AND relation='supersedes'
+                        SELECT r.to_claim_id FROM memory_claim_relations r
+                        LEFT JOIN memory_claim_relation_resolutions x
+                          ON x.from_claim_id=r.from_claim_id
+                         AND x.to_claim_id=r.to_claim_id AND x.relation=r.relation
+                        WHERE r.from_claim_id=?1 AND r.relation='supersedes'
+                          AND x.from_claim_id IS NULL
                         UNION
                         SELECT r.to_claim_id FROM memory_claim_relations r
                         JOIN reachable ON r.from_claim_id=reachable.id
-                        WHERE r.relation='supersedes'
+                        LEFT JOIN memory_claim_relation_resolutions x
+                          ON x.from_claim_id=r.from_claim_id
+                         AND x.to_claim_id=r.to_claim_id AND x.relation=r.relation
+                        WHERE r.relation='supersedes' AND x.from_claim_id IS NULL
                      )
                      SELECT 1 FROM reachable WHERE id=?2 LIMIT 1",
                     params![to_id, from_id],
@@ -245,13 +253,14 @@ impl StateStore {
                 return Err(StateError::InvalidValue);
             }
         }
-        let clock = now_ms()?.max(
+        let clock = next_claim_clock(
+            &tx,
             bounds[0]
                 .1
                 .max(bounds[1].1)
                 .checked_add(1)
                 .ok_or(StateError::Corrupt)?,
-        );
+        )?;
         tx.execute(
             "INSERT INTO memory_claim_relations
              (from_claim_id,to_claim_id,relation,source_ref,reason,recorded_at_ms)
@@ -309,7 +318,10 @@ impl StateStore {
             )
             .optional()?
             .ok_or(StateError::InvalidValue)?;
-        let clock = now_ms()?.max(original.checked_add(1).ok_or(StateError::Corrupt)?);
+        let clock = next_claim_clock(
+            &tx,
+            original.checked_add(1).ok_or(StateError::Corrupt)?,
+        )?;
         tx.execute(
             "INSERT INTO memory_claim_relation_resolutions
              (from_claim_id,to_claim_id,relation,source_ref,reason,recorded_at_ms)
