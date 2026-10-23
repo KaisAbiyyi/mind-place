@@ -146,16 +146,19 @@ fn invalidation_creates_tombstone_and_fences_stale_builder() {
 }
 
 #[test]
-fn legacy_unfenced_writer_invalidates_manifest_and_illegal_hashes_are_rejected() {
+fn legacy_unfenced_writer_is_rejected_and_illegal_hashes_are_rejected() {
     let dir = tempfile::tempdir().unwrap();
     let index = IndexStore::open(dir.path().join("index.sqlite3")).unwrap();
     index.activate_graph_generation("scope", &inputs(), &graph(), None).unwrap();
-    index.replace_graph_projection("scope", &graph()).unwrap();
-    let generation = index.graph_generation("scope").unwrap().unwrap();
-    assert_eq!(generation.generation, 2);
-    assert!(!generation.active);
     assert!(matches!(
-        index.activate_graph_generation("scope", &inputs(), &graph(), Some(1)),
+        index.replace_graph_projection("scope", &graph()),
+        Err(IndexError::StaleGeneration)
+    ));
+    let generation = index.graph_generation("scope").unwrap().unwrap();
+    assert_eq!(generation.generation, 1);
+    assert!(generation.active);
+    assert!(matches!(
+        index.activate_graph_generation("scope", &inputs(), &graph(), None),
         Err(IndexError::StaleGeneration)
     ));
     assert!(matches!(
