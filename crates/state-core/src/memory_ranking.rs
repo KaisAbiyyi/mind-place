@@ -107,8 +107,7 @@ fn is_live_at(db: &Connection, claim: &ClaimState, at_ms: i64) -> Result<bool> {
         |r| Ok((r.get(0)?, r.get(1)?)),
     )?;
     let at_seconds = at_ms.div_euclid(1000);
-    Ok(valid_from.is_none_or(|v| at_seconds >= v)
-        && valid_until.is_none_or(|v| at_seconds <= v))
+    Ok(valid_from.is_none_or(|v| at_seconds >= v) && valid_until.is_none_or(|v| at_seconds <= v))
 }
 
 fn positive_evidence(claim: &ClaimState) -> usize {
