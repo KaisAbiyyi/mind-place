@@ -241,10 +241,24 @@ export function initPopup({ chromeApi = globalThis.chrome, documentRef = globalT
     if (initializing || inFlight || workerJob?.active) return;
     button.disabled = true;
     const providerSave = async () => {
-      const tabs = await chromeApi?.tabs?.query?.({ active: true, currentWindow: true });
+      // One-shot saves already bound every browser operation to a deadline.
+      // Only query first when the user requested history scrolling, and bound
+      // this new routing query too (a suspended Chrome tab may never reply).
+      if (!loadHistory?.checked) return runSave();
+      if (!chromeApi?.tabs?.query) return runScrollingSave();
+      let tabs;
+      try {
+        tabs = await withTimeout(
+          chromeApi.tabs.query({ active: true, currentWindow: true }),
+          Math.min(saveTimeoutMs, 5000),
+        );
+      } catch {
+        showFailure('Capture timed out while checking the active tab. Nothing was sent to Mind Place.');
+        return;
+      }
       const selected = resolveCaptureAdapter(tabs?.[0]?.url ?? '');
-      if (loadHistory?.checked && selected?.adapter.capabilities.manualHistory) return runScrollingSave();
-      if (loadHistory?.checked && selected && !selected.adapter.capabilities.manualHistory) loadHistory.checked = false;
+      if (!selected || selected.adapter.capabilities.manualHistory) return runScrollingSave();
+      loadHistory.checked = false;
       return runSave();
     };
     inFlight = providerSave().catch(() => {
