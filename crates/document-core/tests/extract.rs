@@ -350,3 +350,31 @@ fn pdf_nonstream_filter_dictionary_does_not_bleed() {
     let doc = extract_bytes(DocumentFormat::Pdf, bytes, ExtractionLimits::default()).unwrap();
     assert!(doc.text.contains("current dictionary only"));
 }
+
+#[test]
+fn pdf_revoke_after_first_expanded_decode_discards_text() {
+    use flate2::write::ZlibEncoder;
+    let content = "BT (evidence) Tj ET\n".repeat(6000);
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+    encoder.write_all(content.as_bytes()).unwrap();
+    let compressed = encoder.finish().unwrap();
+    let mut pdf = format!(
+        "%PDF-1.7\n1 0 obj\n<< /Length {} /Filter /FlateDecode >>\nstream\n",
+        compressed.len()
+    )
+    .into_bytes();
+    pdf.extend_from_slice(&compressed);
+    pdf.extend_from_slice(b"\nendstream\nendobj");
+    let mut checks = 0;
+    let result = extract_with_check(
+        DocumentFormat::Pdf,
+        &pdf,
+        ExtractionLimits::default(),
+        || {
+            checks += 1;
+            checks < 5
+        },
+    );
+    assert_eq!(result, Err(ExtractionError::Revoked));
+    assert_eq!(checks, 5);
+}
