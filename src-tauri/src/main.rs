@@ -10,7 +10,9 @@ use mind_place_archive::{
     ArchiveStore, AssetResult, Conversation, ConversationSummary, ExportResult, ImportReceipt,
     SnapshotSummary, NATIVE_HOST_NAME,
 };
-use mind_place_index::documents::{DocumentHit, DocumentIndex, DocumentIndexReport, DocumentPreview};
+use mind_place_index::documents::{
+    DocumentHit, DocumentIndex, DocumentIndexReport, DocumentPreview,
+};
 use mind_place_index::{
     ContextInspection, ContextPack, ContextRequest, FetchInspection, FetchRequest, FetchResponse,
     IndexError, IndexStats, IndexStore, RetrievalRequest, RetrievalResponse, SearchHit,
