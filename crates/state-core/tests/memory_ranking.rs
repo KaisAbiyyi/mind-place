@@ -869,7 +869,13 @@ fn writer_rejects_129th_incident_edge_before_reader_can_be_poisoned() {
     assert_eq!(before.len(), 1);
     assert_eq!(before[0].disposition, "current_candidate");
 
-    make_claim(&state, "claim:leaf:128", "One more related claim", true, &source);
+    make_claim(
+        &state,
+        "claim:leaf:128",
+        "One more related claim",
+        true,
+        &source,
+    );
     assert!(matches!(
         state.add_claim_relation(
             "claim:leaf:128",
