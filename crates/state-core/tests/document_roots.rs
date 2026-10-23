@@ -50,8 +50,10 @@ fn fresh_read_checks_preserve_corruption_and_revocation_guards() {
     assert!(state.require_approved_document_uri(&uri).is_err());
     {
         let db = Connection::open(state.path()).unwrap();
-        db.execute_batch("DROP TRIGGER document_root_registry_no_update;")
-            .unwrap();
+        db.execute_batch(
+            "DROP TRIGGER document_root_registry_no_update; PRAGMA ignore_check_constraints=ON;",
+        )
+        .unwrap();
         db.execute(
             "UPDATE document_root_registry SET path_digest=lower(hex(zeroblob(32))) WHERE root_id=?1",
             [&id],

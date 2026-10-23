@@ -142,6 +142,12 @@ fn content_text(ctx: &mut Context<'_>, data: &[u8]) -> Result<String> {
     let mut output = String::new();
     let mut cursor = 0usize;
     while let Some(start) = find(data, b"BT", cursor) {
+        if (start > 0 && !delimiter(data[start - 1]))
+            || data.get(start + 2).is_some_and(|b| !delimiter(*b))
+        {
+            cursor = start + 2;
+            continue;
+        }
         ctx.poll()?;
         let block = &data[start + 2..];
         let mut pos = 0;

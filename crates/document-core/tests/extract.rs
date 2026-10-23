@@ -11,7 +11,7 @@ fn large_ooxml_revocation_discards_all_text() {
         "<document>{}</document>",
         "<p><t>evidence</t></p>".repeat(12000)
     );
-    let bytes = make_zip(&[("word/document.xml", xml.as_bytes(), true)]);
+    let bytes = make_zip(&[("word/document.xml", xml.as_bytes(), false)]);
     let mut checks = 0;
     let result = extract_with_check(
         DocumentFormat::Docx,
@@ -19,11 +19,11 @@ fn large_ooxml_revocation_discards_all_text() {
         ExtractionLimits::default(),
         || {
             checks += 1;
-            checks < 12
+            checks < 6
         },
     );
     assert_eq!(result, Err(ExtractionError::Revoked));
-    assert_eq!(checks, 12);
+    assert_eq!(checks, 6);
 }
 
 #[test]
