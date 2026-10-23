@@ -711,3 +711,137 @@ fn tampered_resolution_evidence_also_fails_closed() {
         Err(StateError::Corrupt)
     ));
 }
+
+#[test]
+fn global_event_clock_preserves_as_of_across_fast_relation_and_transition_writes() {
+    let (_dir, state, source) = fixture();
+    make_claim(&state, "claim:a", "Old statement", true, &source);
+    make_claim(&state, "claim:b", "Replacement statement", true, &source);
+    let first = state.claim_history("claim:a").unwrap().unwrap()[0].recorded_at_ms;
+    let second = state.claim_history("claim:b").unwrap().unwrap()[0].recorded_at_ms;
+    assert!(second > first);
+
+    let edge = state
+        .add_claim_relation(
+            "claim:b",
+            "claim:a",
+            RelationKind::Supersedes,
+            &source,
+            "Initial replacement evidence",
+        )
+        .unwrap();
+    assert!(edge.recorded_at_ms > second);
+    let at_edge = state
+        .rank_claims(
+            &["claim:a"],
+            &policy(RankingMode::Challenge, Some(edge.recorded_at_ms)),
+        )
+        .unwrap();
+    assert_eq!(at_edge.len(), 1);
+    assert_eq!(at_edge[0].disposition, "superseded");
+    assert_eq!(at_edge[0].claim.revision, 1);
+
+    let terminal = state
+        .transition_claim(
+            "claim:a",
+            ClaimTransition::Retract,
+            "Old claim later retracted",
+            &[ClaimEvidence {
+                source_ref: source.clone(),
+                evidence_kind: "retraction".into(),
+            }],
+            None,
+        )
+        .unwrap();
+    assert!(terminal.recorded_at_ms > edge.recorded_at_ms);
+    let stable_history = state
+        .rank_claims(
+            &["claim:a"],
+            &policy(RankingMode::Challenge, Some(edge.recorded_at_ms)),
+        )
+        .unwrap();
+    assert_eq!(stable_history[0].disposition, "superseded");
+    assert_eq!(stable_history[0].claim.revision, 1);
+    let current = state
+        .rank_claims(&["claim:a"], &policy(RankingMode::Challenge, None))
+        .unwrap();
+    assert_eq!(current[0].disposition, "non_current");
+
+    let resolved = state
+        .resolve_claim_relation(
+            "claim:b",
+            "claim:a",
+            RelationKind::Supersedes,
+            &source,
+            "Source attests mistaken replacement",
+        )
+        .unwrap();
+    assert!(resolved.recorded_at_ms > terminal.recorded_at_ms);
+    let reopening = StateStore::open(state.path()).unwrap();
+    let at_edge_reopened = reopening
+        .rank_claims(
+            &["claim:a"],
+            &policy(RankingMode::Challenge, Some(edge.recorded_at_ms)),
+        )
+        .unwrap();
+    assert_eq!(at_edge_reopened[0].disposition, "superseded");
+    assert_eq!(at_edge_reopened[0].claim.revision, 1);
+}
+
+#[test]
+fn corrected_supersedes_edges_do_not_create_false_cycles() {
+    let (_dir, state, source) = fixture();
+    make_claim(&state, "claim:a", "A", true, &source);
+    make_claim(&state, "claim:b", "B", true, &source);
+    let old = state
+        .add_claim_relation(
+            "claim:a",
+            "claim:b",
+            RelationKind::Supersedes,
+            &source,
+            "Originally wrong direction",
+        )
+        .unwrap();
+    state
+        .resolve_claim_relation(
+            "claim:a",
+            "claim:b",
+            RelationKind::Supersedes,
+            &source,
+            "Correction: direction is reversed",
+        )
+        .unwrap();
+    let reversed = state
+        .add_claim_relation(
+            "claim:b",
+            "claim:a",
+            RelationKind::Supersedes,
+            &source,
+            "Correct direction",
+        )
+        .unwrap();
+    assert!(reversed.recorded_at_ms > old.recorded_at_ms);
+    let current = state
+        .rank_claims(
+            &["claim:a", "claim:b"],
+            &policy(RankingMode::Balanced, None),
+        )
+        .unwrap();
+    assert_eq!(current.len(), 1);
+    assert_eq!(current[0].claim.id, "claim:b");
+
+    let before_resolution = state
+        .rank_claims(
+            &["claim:a", "claim:b"],
+            &policy(RankingMode::Challenge, Some(old.recorded_at_ms)),
+        )
+        .unwrap();
+    assert_eq!(
+        before_resolution
+            .iter()
+            .find(|r| r.claim.id == "claim:b")
+            .unwrap()
+            .disposition,
+        "superseded"
+    );
+}
