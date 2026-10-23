@@ -1,7 +1,8 @@
 param(
     [Parameter(Mandatory = $true)][string]$ApprovedRoot,
     [Parameter(Mandatory = $true)][string]$EvidenceDirectory,
-    [Parameter(Mandatory = $true)][string]$ManifestFile
+    [Parameter(Mandatory = $true)][string]$ManifestFile,
+    [switch]$Release
 )
 $ErrorActionPreference = 'Stop'
 if ($env:OS -ne 'Windows_NT') { throw 'Native Windows required' }
@@ -74,6 +75,7 @@ $rust = (& rustc -Vv) -join "`n"
 $summary = [pscustomobject]@{
     Schema = 'mp-4l2-real-staging-v1'; NativeOS = [Environment]::OSVersion.VersionString
     HarnessSha = $head; ProductBaseline = '08b310b2b14639594edcf5210d9a28b8b677846f'
+    BuildProfile = $(if ($Release) { 'release' } else { 'debug' })
     Rust = $rust; SampleCount = $planned.Count; InputBytes = ($planned | Measure-Object -Property Size -Sum).Sum
     SourceRoots = 'D drive / owner-approved projects; private paths withheld'
 }
@@ -82,7 +84,7 @@ Push-Location $root
 try {
     $processInfo = New-Object System.Diagnostics.ProcessStartInfo
     $processInfo.FileName = (Get-Command cargo -ErrorAction Stop).Source
-    $processInfo.Arguments = 'run --locked -p mind-place-index --example qualify_real_corpus'
+    $processInfo.Arguments = $(if ($Release) { 'run --locked --release -p mind-place-index --example qualify_real_corpus' } else { 'run --locked -p mind-place-index --example qualify_real_corpus' })
     $processInfo.WorkingDirectory = $root
     $processInfo.UseShellExecute = $false
     $processInfo.RedirectStandardOutput = $true
