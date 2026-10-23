@@ -96,6 +96,20 @@ fn now_ms() -> Result<i64> {
     i64::try_from(millis).map_err(|_| StateError::Corrupt)
 }
 
+/// Acquire a database-global logical timestamp while holding an IMMEDIATE
+/// transaction. The caller can provide an additional lower bound for legacy
+/// events or corrected relations created before this clock existed.
+pub(crate) fn next_claim_clock(db: &rusqlite::Connection, minimum_ms: i64) -> Result<i64> {
+    let floor = now_ms()?.max(minimum_ms);
+    let clock: i64 = db.query_row(
+        "UPDATE memory_claim_clock
+         SET last_ms=MAX(last_ms+1,?1) WHERE id=1 RETURNING last_ms",
+        [floor],
+        |r| r.get(0),
+    )?;
+    Ok(clock)
+}
+
 fn add_evidence(
     tx: &rusqlite::Transaction<'_>,
     claim_id: &str,
@@ -242,9 +256,9 @@ impl StateStore {
         evidence: &[ClaimEvidence],
     ) -> Result<()> {
         validate_claim(claim)?;
-        let clock = now_ms()?;
         let mut db = self.connection()?;
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let clock = next_claim_clock(&tx, 0)?;
         tx.execute(
             "INSERT INTO memory_claims(id,statement,asserted_by,epistemic_origin,status)
              VALUES(?1,?2,?3,?4,?5)",
@@ -326,11 +340,12 @@ impl StateStore {
             return Err(StateError::Corrupt);
         }
         let revision = last.revision + 1;
-        let clock = now_ms()?.max(
+        let clock = next_claim_clock(
+            &tx,
             last.recorded_at_ms
                 .checked_add(1)
                 .ok_or(StateError::Corrupt)?,
-        );
+        )?;
         let payload = TransitionPayload {
             from_status: status,
             to_status: transition.status().to_owned(),
