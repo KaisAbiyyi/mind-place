@@ -1,6 +1,6 @@
 # Mind Place — dependency and parallel execution board
 
-**Last coordinated baseline:** 2026-10-21. This supplements [the BIG plan](BIG-IMPLEMENTATION-PLAN.md) and [current phase](implementation-plan/CURRENT-PHASE.md); it does **not** replace acceptance gates or rewrite historical status. Read [agent orchestration policy](AGENT-ORCHESTRATION.md).
+**Last coordinated baseline:** 2026-10-23. This supplements [the BIG plan](BIG-IMPLEMENTATION-PLAN.md) and [current phase](implementation-plan/CURRENT-PHASE.md); it does **not** replace acceptance gates or rewrite historical status. Read [agent orchestration policy](AGENT-ORCHESTRATION.md).
 
 ## P0 · License migration — MP-LIC-00 (22 October 2026)
 
@@ -13,6 +13,12 @@ This governance work uses the independent `license-governance/release-notices` l
 Say `ambil MP-4E` (or `ambil 4E` in Mind Place context). The agent first **checks latest GitHub task claims/PRs, the current roadmap and dependencies**, then declares `CLAIM MP-4E` with unique session ID, resource locks, branch and base SHA before editing. If claimed by another agent, do **REPORT_ONLY** or request fenced transfer; do not silently duplicate the work. Descriptive unit IDs are stable, vendor-neutral, and independent of ChatGPT/Codex/Gemini identity. GitHub comments alone are not atomic claims: serialize conflicting units without a real coordinator.
 
 Historical Cloud 1A–1E, 2A–2D, 3A–3F are merged (3E #14: `5546504`; 3F #17: `f9d1313`). MP-3F's former Codex-local claim is complete; do not reimplement it. `3L1/3L2/3U` remain mandatory and are not proved by CI. Rows below are *eligible work descriptions*, not assertions that their dependencies have passed. `LOCAL` and `HUMAN` cannot be taken as generic cloud implementations.
+
+## Owner-ordered P0 UI gate (2026-10-23)
+
+Owner review of the installed Mind Place UI identified a critical usability gap: one crowded Settings dialog mixes capture, MCP and document permissions; folder onboarding and document search lack an understandable information hierarchy. **Now: MP-4UX-00** ([GitHub #43](https://github.com/KaisAbiyyi/mind-place/issues/43), Cloud, Ready/unclaimed). **Up Next: MP-4U** (HUMAN, Owner Gate) for combined functional and visual usability acceptance only after exact-SHA reviewed/merged implementation, qualified Windows installer and smoke. MP-4L2 is DONE, PR #42 merged at `6454d23` with native Windows real-corpus 10/10 and final CI PASS. 5A/6A/7A stay blocked on MP-4U.
+
+Broad UI design system/navigation and holistic product UX are separately retained in Phase 8 (8A–8F + 8L/8U) and final release acceptance 10U2; do not scope-creep the narrow pre-4U repair into a full Knowledge OS redesign. The Notion task board is authoritative for **live lane/claim state**; this section specifies required execution order. Neither Ready nor Now means an implementer has claimed the task.
 
 ## Task dependency registry (all remaining named units)
 
@@ -32,7 +38,8 @@ Historical Cloud 1A–1E, 2A–2D, 3A–3F are merged (3E #14: `5546504`; 3F #17
 | `MP-4F` | Unified document retrieval/UI and indexed qualification | `MP-4C`, `MP-4D`, `MP-4E` | `document-integration/retrieval` | C |
 | `MP-4L1` | Windows NTFS junction/reparse/races | `MP-4F` | `windows-fs` | LOCAL |
 | `MP-4L2` | Representative documents/parser/resource limits | `MP-4F`, `MP-4L1` | `windows-corpus` | LOCAL |
-| `MP-4U` | Folder add/search/revoke workflow acceptance | `MP-4L2` | `human-acceptance` | HUMAN |
+| `MP-4UX-00` | **P0 Settings/dialog and document workflow UX redesign**; structured settings, guided root management/search/source preview, accessible visuals and packaged smoke | `MP-4L2` | `settings-shell/document-ux` | CLOUD implementation; NOW Ready/unclaimed; local Windows packaged UI smoke; [#43](https://github.com/KaisAbiyyi/mind-place/issues/43) |
+| `MP-4U` | Owner **joint folder functionality + Settings/Documents UX acceptance** | `MP-4L2`, `MP-4UX-00` | `human-acceptance` | HUMAN, UP NEXT / Owner Gate; record exact installed SHA, usability plus revoke/search proof |
 | `MP-5A` | Evidence-based claim transitions and as-of history | `MP-4U` | `memory-state-schema` | C |
 | `MP-5B` | Conflict relations and evidence-aware ranking | `MP-5A` | `memory-retrieval` | C |
 | `MP-5C` | Memory create/update/forget with idempotence/authorization | `MP-5A` | `memory-writes` | C; may parallel with 5B after 5A |
@@ -51,12 +58,12 @@ Historical Cloud 1A–1E, 2A–2D, 3A–3F are merged (3E #14: `5546504`; 3F #17
 | `MP-7U1` | Claude transcript/provider acceptance | `MP-7L1` | `human-acceptance` | HUMAN |
 | `MP-7L2` | Real Gemini session/device qualification | `MP-7E` | `gemini-account` | LOCAL |
 | `MP-7U2` | Gemini transcript/provider acceptance | `MP-7L2` | `human-acceptance` | HUMAN |
-| `MP-8A` | Virtualized Knowledge OS navigation/data architecture | `MP-5D`, `MP-6E`, `MP-7E` | `ui-shell` | C |
+| `MP-8A` | Virtualized Knowledge OS navigation/data architecture + reusable design system/consistent navigation | `MP-5D`, `MP-6E`, `MP-7E` | `ui-shell` | C |
 | `MP-8B` | Conversation/files/search library and context preview | `MP-8A` | `ui-library` | C |
 | `MP-8C` | Memories/projects/people/topics workspace | `MP-8A` | `ui-memory` | C; parallel with 8B |
 | `MP-8D` | Retrieval/connector health and inspector UI | `MP-8A` | `ui-health` | C; parallel with 8B/8C |
 | `MP-8E` | Hive graph explorer, zoom and timeline | `MP-8A`, `MP-6E` | `ui-hive` | C; parallel with 8B/8C/8D |
-| `MP-8F` | Desktop integration, accessiblity and performance | `MP-8B`, `MP-8C`, `MP-8D`, `MP-8E` | `ui-integration` | C |
+| `MP-8F` | Desktop integration, accessibility, interaction and visual consistency/performance | `MP-8B`, `MP-8C`, `MP-8D`, `MP-8E` | `ui-integration` | C |
 | `MP-8L1` | Real packaged WebView2 navigation and startup | `MP-8F` | `windows-ui` | LOCAL |
 | `MP-8L2` | Large corpus UI/graph responsiveness and memory | `MP-8L1` | `windows-ui-benchmark` | LOCAL |
 | `MP-8U1` | Knowledge library daily UX acceptance | `MP-8L1` | `human-acceptance` | HUMAN |
@@ -80,7 +87,7 @@ Historical Cloud 1A–1E, 2A–2D, 3A–3F are merged (3E #14: `5546504`; 3F #17
 | `MP-10L2` | Installer/migration/update/rollback qualification | `MP-10E` | `windows-release` | LOCAL |
 | `MP-10L3` | Two-client real one-brain end-to-end | `MP-10E` | `windows-e2e` | LOCAL |
 | `MP-10U1` | Owner real-project continuity decision | `MP-10L3` | `human-acceptance` | HUMAN |
-| `MP-10U2` | Owner final release decision | `MP-10L1`, `MP-10L2`, `MP-10U1` | `human-acceptance` | HUMAN |
+| `MP-10U2` | Owner final functional + whole-product visual/usability release decision | `MP-10L1`, `MP-10L2`, `MP-10U1` | `human-acceptance` | HUMAN |
 | `MP-10S1` | OPTIONAL vector/hybrid benchmark only if metrics justify | `MP-10B` | `optional-semantic` | OPT-IN |
 | `MP-10S2` | OPTIONAL Tantivy benchmark only if FTS5 bottleneck | `MP-10C` | `optional-tantivy` | OPT-IN |
 
