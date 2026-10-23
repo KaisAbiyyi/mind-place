@@ -223,14 +223,21 @@ fn checked_projection<'a>(
         validate_field(&edge.evidence.locator)?;
         if let GraphOrigin::Inferred { confidence_bps } = edge.origin {
             if !(8_000..=10_000).contains(&confidence_bps)
-                || !matches!(edge.relation, GraphRelation::Contains | GraphRelation::References)
+                || !matches!(
+                    edge.relation,
+                    GraphRelation::Contains | GraphRelation::References
+                )
             {
                 return Err(IndexError::InvalidEvidence);
             }
         }
         let mut parts = vec![
-            scope, &from, &to, edge.relation.as_str(),
-            &edge.evidence.source_ref, &edge.evidence.source_revision,
+            scope,
+            &from,
+            &to,
+            edge.relation.as_str(),
+            &edge.evidence.source_ref,
+            &edge.evidence.source_revision,
             &edge.evidence.locator,
         ];
         // Preserve MP-6A deterministic edge identities across schema migration.
