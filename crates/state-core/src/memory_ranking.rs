@@ -1,9 +1,9 @@
 //! MP-5B: evidence-linked relations and conservative memory ranking.
 //! No external write surface is exposed here. MP-5C owns authorization and forget.
 use crate::{
-    memory::{claim_as_of_connection, next_claim_clock}, source_record, valid_id, valid_text,
-    verify_source_record,
-    ClaimState, Result, StateError, StateStore,
+    memory::{claim_as_of_connection, next_claim_clock},
+    source_record, valid_id, valid_text, verify_source_record, ClaimState, Result, StateError,
+    StateStore,
 };
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::Serialize;
@@ -318,10 +318,7 @@ impl StateStore {
             )
             .optional()?
             .ok_or(StateError::InvalidValue)?;
-        let clock = next_claim_clock(
-            &tx,
-            original.checked_add(1).ok_or(StateError::Corrupt)?,
-        )?;
+        let clock = next_claim_clock(&tx, original.checked_add(1).ok_or(StateError::Corrupt)?)?;
         tx.execute(
             "INSERT INTO memory_claim_relation_resolutions
              (from_claim_id,to_claim_id,relation,source_ref,reason,recorded_at_ms)
