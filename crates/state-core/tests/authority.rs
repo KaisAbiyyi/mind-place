@@ -1,4 +1,4 @@
-use mind_place_state::{MemoryClaim, StateError, StateStore, APPLICATION_ID};
+use mind_place_state::{MemoryClaim, StateError, StateStore, APPLICATION_ID, SCHEMA_VERSION};
 use rusqlite::{Connection, OpenFlags};
 use std::fs;
 fn fresh() -> (tempfile::TempDir, StateStore) {
@@ -67,11 +67,12 @@ fn never_overwrite_unknown_or_future_schema() {
     );
     db.pragma_update(None, "application_id", APPLICATION_ID)
         .unwrap();
-    db.pragma_update(None, "user_version", 9).unwrap();
+    db.pragma_update(None, "user_version", SCHEMA_VERSION + 1)
+        .unwrap();
     drop(db);
     assert!(matches!(
         StateStore::open(&p),
-        Err(StateError::FutureSchema(9))
+        Err(StateError::FutureSchema(version)) if version == SCHEMA_VERSION + 1
     ));
 }
 #[test]
