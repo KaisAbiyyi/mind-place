@@ -70,13 +70,27 @@ fn publishes_once_skips_unchanged_and_hash_invalidation_increments_generation() 
     assert_eq!(revised.generation.generation, 2);
     assert_eq!(revised.generation.input.structure, "d".repeat(64));
 
+    changed_inputs.files = "e".repeat(64);
+    let file_rebuild = index
+        .activate_graph_generation("derived:files", &changed_inputs, &graph(), Some(2))
+        .unwrap();
+    assert_eq!(file_rebuild.generation.generation, 3);
+    changed_inputs.content = "f".repeat(64);
+    let content_rebuild = index
+        .activate_graph_generation("derived:files", &changed_inputs, &graph(), Some(3))
+        .unwrap();
+    assert_eq!(content_rebuild.generation.generation, 4);
+
     let mut changed_projection = graph();
     changed_projection.nodes[0].label = "Project Renamed".into();
     let next = index
-        .activate_graph_generation("derived:files", &changed_inputs, &changed_projection, Some(2))
+        .activate_graph_generation("derived:files", &changed_inputs, &changed_projection, Some(4))
         .unwrap();
-    assert_ne!(next.generation.projection_hash, revised.generation.projection_hash);
-    assert_eq!(next.generation.generation, 3);
+    assert_ne!(
+        next.generation.projection_hash,
+        revised.generation.projection_hash
+    );
+    assert_eq!(next.generation.generation, 5);
     assert!(IndexStore::open(index.path()).unwrap().graph_generation("derived:files").unwrap().unwrap().active);
 }
 
