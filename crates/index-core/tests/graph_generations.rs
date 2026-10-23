@@ -84,21 +84,35 @@ fn publishes_once_skips_unchanged_and_hash_invalidation_increments_generation() 
     let mut changed_projection = graph();
     changed_projection.nodes[0].label = "Project Renamed".into();
     let next = index
-        .activate_graph_generation("derived:files", &changed_inputs, &changed_projection, Some(4))
+        .activate_graph_generation(
+            "derived:files",
+            &changed_inputs,
+            &changed_projection,
+            Some(4),
+        )
         .unwrap();
     assert_ne!(
         next.generation.projection_hash,
         revised.generation.projection_hash
     );
     assert_eq!(next.generation.generation, 5);
-    assert!(IndexStore::open(index.path()).unwrap().graph_generation("derived:files").unwrap().unwrap().active);
+    assert!(
+        IndexStore::open(index.path())
+            .unwrap()
+            .graph_generation("derived:files")
+            .unwrap()
+            .unwrap()
+            .active
+    );
 }
 
 #[test]
 fn stale_generation_does_not_overwrite_newer_graph_and_revocation_rolls_back() {
     let dir = tempfile::tempdir().unwrap();
     let index = IndexStore::open(dir.path().join("index.sqlite3")).unwrap();
-    index.activate_graph_generation("scope", &inputs(), &graph(), None).unwrap();
+    index
+        .activate_graph_generation("scope", &inputs(), &graph(), None)
+        .unwrap();
     let previous = index.graph_generation("scope").unwrap().unwrap();
     let mut updated = graph();
     updated.edges.clear();
@@ -109,25 +123,29 @@ fn stale_generation_does_not_overwrite_newer_graph_and_revocation_rolls_back() {
     assert_eq!(index.graph_generation("scope").unwrap().unwrap(), previous);
 
     let mut checks = 0;
-    let revoked = index.activate_graph_generation_with_check(
-        "scope",
-        &inputs(),
-        &updated,
-        Some(1),
-        || {
+    let revoked =
+        index.activate_graph_generation_with_check("scope", &inputs(), &updated, Some(1), || {
             checks += 1;
-            if checks == 2 { Err(IndexError::Revoked) } else { Ok(()) }
-        },
-    );
+            if checks == 2 {
+                Err(IndexError::Revoked)
+            } else {
+                Ok(())
+            }
+        });
     assert!(matches!(revoked, Err(IndexError::Revoked)));
     assert_eq!(index.graph_generation("scope").unwrap().unwrap(), previous);
     assert_eq!(index.graph_scope_stats("scope").unwrap().edges, 1);
 
     let mut checks = 0;
-    let denied_invalidation = index.invalidate_graph_generation_with_check("scope", Some(1), || {
-        checks += 1;
-        if checks == 2 { Err(IndexError::Revoked) } else { Ok(()) }
-    });
+    let denied_invalidation =
+        index.invalidate_graph_generation_with_check("scope", Some(1), || {
+            checks += 1;
+            if checks == 2 {
+                Err(IndexError::Revoked)
+            } else {
+                Ok(())
+            }
+        });
     assert!(matches!(denied_invalidation, Err(IndexError::Revoked)));
     assert_eq!(index.graph_scope_stats("scope").unwrap().edges, 1);
     assert_eq!(index.graph_generation("scope").unwrap().unwrap(), previous);
@@ -145,7 +163,9 @@ fn invalidation_creates_tombstone_and_fences_stale_builder() {
         index.activate_graph_generation("scope", &inputs(), &graph(), None),
         Err(IndexError::StaleGeneration)
     ));
-    index.activate_graph_generation("scope", &inputs(), &graph(), Some(1)).unwrap();
+    index
+        .activate_graph_generation("scope", &inputs(), &graph(), Some(1))
+        .unwrap();
     let tombstone = index.invalidate_graph_generation("scope", Some(2)).unwrap();
     assert_eq!(tombstone.generation, 3);
     assert!(!tombstone.active);
@@ -154,7 +174,9 @@ fn invalidation_creates_tombstone_and_fences_stale_builder() {
         index.activate_graph_generation("scope", &inputs(), &graph(), Some(2)),
         Err(IndexError::StaleGeneration)
     ));
-    let rebuilt = index.activate_graph_generation("scope", &inputs(), &graph(), Some(3)).unwrap();
+    let rebuilt = index
+        .activate_graph_generation("scope", &inputs(), &graph(), Some(3))
+        .unwrap();
     assert_eq!(rebuilt.generation.generation, 4);
     assert!(rebuilt.generation.active);
 }
@@ -163,7 +185,9 @@ fn invalidation_creates_tombstone_and_fences_stale_builder() {
 fn legacy_unfenced_writer_is_rejected_and_illegal_hashes_are_rejected() {
     let dir = tempfile::tempdir().unwrap();
     let index = IndexStore::open(dir.path().join("index.sqlite3")).unwrap();
-    index.activate_graph_generation("scope", &inputs(), &graph(), None).unwrap();
+    index
+        .activate_graph_generation("scope", &inputs(), &graph(), None)
+        .unwrap();
     assert!(matches!(
         index.replace_graph_projection("scope", &graph()),
         Err(IndexError::StaleGeneration)
@@ -197,7 +221,8 @@ fn existing_v2_index_migrates_losslessly_to_v3_with_fts_and_graph() {
     let v2 = include_str!("../src/schema_v2.sql");
     db.execute_batch(v1).unwrap();
     db.execute_batch(v2).unwrap();
-    db.pragma_update(None, "application_id", 0x4D504958i64).unwrap();
+    db.pragma_update(None, "application_id", 0x4D504958i64)
+        .unwrap();
     db.pragma_update(None, "user_version", 2i64).unwrap();
     let mut hash = Sha256::new();
     hash.update(v1.as_bytes());
@@ -205,7 +230,8 @@ fn existing_v2_index_migrates_losslessly_to_v3_with_fts_and_graph() {
     db.execute(
         "INSERT INTO index_meta(key,value) VALUES('schema_hash',?1)",
         [format!("{:x}", hash.finalize())],
-    ).unwrap();
+    )
+    .unwrap();
     db.execute_batch(
         "INSERT INTO revisions(source_id,archive_id,snapshot_id,provider,conversation_id,
            title,source_url,captured_at,completeness,is_current,seen_generation)
@@ -215,7 +241,8 @@ fn existing_v2_index_migrates_losslessly_to_v3_with_fts_and_graph() {
          INSERT INTO graph_nodes(id,kind,canonical_key,label,source_ref)
          VALUES('g1','project','p','Project','source:p');
          INSERT INTO graph_scope_nodes(scope,node_id) VALUES('scope','g1');",
-    ).unwrap();
+    )
+    .unwrap();
     drop(db);
 
     let index = IndexStore::open(&path).unwrap();
@@ -223,7 +250,9 @@ fn existing_v2_index_migrates_losslessly_to_v3_with_fts_and_graph() {
     assert_eq!(index.graph_scope_stats("scope").unwrap().nodes, 1);
     assert!(index.graph_generation("scope").unwrap().is_none());
     let db = Connection::open(&path).unwrap();
-    let version: i64 = db.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
+    let version: i64 = db
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .unwrap();
     assert_eq!(version, 3);
     drop(db);
     assert!(IndexStore::open(&path).is_ok());
