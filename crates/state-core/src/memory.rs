@@ -72,7 +72,7 @@ struct TransitionPayload {
     superseded_by: Option<String>,
 }
 
-fn validate_claim(claim: &MemoryClaim) -> Result<()> {
+pub(crate) fn validate_claim(claim: &MemoryClaim) -> Result<()> {
     valid_id(&claim.id)?;
     valid_text(&claim.statement)?;
     if !matches!(
@@ -110,7 +110,7 @@ pub(crate) fn next_claim_clock(db: &rusqlite::Connection, minimum_ms: i64) -> Re
     Ok(clock)
 }
 
-fn add_evidence(
+pub(crate) fn add_evidence(
     tx: &rusqlite::Transaction<'_>,
     claim_id: &str,
     revision: i64,
@@ -159,7 +159,7 @@ fn add_evidence(
     Ok(())
 }
 
-fn events(db: &rusqlite::Connection, claim_id: &str) -> Result<Vec<ClaimRevision>> {
+pub(crate) fn events(db: &rusqlite::Connection, claim_id: &str) -> Result<Vec<ClaimRevision>> {
     let mut stmt = db.prepare(
         "SELECT revision,COALESCE(recorded_at_ms, recorded_at*1000),
                 event_type,payload_json
@@ -395,6 +395,12 @@ impl StateStore {
         let Some(current) = current else {
             return Ok(None);
         };
+        // Forget is a permanent non-disclosure boundary even for as-of reads.
+        let forgotten: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM memory_forget_tombstones WHERE claim_id=?1)",
+            [claim_id], |r| r.get(0),
+        )?;
+        if forgotten { return Ok(None); }
         let history = events(&tx, claim_id)?;
         if history.last().map(|h| h.status.as_str()) != Some(current.as_str()) {
             return Err(StateError::Corrupt);
@@ -434,6 +440,11 @@ pub(crate) fn claim_as_of_connection(
     let Some((statement, asserted_by, epistemic_origin, scope_id, current_status)) = base else {
         return Ok(None);
     };
+    let forgotten: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM memory_forget_tombstones WHERE claim_id=?1)",
+        [claim_id], |r| r.get(0),
+    )?;
+    if forgotten { return Ok(None); }
     let history = events(db, claim_id)?;
     if history.last().map(|h| h.status.as_str()) != Some(current_status.as_str()) {
         return Err(StateError::Corrupt);
