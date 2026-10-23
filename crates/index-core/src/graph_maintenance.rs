@@ -224,7 +224,10 @@ impl GraphMaintenanceJob<'_> {
             }
             if let GraphOrigin::Inferred { confidence_bps } = edge.origin {
                 if !(8_000..=10_000).contains(&confidence_bps)
-                    || !matches!(edge.relation, GraphRelation::Contains | GraphRelation::References)
+                    || !matches!(
+                        edge.relation,
+                        GraphRelation::Contains | GraphRelation::References
+                    )
                 {
                     return Err(IndexError::InvalidEvidence);
                 }
