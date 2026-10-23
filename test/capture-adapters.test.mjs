@@ -10,6 +10,7 @@ const html = await readFile(new URL('./fixtures/capture/chatgpt-v1.html', import
 test('adapter selection fails closed for unqualified providers and hostile origins/routes', async () => {
   const { resolveCaptureAdapter, captureAdapterForPage } = await import('../extension/providers/index.mjs');
   for (const url of [
+    fixture.source_url.replace('chatgpt.com', 'claude.ai'),
     fixture.source_url.replace('chatgpt.com', 'gemini.google.com'),
     fixture.source_url.replace('chatgpt.com', 'chatgpt.com.evil.test'),
     fixture.source_url.replace('https:', 'http:'),

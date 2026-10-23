@@ -155,7 +155,7 @@ export function initPopup({ chromeApi = globalThis.chrome, documentRef = globalT
       const activeTabs = await bounded(() => chromeApi.tabs.query({ active: true, currentWindow: true }));
       tab = activeTabs?.[0];
     } catch {
-      showFailure('Capture timed out or could not read the active browser tab. Nothing was sent to Mind Place. Open the ChatGPT conversation and try again.');
+      showFailure('Capture timed out or could not read the active browser tab. Nothing was sent to Mind Place. Open a supported conversation and try again.');
       return;
     }
     if (!tab || !Number.isInteger(tab.id) || typeof tab.url !== 'string') {

@@ -22,13 +22,13 @@
   </head>
   <body>
     <h1>Mind Place</h1>
-    <p class="hint">Save an open ChatGPT or Claude conversation to your local archive.</p>
+    <p class="hint">Save an open ChatGPT, Gemini or Claude conversation to your local archive.</p>
     <label><input id="auto-save" type="checkbox">Automatically save loaded messages</label>
-    <p class="hint">When ON, saves open ChatGPT conversations and loaded changes. Never scrolls. Requests access to chatgpt.com when enabled.</p>
+    <p class="hint">Automatic saving supports ChatGPT only. It never scrolls and requests chatgpt.com access when enabled. Gemini and Claude are explicit Save only.</p>
     <p id="auto-status" class="hint" role="status" aria-live="polite">Automatic saving is OFF by default.</p>
     <hr>
-    <label><input id="load-history" type="checkbox" checked>Manual Save: load older messages by scrolling</label>
-    <p class="hint">History scrolling is available for ChatGPT only; Claude captures currently loaded messages. ChatGPT scrolling runs only after Save, for up to 3 minutes. You can close this popup; progress and controls also appear on the conversation page.</p>
+    <label><input id="load-history" type="checkbox" checked>Manual Save: load older ChatGPT messages by scrolling (Gemini/Claude: loaded only)</label>
+    <p class="hint">Runs only after Save, for up to 3 minutes. You can close this popup; progress and controls also appear on the conversation page.</p>
     <button id="save" type="button">Save this conversation</button>
     <div class="controls"><button id="stop" type="button" hidden>Stop &amp; save</button><button id="cancel" type="button" hidden>Cancel</button></div>
     <p id="status" role="status" aria-live="polite">Ready for manual Save.</p>

@@ -13,6 +13,7 @@ mod document_roots;
 mod document_scanner;
 mod identity;
 mod memory;
+mod memory_inspection;
 mod memory_ranking;
 mod memory_writes;
 mod ntfs;
@@ -25,6 +26,7 @@ pub use document_roots::{DocumentRoot, VirtualDocumentPath, VIRTUAL_ROOT_PREFIX}
 pub use document_scanner::{DocumentScanner, ScanPolicy, ScanReport, WatchEvent};
 pub use identity::{canonical_source_id, SourceDescriptor, SourceKey};
 pub use memory::{ClaimEvidence, ClaimRevision, ClaimState, ClaimTransition};
+pub use memory_inspection::{MemoryInspectRelation, MemoryInspectionDetail};
 pub use memory_ranking::{
     serialize_ranked_context, ClaimRelation, ClaimRelationResolution, RankedClaim, RankingMode,
     RankingPolicy, RelationKind,

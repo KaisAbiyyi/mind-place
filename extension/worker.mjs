@@ -27,9 +27,13 @@ export function createCaptureWorker(chromeApi, { saveTimeoutMs = 15_000, capture
       const selected = resolveCaptureAdapter(tab.url);
       if (!selected) throw new Error('Open a supported saved conversation before saving.');
       const { adapter, identity } = selected;
-      if (!adapter.capabilities.manualDom || (loadHistory && !adapter.capabilities.manualHistory)) {
-        throw new Error('This provider does not support the requested capture mode.');
+      if (!adapter.capabilities.manualDom) {
+        throw new Error('This provider does not support manual capture.');
       }
+      // The popup defaults to ChatGPT history loading; Gemini deliberately
+      // captures only the loaded window without scrolling. The worker owns this
+      // provider decision so the popup never needs a second tab/permission read.
+      loadHistory = loadHistory && adapter.capabilities.manualHistory;
       target.adapter = adapter;
       target.tabId = tab.id;
       target.sourceUrl = identity.sourceUrl;

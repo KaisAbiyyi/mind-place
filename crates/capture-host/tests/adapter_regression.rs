@@ -106,3 +106,70 @@ fn native_host_independently_rejects_adapter_provider_identity_and_mode_spoofing
             .is_empty());
     }
 }
+
+#[test]
+fn gemini_native_host_roundtrip_revisions_and_fail_closed_identity() {
+    let dir = tempdir().unwrap();
+    let mut first_capture = fixture();
+    first_capture.provider = "gemini".into();
+    first_capture.conversation_id = "AbCd1234efGh5678".into();
+    first_capture.source_url = "https://gemini.google.com/app/AbCd1234efGh5678".into();
+    first_capture.messages[1].model = Some("gemini-synthetic".into());
+    let first = submit(&first_capture, dir.path());
+    assert_eq!(first["ok"], true);
+    let id = first["id"].as_str().unwrap();
+    let snapshot = first["snapshot_id"].as_str().unwrap();
+    let path = dir
+        .path()
+        .join("conversations")
+        .join(id)
+        .join("captures")
+        .join(format!("{snapshot}.jsonl"));
+    let original = fs::read(&path).unwrap();
+
+    let mut repeat = first_capture.clone();
+    repeat.captured_at = "2026-10-23T14:00:00.000Z".into();
+    assert_eq!(submit(&repeat, dir.path())["unchanged"], true);
+
+    repeat.messages[1].text = "Regenerated visible Gemini answer".into();
+    let second = submit(&repeat, dir.path());
+    assert_eq!(second["ok"], true);
+    assert_ne!(second["snapshot_id"], snapshot);
+    let archive = ArchiveStore::open(dir.path()).unwrap();
+    assert_eq!(archive.snapshots(id).unwrap().len(), 2);
+    assert_eq!(
+        archive.read(id, Some(snapshot)).unwrap().capture,
+        first_capture
+    );
+    assert_eq!(fs::read(&path).unwrap(), original);
+    assert_eq!(
+        archive.read(id, None).unwrap().capture.messages[1].text,
+        "Regenerated visible Gemini answer"
+    );
+
+    for (field, value) in [
+        (
+            "source_url",
+            json!("https://gemini.google.com.evil.test/app/AbCd1234efGh5678"),
+        ),
+        (
+            "source_url",
+            json!("https://gemini.google.com/app/AbCd1234efGh5678?temporary=true"),
+        ),
+        ("conversation_id", json!("abcd1234efgh5678")),
+        ("capture_method", json!("automatic-dom")),
+        ("capture_method", json!("legacy-import")),
+        ("completeness", json!("complete")),
+    ] {
+        let isolated = tempdir().unwrap();
+        let mut spoofed = serde_json::to_value(&first_capture).unwrap();
+        spoofed[field] = value;
+        let spoofed: Capture = serde_json::from_value(spoofed).unwrap();
+        assert_eq!(submit(&spoofed, isolated.path())["ok"], false, "{field}");
+        assert!(ArchiveStore::open(isolated.path())
+            .unwrap()
+            .list("")
+            .unwrap()
+            .is_empty());
+    }
+}
