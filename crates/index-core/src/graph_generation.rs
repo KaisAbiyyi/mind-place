@@ -1,6 +1,8 @@
 //! MP-6C: scoped source fingerprints, generation fences and atomic graph activation.
 //! Staging is bounded in memory; visible edges and manifests swap in one SQLite tx.
-use crate::graph::{replace_tx, validate_field, GraphProjection, GraphProjectionStats, ARCHIVE_SCOPE};
+use crate::graph::{
+    replace_tx, validate_field, GraphProjection, GraphProjectionStats, ARCHIVE_SCOPE,
+};
 use crate::{IndexError, IndexStore, Result};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use sha2::{Digest, Sha256};
@@ -32,7 +34,9 @@ pub struct GraphActivation {
 }
 
 fn valid_digest(s: &str) -> bool {
-    s.len() == 64 && s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    s.len() == 64
+        && s.bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 fn validate_input(input: &GraphInputHashes) -> Result<()> {
@@ -217,7 +221,11 @@ impl IndexStore {
         expected_generation: Option<i64>,
     ) -> Result<GraphActivation> {
         self.activate_graph_generation_with_check(
-            scope, input, projection, expected_generation, || Ok(())
+            scope,
+            input,
+            projection,
+            expected_generation,
+            || Ok(()),
         )
     }
 
