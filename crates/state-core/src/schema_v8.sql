@@ -41,3 +41,16 @@ BEGIN SELECT RAISE(ABORT,'immutable claim relation resolution'); END;
 CREATE TRIGGER memory_relation_resolutions_immutable_delete
 BEFORE DELETE ON memory_claim_relation_resolutions
 BEGIN SELECT RAISE(ABORT,'immutable claim relation resolution'); END;
+
+-- Every source-backed claim event and relation write shares a single durable
+-- monotonic millisecond clock. SQLite IMMEDIATE write transactions serialize
+-- allocation, including across independent StateStore handles. Without this,
+-- separate claims and edges written in the same wall millisecond can make a
+-- previously queried inclusive "as-of" snapshot retroactively change.
+CREATE TABLE memory_claim_clock (
+  id INTEGER PRIMARY KEY CHECK(id=1),
+  last_ms INTEGER NOT NULL CHECK(last_ms >= 0)
+) STRICT;
+INSERT INTO memory_claim_clock(id,last_ms)
+SELECT 1, COALESCE(MAX(COALESCE(recorded_at_ms,recorded_at*1000)),0)
+FROM memory_claim_events;
