@@ -43,14 +43,18 @@ pub struct GraphifyPromptInput<'a> {
 
 fn is_digest(value: &str) -> bool {
     value.len() == 64
-        && value.bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+        && value
+            .bytes()
+            .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
 }
 
 fn valid_alias(alias: &str) -> bool {
     !alias.is_empty()
         && alias.len() <= 96
         && alias.trim() == alias
-        && alias.chars().all(|c| c.is_alphanumeric() || matches!(c, ' ' | '-' | '_' | '.'))
+        && alias
+            .chars()
+            .all(|c| c.is_alphanumeric() || matches!(c, ' ' | '-' | '_' | '.'))
 }
 
 fn valid_pattern(pattern: &str) -> bool {
@@ -131,7 +135,8 @@ pub struct GraphifyQualification {
 /// Validate a single bounded model-produced batch. Final cross-batch endpoint,
 /// permission, revision, generation and atomic checks remain in MP-6D.
 pub fn qualify_graphify_batch(batch: &GraphMaintenanceBatch) -> Result<GraphifyQualification> {
-    if batch.nodes.len() > 512 || batch.edges.len() > 512
+    if batch.nodes.len() > 512
+        || batch.edges.len() > 512
         || (batch.nodes.is_empty() && batch.edges.is_empty())
     {
         return Err(IndexError::InvalidQuery);
@@ -159,8 +164,11 @@ pub fn qualify_graphify_batch(batch: &GraphMaintenanceBatch) -> Result<GraphifyQ
         if !is_digest(&edge.evidence.source_revision)
             || edge.from == edge.to
             || !edge_ids.insert((
-                edge.from.id()?, edge.to.id()?, edge.relation.as_str(),
-                edge.evidence.source_ref.clone(), edge.evidence.locator.clone(),
+                edge.from.id()?,
+                edge.to.id()?,
+                edge.relation.as_str(),
+                edge.evidence.source_ref.clone(),
+                edge.evidence.locator.clone(),
             ))
         {
             return Err(IndexError::InvalidEvidence);
@@ -170,7 +178,10 @@ pub fn qualify_graphify_batch(batch: &GraphMaintenanceBatch) -> Result<GraphifyQ
             GraphOrigin::Inferred { confidence_bps } => {
                 if confidence_bps < MIN_INFERRED_CONFIDENCE_BPS
                     || confidence_bps > 10_000
-                    || !matches!(edge.relation, GraphRelation::Contains | GraphRelation::References)
+                    || !matches!(
+                        edge.relation,
+                        GraphRelation::Contains | GraphRelation::References
+                    )
                 {
                     return Err(IndexError::InvalidEvidence);
                 }
@@ -202,7 +213,10 @@ pub fn submit_graphify_batch(
 /// deterministic evidence during graph replacement.
 pub fn inferred_edge(mut edge: GraphEdge, confidence_bps: u16) -> Result<GraphEdge> {
     if !(MIN_INFERRED_CONFIDENCE_BPS..=10_000).contains(&confidence_bps)
-        || !matches!(edge.relation, GraphRelation::Contains | GraphRelation::References)
+        || !matches!(
+            edge.relation,
+            GraphRelation::Contains | GraphRelation::References
+        )
     {
         return Err(IndexError::InvalidEvidence);
     }
