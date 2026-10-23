@@ -66,6 +66,8 @@ foreach ($file in $planned) {
 $env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH"
 $env:MP_REAL_STAGING = Join-Path $evidence 'staging'
 $env:MP_REAL_EVIDENCE = $evidence
+$env:MP_REAL_PRODUCT_SHA = $head
+if (& git -C $root status --porcelain -- crates src src-tauri extension) { throw 'Commit product changes before qualification' }
 $env:CARGO_TARGET_DIR = 'D:\MindPlaceQualification\mp4l2-real-cargo-target'
 if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) { throw 'Rust toolchain unavailable' }
 $rust = (& rustc -Vv) -join "`n"

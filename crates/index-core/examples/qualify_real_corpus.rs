@@ -170,6 +170,7 @@ fn main() {
     let receipt = json!({
         "task":"MP-4L2", "kind":"native_real_staged_corpus", "status":overall,
         "product_main_sha":"08b310b2b14639594edcf5210d9a28b8b677846f",
+        "tested_product_sha":std::env::var("MP_REAL_PRODUCT_SHA").expect("runner supplies committed product SHA"),
         "approved_source_root":"D drive / owner-approved projects, locally staged subset",
         "source_files_unchanged":true,
         "formats":by_format,
