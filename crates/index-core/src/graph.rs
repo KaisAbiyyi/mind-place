@@ -315,15 +315,17 @@ impl IndexStore {
         check()?;
         let mut db = self.connection()?;
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let stats = replace_tx(&tx, scope, projection)?;
-        // Compatibility writer: never leave a trusted generation manifest
-        // pointing at rows mutated outside the fenced generation API.
-        tx.execute(
-            "UPDATE graph_generations SET generation=generation+1,active=0,
-               files_hash='',content_hash='',structure_hash='',projection_hash='',
-               nodes=0,edges=0 WHERE scope=?1",
+        // Once a scope is generation-managed, an unfenced legacy writer must
+        // never bypass optimistic concurrency or reactivate invalidated rows.
+        let managed: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM graph_generations WHERE scope=?1)",
             [scope],
+            |row| row.get(0),
         )?;
+        if managed {
+            return Err(IndexError::StaleGeneration);
+        }
+        let stats = replace_tx(&tx, scope, projection)?;
         check()?;
         tx.commit()?;
         Ok(stats)
