@@ -340,7 +340,7 @@ impl IndexStore {
 pub(crate) fn refresh_archive_graph(tx: &Transaction<'_>) -> Result<()> {
     let mut stmt = tx.prepare(
         "SELECT source_id,archive_id,snapshot_id,title
-         FROM revisions ORDER BY source_id,snapshot_id",
+         FROM revisions ORDER BY source_id,is_current DESC,snapshot_id",
     )?;
     let mut rows = stmt.query([])?;
     let mut nodes = BTreeMap::<GraphNodeRef, GraphNode>::new();
