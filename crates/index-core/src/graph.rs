@@ -162,7 +162,10 @@ fn stable_id(prefix: &str, parts: &[&str]) -> String {
 fn checked_projection<'a>(
     scope: &str,
     projection: &'a GraphProjection,
-) -> Result<(BTreeMap<String, &'a GraphNode>, BTreeMap<String, &'a GraphEdge>)> {
+) -> Result<(
+    BTreeMap<String, &'a GraphNode>,
+    BTreeMap<String, &'a GraphEdge>,
+)> {
     if projection.nodes.len() > MAX_GRAPH_ITEMS || projection.edges.len() > MAX_GRAPH_ITEMS {
         return Err(IndexError::InvalidQuery);
     }
