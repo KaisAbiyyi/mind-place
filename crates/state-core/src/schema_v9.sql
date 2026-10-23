@@ -21,7 +21,7 @@ CREATE TABLE memory_forget_tombstones (
   claim_id TEXT PRIMARY KEY REFERENCES memory_claims(id) ON DELETE RESTRICT,
   client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE RESTRICT,
   request_key TEXT NOT NULL,
-  reason TEXT NOT NULL CHECK(length(trim(reason)) BETWEEN 1 AND 4096),
+  reason_sha256 TEXT NOT NULL CHECK(length(reason_sha256)=64 AND reason_sha256 NOT GLOB '*[^0-9a-f]*'),
   recorded_at_ms INTEGER NOT NULL CHECK(recorded_at_ms>0),
   FOREIGN KEY(client_id,request_key) REFERENCES memory_write_receipts(client_id,request_key)
     DEFERRABLE INITIALLY DEFERRED
