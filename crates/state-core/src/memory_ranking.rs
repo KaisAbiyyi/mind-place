@@ -290,6 +290,16 @@ impl StateStore {
         let mut ranked = Vec::new();
         for (id, claim) in claims {
             let support = positive_evidence(&claim);
+            // Confidence is an immutable state field; inferred confidence
+            // is a bounded tie-breaker, never stronger than source authority.
+            let confidence: Option<f64> = tx.query_row(
+                "SELECT confidence FROM memory_claims WHERE id=?1",
+                [&id],
+                |r| r.get(0),
+            )?;
+            let confidence_weight = confidence
+                .map(|value| (value.clamp(0.0, 1.0) * 100.0).round() as i64)
+                .unwrap_or(0);
             let authority = match claim.asserted_by.as_str() {
                 "user" => 300,
                 "deterministic" => 170,
@@ -310,7 +320,7 @@ impl StateStore {
                 } else {
                     35
                 };
-            let mut score = authority + inference + recency + evidence_weight;
+            let mut score = authority + inference + recency + evidence_weight + confidence_weight;
             if policy.scope_id.as_deref() == claim.scope_id.as_deref() {
                 score += 120;
             }
