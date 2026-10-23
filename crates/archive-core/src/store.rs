@@ -147,10 +147,18 @@ pub fn conversation_id_from_url(source: &str) -> Result<String> {
 }
 
 fn validate(c: &mut Capture) -> Result<()> {
-    if c.schema_version != 1 || c.provider != "chatgpt" {
+    if c.schema_version != 1 || !matches!(c.provider.as_str(), "chatgpt" | "generic") {
         return Err(invalid("Unsupported archive schema or provider"));
     }
-    if !matches!(
+    if c.provider == "generic" {
+        // A generic import is NOT a browser capture and can never spoof a provider URL.
+        if c.capture_method != "generic-import"
+            || !hex_id(&c.conversation_id)
+            || c.source_url != format!("mindplace-import://generic/{}", c.conversation_id)
+        {
+            return Err(invalid("Invalid generic source identity or capture method"));
+        }
+    } else if !matches!(
         c.capture_method.as_str(),
         "manual-dom" | "automatic-dom" | "legacy-import"
     ) {
@@ -164,14 +172,15 @@ fn validate(c: &mut Capture) -> Result<()> {
             "A DOM read cannot prove complete conversation history",
         ));
     }
-    if c.source_url.len() > 32768
-        || conversation_id_from_url(&c.source_url)? != c.conversation_id.to_ascii_lowercase()
-    {
-        return Err(invalid(
-            "Capture URL and conversation identity do not match",
-        ));
+    if c.source_url.len() > 32768 {
+        return Err(invalid("Capture source identity exceeds its size limit"));
     }
-    c.conversation_id = c.conversation_id.to_ascii_lowercase();
+    if c.provider == "chatgpt" {
+        if conversation_id_from_url(&c.source_url)? != c.conversation_id.to_ascii_lowercase() {
+            return Err(invalid("Capture URL and conversation identity do not match"));
+        }
+        c.conversation_id = c.conversation_id.to_ascii_lowercase();
+    }
     if c.title.trim().is_empty() || c.title.len() > 1024 {
         return Err(invalid("Conversation title is missing or too long"));
     }
