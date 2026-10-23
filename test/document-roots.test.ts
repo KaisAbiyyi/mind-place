@@ -173,3 +173,70 @@ test("explicit document indexing and search render only inert text and clear on 
   await delay(0);
   assert.equal(root.querySelectorAll(".document-search-results li").length, 0);
 });
+
+
+test("revocation fences delayed document search and blocks searches during pending revoke", async () => {
+  const id = "root:v1:" + "e".repeat(64);
+  const rootInfo: DocumentRoot = {
+    id, canonical_path: "C:\\Private\\Notes", virtual_prefix: "mpdoc://root/" + id,
+    approval_state: "approved",
+  };
+  let resolveSearch!: (value: unknown) => void;
+  const pendingSearch = new Promise<unknown>((resolve) => { resolveSearch = resolve; });
+  let resolveRevoke!: () => void;
+  const pendingRevoke = new Promise<void>((resolve) => { resolveRevoke = resolve; });
+  let searches = 0;
+  const invoke: Invoke = async <T>(command: string) => {
+    if (command === "list_document_roots") return [rootInfo] as T;
+    if (command === "search_document_index") {
+      searches++;
+      return pendingSearch as T;
+    }
+    if (command === "revoke_document_root") return pendingRevoke as T;
+    throw Error(command);
+  };
+  const { dom, root } = setup(invoke);
+  await delay(0);
+  const searchForm = root.querySelector<HTMLFormElement>(".document-search-form")!;
+  searchForm.querySelector("input")!.value = "private";
+  searchForm.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+  assert.equal(searches, 1);
+  const revoke = root.querySelector<HTMLButtonElement>("[data-action='revoke-root']")!;
+  revoke.click();
+  revoke.click();
+  searchForm.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+  assert.equal(searches, 1, "pending revoke must fence new searches");
+  resolveSearch([{
+    uri: "mpdoc://root/" + id + "/secret.md", section: "intro", snippet: "PRIVATE_IN_FLIGHT",
+    version_id: "docver:v1:old", extractor_revision: "mp-4e:1", warnings: [], score: -1,
+  }]);
+  await delay(0);
+  assert.doesNotMatch(root.textContent ?? "", /PRIVATE_IN_FLIGHT/);
+  rootInfo.approval_state = "revoked";
+  resolveRevoke();
+  await delay(0);
+  assert.equal(root.querySelectorAll(".document-search-results li").length, 0);
+  assert.match(root.textContent ?? "", /Results cleared after revocation/);
+});
+
+test("approved folder cards do not claim historical indexing without evidence", async () => {
+  const id = "root:v1:" + "f".repeat(64);
+  const invoke: Invoke = async <T>(command: string) => {
+    if (command === "list_document_roots") return [{
+      id, approval_state: "approved", canonical_path: "C:\\Documents",
+      virtual_prefix: "mpdoc://root/" + id,
+    }] as T;
+    if (command === "refresh_document_root_index") return {
+      root_id: id, scanned_files: 4, indexed_files: 3, skipped_files: 1,
+      indexed_chunks: 8, generation: 2, auto_refresh_active: false,
+    } as T;
+    throw Error(command);
+  };
+  const { root } = setup(invoke);
+  await delay(0);
+  assert.match(root.textContent ?? "", /Index status not available in this session/);
+  root.querySelector<HTMLButtonElement>("[data-action='index-root']")!.click();
+  await delay(0);
+  assert.match(root.textContent ?? "", /3 files · 1 skipped · 8 chunks/);
+  assert.match(root.textContent ?? "", /refresh inactive/);
+});
