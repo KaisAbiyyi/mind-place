@@ -240,3 +240,53 @@ test("approved folder cards do not claim historical indexing without evidence", 
   assert.match(root.textContent ?? "", /3 files · 1 skipped · 8 chunks/);
   assert.match(root.textContent ?? "", /refresh inactive/);
 });
+
+
+test("source preview renders only inert verified text and is erased before revoke resolves", async () => {
+  const id = "root:v1:" + "9".repeat(64);
+  const uri = "mpdoc://root/" + id + "/example.md";
+  const rootInfo: DocumentRoot = {
+    id, canonical_path: "C:\\Private\\Preview", virtual_prefix: "mpdoc://root/" + id,
+    approval_state: "approved",
+  };
+  let resolveRevoke!: () => void;
+  const pendingRevoke = new Promise<void>((resolve) => { resolveRevoke = resolve; });
+  let previewCalls = 0;
+  const invoke: Invoke = async <T>(command: string) => {
+    if (command === "list_document_roots") return [rootInfo] as T;
+    if (command === "search_document_index") return [{
+      uri, version_id: "docver:v1:preview", section: "intro", snippet: "script contents",
+      score: -1, warnings: [], extractor_revision: "mp-4e:2",
+    }] as T;
+    if (command === "preview_document_source") {
+      previewCalls++;
+      return {
+        uri, version_id: "docver:v1:preview",
+        text: "<script>alert('never')</script>",
+        truncated: false, warnings: [], extractor_revision: "mp-4e:2",
+      } as T;
+    }
+    if (command === "revoke_document_root") return pendingRevoke as T;
+    throw Error(command);
+  };
+  const { dom, root } = setup(invoke);
+  await delay(0);
+  const searchForm = root.querySelector<HTMLFormElement>(".document-search-form")!;
+  searchForm.querySelector("input")!.value = "script";
+  searchForm.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+  await delay(0);
+  const previewButton = root.querySelector<HTMLButtonElement>(".document-preview-button")!;
+  previewButton.click();
+  await delay(0);
+  assert.equal(previewCalls, 1);
+  assert.match(root.querySelector(".document-preview-text")?.textContent ?? "", /<script>alert/);
+  assert.equal(root.querySelectorAll("script").length, 0, "source bytes must remain inert");
+  const revoke = root.querySelector<HTMLButtonElement>("[data-action='revoke-root']")!;
+  revoke.click();
+  revoke.click();
+  assert.equal(root.querySelector(".document-preview-text"), null, "revoke must immediately clear stale preview");
+  rootInfo.approval_state = "revoked";
+  resolveRevoke();
+  await delay(0);
+  assert.equal(root.querySelectorAll(".document-search-card").length, 0);
+});
