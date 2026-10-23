@@ -21,12 +21,18 @@ fn capture() -> Value {
 }
 
 fn submit(capture: Value, root: &std::path::Path) -> Value {
-    let bytes = serde_json::to_vec(&json!({"protocol":1,"operation":"save","capture":capture})).unwrap();
+    let bytes =
+        serde_json::to_vec(&json!({"protocol":1,"operation":"save","capture":capture})).unwrap();
     let mut frame = (bytes.len() as u32).to_le_bytes().to_vec();
     frame.extend(bytes);
     let mut out = Vec::new();
-    serve_one(Cursor::new(frame), &mut out, root,
-        &format!("chrome-extension://{}/", mind_place_archive::extension_id())).unwrap();
+    serve_one(
+        Cursor::new(frame),
+        &mut out,
+        root,
+        &format!("chrome-extension://{}/", mind_place_archive::extension_id()),
+    )
+    .unwrap();
     serde_json::from_slice(&out[4..]).unwrap()
 }
 
@@ -48,25 +54,45 @@ fn claude_native_roundtrip_keeps_branch_observation_and_prior_revision() {
     let newer = submit(second, dir.path());
     assert_eq!(newer["ok"], true);
     assert_ne!(newer["snapshot_id"], snapshot);
-    assert_eq!(store.read(id, Some(snapshot)).unwrap().capture.messages[1].text, "Reply");
+    assert_eq!(
+        store.read(id, Some(snapshot)).unwrap().capture.messages[1].text,
+        "Reply"
+    );
     assert_eq!(store.snapshots(id).unwrap().len(), 2);
 }
 
 #[test]
 fn native_claude_rejects_origin_identity_privacy_and_mode_spoofing() {
     for (field, value) in [
-        ("provider",json!("chatgpt")),
-        ("source_url",json!("https://claude.ai.evil.test/chat/123e4567-e89b-12d3-a456-426614174000")),
-        ("source_url",json!("https://claude.ai/chat/123e4567-e89b-12d3-a456-426614174000?temporary=true")),
-        ("source_url",json!("https://claude.ai/chat/223e4567-e89b-12d3-a456-426614174000")),
-        ("conversation_id",json!("223e4567-e89b-12d3-a456-426614174000")),
-        ("capture_method",json!("automatic-dom")), ("capture_method",json!("legacy-import")),
-        ("completeness",json!("complete"))
+        ("provider", json!("chatgpt")),
+        (
+            "source_url",
+            json!("https://claude.ai.evil.test/chat/123e4567-e89b-12d3-a456-426614174000"),
+        ),
+        (
+            "source_url",
+            json!("https://claude.ai/chat/123e4567-e89b-12d3-a456-426614174000?temporary=true"),
+        ),
+        (
+            "source_url",
+            json!("https://claude.ai/chat/223e4567-e89b-12d3-a456-426614174000"),
+        ),
+        (
+            "conversation_id",
+            json!("223e4567-e89b-12d3-a456-426614174000"),
+        ),
+        ("capture_method", json!("automatic-dom")),
+        ("capture_method", json!("legacy-import")),
+        ("completeness", json!("complete")),
     ] {
         let dir = tempdir().unwrap();
         let mut bad = capture();
         bad[field] = value;
         assert_eq!(submit(bad, dir.path())["ok"], false, "{field}");
-        assert!(ArchiveStore::open(dir.path()).unwrap().list("").unwrap().is_empty());
+        assert!(ArchiveStore::open(dir.path())
+            .unwrap()
+            .list("")
+            .unwrap()
+            .is_empty());
     }
 }
