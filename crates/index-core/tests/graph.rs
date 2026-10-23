@@ -4,7 +4,7 @@ use mind_place_index::{
     IndexError, IndexStore,
 };
 use mind_place_state::StateStore;
-use rusqlite::{params, Connection};
+use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 use std::fs;
 
@@ -138,21 +138,39 @@ fn scopes_are_independent_and_empty_replacement_prunes_orphans() {
         .replace_graph_projection(
             "two",
             &GraphProjection {
-                nodes: vec![shared.clone()],
-                edges: vec![],
+                nodes: vec![shared.clone(), solo.clone()],
+                edges: vec![relation(&shared, &solo, GraphRelation::Contains)],
             },
         )
         .unwrap();
+    // Identical structural evidence in different producer scopes is allowed.
+    assert_eq!(index.graph_scope_stats("two").unwrap().edges, 1);
+    let mut poisoned = shared.clone();
+    poisoned.label = "another scope's forged label".into();
+    assert!(matches!(
+        index.replace_graph_projection(
+            "one",
+            &GraphProjection {
+                nodes: vec![poisoned],
+                edges: vec![],
+            },
+        ),
+        Err(IndexError::InvalidQuery)
+    ));
     index
         .replace_graph_projection("one", &GraphProjection::default())
         .unwrap();
     assert_eq!(index.graph_scope_stats("one").unwrap().nodes, 0);
-    assert_eq!(index.graph_scope_stats("two").unwrap().nodes, 1);
+    assert_eq!(index.graph_scope_stats("two").unwrap().nodes, 2);
+    assert_eq!(index.graph_scope_stats("two").unwrap().edges, 1);
+    index
+        .replace_graph_projection("two", &GraphProjection::default())
+        .unwrap();
     let db = Connection::open(index.path()).unwrap();
     let count: i64 = db
         .query_row("SELECT COUNT(*) FROM graph_nodes", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(count, 1);
+    assert_eq!(count, 0);
 }
 
 #[test]
