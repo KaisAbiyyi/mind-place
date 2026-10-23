@@ -528,6 +528,36 @@ mod tests {
         (dir, state, index, root.id)
     }
 
+
+    #[cfg(windows)]
+    #[test]
+    fn preview_revalidates_current_source_revision_and_permission() {
+        let (dir, state, index, root_id) = approved_fixture();
+        index.refresh_root(&state, &root_id, || Ok(())).unwrap();
+        let hits = index.search(&state, "uniquephrase", 1, || Ok(())).unwrap();
+        let hit = &hits[0];
+        let preview = index
+            .preview(&state, &hit.uri, &hit.version_id, || Ok(()))
+            .unwrap();
+        assert!(preview.text.contains("uniquephrase"));
+        assert!(!preview.truncated);
+        assert_eq!(preview.version_id, hit.version_id);
+        assert!(index
+            .preview(&state, &hit.uri, "docver:v1:stale", || Ok(()))
+            .is_err());
+
+        // Changing the authorized live bytes invalidates the saved head hash.
+        std::fs::write(dir.path().join("approved").join("notes.md"), "changed").unwrap();
+        assert!(index
+            .preview(&state, &hit.uri, &hit.version_id, || Ok(()))
+            .is_err());
+
+        state.revoke_document_root(&root_id).unwrap();
+        assert!(index
+            .preview(&state, &hit.uri, &hit.version_id, || Ok(()))
+            .is_err());
+    }
+
     #[cfg(windows)]
     #[test]
     fn revoke_on_second_thread_at_final_search_lease_never_discloses() {
