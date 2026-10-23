@@ -221,6 +221,7 @@ fn claude_conversation_id_from_url(source: &str) -> Result<String> {
     }
     Ok(id.to_ascii_lowercase())
 }
+
 fn validate(c: &mut Capture) -> Result<()> {
     if c.schema_version != 1 || !matches!(c.provider.as_str(), "chatgpt" | "gemini" | "claude") {
         return Err(invalid("Unsupported archive schema or provider"));
