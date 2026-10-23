@@ -85,7 +85,9 @@ fn three_browser_sources_and_generic_import_remain_isolated_and_immutable() {
     let imported_capture = store.read(&generic_id, None).unwrap().capture;
     assert_eq!(imported_capture.provider, "generic");
     assert_eq!(imported_capture.capture_method, "generic-import");
-    assert!(imported_capture.source_url.starts_with("mindplace-import://generic/"));
+    assert!(imported_capture
+        .source_url
+        .starts_with("mindplace-import://generic/"));
     assert_eq!(
         fs::read(
             store
