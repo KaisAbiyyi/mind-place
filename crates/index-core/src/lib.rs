@@ -36,6 +36,7 @@ pub mod documents;
 pub mod fetch;
 pub mod graph;
 pub mod graph_generation;
+pub mod graph_maintenance;
 pub mod graph_query;
 pub mod inspection;
 pub use context::{
@@ -50,6 +51,7 @@ pub use graph::{
     GraphProjectionStats, GraphRelation,
 };
 pub use graph_generation::{GraphActivation, GraphGeneration, GraphInputHashes};
+pub use graph_maintenance::{GraphBatchReceipt, GraphMaintenanceBatch, GraphMaintenanceJob};
 pub use graph_query::{
     GraphCommunities, GraphCommunity, GraphDirection, GraphNeighborhood, GraphNeighborhoodRequest,
     GraphQueryEdge, GraphQueryNode,
