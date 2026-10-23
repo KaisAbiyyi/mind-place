@@ -7,9 +7,8 @@ mod mcp_commands;
 use document_refresh::DocumentRefreshRegistry;
 
 use mind_place_archive::{
-    ArchiveStore, AssetResult, Conversation, ConversationSummary, ExportResult, GenericImportReceipt,
-    ImportReceipt,
-    SnapshotSummary, NATIVE_HOST_NAME,
+    ArchiveStore, AssetResult, Conversation, ConversationSummary, ExportResult,
+    GenericImportReceipt, ImportReceipt, SnapshotSummary, NATIVE_HOST_NAME,
 };
 use mind_place_index::documents::{DocumentHit, DocumentIndex, DocumentIndexReport};
 use mind_place_index::{
@@ -590,7 +589,10 @@ async fn import_generic_text(
     raw: String,
 ) -> Result<GenericImportReceipt, String> {
     let store = state.store.clone();
-    gated_blocking(&state, move || store.import_generic(&format, raw.as_bytes())).await
+    gated_blocking(&state, move || {
+        store.import_generic(&format, raw.as_bytes())
+    })
+    .await
 }
 
 fn native_manifest_path(state: &AppState, browser: &str) -> PathBuf {
