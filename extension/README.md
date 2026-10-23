@@ -32,3 +32,11 @@ The manifest public key is held in `public-key.txt` and fixes the extension ID t
 Required permissions are `activeTab`, `scripting`, `nativeMessaging`, and `storage`. Only optional ChatGPT origin access is declared; no unconditional content script or mandatory host access is shipped. Navigation/change observation is enabled only by the automatic toggle and granted origin access. Neither mode calls provider APIs, uses browser debugging, or reloads tabs. Exact URL/privacy identity is validated before native submission to `com.mindplace.capture`. Only a valid durable save receipt counts as success. A timed-out or lost acknowledgement may have committed; check the archive before retrying.
 
 Limits remain 4 MiB per message, 10,000 collected messages, 31 MiB capture JSON, 120 attachment references, and 16 MiB inline image data across the collection. Attachment-reference omissions are explicit warnings; message text is retained. Missing stable message/turn identity produces a warning about repeated turns and ordering. Historical raw revisions remain immutable; this extension does not erase or replace older snapshots.
+
+## Provider adapters
+
+Manual and opt-in automatic saving dispatch through `providers/index.mjs`.
+ChatGPT is the only registered provider; `capture.mjs` re-exports its serialized
+capture helpers for compatibility. See
+[`phase-7a-capture-adapters.md`](../docs/implementation-plan/phase-7a-capture-adapters.md)
+for the versioned interface, normalized evidence contract and qualification limits.

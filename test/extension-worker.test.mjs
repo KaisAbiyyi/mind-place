@@ -12,7 +12,7 @@ function listeners() {
   return { addListener: (fn) => callbacks.add(fn), removeListener: (fn) => callbacks.delete(fn), emit: (...args) => { for (const callback of callbacks) callback(...args); } };
 }
 
-async function fixture({ waitForRead, afterReadUrl, nativeReply = receipt, incognito = false } = {}) {
+async function fixture({ waitForRead, afterReadUrl, nativeReply = receipt, incognito = false, pageCapture = capture } = {}) {
   let createCaptureWorker;
   try { ({ createCaptureWorker } = await import('../extension/worker.mjs')); }
   catch { assert.fail('manual capture worker must coordinate explicit scroll/save jobs independently of the popup'); }
@@ -25,7 +25,7 @@ async function fixture({ waitForRead, afterReadUrl, nativeReply = receipt, incog
     tabs: { query: async () => [{ id: 7, url: conversationUrl, incognito }], get: async () => ({ id: 7, url: afterReadUrl ?? conversationUrl, incognito }) },
     scripting: { executeScript: async ({ func, args, target }) => {
       assert.equal(target.tabId, 7);
-      if (func.name === 'captureConversation') { readCalls += 1; if (waitForRead) await waitForRead; return [{ frameId: 0, result: { ok: true, capture: structuredClone(capture) } }]; }
+      if (func.name === 'captureConversation') { readCalls += 1; if (waitForRead) await waitForRead; return [{ frameId: 0, result: { ok: true, capture: structuredClone(pageCapture) } }]; }
       controls.push({ name: func.name, args });
       return [{ frameId: 0, result: true }];
     } },
@@ -90,6 +90,23 @@ test('worker refuses private tabs before reading or starting the native host', a
   assert.match(job.status, /private/i);
   assert.equal(fake.reads, 0);
   assert.equal(fake.connections, 0);
+});
+
+test('manual coordinator rejects malformed normalized captures before native submission', async () => {
+  for (const patch of [
+    { schema_version: 2 },
+    { warnings: 'not a warning list' },
+    { messages: [] },
+    { messages: [{ ...capture.messages[0], role: 'invented-role' }] },
+    { messages: [capture.messages[0], capture.messages[0]] },
+    { messages: [{ ...capture.messages[0], attachments: [{ id: 'untrusted', asset_path: 'assets/local.png' }] }] },
+  ]) {
+    const fake = await fixture({ pageCapture: { ...capture, ...patch } });
+    await fake.send({ type: 'start-capture', loadHistory: false });
+    const job = await fake.settled();
+    assert.equal(job.phase, 'error');
+    assert.equal(fake.requests.length, 0, JSON.stringify(patch));
+  }
 });
 
 test('cancelling a loading job prevents a late script result from being saved', async () => {
