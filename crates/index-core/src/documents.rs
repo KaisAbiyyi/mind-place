@@ -540,7 +540,6 @@ mod tests {
         (dir, state, index, root.id)
     }
 
-
     #[cfg(windows)]
     #[test]
     fn preview_revalidates_current_source_revision_and_permission() {
