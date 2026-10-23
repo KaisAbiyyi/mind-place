@@ -326,7 +326,7 @@ fn schema_v3_migrates_without_adopting_historical_approved_roots() {
     db.execute("INSERT INTO source_roots(id,canonical_path,approval_state,approved_at) VALUES('legacy','/legacy/secret','approved',unixepoch())", []).unwrap();
     db.pragma_update(None, "user_version", 3).unwrap();
     drop(db);
-    assert_eq!(SCHEMA_VERSION, 6);
+    assert_eq!(SCHEMA_VERSION, 7);
     let state = StateStore::open(&path).unwrap();
     assert_eq!(
         state.root("legacy").unwrap().unwrap().approval_state,
