@@ -312,6 +312,11 @@ impl StateStore {
         }
         let mut db = self.connection()?;
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let forgotten: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM memory_forget_tombstones WHERE claim_id=?1)",
+            [claim_id], |r| r.get(0),
+        )?;
+        if forgotten { return Err(StateError::MemoryDenied); }
         let status: String = tx
             .query_row(
                 "SELECT status FROM memory_claims WHERE id=?1",
