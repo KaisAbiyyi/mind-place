@@ -1,4 +1,4 @@
-import { captureConversation, controlCapture, finishCapture, parseChatGptConversationUrl } from './capture.mjs';
+import { resolveCaptureAdapter, captureMatchesIdentity } from './providers/index.mjs';
 import { NATIVE_HOST, validReceipt, withTimeout } from './native.mjs';
 import { initAutomaticSaving } from './automatic.mjs';
 
@@ -8,9 +8,9 @@ export function createCaptureWorker(chromeApi, { saveTimeoutMs = 15_000, capture
   const publicJob = () => job && ({ operationId: job.operationId, phase: job.phase, active: job.active, status: job.status, warning: job.warning, messageCount: job.messageCount });
   const setStatus = (target, phase, status) => { target.phase = phase; target.status = status; };
   const control = async (target, action) => {
-    if (!Number.isInteger(target.tabId)) return;
+    if (!Number.isInteger(target.tabId) || !target.adapter) return;
     try {
-      await withTimeout(chromeApi.scripting.executeScript({ target: { tabId: target.tabId }, func: controlCapture, args: [target.operationId, action] }), 3000);
+      await withTimeout(chromeApi.scripting.executeScript({ target: { tabId: target.tabId }, func: target.adapter.control, args: [target.operationId, action] }), 3000);
     } catch { /* A closed/navigated tab has no job left to control. */ }
   };
   const run = async (target, loadHistory) => {
@@ -24,8 +24,13 @@ export function createCaptureWorker(chromeApi, { saveTimeoutMs = 15_000, capture
       const tab = tabs?.[0];
       if (!tab || !Number.isInteger(tab.id)) throw new Error('No active web tab is available to capture.');
       if (tab.incognito) throw new Error('Private browsing is excluded. Use a regular browser window.');
-      const identity = parseChatGptConversationUrl(tab.url);
-      if (!identity) throw new Error('Open a saved ChatGPT conversation at chatgpt.com before saving.');
+      const selected = resolveCaptureAdapter(tab.url);
+      if (!selected) throw new Error('Open a supported saved conversation before saving.');
+      const { adapter, identity } = selected;
+      if (!adapter.capabilities.manualDom || (loadHistory && !adapter.capabilities.manualHistory)) {
+        throw new Error('This provider does not support the requested capture mode.');
+      }
+      target.adapter = adapter;
       target.tabId = tab.id;
       target.sourceUrl = identity.sourceUrl;
       if (target.cancelled) throw new Error('Capture cancelled. Nothing was saved.');
@@ -50,7 +55,7 @@ export function createCaptureWorker(chromeApi, { saveTimeoutMs = 15_000, capture
       injectionStarted = true;
       const frames = await withTimeout(Promise.race([
         chromeApi.scripting.executeScript({
-          target: { tabId: tab.id }, func: captureConversation,
+          target: { tabId: tab.id }, func: adapter.capture,
           args: [{ loadHistory, operationId: target.operationId, maxDurationMs: Math.max(40, Math.min(180_000, captureTimeoutMs - 15_000)) }],
         }),
         response.then(() => { throw new Error('Unexpected native response before a save request.'); }),
@@ -59,9 +64,7 @@ export function createCaptureWorker(chromeApi, { saveTimeoutMs = 15_000, capture
       const result = frames?.find((frame) => frame.frameId === 0)?.result;
       if (!result?.ok || !result.capture) throw new Error(result?.error || 'The page could not be read; nothing was saved.');
       const capture = result.capture;
-      if (capture.provider !== 'chatgpt' || capture.conversation_id !== identity.conversationId
-        || capture.source_url !== identity.sourceUrl || capture.capture_method !== 'manual-dom'
-        || capture.completeness !== 'partial') throw new Error('The page identity changed during capture. Nothing was sent to Mind Place.');
+      if (!captureMatchesIdentity(adapter, identity, capture, false)) throw new Error('The page identity or capture contract changed during capture. Nothing was sent to Mind Place.');
       const currentTab = await withTimeout(chromeApi.tabs.get(tab.id), 5000);
       if (target.cancelled) throw new Error('Capture cancelled. Nothing was saved.');
       if (!currentTab || currentTab.incognito || currentTab.url !== identity.sourceUrl) throw new Error('The browser tab navigated or changed during capture. Nothing was saved.');
@@ -90,7 +93,7 @@ export function createCaptureWorker(chromeApi, { saveTimeoutMs = 15_000, capture
       target.active = false;
       if (Number.isInteger(target.tabId) && loadHistory) {
         try {
-          await withTimeout(chromeApi.scripting.executeScript({ target: { tabId: target.tabId }, func: finishCapture, args: [target.operationId, target.status] }), 3000);
+          await withTimeout(chromeApi.scripting.executeScript({ target: { tabId: target.tabId }, func: target.adapter.finish, args: [target.operationId, target.status] }), 3000);
         } catch { /* The final result remains available when the popup is reopened. */ }
       }
     }

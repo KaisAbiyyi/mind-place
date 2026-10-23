@@ -37,7 +37,7 @@ test('automatic DOM capture has separate provenance and cannot enter history scr
   } finally { dom.window.close(); }
 });
 
-async function workerFixture({ enabled = false, permission = true, navigate = false, nativeFails = false, currentUrl = url, stalledAttachment = false } = {}) {
+async function workerFixture({ enabled = false, permission = true, navigate = false, nativeFails = false, currentUrl = url, stalledAttachment = false, mutateCapture } = {}) {
   const { initAutomaticSaving } = await import('../extension/automatic.mjs');
   const stored = { automaticSavingEnabled: enabled };
   const reads = [], saves = [], registrations = [], stops = [];
@@ -47,7 +47,7 @@ async function workerFixture({ enabled = false, permission = true, navigate = fa
     storage: { local: { get: async () => ({ ...stored }), set: async values => Object.assign(stored, values) } },
     permissions: { contains: async () => permission, remove: async () => true, onRemoved: event() },
     scripting: { getRegisteredContentScripts: async () => [], registerContentScripts: async entries => registrations.push(...entries), unregisterContentScripts: async () => {},
-      executeScript: async ({ func, files, args }) => { if (files) return stalledAttachment ? new Promise(() => {}) : []; reads.push(args); const dom = page(currentUrl); try { const result = dom.window.eval(`(${func.toString()})(${JSON.stringify(args[0])})`); return [{ frameId: 0, result }]; } finally { dom.window.close(); } } },
+      executeScript: async ({ func, files, args }) => { if (files) return stalledAttachment ? new Promise(() => {}) : []; reads.push(args); const dom = page(currentUrl); try { const result = dom.window.eval(`(${func.toString()})(${JSON.stringify(args[0])})`); if (mutateCapture && result.capture) mutateCapture(result.capture); return [{ frameId: 0, result }]; } finally { dom.window.close(); } } },
     tabs: { query: async () => [{ id: 7, url: currentUrl, incognito: false }], get: async () => ({ id: 7, url: navigate && reads.length ? other : currentUrl, incognito: false }),
       sendMessage: async (id, message) => stops.push(message), onUpdated: event(), onRemoved: event() },
   };
@@ -102,6 +102,16 @@ test('navigation between automatic read and save rejects the stale window', asyn
   const fake = await workerFixture({ enabled: true, navigate: true });
   await fake.send({ type: 'auto-capture', sourceUrl: url }, pageSender);
   assert.equal(fake.saves.length, 0);
+});
+
+test('automatic coordinator applies normalized admission before hashing or native submission', async () => {
+  for (const patch of [{ schema_version: 2 }, { warnings: [] }, { messages: [] }, { completeness: 'complete' }]) {
+    const fake = await workerFixture({ enabled: true, mutateCapture: capture => Object.assign(capture, patch) });
+    const result = await fake.send({ type: 'auto-capture', sourceUrl: url }, pageSender);
+    assert.equal(result.ok, false);
+    assert.equal(fake.saves.length, 0);
+    assert.notEqual(fake.stored.automaticSavingStatus?.state, 'saved');
+  }
 });
 
 test('SPA capture uses the current tab URL even if MessageSender retains the document startup URL', async () => {

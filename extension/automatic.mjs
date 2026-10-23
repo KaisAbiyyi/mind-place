@@ -1,8 +1,9 @@
-import { captureConversation, parseChatGptConversationUrl } from './capture.mjs';
+import { CAPTURE_ADAPTERS, captureAdapterForPage, resolveCaptureAdapter, captureMatchesIdentity } from './providers/index.mjs';
 import { NATIVE_HOST, validReceipt, withTimeout } from './native.mjs';
 
-export const AUTO_ORIGINS = ['https://chatgpt.com/*'];
-const SCRIPT_ID = 'mind-place-loaded-auto-save';
+const automaticAdapters = CAPTURE_ADAPTERS.filter(adapter => adapter.capabilities.automaticLoadedDom && adapter.automatic);
+export const AUTO_ORIGINS = Object.freeze(automaticAdapters.flatMap(adapter => adapter.automatic.origins));
+const scriptIds = automaticAdapters.map(adapter => adapter.automatic.scriptId);
 
 export function initAutomaticSaving(chromeApi, { saveTimeoutMs = 15_000, attachmentTimeoutMs = 5000 } = {}) {
   let generation = 0;
@@ -13,7 +14,7 @@ export function initAutomaticSaving(chromeApi, { saveTimeoutMs = 15_000, attachm
   const enabled = async () => (await local.get('automaticSavingEnabled')).automaticSavingEnabled === true && await permitted();
   const isPage = sender => sender?.id === chromeApi.runtime.id && sender.frameId === 0
     && Number.isInteger(sender.tab?.id) && !sender.tab.incognito
-    && (() => { try { return new URL(sender.url).origin === 'https://chatgpt.com'; } catch { return false; } })();
+    && captureAdapterForPage(sender.url)?.capabilities.automaticLoadedDom === true;
   const isPopup = sender => sender?.id === chromeApi.runtime.id && !sender.tab
     && sender.url === chromeApi.runtime.getURL('popup.html');
   const status = async (value) => {
@@ -22,21 +23,23 @@ export function initAutomaticSaving(chromeApi, { saveTimeoutMs = 15_000, attachm
   const attach = async tab => {
     if (!Number.isInteger(tab?.id) || tab.incognito) return;
     try {
-      if (new URL(tab.url).origin !== 'https://chatgpt.com') return;
-      await withTimeout(chromeApi.scripting.executeScript({ target: { tabId: tab.id }, files: ['auto-observer.js'] }), attachmentTimeoutMs);
+      const adapter = captureAdapterForPage(tab.url);
+      if (!adapter?.capabilities.automaticLoadedDom || !adapter.automatic) return;
+      await withTimeout(chromeApi.scripting.executeScript({ target: { tabId: tab.id }, files: [adapter.automatic.observerFile] }), attachmentTimeoutMs);
     } catch { /* A closed/loading tab is attached on its next completed navigation. */ }
   };
   const synchronize = async () => {
     const active = await enabled();
-    const registered = await chromeApi.scripting.getRegisteredContentScripts({ ids: [SCRIPT_ID] });
+    const registered = await chromeApi.scripting.getRegisteredContentScripts({ ids: scriptIds });
     if (!active) {
-      if (registered.length) await chromeApi.scripting.unregisterContentScripts({ ids: [SCRIPT_ID] });
+      if (registered.length) await chromeApi.scripting.unregisterContentScripts({ ids: scriptIds });
       return false;
     }
-    if (!registered.length) await chromeApi.scripting.registerContentScripts([{
-      id: SCRIPT_ID, matches: AUTO_ORIGINS, js: ['auto-observer.js'],
+    const missing = automaticAdapters.filter(adapter => !registered.some(script => script.id === adapter.automatic.scriptId));
+    if (missing.length) await chromeApi.scripting.registerContentScripts(missing.map(adapter => ({
+      id: adapter.automatic.scriptId, matches: adapter.automatic.origins, js: [adapter.automatic.observerFile],
       allFrames: false, runAt: 'document_idle', persistAcrossSessions: true,
-    }]);
+    })));
     const tabs = await chromeApi.tabs.query({ url: AUTO_ORIGINS });
     // A frozen/discarded tab must not delay the user's setting acknowledgement.
     void Promise.allSettled(tabs.map(attach));
@@ -62,22 +65,21 @@ export function initAutomaticSaving(chromeApi, { saveTimeoutMs = 15_000, attachm
   const saveWindow = async (sourceUrl, sender) => {
     const token = generation;
     if (!await enabled()) return { ok: false, enabled: false };
-    const identity = parseChatGptConversationUrl(sourceUrl);
+    const selected = resolveCaptureAdapter(sourceUrl);
     // A same-document navigation can retain the sender's document-start URL.
     // Trust the live tab URL checked here and after capture, never a requested URL alone.
-    if (!identity) return { ok: false };
+    if (!selected || !selected.adapter.capabilities.automaticLoadedDom) return { ok: false };
+    const { adapter, identity } = selected;
     const tab = await chromeApi.tabs.get(sender.tab.id);
     if (!tab || tab.incognito || tab.url !== sourceUrl) return { ok: false };
     const frames = await withTimeout(chromeApi.scripting.executeScript({
-      target: { tabId: tab.id }, func: captureConversation,
+      target: { tabId: tab.id }, func: adapter.capture,
       args: [{ automatic: true, loadHistory: false }],
     }), 5000);
     const result = frames.find(frame => frame.frameId === 0)?.result;
     if (!result?.ok) return { ok: false, error: result?.error };
     const capture = result.capture;
-    if (capture?.provider !== 'chatgpt' || capture.conversation_id !== identity.conversationId
-      || capture.source_url !== sourceUrl || capture.capture_method !== 'automatic-dom'
-      || capture.completeness !== 'partial') return { ok: false };
+    if (!captureMatchesIdentity(adapter, identity, capture, true)) return { ok: false };
     const current = await chromeApi.tabs.get(tab.id);
     if (token !== generation || !await enabled() || !current || current.incognito || current.url !== sourceUrl) return { ok: false };
     const bytes = new TextEncoder().encode(JSON.stringify({ ...capture, captured_at: '' }));

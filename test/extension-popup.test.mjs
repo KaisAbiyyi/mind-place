@@ -27,7 +27,7 @@ function makeConversationPage(url = conversationUrl, assistantText = 'Answer') {
   return dom;
 }
 
-function makeChrome({ page, tabUrl = conversationUrl, incognito = false, queryReply, nativeReply, onNative, afterReadUrl } = {}) {
+function makeChrome({ page, tabUrl = conversationUrl, incognito = false, queryReply, nativeReply, onNative, afterReadUrl, mutateCapture, frameId = 0 } = {}) {
   const nativeRequests = [];
   let currentUrl = tabUrl;
   let injected = 0;
@@ -41,8 +41,9 @@ function makeChrome({ page, tabUrl = conversationUrl, incognito = false, queryRe
         assert.deepEqual(target, { tabId: 7 });
         injected += 1;
         const result = page.window.eval(`(${func.toString()})()`);
+        if (mutateCapture && result.capture) mutateCapture(result.capture);
         if (afterReadUrl) currentUrl = afterReadUrl;
-        return [{ frameId: 0, result }];
+        return [{ frameId, result }];
       },
     },
     runtime: {
@@ -157,6 +158,31 @@ test('rechecks the exact URL after the DOM read and refuses a navigation race', 
   assert.equal(fake.injected, 1);
   assert.equal(fake.nativeRequests.length, 0);
   assert.match(dom.window.document.querySelector('#status').textContent, /navigat|changed/i);
+});
+
+test('quick save rejects malformed normalized captures before native submission', async () => {
+  for (const patch of [{ schema_version: 2 }, { warnings: [] }, { messages: [] }, { completeness: 'complete' }]) {
+    const page = makeConversationPage();
+    const fake = makeChrome({ page, mutateCapture: capture => Object.assign(capture, patch) });
+    const { dom, controller } = startPopup(fake.chromeApi);
+    try {
+      dom.window.document.querySelector('#save').click();
+      await controller.whenIdle();
+      assert.equal(fake.nativeRequests.length, 0);
+      assert.match(dom.window.document.querySelector('#status').textContent, /contract|identity|nothing.*sent/i);
+    } finally { controller.destroy(); dom.window.close(); page.window.close(); }
+  }
+});
+
+test('quick save cannot accept a subframe result as top-level evidence', async () => {
+  const page = makeConversationPage();
+  const fake = makeChrome({ page, frameId: 1 });
+  const { dom, controller } = startPopup(fake.chromeApi);
+  try {
+    dom.window.document.querySelector('#save').click();
+    await controller.whenIdle();
+    assert.equal(fake.nativeRequests.length, 0);
+  } finally { controller.destroy(); dom.window.close(); page.window.close(); }
 });
 
 test('keeps the save pending until the native host acknowledges its durable receipt', async () => {
