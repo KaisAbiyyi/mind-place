@@ -174,6 +174,7 @@ fn graph_edges_for(
     node_id: &str,
     direction: GraphDirection,
     limit: usize,
+    seen_ids_json: &str,
 ) -> Result<Vec<GraphQueryEdge>> {
     // Both endpoints must be members of the SAME requested scope. Merely
     // sharing a global node ID never authorizes reading another scope's edges.
@@ -184,13 +185,14 @@ fn graph_edges_for(
          JOIN graph_scope_nodes f ON f.node_id=e.from_node AND f.scope=e.scope
          JOIN graph_scope_nodes t ON t.node_id=e.to_node AND t.scope=e.scope
          WHERE e.scope=?1 AND
+             e.id NOT IN (SELECT value FROM json_each(?4)) AND
              ((?3='both' AND (e.from_node=?2 OR e.to_node=?2))
               OR (?3='out' AND e.from_node=?2)
               OR (?3='in' AND e.to_node=?2))
-         ORDER BY e.id LIMIT ?4",
+         ORDER BY e.id LIMIT ?5",
     )?;
     let rows = stmt.query_map(
-        params![scope, node_id, direction.as_str(), limit as i64],
+        params![scope, node_id, direction.as_str(), seen_ids_json, limit as i64],
         |r| {
             Ok((
                 r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?,
@@ -247,12 +249,15 @@ impl IndexStore {
             // One extra row signals possible truncation without scanning a
             // high-degree node or disclosing any out-of-scope information.
             let remaining = request.max_edges - edges.len();
+            let seen_ids_json = serde_json::to_string(&edges.keys().collect::<Vec<_>>())
+                .map_err(|_| IndexError::InvalidQuery)?;
             let adjacent = graph_edges_for(
                 &tx,
                 &request.scope,
                 &id,
                 request.direction,
                 remaining + 1,
+                &seen_ids_json,
             )?;
             for edge in adjacent {
                 if edges.contains_key(&edge.id) {
