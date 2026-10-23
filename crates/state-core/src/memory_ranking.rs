@@ -41,6 +41,17 @@ pub struct ClaimRelation {
     pub recorded_at_ms: i64,
 }
 
+/// Immutable evidence that an earlier relation was erroneous or obsolete.
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub struct ClaimRelationResolution {
+    pub from_claim_id: String,
+    pub to_claim_id: String,
+    pub relation: String,
+    pub source_ref: String,
+    pub reason: String,
+    pub recorded_at_ms: i64,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RankingMode {
     Balanced,
@@ -117,31 +128,44 @@ fn load_relations(
     db: &Connection,
     ids: &BTreeSet<String>,
     as_of_ms: i64,
-) -> Result<Vec<ClaimRelation>> {
+) -> Result<(Vec<ClaimRelation>, BTreeSet<String>)> {
     let mut found = BTreeMap::new();
+    let mut correction_sources = BTreeSet::new();
     for id in ids {
         let mut stmt = db.prepare(
-            "SELECT from_claim_id,to_claim_id,relation,source_ref,reason,recorded_at_ms
-             FROM memory_claim_relations
-             WHERE (from_claim_id=?1 OR to_claim_id=?1) AND recorded_at_ms<=?2
-             ORDER BY from_claim_id,to_claim_id,relation LIMIT 129",
+            "SELECT r.from_claim_id,r.to_claim_id,r.relation,r.source_ref,
+                    r.reason,r.recorded_at_ms,x.source_ref,x.recorded_at_ms
+             FROM memory_claim_relations r
+             LEFT JOIN memory_claim_relation_resolutions x
+               ON x.from_claim_id=r.from_claim_id
+              AND x.to_claim_id=r.to_claim_id AND x.relation=r.relation
+             WHERE (r.from_claim_id=?1 OR r.to_claim_id=?1) AND r.recorded_at_ms<=?2
+             ORDER BY r.from_claim_id,r.to_claim_id,r.relation LIMIT 129",
         )?;
         let rows = stmt
             .query_map(params![id, as_of_ms], |row| {
-                Ok(ClaimRelation {
-                    from_claim_id: row.get(0)?,
-                    to_claim_id: row.get(1)?,
-                    relation: row.get(2)?,
-                    source_ref: row.get(3)?,
-                    reason: row.get(4)?,
-                    recorded_at_ms: row.get(5)?,
-                })
+                Ok((
+                    ClaimRelation {
+                        from_claim_id: row.get(0)?,
+                        to_claim_id: row.get(1)?,
+                        relation: row.get(2)?,
+                        source_ref: row.get(3)?,
+                        reason: row.get(4)?,
+                        recorded_at_ms: row.get(5)?,
+                    },
+                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, Option<i64>>(7)?,
+                ))
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         if rows.len() > MAX_RELATIONS_PER_CLAIM {
             return Err(StateError::InvalidValue);
         }
-        for relation in rows {
+        for (relation, correction_source, correction_at) in rows {
+            if correction_at.is_some_and(|at| at <= as_of_ms) {
+                correction_sources.insert(correction_source.ok_or(StateError::Corrupt)?);
+                continue;
+            }
             found.insert(
                 (
                     relation.from_claim_id.clone(),
@@ -152,7 +176,7 @@ fn load_relations(
             );
         }
     }
-    Ok(found.into_values().collect())
+    Ok((found.into_values().collect(), correction_sources))
 }
 
 impl StateStore {
@@ -246,6 +270,64 @@ impl StateStore {
         })
     }
 
+    /// Append a durable correction to an incorrect relation without deleting
+    /// its historical source and without silently changing as-of results.
+    /// The same relation may only be resolved once; fresh contradictory
+    /// evidence requires a new claim/evidence link rather than rewriting history.
+    pub fn resolve_claim_relation(
+        &self,
+        from_id: &str,
+        to_id: &str,
+        relation: RelationKind,
+        source_ref: &str,
+        reason: &str,
+    ) -> Result<ClaimRelationResolution> {
+        valid_id(from_id)?;
+        valid_id(to_id)?;
+        valid_id(source_ref)?;
+        valid_text(reason)?;
+        if from_id == to_id || !source_ref.starts_with("src:v1:") || reason.len() > 4096 {
+            return Err(StateError::InvalidValue);
+        }
+        let mut db = self.connection()?;
+        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let source = tx
+            .query_row(
+                "SELECT id,provider,source_namespace,source_kind,key_type,source_key
+                 FROM source_identities WHERE id=?1",
+                [source_ref],
+                source_record,
+            )
+            .optional()?
+            .ok_or(StateError::InvalidValue)?;
+        verify_source_record(&source)?;
+        let original: i64 = tx
+            .query_row(
+                "SELECT recorded_at_ms FROM memory_claim_relations
+                 WHERE from_claim_id=?1 AND to_claim_id=?2 AND relation=?3",
+                params![from_id, to_id, relation.as_str()],
+                |r| r.get(0),
+            )
+            .optional()?
+            .ok_or(StateError::InvalidValue)?;
+        let clock = now_ms()?.max(original.checked_add(1).ok_or(StateError::Corrupt)?);
+        tx.execute(
+            "INSERT INTO memory_claim_relation_resolutions
+             (from_claim_id,to_claim_id,relation,source_ref,reason,recorded_at_ms)
+             VALUES(?1,?2,?3,?4,?5,?6)",
+            params![from_id, to_id, relation.as_str(), source_ref, reason, clock],
+        )?;
+        tx.commit()?;
+        Ok(ClaimRelationResolution {
+            from_claim_id: from_id.into(),
+            to_claim_id: to_id.into(),
+            relation: relation.as_str().into(),
+            source_ref: source_ref.into(),
+            reason: reason.into(),
+            recorded_at_ms: clock,
+        })
+    }
+
     /// Rank only bounded, explicitly selected IDs. Related claims outside that
     /// selection are checked too, so omitted opponents cannot silently vanish.
     /// Every read uses one authority SQLite snapshot; no derived FTS/index.
@@ -285,7 +367,7 @@ impl StateStore {
                 }
             }
         }
-        let relations = load_relations(&tx, &ids, cutoff)?;
+        let (relations, resolved_sources) = load_relations(&tx, &ids, cutoff)?;
         let mut neighbors = BTreeMap::new();
         for relation in &relations {
             for id in [&relation.from_claim_id, &relation.to_claim_id] {
@@ -299,7 +381,7 @@ impl StateStore {
         // An already-open store must fail closed if authority source metadata
         // was modified after open. Foreign keys only prove a row exists, not
         // that its canonical id still matches its source descriptor.
-        let mut source_refs = BTreeSet::new();
+        let mut source_refs = resolved_sources;
         for claim in claims.values().chain(neighbors.values()) {
             for evidence in &claim.evidence {
                 source_refs.insert(evidence.source_ref.clone());
