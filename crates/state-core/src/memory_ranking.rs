@@ -202,9 +202,12 @@ impl StateStore {
         for id in [from_id, to_id] {
             let forgotten: bool = tx.query_row(
                 "SELECT EXISTS(SELECT 1 FROM memory_forget_tombstones WHERE claim_id=?1)",
-                [id], |r| r.get(0),
+                [id],
+                |r| r.get(0),
             )?;
-            if forgotten { return Err(StateError::MemoryDenied); }
+            if forgotten {
+                return Err(StateError::MemoryDenied);
+            }
         }
         let source = tx
             .query_row(
@@ -324,9 +327,12 @@ impl StateStore {
         for id in [from_id, to_id] {
             let forgotten: bool = tx.query_row(
                 "SELECT EXISTS(SELECT 1 FROM memory_forget_tombstones WHERE claim_id=?1)",
-                [id], |r| r.get(0),
+                [id],
+                |r| r.get(0),
             )?;
-            if forgotten { return Err(StateError::MemoryDenied); }
+            if forgotten {
+                return Err(StateError::MemoryDenied);
+            }
         }
         let source = tx
             .query_row(
