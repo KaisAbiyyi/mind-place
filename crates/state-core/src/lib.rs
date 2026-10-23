@@ -25,11 +25,11 @@ pub use document_roots::{DocumentRoot, VirtualDocumentPath, VIRTUAL_ROOT_PREFIX}
 pub use document_scanner::{DocumentScanner, ScanPolicy, ScanReport, WatchEvent};
 pub use identity::{canonical_source_id, SourceDescriptor, SourceKey};
 pub use memory::{ClaimEvidence, ClaimRevision, ClaimState, ClaimTransition};
-pub use memory_writes::{MemoryWrite, MemoryWriteReceipt};
 pub use memory_ranking::{
     serialize_ranked_context, ClaimRelation, ClaimRelationResolution, RankedClaim, RankingMode,
     RankingPolicy, RelationKind,
 };
+pub use memory_writes::{MemoryWrite, MemoryWriteReceipt};
 
 pub const APPLICATION_ID: i64 = 0x4D504C43;
 pub const SCHEMA_VERSION: i64 = 9;
