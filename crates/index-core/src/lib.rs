@@ -16,6 +16,16 @@ use std::{
 const APPLICATION_ID: i64 = 0x4D504958; // MPIX, deliberately distinct from state.
 const SCHEMA_VERSION: i64 = 3;
 const NAMESPACE: &str = "mind-place-chatgpt-archive-v1";
+
+// Preserve historical ChatGPT source identity bytes; each newer provider has
+// its own explicit local archive namespace.
+pub(crate) fn namespace_for_provider(provider: &str) -> Option<&'static str> {
+    match provider {
+        "chatgpt" => Some(NAMESPACE),
+        "gemini" => Some("mind-place-gemini-archive-v1"),
+        _ => None,
+    }
+}
 const MAX_CHUNK_BYTES: usize = 4096;
 const SCHEMA: &str = include_str!("schema_v1.sql");
 const GRAPH_SCHEMA: &str = include_str!("schema_v2.sql");
@@ -26,6 +36,8 @@ pub mod documents;
 pub mod fetch;
 pub mod graph;
 pub mod graph_generation;
+pub mod graph_maintenance;
+pub mod graph_query;
 pub mod inspection;
 pub use context::{
     ContextBudget, ContextExcerpt, ContextGroup, ContextPack, ContextPreset, ContextRequest,
@@ -39,6 +51,11 @@ pub use graph::{
     GraphProjectionStats, GraphRelation,
 };
 pub use graph_generation::{GraphActivation, GraphGeneration, GraphInputHashes};
+pub use graph_maintenance::{GraphBatchReceipt, GraphMaintenanceBatch, GraphMaintenanceJob};
+pub use graph_query::{
+    GraphCommunities, GraphCommunity, GraphDirection, GraphNeighborhood, GraphNeighborhoodRequest,
+    GraphQueryEdge, GraphQueryNode,
+};
 pub use inspection::{ContextInspection, FetchInspection, RetrievalTrace, SearchInspection};
 pub use retrieval::{
     MatchMode, QueryTerm, RetrievalFilters, RetrievalHit, RetrievalRequest, RetrievalResponse,
@@ -321,7 +338,9 @@ impl IndexStore {
         for summary in conversations {
             check()?;
             let selected = archive.read(&summary.id, None)?;
-            if selected.capture.provider != "chatgpt"
+            let namespace =
+                namespace_for_provider(&summary.provider).ok_or(IndexError::InvalidEvidence)?;
+            if selected.capture.provider != summary.provider
                 || selected.capture.conversation_id != summary.conversation_id
                 || format!(
                     "{:x}",
@@ -332,11 +351,11 @@ impl IndexStore {
             {
                 return Err(IndexError::InvalidEvidence);
             }
-            // The namespace identifies the explicitly local ChatGPT archive import
-            // origin. Do not pretend an unobserved provider account ID exists.
+            // An explicit provider-local namespace avoids cross-provider identity
+            // collisions without pretending an unobserved account ID exists.
             let source_id = authority.register_source(&SourceDescriptor {
-                provider: "chatgpt",
-                source_namespace: NAMESPACE,
+                provider: &summary.provider,
+                source_namespace: namespace,
                 source_kind: "conversation",
                 key: SourceKey::External(&summary.conversation_id),
             })?;

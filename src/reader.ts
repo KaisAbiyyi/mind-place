@@ -1,6 +1,7 @@
 import createDOMPurify from "dompurify";
 import { mountLocalMcpSetup } from "./mcp-setup.js";
 import { mountDocumentRootSetup } from "./document-roots.js";
+import { mountMemoryInspector, type MemoryInspectorHandle } from "./memory-inspector.js";
 import { marked } from "marked";
 import renderMathInElement from "katex/contrib/auto-render";
 import type {
@@ -67,6 +68,7 @@ const STATIC_APP_SHELL = `
       </div>
       <div class="library-footer">
         <div class="offline-note"><span class="offline-dot" aria-hidden="true"></span><span>Stored on this device</span></div>
+        <button class="setup-link" type="button" data-action="open-memory-inspector">Memories &amp; evidence</button>
         <button class="setup-link" type="button" data-action="open-document-search">Search indexed documents</button>
         <button class="setup-link" type="button" data-action="open-setup">
           <svg aria-hidden="true" viewBox="0 0 20 20"><path d="M10 2.5v2M10 15.5v2M2.5 10h2m11 0h2m-12.28-5.22 1.42 1.42m7.72 7.72 1.42 1.42m0-10.56-1.42 1.42m-7.72 7.72-1.42 1.42"></path><circle cx="10" cy="10" r="4"></circle></svg>
@@ -189,6 +191,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   let loadedSnapshots: CaptureSnapshot[] = [];
   let selectedSnapshotId: string | null = null;
   let exportedMarkdown = "";
+  let memoryInspector: MemoryInspectorHandle | undefined;
   let alive = true;
   const invoke: Invoke = async <T>(command: string, args?: Record<string, unknown>) => {
     if (!alive) throw new Error("MP_UI_SESSION_EXPIRED");
@@ -319,6 +322,8 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   };
 
   const selectConversation = async (id: string) => {
+    memoryInspector?.destroy();
+    memoryInspector = undefined;
     selectedId = id;
     loadedConversation = null;
     loadedSnapshots = [];
@@ -634,7 +639,6 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     importStatus.setAttribute("aria-live", "polite");
 
     setupContent.append(connection, pathList, registered, register, divider, legacyTitle, legacyText, legacyButton, importStatus);
-
     const genericTitle = document.createElement("h3");
     genericTitle.className = "setup-section-title";
     genericTitle.textContent = "Import a generic transcript";
@@ -887,6 +891,28 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     get<HTMLButtonElement>("[data-action='open-setup']").focus();
   };
 
+  const openMemoryInspector = () => {
+    memoryInspector?.destroy();
+    ++selectionVersion;
+    selectedId = null;
+    loadedConversation = null;
+    selectedSnapshotId = null;
+    exportedMarkdown = "";
+    updateToolbarSelection();
+    setActionStatus("");
+    renderConversationRows(search.value.trim());
+    toolbarTitle.textContent = "Memory inspector";
+    memoryInspector = mountMemoryInspector({
+      view, invoke, copyText: (value) => safeClipboard.writeText(value),
+      onClose: () => {
+        memoryInspector?.destroy();
+        memoryInspector = undefined;
+        if (summaries.length) void selectConversation(summaries[0].id);
+        else renderState("Archive is empty", "No saved conversations are available.");
+      },
+    });
+  };
+
   const clickHandler = (event: Event) => {
     if (!alive) return;
     const target = event.target;
@@ -896,6 +922,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
       const action = actionElement.dataset.action;
       if (action === "lock") onLock?.();
       else if (action === "refresh") void loadConversations(true);
+      else if (action === "open-memory-inspector") openMemoryInspector();
       else if (action === "retry-selection" && selectedId) void selectConversation(selectedId);
       else if (action === "open-document-search") {
         if (typeof dialog.showModal === "function") {
@@ -956,6 +983,8 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     ready,
     refresh: () => loadConversations(true),
     destroy: () => {
+      memoryInspector?.destroy();
+      memoryInspector = undefined;
       alive = false;
       selectionVersion++;
       listVersion++;

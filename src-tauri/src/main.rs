@@ -8,7 +8,8 @@ use document_refresh::DocumentRefreshRegistry;
 
 use mind_place_archive::{
     ArchiveStore, AssetResult, Conversation, ConversationSummary, ExportResult,
-    GenericImportReceipt, ImportReceipt, SnapshotSummary, NATIVE_HOST_NAME,
+    GenericImportReceipt, ImportReceipt,
+    SnapshotSummary, NATIVE_HOST_NAME,
 };
 use mind_place_index::documents::{DocumentHit, DocumentIndex, DocumentIndexReport};
 use mind_place_index::{
@@ -18,7 +19,7 @@ use mind_place_index::{
 };
 use mind_place_integration::transport::LocalMcpServer;
 use mind_place_security::{SecurityError, SecurityGate, SecurityStatus, UnlockLease};
-use mind_place_state::{DocumentRoot, StateStore};
+use mind_place_state::{DocumentRoot, MemoryInspectionDetail, RankedClaim, StateStore};
 use serde::Serialize;
 use std::{
     io::Write,
@@ -143,6 +144,45 @@ async fn index_task<T: Send + 'static>(
         .map_err(|error| format!("{}:{}", error.code(), error))?;
     finish_unlocked(state, lease)?;
     Ok(result)
+}
+
+async fn read_memory_authority<T: Send + 'static>(
+    state: &AppState,
+    operation: impl FnOnce(StateStore) -> mind_place_state::Result<T> + Send + 'static,
+) -> Result<T, String> {
+    let lease = begin_unlocked(state)?;
+    let state_path = state.state_path.clone();
+    let output = tauri::async_runtime::spawn_blocking(move || {
+        let authority = StateStore::open(state_path)?;
+        operation(authority)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(|error| format!("{}:{}", error.code(), error))?;
+    finish_unlocked(state, lease)?;
+    Ok(output)
+}
+
+#[tauri::command]
+async fn list_memory_inspection(
+    state: State<'_, AppState>,
+    query: Option<String>,
+) -> Result<Vec<RankedClaim>, String> {
+    read_memory_authority(&state, move |authority| {
+        authority.memory_inspection_overview(query.as_deref().unwrap_or(""))
+    })
+    .await
+}
+
+#[tauri::command]
+async fn get_memory_inspection(
+    state: State<'_, AppState>,
+    claim_id: String,
+) -> Result<Option<MemoryInspectionDetail>, String> {
+    read_memory_authority(&state, move |authority| {
+        authority.memory_inspection_detail(&claim_id)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -787,6 +827,8 @@ fn main() {
             search_document_index,
             list_conversations,
             read_conversation,
+            list_memory_inspection,
+            get_memory_inspection,
             list_snapshots,
             export_markdown,
             get_asset,

@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import "katex/dist/katex.min.css";
 import "./style.css";
+import "./memory-inspector.css";
 import "./security.css";
 import type { Invoke } from "./reader.js";
 import { mountApplication } from "./app.js";

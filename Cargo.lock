@@ -1924,6 +1924,7 @@ dependencies = [
  "chrono",
  "mind-place-archive",
  "mind-place-documents",
+ "mind-place-security",
  "mind-place-state",
  "rusqlite",
  "serde",
