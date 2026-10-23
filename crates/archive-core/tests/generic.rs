@@ -19,7 +19,8 @@ fn json_raw_roundtrip_identity_and_idempotent_snapshot() {
             {"role": "user", "content": "hello", "authored_at": "2026-10-23T00:00:00Z"},
             {"role": "assistant", "text": "world", "model": "synthetic"}
         ]
-    })).unwrap();
+    }))
+    .unwrap();
     let sha = format!("{:x}", Sha256::digest(&raw));
     let first = store.import_generic("json", &raw).unwrap();
     assert!(first.raw_preserved);
@@ -30,14 +31,33 @@ fn json_raw_roundtrip_identity_and_idempotent_snapshot() {
     let conversation = store.read(&id, None).unwrap();
     assert_eq!(conversation.capture.provider, "generic");
     assert_eq!(conversation.capture.capture_method, "generic-import");
-    assert_eq!(conversation.capture.source_url, format!("mindplace-import://generic/{sha}"));
+    assert_eq!(
+        conversation.capture.source_url,
+        format!("mindplace-import://generic/{sha}")
+    );
     assert_eq!(conversation.capture.messages.len(), 2);
-    assert_eq!(conversation.capture.messages[0].authored_at.as_deref(), Some("2026-10-23T00:00:00Z"));
-    assert_eq!(conversation.capture.messages[1].model.as_deref(), Some("synthetic"));
-    assert!(conversation.capture.messages[1].authored_at.is_none(), "missing source time is not invented");
+    assert_eq!(
+        conversation.capture.messages[0].authored_at.as_deref(),
+        Some("2026-10-23T00:00:00Z")
+    );
+    assert_eq!(
+        conversation.capture.messages[1].model.as_deref(),
+        Some("synthetic")
+    );
+    assert!(
+        conversation.capture.messages[1].authored_at.is_none(),
+        "missing source time is not invented"
+    );
     assert_eq!(conversation.capture.completeness, "partial");
     assert_eq!(
-        fs::read(store.root().join("imports/generic").join(format!("{sha}.raw"))).unwrap(), raw
+        fs::read(
+            store
+                .root()
+                .join("imports/generic")
+                .join(format!("{sha}.raw"))
+        )
+        .unwrap(),
+        raw
     );
     let next = store.import_generic("json", &raw).unwrap();
     assert!(next.saved.unwrap().unchanged);
@@ -48,7 +68,11 @@ fn json_raw_roundtrip_identity_and_idempotent_snapshot() {
 fn markdown_role_boundaries_and_html_entities_are_explicit() {
     let (_tmp, store) = archive();
     let markdown = b"# Synthetic notes\n\n## User\nQuestion\n## Assistant\n**Answer**\n";
-    let md = store.import_generic("markdown", markdown).unwrap().saved.unwrap();
+    let md = store
+        .import_generic("markdown", markdown)
+        .unwrap()
+        .saved
+        .unwrap();
     let capture = store.read(&md.id, None).unwrap().capture;
     assert_eq!(capture.title, "Synthetic notes");
     assert_eq!(capture.messages[0].text, "Question");
@@ -57,7 +81,10 @@ fn markdown_role_boundaries_and_html_entities_are_explicit() {
     let html = br#"<html><body><article data-role="user"><p>A &amp; B</p></article><section data-role="assistant"><p>&lt;safe&gt;</p></section></body></html>"#;
     let receipt = store.import_generic("html", html).unwrap();
     assert!(receipt.errors.is_empty(), "{:?}", receipt.errors);
-    let chat = store.read(&receipt.saved.unwrap().id, None).unwrap().capture;
+    let chat = store
+        .read(&receipt.saved.unwrap().id, None)
+        .unwrap()
+        .capture;
     assert_eq!(chat.messages.len(), 2);
     assert_eq!(chat.messages[0].text, "A & B");
     assert_eq!(chat.messages[1].text, "<safe>");
@@ -89,7 +116,9 @@ fn size_bounds_and_unsupported_formats_fail_before_copying() {
     let (_tmp, store) = archive();
     assert!(store.import_generic("text", b"hello").is_err());
     assert!(store.import_generic("json", b"").is_err());
-    assert!(store.import_generic("json", &vec![0; MAX_GENERIC_IMPORT_BYTES + 1]).is_err());
+    assert!(store
+        .import_generic("json", &vec![0; MAX_GENERIC_IMPORT_BYTES + 1])
+        .is_err());
     assert!(!store.root().join("imports").exists());
 }
 
@@ -111,7 +140,15 @@ fn archive_rejects_generic_identity_spoofing_and_dom_bypass() {
     let fake = Capture {
         provider: "chatgpt".into(),
         capture_method: "generic-import".into(),
-        messages: vec![Message { id: "a".into(), role: "user".into(), text: "a".into(), format: "plain".into(), authored_at: None, model: None, attachments: vec![] }],
+        messages: vec![Message {
+            id: "a".into(),
+            role: "user".into(),
+            text: "a".into(),
+            format: "plain".into(),
+            authored_at: None,
+            model: None,
+            attachments: vec![],
+        }],
         ..capture
     };
     assert!(store.save(fake).is_err());
