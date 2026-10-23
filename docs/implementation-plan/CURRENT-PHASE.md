@@ -2,6 +2,12 @@
 
 This file is the small execution-order pointer for cloud agents. Strategy lives in `../BIG-IMPLEMENTATION-PLAN.md`; detailed design notes live beside this file. If older phase labels conflict with this file, follow this file for the current execution order.
 
+## Current execution gate — 2026-10-23
+
+**MP-4L2: native document qualification recovery**, [PR #42](https://github.com/KaisAbiyyi/mind-place/pull/42). The optimized Windows real-corpus gate passes 10/10 with no skips on product SHA `60233a0`; [implementation receipt](../implementation-summary/2026-10-23-mp-4l2-native-parser-recovery.md) and [machine-readable evidence](../qualification/2026-10-23-mp-4l2-release.json). Final-head CI and reviewed merge are required for integration acceptance. This local bounded repair was explicitly owner-authorized.
+
+**Immediate successor: MP-4U**, owner folder add/search/revoke workflow acceptance after #42 integration. Phases 5/6/7 remain gated by that owner decision. Historical phase labels below do not move execution back to Phase 3; live task status is maintained in the Notion execution board.
+
 ## Baseline
 
 - **Phase 0 â€” current archive foundation: DONE / qualified compatibility floor.**
