@@ -491,3 +491,20 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
   .document-root-card-header { flex-direction: column; gap: 8px; }
   .setup-dialog .dialog-footer { padding: 10px 16px; }
 }
+
+.document-preview-button { justify-self: start; margin-top: 5px; }
+.document-preview-status { margin: 1px 0; color: #bdc9bf; font-size: 12px; }
+.document-preview-text {
+  max-height: 300px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 16px;
+  margin: 0;
+  border: 1px solid #47504d;
+  border-radius: 8px;
+  background: #15191a;
+  color: #e5e6de;
+  font: 12px/1.6 ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+.document-preview-text[hidden] { display: none !important; }
