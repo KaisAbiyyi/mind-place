@@ -207,13 +207,50 @@ impl StateStore {
                     .map_err(|e| if matches!(e, StateError::Corrupt) { StateError::InvalidValue } else { e })?;
                 let last = history.last().ok_or(StateError::Corrupt)?;
                 let clock = next_claim_clock(&tx, last.recorded_at_ms.checked_add(1).ok_or(StateError::Corrupt)?)?;
-                // Deferred FK to the receipt is resolved on this transaction's
-                // commit, so a failed receipt insert cannot leave a tombstone.
-                tx.execute(
-                    "INSERT INTO memory_forget_tombstones(claim_id,client_id,request_key,reason,recorded_at_ms)
-                     VALUES(?1,?2,?3,?4,?5)",
-                    params![claim_id, client_id, request_key, reason, clock],
-                )?;
+                // Cascade only along explicit successor chains, never to raw
+                // sources or unrelated memories. Bound amplification and abort
+                // atomically on unexpectedly large/cyclic histories.
+                let mut pending = vec![(*claim_id).to_owned()];
+                let mut seen = std::collections::BTreeSet::new();
+                while let Some(current) = pending.pop() {
+                    if !seen.insert(current.clone()) { continue; }
+                    if seen.len() > 128 { return Err(StateError::InvalidValue); }
+                    let mut stmt = tx.prepare(
+                        "SELECT json_extract(payload_json,'$.superseded_by')
+                         FROM memory_claim_events
+                         WHERE claim_id=?1 AND event_type='transition'
+                           AND json_type(payload_json,'$.superseded_by')='text'",
+                    )?;
+                    let successors = stmt.query_map([&current], |r| r.get::<_, String>(0))?
+                        .collect::<std::result::Result<Vec<_>, _>>()?;
+                    pending.extend(successors);
+                    // MP-5B relation-based successor: A supersedes B.
+                    let mut relation_stmt = tx.prepare(
+                        "SELECT from_claim_id FROM memory_claim_relations
+                         WHERE to_claim_id=?1 AND relation='supersedes'
+                           AND NOT EXISTS (
+                               SELECT 1 FROM memory_claim_relation_resolutions x
+                               WHERE x.from_claim_id=memory_claim_relations.from_claim_id
+                                 AND x.to_claim_id=memory_claim_relations.to_claim_id
+                                 AND x.relation=memory_claim_relations.relation
+                           )",
+                    )?;
+                    let successors = relation_stmt.query_map([&current], |r| r.get::<_, String>(0))?
+                        .collect::<std::result::Result<Vec<_>, _>>()?;
+                    pending.extend(successors);
+                }
+                // A forgotten successor stays forgotten; no stale relation or
+                // future write may promote it again. Store only the hash of
+                // the owner reason to avoid reintroducing sensitive raw text.
+                let reason_hash = format!("{:x}", Sha256::digest(reason.as_bytes()));
+                for affected in seen {
+                    tx.execute(
+                        "INSERT OR IGNORE INTO memory_forget_tombstones
+                         (claim_id,client_id,request_key,reason_sha256,recorded_at_ms)
+                         VALUES(?1,?2,?3,?4,?5)",
+                        params![affected, client_id, request_key, reason_hash, clock],
+                    )?;
+                }
                 ((*claim_id).to_owned(), last.revision, clock)
             }
         };
