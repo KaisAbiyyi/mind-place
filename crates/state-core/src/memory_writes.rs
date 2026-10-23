@@ -3,8 +3,9 @@
 //! Callers must enforce owner confirmation for destructive actions, and may only
 //! supply a SHA-256 derived from a verified bearer in the unlocked security path.
 use crate::{
-    memory::{add_evidence, events, next_claim_clock, validate_claim}, valid_id, valid_text,
-    ClaimEvidence, ClientCapability, MemoryClaim, Result, StateError, StateStore,
+    memory::{add_evidence, events, next_claim_clock, validate_claim},
+    valid_id, valid_text, ClaimEvidence, ClientCapability, MemoryClaim, Result, StateError,
+    StateStore,
 };
 use rusqlite::{params, OptionalExtension, TransactionBehavior};
 use serde::Serialize;
@@ -45,7 +46,9 @@ pub struct MemoryWriteReceipt {
 }
 
 fn valid_hash(s: &str) -> bool {
-    s.len() == 64 && s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    s.len() == 64
+        && s.bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 fn check_text_reason(reason: &str) -> Result<()> {
@@ -57,25 +60,35 @@ fn check_text_reason(reason: &str) -> Result<()> {
 }
 
 fn assert_not_forgotten(db: &rusqlite::Connection, id: &str) -> Result<()> {
-    let erased: Option<i64> = db.query_row(
-        "SELECT 1 FROM memory_forget_tombstones WHERE claim_id=?1",
-        [id], |row| row.get(0),
-    ).optional()?;
+    let erased: Option<i64> = db
+        .query_row(
+            "SELECT 1 FROM memory_forget_tombstones WHERE claim_id=?1",
+            [id],
+            |row| row.get(0),
+        )
+        .optional()?;
     if erased.is_some() {
         return Err(StateError::MemoryDenied);
     }
     Ok(())
 }
 
-fn assert_not_duplicate(db: &rusqlite::Connection, claim: &MemoryClaim, scope: Option<&str>) -> Result<()> {
-    let exists: Option<String> = db.query_row(
-        "SELECT id FROM memory_claims WHERE scope_id IS ?1
+fn assert_not_duplicate(
+    db: &rusqlite::Connection,
+    claim: &MemoryClaim,
+    scope: Option<&str>,
+) -> Result<()> {
+    let exists: Option<String> = db
+        .query_row(
+            "SELECT id FROM memory_claims WHERE scope_id IS ?1
          AND lower(trim(statement))=lower(trim(?2))
          AND status IN ('active','uncertain')
          AND NOT EXISTS(SELECT 1 FROM memory_forget_tombstones t WHERE t.claim_id=memory_claims.id)
          LIMIT 1",
-        params![scope, claim.statement], |row| row.get(0),
-    ).optional()?;
+            params![scope, claim.statement],
+            |row| row.get(0),
+        )
+        .optional()?;
     if exists.is_some() {
         return Err(StateError::InvalidValue);
     }
@@ -89,18 +102,31 @@ fn insert_claim(
     evidence: &[ClaimEvidence],
 ) -> Result<i64> {
     validate_claim(claim)?;
-    if let Some(s) = scope { valid_id(s)?; }
+    if let Some(s) = scope {
+        valid_id(s)?;
+    }
     assert_not_duplicate(tx, claim, scope)?;
     let clock = next_claim_clock(tx, 0)?;
     tx.execute(
         "INSERT INTO memory_claims(id,statement,scope_id,asserted_by,epistemic_origin,status)
          VALUES(?1,?2,?3,?4,?5,?6)",
-        params![claim.id, claim.statement, scope, claim.asserted_by, claim.epistemic_origin, claim.status],
+        params![
+            claim.id,
+            claim.statement,
+            scope,
+            claim.asserted_by,
+            claim.epistemic_origin,
+            claim.status
+        ],
     )?;
     tx.execute(
         "INSERT INTO memory_claim_events(claim_id,revision,event_type,payload_json,recorded_at_ms)
          VALUES(?1,1,'created',?2,?3)",
-        params![claim.id, serde_json::to_string(claim).map_err(|_|StateError::InvalidValue)?, clock],
+        params![
+            claim.id,
+            serde_json::to_string(claim).map_err(|_| StateError::InvalidValue)?,
+            clock
+        ],
     )?;
     add_evidence(tx, &claim.id, 1, evidence)?;
     Ok(clock)
@@ -118,8 +144,9 @@ impl StateStore {
     ) -> Result<MemoryWriteReceipt> {
         if !valid_hash(token_sha256)
             || !(16..=128).contains(&request_key.len())
-            || !request_key.bytes().all(|b|
-                b.is_ascii_alphanumeric() || b == b':' || b == b'-' || b == b'_')
+            || !request_key
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b':' || b == b'-' || b == b'_')
         {
             return Err(StateError::InvalidValue);
         }
@@ -128,59 +155,112 @@ impl StateStore {
             MemoryWrite::Supersede { .. } => "supersede",
             MemoryWrite::Forget { .. } => "forget",
         };
-        let required = if kind == "forget" { ClientCapability::Admin } else { ClientCapability::Write };
+        let required = if kind == "forget" {
+            ClientCapability::Admin
+        } else {
+            ClientCapability::Write
+        };
         let canonical = serde_json::to_vec(operation).map_err(|_| StateError::InvalidValue)?;
-        if canonical.len() > 64 * 1024 { return Err(StateError::InvalidValue); }
+        if canonical.len() > 64 * 1024 {
+            return Err(StateError::InvalidValue);
+        }
         let digest = format!("{:x}", Sha256::digest(&canonical));
 
         let mut db = self.connection()?;
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let client_id: String = tx.query_row(
-            "SELECT c.id FROM client_credentials k
+        let client_id: String = tx
+            .query_row(
+                "SELECT c.id FROM client_credentials k
              JOIN clients c ON c.id=k.client_id
              JOIN client_capabilities p ON p.client_id=c.id
              WHERE k.token_sha256=?1 AND c.state='enabled'
              AND p.capability=?2 AND p.revoked_at IS NULL",
-            params![token_sha256, required.as_str()], |row| row.get(0),
-        ).optional()?.ok_or(StateError::MemoryDenied)?;
+                params![token_sha256, required.as_str()],
+                |row| row.get(0),
+            )
+            .optional()?
+            .ok_or(StateError::MemoryDenied)?;
 
-        let receipt = tx.query_row(
-            "SELECT operation_hash,operation_kind,claim_id,revision,recorded_at_ms
+        let receipt = tx
+            .query_row(
+                "SELECT operation_hash,operation_kind,claim_id,revision,recorded_at_ms
              FROM memory_write_receipts WHERE client_id=?1 AND request_key=?2",
-            params![client_id, request_key], |row| Ok((
-                row.get::<_, String>(0)?, row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?, row.get::<_, i64>(3)?, row.get::<_, i64>(4)?,
-            )),
-        ).optional()?;
+                params![client_id, request_key],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, i64>(4)?,
+                    ))
+                },
+            )
+            .optional()?;
         if let Some((hash, old_kind, id, revision, at)) = receipt {
-            if hash != digest || old_kind != kind { return Err(StateError::InvalidValue); }
+            if hash != digest || old_kind != kind {
+                return Err(StateError::InvalidValue);
+            }
             tx.commit()?;
-            return Ok(MemoryWriteReceipt { client_id, claim_id: id, operation: kind.into(), revision, recorded_at_ms: at });
+            return Ok(MemoryWriteReceipt {
+                client_id,
+                claim_id: id,
+                operation: kind.into(),
+                revision,
+                recorded_at_ms: at,
+            });
         }
 
         let (id, revision, clock) = match operation {
-            MemoryWrite::Create { claim, scope_id, evidence } => {
+            MemoryWrite::Create {
+                claim,
+                scope_id,
+                evidence,
+            } => {
                 let clock = insert_claim(&tx, claim, *scope_id, evidence)?;
                 (claim.id.clone(), 1, clock)
             }
-            MemoryWrite::Supersede { previous_id, successor, scope_id, evidence, reason } => {
+            MemoryWrite::Supersede {
+                previous_id,
+                successor,
+                scope_id,
+                evidence,
+                reason,
+            } => {
                 valid_id(previous_id)?;
                 check_text_reason(reason)?;
-                if *previous_id == successor.id { return Err(StateError::InvalidValue); }
+                if *previous_id == successor.id {
+                    return Err(StateError::InvalidValue);
+                }
                 assert_not_forgotten(&tx, previous_id)?;
-                let previous: Option<(String, Option<String>)> = tx.query_row(
-                    "SELECT status,scope_id FROM memory_claims WHERE id=?1",
-                    [previous_id], |r| Ok((r.get(0)?, r.get(1)?)),
-                ).optional()?;
+                let previous: Option<(String, Option<String>)> = tx
+                    .query_row(
+                        "SELECT status,scope_id FROM memory_claims WHERE id=?1",
+                        [previous_id],
+                        |r| Ok((r.get(0)?, r.get(1)?)),
+                    )
+                    .optional()?;
                 let (status, previous_scope) = previous.ok_or(StateError::InvalidValue)?;
-                if !matches!(status.as_str(), "active" | "uncertain" | "disputed" | "historical") 
-                    || previous_scope.as_deref() != *scope_id { return Err(StateError::InvalidValue); }
+                if !matches!(
+                    status.as_str(),
+                    "active" | "uncertain" | "disputed" | "historical"
+                ) || previous_scope.as_deref() != *scope_id
+                {
+                    return Err(StateError::InvalidValue);
+                }
                 let history = events(&tx, previous_id)?;
                 let last = history.last().ok_or(StateError::Corrupt)?;
-                if last.status != status || last.revision >= 1_000_000 { return Err(StateError::Corrupt); }
+                if last.status != status || last.revision >= 1_000_000 {
+                    return Err(StateError::Corrupt);
+                }
                 let created_at = insert_claim(&tx, successor, *scope_id, evidence)?;
                 let revision = last.revision + 1;
-                let clock = next_claim_clock(&tx, last.recorded_at_ms.checked_add(1).ok_or(StateError::Corrupt)?)?;
+                let clock = next_claim_clock(
+                    &tx,
+                    last.recorded_at_ms
+                        .checked_add(1)
+                        .ok_or(StateError::Corrupt)?,
+                )?;
                 let payload = serde_json::json!({
                     "from_status": status, "to_status": "superseded",
                     "reason": reason, "superseded_by": successor.id,
@@ -203,25 +283,40 @@ impl StateStore {
                 valid_id(claim_id)?;
                 check_text_reason(reason)?;
                 assert_not_forgotten(&tx, claim_id)?;
-                let history = events(&tx, claim_id)
-                    .map_err(|e| if matches!(e, StateError::Corrupt) { StateError::InvalidValue } else { e })?;
+                let history = events(&tx, claim_id).map_err(|e| {
+                    if matches!(e, StateError::Corrupt) {
+                        StateError::InvalidValue
+                    } else {
+                        e
+                    }
+                })?;
                 let last = history.last().ok_or(StateError::Corrupt)?;
-                let clock = next_claim_clock(&tx, last.recorded_at_ms.checked_add(1).ok_or(StateError::Corrupt)?)?;
+                let clock = next_claim_clock(
+                    &tx,
+                    last.recorded_at_ms
+                        .checked_add(1)
+                        .ok_or(StateError::Corrupt)?,
+                )?;
                 // Cascade only along explicit successor chains, never to raw
                 // sources or unrelated memories. Bound amplification and abort
                 // atomically on unexpectedly large/cyclic histories.
                 let mut pending = vec![(*claim_id).to_owned()];
                 let mut seen = std::collections::BTreeSet::new();
                 while let Some(current) = pending.pop() {
-                    if !seen.insert(current.clone()) { continue; }
-                    if seen.len() > 128 { return Err(StateError::InvalidValue); }
+                    if !seen.insert(current.clone()) {
+                        continue;
+                    }
+                    if seen.len() > 128 {
+                        return Err(StateError::InvalidValue);
+                    }
                     let mut stmt = tx.prepare(
                         "SELECT json_extract(payload_json,'$.superseded_by')
                          FROM memory_claim_events
                          WHERE claim_id=?1 AND event_type='transition'
                            AND json_type(payload_json,'$.superseded_by')='text'",
                     )?;
-                    let successors = stmt.query_map([&current], |r| r.get::<_, String>(0))?
+                    let successors = stmt
+                        .query_map([&current], |r| r.get::<_, String>(0))?
                         .collect::<std::result::Result<Vec<_>, _>>()?;
                     pending.extend(successors);
                     // MP-5B relation-based successor: A supersedes B.
@@ -235,7 +330,8 @@ impl StateStore {
                                  AND x.relation=memory_claim_relations.relation
                            )",
                     )?;
-                    let successors = relation_stmt.query_map([&current], |r| r.get::<_, String>(0))?
+                    let successors = relation_stmt
+                        .query_map([&current], |r| r.get::<_, String>(0))?
                         .collect::<std::result::Result<Vec<_>, _>>()?;
                     pending.extend(successors);
                 }
@@ -261,6 +357,12 @@ impl StateStore {
             params![client_id, request_key, digest, kind, id, revision, clock],
         )?;
         tx.commit()?;
-        Ok(MemoryWriteReceipt { client_id, claim_id: id, operation: kind.into(), revision, recorded_at_ms: clock })
+        Ok(MemoryWriteReceipt {
+            client_id,
+            claim_id: id,
+            operation: kind.into(),
+            revision,
+            recorded_at_ms: clock,
+        })
     }
 }
