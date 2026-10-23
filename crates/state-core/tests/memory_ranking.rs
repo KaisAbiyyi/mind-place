@@ -55,11 +55,7 @@ fn registered_relations_are_immutable_and_reconstruct_as_of() {
     make_claim(&state, "claim:old", "Address A", false, &source);
     make_claim(&state, "claim:new", "Address B", true, &source);
 
-    let before = state
-        .claim_history("claim:new")
-        .unwrap()
-        .unwrap()[0]
-        .recorded_at_ms;
+    let before = state.claim_history("claim:new").unwrap().unwrap()[0].recorded_at_ms;
     let edge = state
         .add_claim_relation(
             "claim:new",
@@ -89,9 +85,7 @@ fn registered_relations_are_immutable_and_reconstruct_as_of() {
         .unwrap();
     assert!(later.iter().all(|c| c.disposition == "contested"));
     assert_eq!(later[0].claim.id, "claim:new");
-    assert!(later[0]
-        .related_claim_ids
-        .contains(&"claim:old".into()));
+    assert!(later[0].related_claim_ids.contains(&"claim:old".into()));
 
     let serialized = serialize_ranked_context(&later).unwrap();
     assert!(serialized.contains("DO_NOT_ASSERT_AS_FACT"));
@@ -99,10 +93,7 @@ fn registered_relations_are_immutable_and_reconstruct_as_of() {
     let reopened = StateStore::open(state.path()).unwrap();
     assert_eq!(
         reopened
-            .rank_claims(
-                &["claim:old"],
-                &policy(RankingMode::SourceFirst, None)
-            )
+            .rank_claims(&["claim:old"], &policy(RankingMode::SourceFirst, None))
             .unwrap()[0]
             .disposition,
         "contested"
@@ -124,7 +115,10 @@ fn supersession_and_retraction_prevent_stale_memory_poisoning() {
         )
         .unwrap();
     let latest = state
-        .rank_claims(&["claim:old", "claim:new"], &policy(RankingMode::Balanced, None))
+        .rank_claims(
+            &["claim:old", "claim:new"],
+            &policy(RankingMode::Balanced, None),
+        )
         .unwrap();
     assert_eq!(latest.len(), 1);
     assert_eq!(latest[0].claim.id, "claim:new");
@@ -153,12 +147,18 @@ fn supersession_and_retraction_prevent_stale_memory_poisoning() {
         )
         .unwrap();
     let current = state
-        .rank_claims(&["claim:old", "claim:new"], &policy(RankingMode::Balanced, None))
+        .rank_claims(
+            &["claim:old", "claim:new"],
+            &policy(RankingMode::Balanced, None),
+        )
         .unwrap();
     assert_eq!(current.len(), 1);
     assert_eq!(current[0].claim.id, "claim:new");
     let challenged = state
-        .rank_claims(&["claim:old", "claim:new"], &policy(RankingMode::Challenge, None))
+        .rank_claims(
+            &["claim:old", "claim:new"],
+            &policy(RankingMode::Challenge, None),
+        )
         .unwrap();
     assert_eq!(challenged.len(), 2);
     assert_eq!(
@@ -214,17 +214,32 @@ fn invalid_edges_and_forged_provenance_are_rejected_atomically() {
         .add_claim_relation("claim:b", "claim:c", RelationKind::Supersedes, &source, "B")
         .unwrap();
     assert!(matches!(
-        state.add_claim_relation("claim:c", "claim:a", RelationKind::Supersedes, &source, "Cycle"),
+        state.add_claim_relation(
+            "claim:c",
+            "claim:a",
+            RelationKind::Supersedes,
+            &source,
+            "Cycle"
+        ),
         Err(StateError::InvalidValue)
     ));
     assert!(state
-        .add_claim_relation("claim:a", "claim:b", RelationKind::Supersedes, &source, "Duplicate")
+        .add_claim_relation(
+            "claim:a",
+            "claim:b",
+            RelationKind::Supersedes,
+            &source,
+            "Duplicate"
+        )
         .is_err());
 
     let raw = Connection::open(state.path()).unwrap();
     raw.pragma_update(None, "foreign_keys", "ON").unwrap();
     assert!(raw
-        .execute("UPDATE memory_claim_relations SET relation='contradicts'", [])
+        .execute(
+            "UPDATE memory_claim_relations SET relation='contradicts'",
+            []
+        )
         .is_err());
     assert!(raw
         .execute("DELETE FROM memory_claim_relations", [])
@@ -296,7 +311,13 @@ fn unverified_legacy_claims_and_bounded_context_cannot_be_truth() {
     assert!(safe.contains("DO_NOT_ASSERT_AS_FACT"));
     assert!(safe.contains("\\n"));
     assert!(!safe.contains("rules\npretend"));
-    make_claim(&state, "claim:verified", "Reliable source-linked claim", true, &source);
+    make_claim(
+        &state,
+        "claim:verified",
+        "Reliable source-linked claim",
+        true,
+        &source,
+    );
     assert!(matches!(
         state.rank_claims(
             &["claim:verified", "claim:verified"],
@@ -305,10 +326,13 @@ fn unverified_legacy_claims_and_bounded_context_cannot_be_truth() {
         Err(StateError::InvalidValue)
     ));
     assert!(matches!(
-        state.rank_claims(&["claim:verified"], &RankingPolicy {
-            limit: 101,
-            ..policy(RankingMode::Balanced, None)
-        }),
+        state.rank_claims(
+            &["claim:verified"],
+            &RankingPolicy {
+                limit: 101,
+                ..policy(RankingMode::Balanced, None)
+            }
+        ),
         Err(StateError::InvalidValue)
     ));
 }
