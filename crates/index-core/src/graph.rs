@@ -62,13 +62,18 @@ impl GraphRelation {
         match self {
             Self::Contains => matches!(
                 from,
-                GraphKind::Project | GraphKind::Topic | GraphKind::Conversation
-                    | GraphKind::Entity | GraphKind::Import
+                GraphKind::Project
+                    | GraphKind::Topic
+                    | GraphKind::Conversation
+                    | GraphKind::Entity
+                    | GraphKind::Import
             ),
             Self::References => true,
             Self::Version => {
-                matches!(from, GraphKind::Conversation | GraphKind::File | GraphKind::Memory)
-                    && to == GraphKind::Revision
+                matches!(
+                    from,
+                    GraphKind::Conversation | GraphKind::File | GraphKind::Memory
+                ) && to == GraphKind::Revision
             }
             Self::ImportedFrom => to == GraphKind::Import && from != GraphKind::Import,
             Self::DefinesSymbol => from == GraphKind::File && to == GraphKind::Symbol,
@@ -84,7 +89,10 @@ pub struct GraphNodeRef {
 
 impl GraphNodeRef {
     pub fn new(kind: GraphKind, key: impl Into<String>) -> Self {
-        Self { kind, key: key.into() }
+        Self {
+            kind,
+            key: key.into(),
+        }
     }
 
     pub fn id(&self) -> Result<String> {
@@ -172,7 +180,9 @@ fn checked_projection(
     for edge in &projection.edges {
         let from = edge.from.id()?;
         let to = edge.to.id()?;
-        if from == to || !nodes.contains_key(&from) || !nodes.contains_key(&to)
+        if from == to
+            || !nodes.contains_key(&from)
+            || !nodes.contains_key(&to)
             || !edge.relation.allowed(edge.from.kind, edge.to.kind)
         {
             return Err(IndexError::InvalidQuery);
@@ -206,7 +216,11 @@ fn checked_projection(
 
 /// Atomically replace only one derived scope. Unrelated scoped projections remain.
 /// Edges must reference nodes declared within this scope; no hidden cross-scope reads.
-fn replace_tx(tx: &Transaction<'_>, scope: &str, projection: &GraphProjection) -> Result<GraphProjectionStats> {
+fn replace_tx(
+    tx: &Transaction<'_>,
+    scope: &str,
+    projection: &GraphProjection,
+) -> Result<GraphProjectionStats> {
     validate_field(scope)?;
     let (nodes, edges) = checked_projection(projection)?;
     tx.execute("DELETE FROM graph_edges WHERE scope=?1", [scope])?;
@@ -217,8 +231,11 @@ fn replace_tx(tx: &Transaction<'_>, scope: &str, projection: &GraphProjection) -
              VALUES(?1,?2,?3,?4,?5)
              ON CONFLICT(id) DO UPDATE SET label=excluded.label,source_ref=excluded.source_ref",
             params![
-                id, node.identity.kind.as_str(), node.identity.key,
-                node.label, node.source_ref
+                id,
+                node.identity.kind.as_str(),
+                node.identity.key,
+                node.label,
+                node.source_ref
             ],
         )?;
         tx.execute(
@@ -232,9 +249,14 @@ fn replace_tx(tx: &Transaction<'_>, scope: &str, projection: &GraphProjection) -
                  source_ref,source_revision,locator)
              VALUES(?1,?2,?3,?4,?5,'deterministic',?6,?7,?8)",
             params![
-                id, scope, edge.from.id()?, edge.to.id()?,
-                edge.relation.as_str(), edge.evidence.source_ref,
-                edge.evidence.source_revision, edge.evidence.locator
+                id,
+                scope,
+                edge.from.id()?,
+                edge.to.id()?,
+                edge.relation.as_str(),
+                edge.evidence.source_ref,
+                edge.evidence.source_revision,
+                edge.evidence.locator
             ],
         )?;
     }
@@ -284,11 +306,13 @@ impl IndexStore {
         let db = self.connection()?;
         let nodes = db.query_row(
             "SELECT COUNT(*) FROM graph_scope_nodes WHERE scope=?1",
-            [scope], |r| r.get(0),
+            [scope],
+            |r| r.get(0),
         )?;
         let edges = db.query_row(
             "SELECT COUNT(*) FROM graph_edges WHERE scope=?1",
-            [scope], |r| r.get(0),
+            [scope],
+            |r| r.get(0),
         )?;
         Ok(GraphProjectionStats { nodes, edges })
     }
@@ -310,13 +334,15 @@ pub(crate) fn refresh_archive_graph(tx: &Transaction<'_>) -> Result<()> {
         let snapshot_id: String = row.get(2)?;
         let title: String = row.get(3)?;
         let conversation = GraphNodeRef::new(GraphKind::Conversation, &source_id);
-        let revision = GraphNodeRef::new(
-            GraphKind::Revision, format!("{source_id}/{snapshot_id}"),
-        );
+        let revision = GraphNodeRef::new(GraphKind::Revision, format!("{source_id}/{snapshot_id}"));
         let import = GraphNodeRef::new(GraphKind::Import, &archive_id);
         nodes.entry(conversation.clone()).or_insert(GraphNode {
             identity: conversation.clone(),
-            label: if title.trim().is_empty() { "Untitled conversation".into() } else { title },
+            label: if title.trim().is_empty() {
+                "Untitled conversation".into()
+            } else {
+                title
+            },
             source_ref: source_id.clone(),
         });
         nodes.entry(revision.clone()).or_insert(GraphNode {
@@ -349,9 +375,13 @@ pub(crate) fn refresh_archive_graph(tx: &Transaction<'_>) -> Result<()> {
     }
     drop(rows);
     drop(stmt);
-    replace_tx(tx, ARCHIVE_SCOPE, &GraphProjection {
-        nodes: nodes.into_values().collect(),
-        edges,
-    })?;
+    replace_tx(
+        tx,
+        ARCHIVE_SCOPE,
+        &GraphProjection {
+            nodes: nodes.into_values().collect(),
+            edges,
+        },
+    )?;
     Ok(())
 }
