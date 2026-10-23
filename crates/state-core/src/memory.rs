@@ -96,6 +96,20 @@ fn now_ms() -> Result<i64> {
     i64::try_from(millis).map_err(|_| StateError::Corrupt)
 }
 
+/// Acquire a database-global logical timestamp while holding an IMMEDIATE
+/// transaction. The caller can provide an additional lower bound for legacy
+/// events or corrected relations created before this clock existed.
+pub(crate) fn next_claim_clock(db: &rusqlite::Connection, minimum_ms: i64) -> Result<i64> {
+    let floor = now_ms()?.max(minimum_ms);
+    let clock: i64 = db.query_row(
+        "UPDATE memory_claim_clock
+         SET last_ms=MAX(last_ms+1,?1) WHERE id=1 RETURNING last_ms",
+        [floor],
+        |r| r.get(0),
+    )?;
+    Ok(clock)
+}
+
 fn add_evidence(
     tx: &rusqlite::Transaction<'_>,
     claim_id: &str,
@@ -242,9 +256,9 @@ impl StateStore {
         evidence: &[ClaimEvidence],
     ) -> Result<()> {
         validate_claim(claim)?;
-        let clock = now_ms()?;
         let mut db = self.connection()?;
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let clock = next_claim_clock(&tx, 0)?;
         tx.execute(
             "INSERT INTO memory_claims(id,statement,asserted_by,epistemic_origin,status)
              VALUES(?1,?2,?3,?4,?5)",
@@ -326,11 +340,12 @@ impl StateStore {
             return Err(StateError::Corrupt);
         }
         let revision = last.revision + 1;
-        let clock = now_ms()?.max(
+        let clock = next_claim_clock(
+            &tx,
             last.recorded_at_ms
                 .checked_add(1)
                 .ok_or(StateError::Corrupt)?,
-        );
+        )?;
         let payload = TransitionPayload {
             from_status: status,
             to_status: transition.status().to_owned(),
@@ -394,39 +409,50 @@ impl StateStore {
         valid_id(claim_id)?;
         let db = self.read_connection()?;
         let tx = db.unchecked_transaction()?;
-        let base: Option<(String, String, String, Option<String>, String)> = tx
-            .query_row(
-                "SELECT statement,asserted_by,epistemic_origin,scope_id,status
-             FROM memory_claims WHERE id=?1",
-                [claim_id],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
-            )
-            .optional()?;
-        let Some((statement, asserted_by, epistemic_origin, scope_id, current_status)) = base
-        else {
-            return Ok(None);
-        };
-        let history = events(&tx, claim_id)?;
-        if history.last().map(|h| h.status.as_str()) != Some(current_status.as_str()) {
-            return Err(StateError::Corrupt);
-        }
-        let selected = history.iter().rev().find(|h| h.recorded_at_ms <= as_of_ms);
-        let result = selected.map(|h| ClaimState {
-            id: claim_id.to_owned(),
-            statement,
-            asserted_by,
-            epistemic_origin,
-            scope_id,
-            revision: h.revision,
-            status: h.status.clone(),
-            recorded_at_ms: h.recorded_at_ms,
-            evidence: history
-                .iter()
-                .take(h.revision as usize)
-                .flat_map(|entry| entry.evidence.iter().cloned())
-                .collect(),
-        });
+        let result = claim_as_of_connection(&tx, claim_id, as_of_ms)?;
         tx.commit()?;
         Ok(result)
     }
+}
+
+/// Project a claim at a deterministic event clock within an existing read
+/// snapshot, allowing relation/ranking consumers to avoid torn multi-read views.
+pub(crate) fn claim_as_of_connection(
+    db: &rusqlite::Connection,
+    claim_id: &str,
+    as_of_ms: i64,
+) -> Result<Option<ClaimState>> {
+    valid_id(claim_id)?;
+    let base: Option<(String, String, String, Option<String>, String)> = db
+        .query_row(
+            "SELECT statement,asserted_by,epistemic_origin,scope_id,status
+             FROM memory_claims WHERE id=?1",
+            [claim_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+        )
+        .optional()?;
+    let Some((statement, asserted_by, epistemic_origin, scope_id, current_status)) = base else {
+        return Ok(None);
+    };
+    let history = events(db, claim_id)?;
+    if history.last().map(|h| h.status.as_str()) != Some(current_status.as_str()) {
+        return Err(StateError::Corrupt);
+    }
+    let selected = history.iter().rev().find(|h| h.recorded_at_ms <= as_of_ms);
+    let result = selected.map(|h| ClaimState {
+        id: claim_id.to_owned(),
+        statement,
+        asserted_by,
+        epistemic_origin,
+        scope_id,
+        revision: h.revision,
+        status: h.status.clone(),
+        recorded_at_ms: h.recorded_at_ms,
+        evidence: history
+            .iter()
+            .take(h.revision as usize)
+            .flat_map(|entry| entry.evidence.iter().cloned())
+            .collect(),
+    });
+    Ok(result)
 }
