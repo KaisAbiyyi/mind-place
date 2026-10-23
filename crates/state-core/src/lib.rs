@@ -12,6 +12,7 @@ mod document_objects;
 mod document_roots;
 mod document_scanner;
 mod identity;
+mod memory;
 mod ntfs;
 pub use clients::{ClientAuditEvent, ClientCapability, ClientRecord};
 pub use document_objects::{
@@ -21,9 +22,10 @@ pub use document_objects::{
 pub use document_roots::{DocumentRoot, VirtualDocumentPath, VIRTUAL_ROOT_PREFIX};
 pub use document_scanner::{DocumentScanner, ScanPolicy, ScanReport, WatchEvent};
 pub use identity::{canonical_source_id, SourceDescriptor, SourceKey};
+pub use memory::{ClaimEvidence, ClaimRevision, ClaimState, ClaimTransition};
 
 pub const APPLICATION_ID: i64 = 0x4D504C43;
-pub const SCHEMA_VERSION: i64 = 6;
+pub const SCHEMA_VERSION: i64 = 7;
 const MIN_SQLITE_NUMBER: i32 = 3_053_002;
 const MIGRATION_V1: &str = include_str!("schema_v1.sql");
 const MIGRATION_V2: &str = include_str!("schema_v2.sql");
@@ -31,6 +33,7 @@ const MIGRATION_V3: &str = include_str!("schema_v3.sql");
 const MIGRATION_V4: &str = include_str!("schema_v4.sql");
 const MIGRATION_V5: &str = include_str!("schema_v5.sql");
 const MIGRATION_V6: &str = include_str!("schema_v6.sql");
+const MIGRATION_V7: &str = include_str!("schema_v7.sql");
 pub type Result<T> = std::result::Result<T, StateError>;
 
 #[derive(Debug, thiserror::Error)]
@@ -247,6 +250,13 @@ impl StateStore {
                 tx.execute(
                     "INSERT INTO schema_migrations(version,checksum) VALUES(6,?1)",
                     [checksum(MIGRATION_V6)],
+                )?;
+            }
+            if previous_version < 7 {
+                tx.execute_batch(MIGRATION_V7)?;
+                tx.execute(
+                    "INSERT INTO schema_migrations(version,checksum) VALUES(7,?1)",
+                    [checksum(MIGRATION_V7)],
                 )?;
             }
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -512,6 +522,7 @@ fn validate_version(db: &Connection, version: i64) -> Result<()> {
         (4, MIGRATION_V4),
         (5, MIGRATION_V5),
         (6, MIGRATION_V6),
+        (7, MIGRATION_V7),
     ] {
         if step > version {
             break;
