@@ -443,3 +443,146 @@ fn immutable_numeric_confidence_only_breaks_otherwise_equal_inferences() {
     assert_eq!(ranked[0].claim.id, "claim:high");
     assert!(ranked[0].score > ranked[1].score);
 }
+
+#[test]
+fn validity_windows_are_enforced_for_current_and_historical_rankings() {
+    let (_dir, state, source) = fixture();
+    let now_sec = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let raw = Connection::open(state.path()).unwrap();
+    raw.pragma_update(None, "foreign_keys", "ON").unwrap();
+    let cases = [
+        ("claim:expired", Some(now_sec - 7200), Some(now_sec - 3600)),
+        ("claim:future", Some(now_sec + 3600), None),
+        ("claim:valid", Some(now_sec - 3600), Some(now_sec + 3600)),
+    ];
+    for (id, from, until) in cases {
+        let item = claim(id, "Temporal assertion", true);
+        raw.execute(
+            "INSERT INTO memory_claims
+             (id,statement,asserted_by,epistemic_origin,status,valid_from,valid_until)
+             VALUES(?1,?2,?3,?4,?5,?6,?7)",
+            rusqlite::params![
+                item.id,
+                item.statement,
+                item.asserted_by,
+                item.epistemic_origin,
+                item.status,
+                from,
+                until
+            ],
+        )
+        .unwrap();
+        raw.execute(
+            "INSERT INTO memory_claim_events
+             (claim_id,revision,event_type,payload_json,recorded_at_ms)
+             VALUES(?1,1,'created',?2,1000000000000)",
+            rusqlite::params![id, serde_json::to_string(&item).unwrap()],
+        )
+        .unwrap();
+        raw.execute(
+            "INSERT INTO memory_claim_event_evidence
+             (claim_id,revision,source_ref,evidence_kind)
+             VALUES(?1,1,?2,'support')",
+            rusqlite::params![id, source],
+        )
+        .unwrap();
+    }
+    let ids = &["claim:expired", "claim:future", "claim:valid"];
+    let current = state
+        .rank_claims(ids, &policy(RankingMode::Balanced, None))
+        .unwrap();
+    assert_eq!(current.len(), 1);
+    assert_eq!(current[0].claim.id, "claim:valid");
+    let challenged = state
+        .rank_claims(ids, &policy(RankingMode::Challenge, None))
+        .unwrap();
+    assert_eq!(challenged.len(), 3);
+    for id in ["claim:expired", "claim:future"] {
+        assert_eq!(
+            challenged.iter().find(|r| r.claim.id == id).unwrap().disposition,
+            "non_current"
+        );
+    }
+    let historical = state
+        .rank_claims(
+            ids,
+            &policy(RankingMode::Balanced, Some((now_sec - 5000) * 1000)),
+        )
+        .unwrap();
+    assert_eq!(historical.len(), 1);
+    assert_eq!(historical[0].claim.id, "claim:expired");
+    let later = state
+        .rank_claims(
+            ids,
+            &policy(RankingMode::Balanced, Some((now_sec + 5000) * 1000)),
+        )
+        .unwrap();
+    assert_eq!(later.len(), 1);
+    assert_eq!(later[0].claim.id, "claim:future");
+}
+
+#[test]
+fn an_intermediate_superseded_successor_never_resurrects_old_claim() {
+    let (_dir, state, source) = fixture();
+    for id in ["claim:a", "claim:b", "claim:c"] {
+        make_claim(&state, id, "Replacement chain", true, &source);
+    }
+    state
+        .add_claim_relation(
+            "claim:b",
+            "claim:a",
+            RelationKind::Supersedes,
+            &source,
+            "A replaced by B",
+        )
+        .unwrap();
+    state
+        .add_claim_relation(
+            "claim:c",
+            "claim:b",
+            RelationKind::Supersedes,
+            &source,
+            "B replaced by C",
+        )
+        .unwrap();
+    state
+        .transition_claim(
+            "claim:b",
+            ClaimTransition::Supersede,
+            "C supersedes B",
+            &[ClaimEvidence {
+                source_ref: source,
+                evidence_kind: "correction".into(),
+            }],
+            Some("claim:c"),
+        )
+        .unwrap();
+    let selected = state
+        .rank_claims(&["claim:a"], &policy(RankingMode::Balanced, None))
+        .unwrap();
+    assert!(selected.is_empty());
+    let challenge = state
+        .rank_claims(&["claim:a"], &policy(RankingMode::Challenge, None))
+        .unwrap();
+    assert_eq!(challenge.len(), 1);
+    assert_eq!(challenge[0].disposition, "superseded");
+}
+
+#[test]
+fn ranking_fails_closed_if_authority_source_is_tampered_after_open() {
+    let (_dir, state, source) = fixture();
+    make_claim(&state, "claim:signed", "Verified source", true, &source);
+    let raw = Connection::open(state.path()).unwrap();
+    raw.execute(
+        "UPDATE source_identities SET source_key='tampered' WHERE id=?1",
+        [&source],
+    )
+    .unwrap();
+    assert!(matches!(
+        state.rank_claims(&["claim:signed"], &policy(RankingMode::Balanced, None)),
+        Err(StateError::Corrupt)
+    ));
+}
