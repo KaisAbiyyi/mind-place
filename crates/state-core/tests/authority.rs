@@ -67,11 +67,11 @@ fn never_overwrite_unknown_or_future_schema() {
     );
     db.pragma_update(None, "application_id", APPLICATION_ID)
         .unwrap();
-    db.pragma_update(None, "user_version", 8).unwrap();
+    db.pragma_update(None, "user_version", 9).unwrap();
     drop(db);
     assert!(matches!(
         StateStore::open(&p),
-        Err(StateError::FutureSchema(8))
+        Err(StateError::FutureSchema(9))
     ));
 }
 #[test]
