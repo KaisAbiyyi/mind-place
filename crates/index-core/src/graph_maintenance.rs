@@ -10,7 +10,10 @@ use crate::{
 };
 use mind_place_security::{SecurityGate, UnlockLease};
 use mind_place_state::{StateStore, VirtualDocumentPath};
-use std::{collections::BTreeMap, time::{Duration, Instant}};
+use std::{
+    collections::BTreeMap,
+    time::{Duration, Instant},
+};
 
 const MAX_LIFETIME: Duration = Duration::from_secs(15 * 60);
 const MAX_BATCH: usize = 512;
@@ -76,17 +79,23 @@ impl IndexStore {
             return Err(IndexError::InvalidQuery);
         }
         validate_field(source_revision)?;
-        if lifetime.is_zero() || lifetime > MAX_LIFETIME ||
-            !is_digest(source_revision) || input.content != source_revision ||
-            !is_digest(&input.files) || !is_digest(&input.structure) ||
-            expected_generation.is_some_and(|v| v < 1)
+        if lifetime.is_zero()
+            || lifetime > MAX_LIFETIME
+            || !is_digest(source_revision)
+            || input.content != source_revision
+            || !is_digest(&input.files)
+            || !is_digest(&input.structure)
+            || expected_generation.is_some_and(|v| v < 1)
         {
             return Err(IndexError::InvalidQuery);
         }
-        let lease = security.require_unlocked().map_err(|_| IndexError::Revoked)?;
+        let lease = security
+            .require_unlocked()
+            .map_err(|_| IndexError::Revoked)?;
         // Root grants come exclusively from the state authority, never a
         // producer's asserted root ID.
-        authority.with_approved_document_roots(&[root_id.to_owned()], || Ok::<_, IndexError>(()))?;
+        authority
+            .with_approved_document_roots(&[root_id.to_owned()], || Ok::<_, IndexError>(()))?;
         let current = self.graph_generation(scope)?;
         if current.as_ref().map(|g| g.generation) != expected_generation {
             return Err(IndexError::StaleGeneration);
@@ -116,8 +125,10 @@ impl IndexStore {
 }
 
 fn is_digest(value: &str) -> bool {
-    value.len() == 64 &&
-        value.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 impl GraphMaintenanceJob<'_> {
@@ -133,14 +144,15 @@ impl GraphMaintenanceJob<'_> {
         if self.cancelled || Instant::now() >= self.expires_at {
             return Err(IndexError::Revoked);
         }
-        self.security.validate_lease(self.lease).map_err(|_| IndexError::Revoked)
+        self.security
+            .validate_lease(self.lease)
+            .map_err(|_| IndexError::Revoked)
     }
 
     fn check_authority(&mut self) -> Result<()> {
         self.check_time_and_lease()?;
-        self.authority.with_approved_document_roots(
-            &[self.root_id.clone()], || Ok::<_, IndexError>(())
-        )?;
+        self.authority
+            .with_approved_document_roots(&[self.root_id.clone()], || Ok::<_, IndexError>(()))?;
         if (self.verify_revision)()? != self.source_revision {
             return Err(IndexError::Revoked);
         }
@@ -148,7 +160,8 @@ impl GraphMaintenanceJob<'_> {
     }
 
     fn check_evidence(&self, reference: &str) -> Result<()> {
-        let path = VirtualDocumentPath::parse(reference).map_err(|_| IndexError::InvalidEvidence)?;
+        let path =
+            VirtualDocumentPath::parse(reference).map_err(|_| IndexError::InvalidEvidence)?;
         if path.root_id() != self.root_id {
             return Err(IndexError::Revoked);
         }
@@ -173,11 +186,18 @@ impl GraphMaintenanceJob<'_> {
             }
             return Err(IndexError::InvalidQuery);
         }
-        if batch.sequence != self.next_sequence ||
-            batch.nodes.len() > MAX_BATCH || batch.edges.len() > MAX_BATCH ||
-            (batch.nodes.is_empty() && batch.edges.is_empty()) ||
-            self.nodes.checked_add(batch.nodes.len()).is_none_or(|n| n > MAX_ITEMS) ||
-            self.edges.checked_add(batch.edges.len()).is_none_or(|n| n > MAX_ITEMS)
+        if batch.sequence != self.next_sequence
+            || batch.nodes.len() > MAX_BATCH
+            || batch.edges.len() > MAX_BATCH
+            || (batch.nodes.is_empty() && batch.edges.is_empty())
+            || self
+                .nodes
+                .checked_add(batch.nodes.len())
+                .is_none_or(|n| n > MAX_ITEMS)
+            || self
+                .edges
+                .checked_add(batch.edges.len())
+                .is_none_or(|n| n > MAX_ITEMS)
         {
             return Err(IndexError::InvalidQuery);
         }
@@ -200,7 +220,11 @@ impl GraphMaintenanceJob<'_> {
         let seq = self.next_sequence;
         self.batches.insert(seq, batch);
         self.next_sequence += 1;
-        Ok(GraphBatchReceipt { sequence: seq, next_sequence: self.next_sequence, replayed: false })
+        Ok(GraphBatchReceipt {
+            sequence: seq,
+            next_sequence: self.next_sequence,
+            replayed: false,
+        })
     }
 
     /// Publication is one generation-fenced SQLite transaction. The short
