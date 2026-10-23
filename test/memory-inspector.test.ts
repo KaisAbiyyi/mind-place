@@ -35,7 +35,7 @@ function detail(item: RankedMemory): MemoryDetail {
 
 test("contested and historical claims are visible without rendering provenance as HTML", async () => {
   const item = candidate("claim:old", "<script>inert statement</script>", "contested");
-  const invoke: Invoke = async <T>(command) => {
+  const invoke: Invoke = async <T>(command: string) => {
     if (command === "list_memory_inspection") return [item] as T;
     if (command === "get_memory_inspection") return detail(item) as T;
     throw new Error(command);
@@ -54,7 +54,7 @@ test("contested and historical claims are visible without rendering provenance a
 
 test("manual correction copies a draft only, pin is view-only", async () => {
   const item = candidate("claim:a", "Uncertain preference");
-  const invoke: Invoke = async <T>(command) => {
+  const invoke: Invoke = async <T>(command: string) => {
     if (command === "list_memory_inspection") return [item] as T;
     if (command === "get_memory_inspection") return detail(item) as T;
     throw new Error("Unexpected mutation: " + command);
@@ -79,7 +79,7 @@ test("forget lookup fails closed and stale asynchronous details never reappear a
   const item = candidate("claim:gone", "Old detail");
   let finish!: (value: MemoryDetail | null) => void;
   const pending = new Promise<MemoryDetail | null>((resolve) => { finish = resolve; });
-  const invoke: Invoke = async <T>(command) => {
+  const invoke: Invoke = async <T>(command: string) => {
     if (command === "list_memory_inspection") return [item] as T;
     if (command === "get_memory_inspection") return pending as Promise<T>;
     throw new Error(command);
@@ -95,7 +95,7 @@ test("forget lookup fails closed and stale asynchronous details never reappear a
 
 test("forgotten/no-visible result never displays stale memory details", async () => {
   const item = candidate("claim:gone", "Disallowed detail");
-  const invoke: Invoke = async <T>(command) => {
+  const invoke: Invoke = async <T>(command: string) => {
     if (command === "list_memory_inspection") return [item] as T;
     if (command === "get_memory_inspection") return null as T;
     throw new Error(command);
