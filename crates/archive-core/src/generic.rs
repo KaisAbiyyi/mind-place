@@ -51,53 +51,95 @@ fn json_messages(source: &str) -> Result<(String, Vec<Message>)> {
     let (title, records) = match &data {
         Value::Array(values) => ("Imported JSON transcript".to_owned(), values),
         Value::Object(map) => {
-            if map.keys().any(|key| !matches!(key.as_str(), "title" | "messages")) {
+            if map
+                .keys()
+                .any(|key| !matches!(key.as_str(), "title" | "messages"))
+            {
                 return Err(invalid("JSON transcript has unsupported top-level fields"));
             }
-            let values = map.get("messages").and_then(Value::as_array)
+            let values = map
+                .get("messages")
+                .and_then(Value::as_array)
                 .ok_or_else(|| invalid("JSON transcript requires a messages array"))?;
-            let title = map.get("title").and_then(Value::as_str)
+            let title = map
+                .get("title")
+                .and_then(Value::as_str)
                 .filter(|value| !value.trim().is_empty())
                 .unwrap_or("Imported JSON transcript");
             (title.to_owned(), values)
         }
-        _ => return Err(invalid("JSON transcript must be an array or an object with messages")),
+        _ => {
+            return Err(invalid(
+                "JSON transcript must be an array or an object with messages",
+            ))
+        }
     };
     if records.is_empty() || records.len() > 10_000 {
-        return Err(invalid("JSON transcript requires 1 to 10000 explicit messages"));
+        return Err(invalid(
+            "JSON transcript requires 1 to 10000 explicit messages",
+        ));
     }
     let mut messages = Vec::with_capacity(records.len());
     for (index, item) in records.iter().enumerate() {
-        let record = item.as_object()
+        let record = item
+            .as_object()
             .ok_or_else(|| invalid(format!("JSON record {index} is not an object")))?;
-        if record.keys().any(|key| !matches!(key.as_str(), "role" | "content" | "text" | "id" | "authored_at" | "model" | "attachments")) {
-            return Err(invalid(format!("JSON record {index} contains unsupported fields")));
+        if record.keys().any(|key| {
+            !matches!(
+                key.as_str(),
+                "role" | "content" | "text" | "id" | "authored_at" | "model" | "attachments"
+            )
+        }) {
+            return Err(invalid(format!(
+                "JSON record {index} contains unsupported fields"
+            )));
         }
-        let kind = record.get("role").and_then(Value::as_str)
+        let kind = record
+            .get("role")
+            .and_then(Value::as_str)
             .ok_or_else(|| invalid(format!("JSON record {index} has no explicit role")))?;
         // Refuse ambiguous representations rather than picking one and dropping evidence.
         if record.contains_key("content") && record.contains_key("text") {
-            return Err(invalid(format!("JSON record {index} has ambiguous content and text")));
+            return Err(invalid(format!(
+                "JSON record {index} has ambiguous content and text"
+            )));
         }
-        let body = record.get("content").or_else(|| record.get("text"))
+        let body = record
+            .get("content")
+            .or_else(|| record.get("text"))
             .and_then(Value::as_str)
             .ok_or_else(|| invalid(format!("JSON record {index} requires string content/text")))?;
-        if record.get("attachments").is_some_and(|value| !value.is_null() && value != &Value::Array(vec![])) {
-            return Err(invalid(format!("JSON record {index} contains unsupported attachments")));
+        if record
+            .get("attachments")
+            .is_some_and(|value| !value.is_null() && value != &Value::Array(vec![]))
+        {
+            return Err(invalid(format!(
+                "JSON record {index} contains unsupported attachments"
+            )));
         }
         let mut item = message(index, kind, body.to_owned(), "plain")?;
         if let Some(id) = record.get("id") {
-            let id = id.as_str().filter(|id| !id.is_empty() && id.len() <= 256)
+            let id = id
+                .as_str()
+                .filter(|id| !id.is_empty() && id.len() <= 256)
                 .ok_or_else(|| invalid(format!("JSON record {index} has invalid id")))?;
             item.id = id.into();
         }
         if let Some(value) = record.get("authored_at") {
-            item.authored_at = Some(value.as_str()
-                .ok_or_else(|| invalid(format!("JSON record {index} has invalid authored_at")))?.into());
+            item.authored_at = Some(
+                value
+                    .as_str()
+                    .ok_or_else(|| invalid(format!("JSON record {index} has invalid authored_at")))?
+                    .into(),
+            );
         }
         if let Some(value) = record.get("model") {
-            item.model = Some(value.as_str()
-                .ok_or_else(|| invalid(format!("JSON record {index} has invalid model")))?.into());
+            item.model = Some(
+                value
+                    .as_str()
+                    .ok_or_else(|| invalid(format!("JSON record {index} has invalid model")))?
+                    .into(),
+            );
         }
         messages.push(item);
     }
@@ -112,11 +154,18 @@ fn markdown_messages(source: &str) -> Result<(String, Vec<Message>)> {
     let mut preamble = String::new();
     for line in source.split_inclusive('\n') {
         let header = line.trim_end_matches(['\r', '\n']).trim();
-        let next = header.strip_prefix("## ").and_then(role)
+        let next = header
+            .strip_prefix("## ")
+            .and_then(role)
             .or_else(|| header.strip_prefix("### ").and_then(role));
         if let Some(kind) = next {
             if let Some(previous) = current {
-                records.push(message(records.len(), previous, body.trim_matches('\n').to_owned(), "markdown")?);
+                records.push(message(
+                    records.len(),
+                    previous,
+                    body.trim_matches('\n').to_owned(),
+                    "markdown",
+                )?);
                 body.clear();
             } else if !preamble.trim().is_empty() {
                 let pre = preamble.trim();
@@ -126,7 +175,9 @@ fn markdown_messages(source: &str) -> Result<(String, Vec<Message>)> {
                     }
                     title = name.trim().to_owned();
                 } else {
-                    return Err(invalid("Markdown transcript requires explicit role headers"));
+                    return Err(invalid(
+                        "Markdown transcript requires explicit role headers",
+                    ));
                 }
             }
             current = Some(kind);
@@ -137,18 +188,29 @@ fn markdown_messages(source: &str) -> Result<(String, Vec<Message>)> {
         }
     }
     if let Some(kind) = current {
-        records.push(message(records.len(), kind, body.trim_matches('\n').to_owned(), "markdown")?);
+        records.push(message(
+            records.len(),
+            kind,
+            body.trim_matches('\n').to_owned(),
+            "markdown",
+        )?);
     }
     if records.is_empty() || records.len() > 10_000 {
-        return Err(invalid("Markdown transcript requires 1 to 10000 ## Role headers"));
+        return Err(invalid(
+            "Markdown transcript requires 1 to 10000 ## Role headers",
+        ));
     }
     Ok((title, records))
 }
 
 fn unescape_entities(source: &str) -> String {
-    source.replace("&nbsp;", " ").replace("&quot;", "\"")
-        .replace("&#39;", "'").replace("&apos;", "'")
-        .replace("&lt;", "<").replace("&gt;", ">")
+    source
+        .replace("&nbsp;", " ")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&apos;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
         .replace("&amp;", "&")
 }
 
@@ -160,12 +222,20 @@ fn html_text(fragment: &str) -> Result<String> {
     while !rest.is_empty() {
         if let Some(start) = rest.find('<') {
             out.push_str(&unescape_entities(&rest[..start]));
-            let end = rest[start..].find('>')
-                .ok_or_else(|| invalid("Unterminated HTML tag"))? + start;
+            let end = rest[start..]
+                .find('>')
+                .ok_or_else(|| invalid("Unterminated HTML tag"))?
+                + start;
             let tag = rest[start + 1..end].trim().to_ascii_lowercase();
-            if tag.starts_with("script") || tag.starts_with("style") || tag.starts_with("iframe")
-                || tag.starts_with("object") || tag.starts_with("svg") {
-                return Err(invalid("Active HTML content cannot be imported as transcript text"));
+            if tag.starts_with("script")
+                || tag.starts_with("style")
+                || tag.starts_with("iframe")
+                || tag.starts_with("object")
+                || tag.starts_with("svg")
+            {
+                return Err(invalid(
+                    "Active HTML content cannot be imported as transcript text",
+                ));
             }
             if matches!(tag.as_str(), "br" | "br/" | "/p" | "/div" | "/li" | "/pre") {
                 out.push('\n');
@@ -184,30 +254,61 @@ fn html_text(fragment: &str) -> Result<String> {
 
 fn html_messages(source: &str) -> Result<(String, Vec<Message>)> {
     let lower = source.to_ascii_lowercase();
-    if ["<script", "<style", "<iframe", "<object", "<svg", "<!--", "<template"]
-        .iter().any(|marker| lower.contains(marker)) {
-        return Err(invalid("HTML transcript contains unsupported active/hidden markup"));
+    if [
+        "<script",
+        "<style",
+        "<iframe",
+        "<object",
+        "<svg",
+        "<!--",
+        "<template",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker))
+    {
+        return Err(invalid(
+            "HTML transcript contains unsupported active/hidden markup",
+        ));
     }
     let prefixes = ["<article data-role=\"", "<section data-role=\""];
     let mut offset = 0;
     let mut records = Vec::new();
     while offset < lower.len() {
-        let found = prefixes.iter().filter_map(|prefix| {
-            lower[offset..].find(prefix).map(|index| (offset + index, *prefix))
-        }).min_by_key(|(index, _)| *index);
+        let found = prefixes
+            .iter()
+            .filter_map(|prefix| {
+                lower[offset..]
+                    .find(prefix)
+                    .map(|index| (offset + index, *prefix))
+            })
+            .min_by_key(|(index, _)| *index);
         let Some((start, prefix)) = found else { break };
         let role_start = start + prefix.len();
-        let role_end = lower[role_start..].find('"')
-            .ok_or_else(|| invalid("HTML role attribute is unterminated"))? + role_start;
+        let role_end = lower[role_start..]
+            .find('"')
+            .ok_or_else(|| invalid("HTML role attribute is unterminated"))?
+            + role_start;
         let kind = role(&lower[role_start..role_end])
             .ok_or_else(|| invalid("HTML element has unsupported role"))?;
-        let tag_end = lower[role_end..].find('>')
-            .ok_or_else(|| invalid("HTML element opening tag is unterminated"))? + role_end;
-        let close = if prefix.starts_with("<article") { "</article>" } else { "</section>" };
-        let close_start = lower[tag_end + 1..].find(close)
-            .ok_or_else(|| invalid("HTML transcript role element is not closed"))? + tag_end + 1;
+        let tag_end = lower[role_end..]
+            .find('>')
+            .ok_or_else(|| invalid("HTML element opening tag is unterminated"))?
+            + role_end;
+        let close = if prefix.starts_with("<article") {
+            "</article>"
+        } else {
+            "</section>"
+        };
+        let close_start = lower[tag_end + 1..]
+            .find(close)
+            .ok_or_else(|| invalid("HTML transcript role element is not closed"))?
+            + tag_end
+            + 1;
         let inside = &source[tag_end + 1..close_start];
-        if prefixes.iter().any(|prefix| inside.to_ascii_lowercase().contains(prefix)) {
+        if prefixes
+            .iter()
+            .any(|prefix| inside.to_ascii_lowercase().contains(prefix))
+        {
             return Err(invalid("Nested transcript records are unsupported"));
         }
         records.push(message(records.len(), kind, html_text(inside)?, "plain")?);
@@ -223,8 +324,8 @@ fn html_messages(source: &str) -> Result<(String, Vec<Message>)> {
 }
 
 fn parse(format: &str, raw: &[u8], sha: &str) -> Result<Capture> {
-    let source = std::str::from_utf8(raw)
-        .map_err(|_| invalid("Generic transcript is not valid UTF-8"))?;
+    let source =
+        std::str::from_utf8(raw).map_err(|_| invalid("Generic transcript is not valid UTF-8"))?;
     let (title, messages) = match format {
         "json" => json_messages(source)?,
         "markdown" => markdown_messages(source)?,
@@ -259,10 +360,14 @@ impl ArchiveStore {
     /// Retains the original artifact even if parsing/normalization fails.
     pub fn import_generic(&self, format: &str, source: &[u8]) -> Result<GenericImportReceipt> {
         if !matches!(format, "json" | "markdown" | "html") {
-            return Err(invalid("Generic import format must be json, markdown, or html"));
+            return Err(invalid(
+                "Generic import format must be json, markdown, or html",
+            ));
         }
         if source.is_empty() || source.len() > MAX_GENERIC_IMPORT_BYTES {
-            return Err(invalid("Generic import source must contain 1 byte to 8 MiB"));
+            return Err(invalid(
+                "Generic import source must contain 1 byte to 8 MiB",
+            ));
         }
         let sha = crate::store::digest(source);
         let imports_root = self.root().join("imports");
@@ -278,7 +383,8 @@ impl ArchiveStore {
         } else if let Err(error) = crate::store::atomic_write(&raw_path, source, true) {
             // A concurrent same-hash import may win the immutable creation race.
             if !raw_path.exists()
-                || crate::store::bounded_read(&raw_path, MAX_GENERIC_IMPORT_BYTES)? != source {
+                || crate::store::bounded_read(&raw_path, MAX_GENERIC_IMPORT_BYTES)? != source
+            {
                 return Err(error);
             }
         }
@@ -291,7 +397,9 @@ impl ArchiveStore {
         };
         match parse(format, source, &sha).and_then(|capture| self.save(capture)) {
             Ok(saved) => receipt.saved = Some(saved),
-            Err(error) => receipt.errors.push(error.to_string().chars().take(400).collect()),
+            Err(error) => receipt
+                .errors
+                .push(error.to_string().chars().take(400).collect()),
         }
         Ok(receipt)
     }
