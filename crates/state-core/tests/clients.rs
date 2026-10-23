@@ -31,7 +31,7 @@ fn v2_upgrade_creates_backed_up_credential_migration_without_trusting_old_client
     db.pragma_update(None, "user_version", 2).unwrap();
     drop(db);
     let upgraded = StateStore::open(&path).unwrap();
-    assert_eq!(SCHEMA_VERSION, 7);
+    assert_eq!(SCHEMA_VERSION, 8);
     let no_token = format!("{:x}", Sha256::digest(b"mpc_v1_unsafe"));
     assert_eq!(
         upgraded
