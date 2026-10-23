@@ -29,6 +29,7 @@ fn relation(from: &GraphNode, to: &GraphNode, kind: GraphRelation) -> GraphEdge 
         from: from.identity.clone(),
         to: to.identity.clone(),
         relation: kind,
+        origin: mind_place_index::GraphOrigin::Deterministic,
         evidence: evidence(),
     }
 }
