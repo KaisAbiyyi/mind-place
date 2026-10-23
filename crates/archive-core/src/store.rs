@@ -146,8 +146,25 @@ pub fn conversation_id_from_url(source: &str) -> Result<String> {
     Ok(id.to_ascii_lowercase())
 }
 
+// An independent origin-to-identity check for Claude; legacy ChatGPT remains unchanged.
+fn claude_conversation_id_from_url(source: &str) -> Result<String> {
+    let url = url::Url::parse(source).map_err(|_| invalid("Invalid Claude conversation URL"))?;
+    if url.scheme() != "https" || url.host_str() != Some("claude.ai")
+        || url.port().is_some() || !url.username().is_empty() || url.password().is_some()
+        || url.query().is_some() || url.fragment().is_some()
+    { return Err(invalid("Claude captures require an official saved-conversation URL")); }
+    let parts: Vec<_> = url.path().split('/').filter(|p| !p.is_empty()).collect();
+    let id = match parts.as_slice() {
+        ["chat", id] => *id,
+        ["project", project, "chat", id] if uuid(project) => *id,
+        _ => return Err(invalid("Invalid Claude conversation route")),
+    };
+    if !uuid(id) { return Err(invalid("Invalid Claude conversation identity")); }
+    Ok(id.to_ascii_lowercase())
+}
+
 fn validate(c: &mut Capture) -> Result<()> {
-    if c.schema_version != 1 || c.provider != "chatgpt" {
+    if c.schema_version != 1 || !matches!(c.provider.as_str(), "chatgpt" | "claude") {
         return Err(invalid("Unsupported archive schema or provider"));
     }
     if !matches!(
@@ -164,12 +181,18 @@ fn validate(c: &mut Capture) -> Result<()> {
             "A DOM read cannot prove complete conversation history",
         ));
     }
-    if c.source_url.len() > 32768
-        || conversation_id_from_url(&c.source_url)? != c.conversation_id.to_ascii_lowercase()
-    {
+    let source_identity = if c.provider == "claude" {
+        claude_conversation_id_from_url(&c.source_url)?
+    } else {
+        conversation_id_from_url(&c.source_url)?
+    };
+    if c.source_url.len() > 32768 || source_identity != c.conversation_id.to_ascii_lowercase() {
         return Err(invalid(
             "Capture URL and conversation identity do not match",
         ));
+    }
+    if c.provider == "claude" && c.capture_method != "manual-dom" {
+        return Err(invalid("Claude capture supports explicit manual DOM only"));
     }
     c.conversation_id = c.conversation_id.to_ascii_lowercase();
     if c.title.trim().is_empty() || c.title.len() > 1024 {

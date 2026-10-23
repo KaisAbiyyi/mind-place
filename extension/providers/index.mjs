@@ -1,9 +1,10 @@
 import { chatGptAdapter } from './chatgpt.mjs';
+import { claudeAdapter } from './claude.mjs';
 export { captureMatchesIdentity } from './contract.mjs';
 
 // Statically bundled adapters only. Tab/page messages cannot register code or origins.
 /** @type {readonly import('./contract.mjs').CaptureAdapter[]} */
-export const CAPTURE_ADAPTERS = Object.freeze([chatGptAdapter]);
+export const CAPTURE_ADAPTERS = Object.freeze([chatGptAdapter, claudeAdapter]);
 
 export function captureAdapterForPage(sourceUrl) {
   try {

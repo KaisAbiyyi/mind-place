@@ -240,7 +240,14 @@ export function initPopup({ chromeApi = globalThis.chrome, documentRef = globalT
   const onClick = () => {
     if (initializing || inFlight || workerJob?.active) return;
     button.disabled = true;
-    inFlight = (loadHistory?.checked ? runScrollingSave() : runSave()).catch(() => {
+    const providerSave = async () => {
+      const tabs = await chromeApi?.tabs?.query?.({ active: true, currentWindow: true });
+      const selected = resolveCaptureAdapter(tabs?.[0]?.url ?? '');
+      if (loadHistory?.checked && selected?.adapter.capabilities.manualHistory) return runScrollingSave();
+      if (loadHistory?.checked && selected && !selected.adapter.capabilities.manualHistory) loadHistory.checked = false;
+      return runSave();
+    };
+    inFlight = providerSave().catch(() => {
       showFailure('The save could not be completed. Check Mind Place and try again.');
     }).finally(() => {
       button.disabled = Boolean(workerJob?.active);
