@@ -52,7 +52,7 @@ test('serialized Gemini adapter captures only visible conversation turns without
     assert.equal(c.completeness, 'partial');
     assert.equal(c.title, 'Design notes');
     assert.equal(c.messages.length, 2);
-    assert.deepEqual(c.messages.map(m => m.id), ['gemini-user-u1', 'gemini-assistant-a1']);
+    assert.deepEqual(Array.from(c.messages, m => m.id), ['gemini-user-u1', 'gemini-assistant-a1']);
     assert.equal(c.messages[0].text, 'Question **one**');
     assert.match(c.messages[1].text, /Answer \*one\*\./);
     assert.match(c.messages[1].text, /const n = 1/);

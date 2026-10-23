@@ -237,18 +237,10 @@ export function initPopup({ chromeApi = globalThis.chrome, documentRef = globalT
     showWarning(receiptWarnings.join(' '));
   };
 
-  // A provider without a history-scrolling capability must never enter the worker's
-  // scrolling mode even when the ChatGPT-only checkbox was left checked.
-  const selectAndSave = async () => {
-    if (!loadHistory?.checked) return runSave();
-    const tabs = await withTimeout(chromeApi.tabs.query({ active: true, currentWindow: true }), 5000);
-    const selected = resolveCaptureAdapter(tabs?.[0]?.url);
-    return selected && !selected.adapter.capabilities.manualHistory ? runSave() : runScrollingSave();
-  };
   const onClick = () => {
     if (initializing || inFlight || workerJob?.active) return;
     button.disabled = true;
-    inFlight = selectAndSave().catch(() => {
+    inFlight = (loadHistory?.checked ? runScrollingSave() : runSave()).catch(() => {
       showFailure('The save could not be completed. Check Mind Place and try again.');
     }).finally(() => {
       button.disabled = Boolean(workerJob?.active);
