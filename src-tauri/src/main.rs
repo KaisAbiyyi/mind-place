@@ -7,7 +7,8 @@ mod mcp_commands;
 use document_refresh::DocumentRefreshRegistry;
 
 use mind_place_archive::{
-    ArchiveStore, AssetResult, Conversation, ConversationSummary, ExportResult, ImportReceipt,
+    ArchiveStore, AssetResult, Conversation, ConversationSummary, ExportResult, GenericImportReceipt,
+    ImportReceipt,
     SnapshotSummary, NATIVE_HOST_NAME,
 };
 use mind_place_index::documents::{DocumentHit, DocumentIndex, DocumentIndexReport};
@@ -580,6 +581,18 @@ async fn import_legacy(state: State<'_, AppState>) -> Result<ImportReceipt, Stri
     gated_blocking(&state, move || store.import_legacy(&source)).await
 }
 
+/// Explicit owner action. Takes text bytes from the selected file, never a filesystem path.
+/// No browser extension or remote MCP client can invoke this Tauri command.
+#[tauri::command]
+async fn import_generic_text(
+    state: State<'_, AppState>,
+    format: String,
+    raw: String,
+) -> Result<GenericImportReceipt, String> {
+    let store = state.store.clone();
+    gated_blocking(&state, move || store.import_generic(&format, raw.as_bytes())).await
+}
+
 fn native_manifest_path(state: &AppState, browser: &str) -> PathBuf {
     state
         .store
@@ -778,6 +791,7 @@ fn main() {
             get_setup,
             register_extension,
             import_legacy,
+            import_generic_text,
             refresh_archive_index,
             rebuild_archive_index,
             get_archive_index_stats,
