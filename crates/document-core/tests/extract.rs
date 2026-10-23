@@ -336,3 +336,10 @@ fn pdf_operator_letters_inside_literal_are_preserved() {
     let doc = extract_bytes(DocumentFormat::Pdf, bytes, ExtractionLimits::default()).unwrap();
     assert!(doc.text.contains("METADATA and ET inside text"));
 }
+
+#[test]
+fn pdf_previous_stream_filter_does_not_bleed_into_plain_stream() {
+    let bytes = b"%PDF-1.7\n1 0 obj\n<< /Filter /DCTDecode >>\nstream\nunsupported\nendstream\nendobj\n2 0 obj\n<< /Length 30 >>\nstream\nBT (visible second stream) Tj ET\nendstream\nendobj";
+    let doc = extract_bytes(DocumentFormat::Pdf, bytes, ExtractionLimits::default()).unwrap();
+    assert!(doc.text.contains("visible second stream"));
+}

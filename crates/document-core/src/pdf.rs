@@ -141,6 +141,9 @@ fn delimiter(b: u8) -> bool {
 fn content_text(ctx: &mut Context<'_>, data: &[u8]) -> Result<String> {
     let mut output = String::new();
     let mut cursor = 0usize;
+    let mut last_auth = 0usize;
+    let mut events = 0usize;
+    ctx.poll()?;
     while let Some(start) = find(data, b"BT", cursor) {
         if (start > 0 && !delimiter(data[start - 1]))
             || data.get(start + 2).is_some_and(|b| !delimiter(*b))
@@ -148,13 +151,19 @@ fn content_text(ctx: &mut Context<'_>, data: &[u8]) -> Result<String> {
             cursor = start + 2;
             continue;
         }
-        ctx.poll()?;
+        ctx.check_time()?;
         let block = &data[start + 2..];
         let mut pos = 0;
         while pos < block.len() {
-            if pos % 4096 == 0 {
+            let absolute = start + 2 + pos;
+            if absolute.saturating_sub(last_auth) >= 8192 || events >= 256 {
                 ctx.poll()?;
+                last_auth = absolute;
+                events = 0;
+            } else {
+                ctx.check_time()?;
             }
+            events += 1;
             // ET inside a literal/hex string is evidence, not an operator.
             if block[pos..].starts_with(b"ET")
                 && (pos == 0 || delimiter(block[pos - 1]))
@@ -198,6 +207,7 @@ fn content_text(ctx: &mut Context<'_>, data: &[u8]) -> Result<String> {
         }
         cursor = start + 2 + pos;
     }
+    ctx.poll()?;
     Ok(output)
 }
 
@@ -247,6 +257,7 @@ pub(super) fn extract_pdf(ctx: &mut Context<'_>, bytes: &[u8]) -> Result<()> {
     let mut supported_streams = 0usize;
     while let Some(marker) = find(bytes, b"stream", scan_at) {
         ctx.poll()?;
+        let dict_start = scan_at;
         scan_at = marker + 6;
         let content_at = match bytes.get(scan_at..scan_at + 2) {
             Some(value) if value == b"\r\n" => scan_at + 2,
@@ -264,7 +275,8 @@ pub(super) fn extract_pdf(ctx: &mut Context<'_>, bytes: &[u8]) -> Result<()> {
         while content_end > content_at && matches!(bytes[content_end - 1], b'\r' | b'\n') {
             content_end -= 1;
         }
-        let dict_start = marker.saturating_sub(512);
+        // Never inherit a filter from a preceding stream. Limit dictionary
+        // inspection to the bytes since the previous endstream boundary.
         let preceding = &bytes[dict_start..marker];
         let flate = preceding
             .windows(b"/FlateDecode".len())
