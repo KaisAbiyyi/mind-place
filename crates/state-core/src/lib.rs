@@ -25,7 +25,8 @@ pub use document_scanner::{DocumentScanner, ScanPolicy, ScanReport, WatchEvent};
 pub use identity::{canonical_source_id, SourceDescriptor, SourceKey};
 pub use memory::{ClaimEvidence, ClaimRevision, ClaimState, ClaimTransition};
 pub use memory_ranking::{
-    serialize_ranked_context, ClaimRelation, RankedClaim, RankingMode, RankingPolicy, RelationKind,
+    serialize_ranked_context, ClaimRelation, ClaimRelationResolution, RankedClaim, RankingMode,
+    RankingPolicy, RelationKind,
 };
 
 pub const APPLICATION_ID: i64 = 0x4D504C43;
