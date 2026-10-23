@@ -41,6 +41,20 @@ export function captureGeminiConversation(options = {}) {
     }
     return true;
   };
+  // Only a positively active, visible private-session marker blocks capture.
+  // Mere prompts to enable a private mode are not proof that it is active.
+  const privateUi = () => [...document.querySelectorAll(
+    '[aria-pressed="true"],[aria-checked="true"],[aria-current="true"],[data-state="active"],[role="status"],[role="alert"]',
+  )].some(element => {
+    if (!visible(element)) return false;
+    const hint = [
+      element.getAttribute('aria-label'), element.getAttribute('title'),
+      element.getAttribute('data-testid'), (element.textContent ?? '').trim().slice(0, 120),
+    ].join(' ');
+    return /\b(?:temporary\s+(?:chat|conversation)|private\s+(?:chat|conversation)|incognito)\b/i.test(hint)
+      && !/\b(?:off|disabled|not active|turn on|enable)\b/i.test(hint);
+  });
+  if (privateUi()) return fail('Private or temporary Gemini conversations are excluded.');
   // Never harvest the entire body/sidebar: require an explicit conversation surface.
   const root = [...document.querySelectorAll('main,[role="main"],infinite-scroller,.conversation-container')]
     .find(element => visible(element) && element.querySelector('user-query,model-response'));
@@ -125,6 +139,7 @@ export function captureGeminiConversation(options = {}) {
     completeness: 'partial', warnings, messages,
   };
   if (byteLength(JSON.stringify(capture)) > 31 * 1024 * 1024) return fail('Gemini capture exceeds the 31 MiB limit.');
+  if (privateUi()) return fail('The Gemini conversation entered private mode during capture.');
   if (location.href !== sourceUrl) return fail('The Gemini conversation navigated during capture.');
   return { ok: true, capture };
 }

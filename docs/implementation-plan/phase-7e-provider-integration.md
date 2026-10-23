@@ -27,4 +27,4 @@ Generic accepts only bounded, explicitly structured JSON, Markdown or HTML trans
 - `test/provider-integration.test.mjs` pins the matrix, manifest permissions, serializer admission and fail-closed hostile cases across the bundled ChatGPT, Claude and Gemini DOM readers.
 - `crates/capture-host/tests/provider_integration.rs` exercises the real native host with multiple provider captures and the archive with a generic source, including identity isolation and immutable revisions.
 - Existing single-provider tests and generic source-byte tests remain required; product Windows and Phase 1E 10K/100K/1M CI must be checked **on the final PR SHA**.
-- Results belong to PR #TBD and [Notion MP-7E](https://app.notion.com/p/400c4a6aaf7381749e52ee14b5dd482a). Mark CI as NOT_RUN while pending; mark cloud complete only after truthful self-review and checks. No release/device qualification is implied.
+- Results belong to PR #75 and [Notion MP-7E](https://app.notion.com/p/400c4a6aaf7381749e52ee14b5dd482a). Mark CI as NOT_RUN while pending; mark cloud complete only after truthful self-review and checks. No release/device qualification is implied.
