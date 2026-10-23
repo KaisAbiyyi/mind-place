@@ -118,11 +118,34 @@ pub struct GraphEvidence {
     pub locator: String,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GraphOrigin {
+    Deterministic,
+    Inferred { confidence_bps: u16 },
+}
+
+impl GraphOrigin {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Deterministic => "deterministic",
+            Self::Inferred { .. } => "inferred",
+        }
+    }
+
+    pub fn confidence_bps(self) -> Option<u16> {
+        match self {
+            Self::Deterministic => None,
+            Self::Inferred { confidence_bps } => Some(confidence_bps),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GraphEdge {
     pub from: GraphNodeRef,
     pub to: GraphNodeRef,
     pub relation: GraphRelation,
+    pub origin: GraphOrigin,
     pub evidence: GraphEvidence,
 }
 
@@ -198,18 +221,32 @@ fn checked_projection<'a>(
             return Err(IndexError::InvalidQuery);
         }
         validate_field(&edge.evidence.locator)?;
-        let id = stable_id(
-            "ge",
-            &[
-                scope,
-                &from,
-                &to,
-                edge.relation.as_str(),
-                &edge.evidence.source_ref,
-                &edge.evidence.source_revision,
-                &edge.evidence.locator,
-            ],
-        );
+        if let GraphOrigin::Inferred { confidence_bps } = edge.origin {
+            if !(8_000..=10_000).contains(&confidence_bps)
+                || !matches!(
+                    edge.relation,
+                    GraphRelation::Contains | GraphRelation::References
+                )
+            {
+                return Err(IndexError::InvalidEvidence);
+            }
+        }
+        let mut parts = vec![
+            scope,
+            &from,
+            &to,
+            edge.relation.as_str(),
+            &edge.evidence.source_ref,
+            &edge.evidence.source_revision,
+            &edge.evidence.locator,
+        ];
+        // Preserve MP-6A deterministic edge identities across schema migration.
+        let confidence = edge.origin.confidence_bps().map(|v| v.to_string());
+        if let Some(ref value) = confidence {
+            parts.push("inferred");
+            parts.push(value);
+        }
+        let id = stable_id("ge", &parts);
         if let Some(existing) = edges.insert(id, edge) {
             if existing != edge {
                 return Err(IndexError::InvalidQuery);
@@ -265,15 +302,17 @@ pub(crate) fn replace_tx(
     }
     for (id, edge) in &edges {
         tx.execute(
-            "INSERT INTO graph_edges(id,scope,from_node,to_node,relation,origin,
+            "INSERT INTO graph_edges(id,scope,from_node,to_node,relation,origin,confidence_bps,
                  source_ref,source_revision,locator)
-             VALUES(?1,?2,?3,?4,?5,'deterministic',?6,?7,?8)",
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
             params![
                 id,
                 scope,
                 edge.from.id()?,
                 edge.to.id()?,
                 edge.relation.as_str(),
+                edge.origin.as_str(),
+                edge.origin.confidence_bps().map(i64::from),
                 edge.evidence.source_ref,
                 edge.evidence.source_revision,
                 edge.evidence.locator
@@ -399,12 +438,14 @@ pub(crate) fn refresh_archive_graph(tx: &Transaction<'_>) -> Result<()> {
             from: conversation,
             to: revision.clone(),
             relation: GraphRelation::Version,
+            origin: GraphOrigin::Deterministic,
             evidence: evidence.clone(),
         });
         edges.push(GraphEdge {
             from: revision,
             to: import,
             relation: GraphRelation::ImportedFrom,
+            origin: GraphOrigin::Deterministic,
             evidence,
         });
     }

@@ -15,6 +15,7 @@ fn edge(a: &GraphNode, b: &GraphNode) -> GraphEdge {
         from: a.identity.clone(),
         to: b.identity.clone(),
         relation: GraphRelation::References,
+        origin: mind_place_index::GraphOrigin::Deterministic,
         evidence: GraphEvidence {
             source_ref: "fixture:source".into(),
             source_revision: "revision:1".into(),

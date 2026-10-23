@@ -29,6 +29,7 @@ fn relation(from: &GraphNode, to: &GraphNode, kind: GraphRelation) -> GraphEdge 
         from: from.identity.clone(),
         to: to.identity.clone(),
         relation: kind,
+        origin: mind_place_index::GraphOrigin::Deterministic,
         evidence: evidence(),
     }
 }
@@ -259,7 +260,7 @@ fn legacy_index_migrates_without_discarding_fts_or_modifying_state() {
     let ver: i64 = db
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(ver, 3);
+    assert_eq!(ver, 4);
     assert_eq!(fs::read(state.path()).unwrap(), before_state_bytes);
     drop(db);
     assert!(IndexStore::open(&path).is_ok());

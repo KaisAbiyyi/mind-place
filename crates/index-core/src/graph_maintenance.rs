@@ -3,7 +3,7 @@
 //! No bearer secret or permanent HTTP/MCP write endpoint is created. A trusted
 //! desktop producer owns this opaque job. Source evidence stays authoritative
 //! in state/archive; only the disposable graph projection is mutated.
-use crate::graph::{validate_field, ARCHIVE_SCOPE};
+use crate::graph::{validate_field, GraphOrigin, GraphRelation, ARCHIVE_SCOPE};
 use crate::{
     GraphActivation, GraphEdge, GraphInputHashes, GraphNode, GraphProjection, IndexError,
     IndexStore, Result,
@@ -221,6 +221,16 @@ impl GraphMaintenanceJob<'_> {
             validate_field(&edge.evidence.locator)?;
             if edge.evidence.source_revision != self.source_revision {
                 return Err(IndexError::Revoked);
+            }
+            if let GraphOrigin::Inferred { confidence_bps } = edge.origin {
+                if !(8_000..=10_000).contains(&confidence_bps)
+                    || !matches!(
+                        edge.relation,
+                        GraphRelation::Contains | GraphRelation::References
+                    )
+                {
+                    return Err(IndexError::InvalidEvidence);
+                }
             }
         }
         self.nodes += batch.nodes.len();

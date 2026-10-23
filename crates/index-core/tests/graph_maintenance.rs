@@ -63,6 +63,7 @@ fn fixture(root: &str) -> (GraphMaintenanceBatch, GraphMaintenanceBatch) {
                 from: project,
                 to: file,
                 relation: GraphRelation::Contains,
+                origin: mind_place_index::GraphOrigin::Deterministic,
                 evidence: GraphEvidence {
                     source_ref: source,
                     source_revision: "b".repeat(64),

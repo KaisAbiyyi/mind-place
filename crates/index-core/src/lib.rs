@@ -14,7 +14,7 @@ use std::{
 };
 
 const APPLICATION_ID: i64 = 0x4D504958; // MPIX, deliberately distinct from state.
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 const NAMESPACE: &str = "mind-place-chatgpt-archive-v1";
 
 // Preserve historical ChatGPT source identity bytes; each newer provider has
@@ -30,6 +30,7 @@ const MAX_CHUNK_BYTES: usize = 4096;
 const SCHEMA: &str = include_str!("schema_v1.sql");
 const GRAPH_SCHEMA: &str = include_str!("schema_v2.sql");
 const GRAPH_GENERATION_SCHEMA: &str = include_str!("schema_v3.sql");
+const GRAPHIFY_SCHEMA: &str = include_str!("schema_v4.sql");
 
 pub mod context;
 pub mod documents;
@@ -38,6 +39,7 @@ pub mod graph;
 pub mod graph_generation;
 pub mod graph_maintenance;
 pub mod graph_query;
+pub mod graphify;
 pub mod inspection;
 pub use context::{
     ContextBudget, ContextExcerpt, ContextGroup, ContextPack, ContextPreset, ContextRequest,
@@ -47,7 +49,7 @@ pub use fetch::{
     FetchBudget, FetchCursor, FetchGranularity, FetchRequest, FetchResponse, FetchSegment,
 };
 pub use graph::{
-    GraphEdge, GraphEvidence, GraphKind, GraphNode, GraphNodeRef, GraphProjection,
+    GraphEdge, GraphEvidence, GraphKind, GraphNode, GraphNodeRef, GraphOrigin, GraphProjection,
     GraphProjectionStats, GraphRelation,
 };
 pub use graph_generation::{GraphActivation, GraphGeneration, GraphInputHashes};
@@ -55,6 +57,10 @@ pub use graph_maintenance::{GraphBatchReceipt, GraphMaintenanceBatch, GraphMaint
 pub use graph_query::{
     GraphCommunities, GraphCommunity, GraphDirection, GraphNeighborhood, GraphNeighborhoodRequest,
     GraphQueryEdge, GraphQueryNode,
+};
+pub use graphify::{
+    graphify_prompt, inferred_edge, qualify_graphify_batch, submit_graphify_batch, GraphifyProfile,
+    GraphifyPromptInput, GraphifyQualification,
 };
 pub use inspection::{ContextInspection, FetchInspection, RetrievalTrace, SearchInspection};
 pub use retrieval::{
@@ -175,6 +181,9 @@ fn expected_schema_hash(version: i64) -> String {
     if version >= 3 {
         hash.update(GRAPH_GENERATION_SCHEMA.as_bytes());
     }
+    if version >= 4 {
+        hash.update(GRAPHIFY_SCHEMA.as_bytes());
+    }
     format!("{:x}", hash.finalize())
 }
 
@@ -235,6 +244,7 @@ impl IndexStore {
             tx.execute_batch(SCHEMA)?;
             tx.execute_batch(GRAPH_SCHEMA)?;
             tx.execute_batch(GRAPH_GENERATION_SCHEMA)?;
+            tx.execute_batch(GRAPHIFY_SCHEMA)?;
             tx.pragma_update(None, "application_id", APPLICATION_ID)?;
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             tx.execute(
@@ -251,7 +261,10 @@ impl IndexStore {
                 if version == 1 {
                     tx.execute_batch(GRAPH_SCHEMA)?;
                 }
-                tx.execute_batch(GRAPH_GENERATION_SCHEMA)?;
+                if version < 3 {
+                    tx.execute_batch(GRAPH_GENERATION_SCHEMA)?;
+                }
+                tx.execute_batch(GRAPHIFY_SCHEMA)?;
                 tx.execute(
                     "UPDATE index_meta SET value=?1 WHERE key='schema_hash'",
                     [expected_schema_hash(SCHEMA_VERSION)],
