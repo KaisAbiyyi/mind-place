@@ -314,9 +314,12 @@ impl StateStore {
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let forgotten: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM memory_forget_tombstones WHERE claim_id=?1)",
-            [claim_id], |r| r.get(0),
+            [claim_id],
+            |r| r.get(0),
         )?;
-        if forgotten { return Err(StateError::MemoryDenied); }
+        if forgotten {
+            return Err(StateError::MemoryDenied);
+        }
         let status: String = tx
             .query_row(
                 "SELECT status FROM memory_claims WHERE id=?1",
@@ -403,9 +406,12 @@ impl StateStore {
         // Forget is a permanent non-disclosure boundary even for as-of reads.
         let forgotten: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM memory_forget_tombstones WHERE claim_id=?1)",
-            [claim_id], |r| r.get(0),
+            [claim_id],
+            |r| r.get(0),
         )?;
-        if forgotten { return Ok(None); }
+        if forgotten {
+            return Ok(None);
+        }
         let history = events(&tx, claim_id)?;
         if history.last().map(|h| h.status.as_str()) != Some(current.as_str()) {
             return Err(StateError::Corrupt);
@@ -447,9 +453,12 @@ pub(crate) fn claim_as_of_connection(
     };
     let forgotten: bool = db.query_row(
         "SELECT EXISTS(SELECT 1 FROM memory_forget_tombstones WHERE claim_id=?1)",
-        [claim_id], |r| r.get(0),
+        [claim_id],
+        |r| r.get(0),
     )?;
-    if forgotten { return Ok(None); }
+    if forgotten {
+        return Ok(None);
+    }
     let history = events(db, claim_id)?;
     if history.last().map(|h| h.status.as_str()) != Some(current_status.as_str()) {
         return Err(StateError::Corrupt);
