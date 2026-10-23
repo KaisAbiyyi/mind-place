@@ -169,7 +169,8 @@ async fn list_memory_inspection(
 ) -> Result<Vec<RankedClaim>, String> {
     read_memory_authority(&state, move |authority| {
         authority.memory_inspection_overview(query.as_deref().unwrap_or(""))
-    }).await
+    })
+    .await
 }
 
 #[tauri::command]
@@ -179,7 +180,8 @@ async fn get_memory_inspection(
 ) -> Result<Option<MemoryInspectionDetail>, String> {
     read_memory_authority(&state, move |authority| {
         authority.memory_inspection_detail(&claim_id)
-    }).await
+    })
+    .await
 }
 
 #[tauri::command]

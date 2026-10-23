@@ -59,7 +59,9 @@ impl StateStore {
              ORDER BY c.id LIMIT ?2",
         )?;
         let ids = statement
-            .query_map(params![query, MAX_VISIBLE as i64], |row| row.get::<_, String>(0))?
+            .query_map(params![query, MAX_VISIBLE as i64], |row| {
+                row.get::<_, String>(0)
+            })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         drop(statement);
         drop(db);
@@ -72,7 +74,10 @@ impl StateStore {
         self.rank_claims(&refs, &inspection_policy(MAX_VISIBLE))
     }
 
-    pub fn memory_inspection_detail(&self, claim_id: &str) -> Result<Option<MemoryInspectionDetail>> {
+    pub fn memory_inspection_detail(
+        &self,
+        claim_id: &str,
+    ) -> Result<Option<MemoryInspectionDetail>> {
         valid_id(claim_id)?;
         let Some(visible) = self.claim_as_of(claim_id, i64::MAX)? else {
             return Ok(None);
@@ -114,7 +119,12 @@ impl StateStore {
             let from: String = row.get(0)?;
             let to: String = row.get(1)?;
             Ok(MemoryInspectRelation {
-                direction: if from == claim_id { "outgoing" } else { "incoming" }.into(),
+                direction: if from == claim_id {
+                    "outgoing"
+                } else {
+                    "incoming"
+                }
+                .into(),
                 other_claim_id: if from == claim_id { to } else { from },
                 relation: row.get(2)?,
                 source_ref: row.get(3)?,
@@ -136,6 +146,10 @@ impl StateStore {
         if still_visible.is_none_or(|claim| claim.scope_id.is_some()) {
             return Ok(None);
         }
-        Ok(Some(MemoryInspectionDetail { ranked, history, relations }))
+        Ok(Some(MemoryInspectionDetail {
+            ranked,
+            history,
+            relations,
+        }))
     }
 }
