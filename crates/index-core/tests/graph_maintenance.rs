@@ -63,7 +63,7 @@ fn scoped_batches_are_sequenced_replay_safe_and_atomically_published() {
     let revision = hashes().content;
     let mut job = index.begin_graph_maintenance(
         &state, &security, "derived:project-a", &root, &revision,
-        hashes(), None, Duration::from_secs(60), move || Ok(revision.clone())
+        hashes(), None, Duration::from_secs(60), || Ok(hashes().content)
     ).unwrap();
     assert_eq!(job.scope(), "derived:project-a");
     let (first, second) = fixture(&root);
@@ -107,7 +107,7 @@ fn root_revocation_lock_and_stale_source_deny_unpublished_work() {
     let revision = hashes().content;
     let mut locked_job = index.begin_graph_maintenance(
         &state, &security, "derived:another", &root, &revision,
-        hashes(), None, Duration::from_secs(60), move || Ok(revision.clone())
+        hashes(), None, Duration::from_secs(60), || Ok(hashes().content)
     ).unwrap();
     security.lock();
     assert!(matches!(locked_job.accept_batch(fixture(&root).0), Err(IndexError::Revoked)));
@@ -116,7 +116,7 @@ fn root_revocation_lock_and_stale_source_deny_unpublished_work() {
     let revision = hashes().content;
     let mut revoked = index.begin_graph_maintenance(
         &state, &security, "derived:third", &root, &revision,
-        hashes(), None, Duration::from_secs(60), move || Ok(revision.clone())
+        hashes(), None, Duration::from_secs(60), || Ok(hashes().content)
     ).unwrap();
     revoked.accept_batch(fixture(&root).0).unwrap();
     state.revoke_document_root(&root).unwrap();
@@ -130,7 +130,7 @@ fn cross_root_evidence_and_incomplete_projection_fail_closed() {
     let revision = hashes().content;
     let mut job = index.begin_graph_maintenance(
         &state, &security, "derived:scope", &root, &revision,
-        hashes(), None, Duration::from_secs(60), move || Ok(revision.clone())
+        hashes(), None, Duration::from_secs(60), || Ok(hashes().content)
     ).unwrap();
     let (mut first, _) = fixture(&root);
     first.nodes[0].source_ref = "mpdoc://root/root:v1:bogus/leak.md".into();
@@ -149,7 +149,7 @@ fn stale_generation_fences_jobs_and_expiry_rejects_submissions() {
     let revision = hashes().content;
     let mut job = index.begin_graph_maintenance(
         &state, &security, "derived:scope", &root, &revision,
-        hashes(), None, Duration::from_secs(60), move || Ok(revision.clone())
+        hashes(), None, Duration::from_secs(60), || Ok(hashes().content)
     ).unwrap();
     job.accept_batch(fixture(&root).0).unwrap();
     // A newer producer invalidates the scope before this worker can finish.
@@ -160,7 +160,7 @@ fn stale_generation_fences_jobs_and_expiry_rejects_submissions() {
     let revision = hashes().content;
     let mut expiring = index.begin_graph_maintenance(
         &state, &security, "derived:short-lived", &root, &revision,
-        hashes(), None, Duration::from_millis(1), move || Ok(revision.clone())
+        hashes(), None, Duration::from_millis(1), || Ok(hashes().content)
     ).unwrap();
     std::thread::sleep(Duration::from_millis(20));
     assert!(matches!(expiring.accept_batch(fixture(&root).0), Err(IndexError::Revoked)));
