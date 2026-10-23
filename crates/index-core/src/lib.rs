@@ -24,6 +24,7 @@ pub mod context;
 pub mod documents;
 pub mod fetch;
 pub mod graph;
+pub mod graph_query;
 pub mod inspection;
 pub use context::{
     ContextBudget, ContextExcerpt, ContextGroup, ContextPack, ContextPreset, ContextRequest,
@@ -35,6 +36,10 @@ pub use fetch::{
 pub use graph::{
     GraphEdge, GraphEvidence, GraphKind, GraphNode, GraphNodeRef, GraphProjection,
     GraphProjectionStats, GraphRelation,
+};
+pub use graph_query::{
+    GraphCommunities, GraphCommunity, GraphDirection, GraphNeighborhood,
+    GraphNeighborhoodRequest, GraphQueryEdge, GraphQueryNode,
 };
 pub use inspection::{ContextInspection, FetchInspection, RetrievalTrace, SearchInspection};
 pub use retrieval::{
