@@ -195,11 +195,42 @@ fn gemini_conversation_id_from_url(source: &str) -> Result<String> {
     Ok(id.to_owned())
 }
 
+fn claude_conversation_id_from_url(source: &str) -> Result<String> {
+    let url = url::Url::parse(source).map_err(|_| invalid("Invalid Claude conversation URL"))?;
+    if url.scheme() != "https"
+        || url.host_str() != Some("claude.ai")
+        || url.port().is_some()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err(invalid(
+            "Claude captures require an official saved-conversation URL",
+        ));
+    }
+    let parts: Vec<_> = url.path().split('/').filter(|p| !p.is_empty()).collect();
+    let id = match parts.as_slice() {
+        ["chat", id] => *id,
+        ["project", project, "chat", id] if uuid(project) => *id,
+        _ => return Err(invalid("Invalid Claude conversation route")),
+    };
+    if !uuid(id) {
+        return Err(invalid("Invalid Claude conversation identity"));
+    }
+    Ok(id.to_ascii_lowercase())
+}
+
 fn validate(c: &mut Capture) -> Result<()> {
-    if c.schema_version != 1 || !matches!(c.provider.as_str(), "chatgpt" | "gemini" | "generic") {
+    if c.schema_version != 1
+        || !matches!(
+            c.provider.as_str(),
+            "chatgpt" | "gemini" | "generic" | "claude"
+        )
+    {
         return Err(invalid("Unsupported archive schema or provider"));
     }
-    if c.provider == "gemini" && c.capture_method != "manual-dom" {
+    if matches!(c.provider.as_str(), "gemini" | "claude") && c.capture_method != "manual-dom" {
         return Err(invalid("Gemini capture is explicit manual DOM only"));
     }
     if c.provider == "generic" {
@@ -231,10 +262,11 @@ fn validate(c: &mut Capture) -> Result<()> {
     let canonical_id = match c.provider.as_str() {
         "chatgpt" => conversation_id_from_url(&c.source_url)?,
         "gemini" => gemini_conversation_id_from_url(&c.source_url)?,
+        "claude" => claude_conversation_id_from_url(&c.source_url)?,
         "generic" => c.conversation_id.clone(),
         _ => return Err(invalid("Unsupported archive provider")),
     };
-    let supplied_id = if c.provider == "chatgpt" {
+    let supplied_id = if matches!(c.provider.as_str(), "chatgpt" | "claude") {
         c.conversation_id.to_ascii_lowercase()
     } else {
         c.conversation_id.clone()

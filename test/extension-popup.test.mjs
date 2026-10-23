@@ -364,3 +364,44 @@ test('a restarted worker releases stale loading controls and lets the popup star
     assert.equal(starts, 1);
   } finally { controller.destroy(); dom.window.close(); }
 });
+
+
+test('manual history routing times out when the active-tab query never settles', async () => {
+  const dom = new JSDOM(await readFile(new URL('../extension/popup.html', import.meta.url), 'utf8'), { url: 'chrome-extension://test/popup.html' });
+  const sends = [];
+  const chromeApi = {
+    tabs: { query: () => new Promise(() => {}) },
+    runtime: { sendMessage: async msg => { sends.push(msg); return { job: null }; } },
+  };
+  const controller = initPopup({ chromeApi, documentRef: dom.window.document, saveTimeoutMs: 25 });
+  try {
+    await controller.whenIdle();
+    dom.window.document.querySelector('#save').click();
+    await controller.whenIdle();
+    assert.match(dom.window.document.querySelector('#status').textContent, /timed out/i);
+    assert.equal(sends.some(msg => msg.type === 'start-capture'), false);
+  } finally { controller.destroy(); dom.window.close(); }
+});
+
+test('Claude Save ignores ChatGPT-only history scrolling and submits a partial loaded capture', async () => {
+  const url = 'https://claude.ai/chat/' + conversationId;
+  const page = new JSDOM('<title>Conversation - Claude</title><main>'
+    + '<div data-testid="user-message" data-message-id="u1">Hello</div>'
+    + '<div data-testid="assistant-message" data-message-id="a1">Hi</div></main>',
+    { url, runScripts: 'outside-only' });
+  page.window.TextEncoder = TextEncoder;
+  const fake = makeChrome({ page, tabUrl: url });
+  const dom = new JSDOM(await readFile(new URL('../extension/popup.html', import.meta.url), 'utf8'), { url: 'chrome-extension://test/popup.html' });
+  const controller = initPopup({ chromeApi: fake.chromeApi, documentRef: dom.window.document });
+  try {
+    await controller.whenIdle();
+    assert.equal(dom.window.document.querySelector('#load-history').checked, true);
+    dom.window.document.querySelector('#save').click();
+    await controller.whenIdle();
+    assert.equal(fake.nativeRequests.length, 1);
+    assert.equal(fake.nativeRequests[0].request.capture.provider, 'claude');
+    assert.equal(fake.nativeRequests[0].request.capture.capture_method, 'manual-dom');
+    assert.equal(fake.nativeRequests[0].request.capture.completeness, 'partial');
+    assert.equal(dom.window.document.querySelector('#load-history').checked, false);
+  } finally { controller.destroy(); dom.window.close(); page.window.close(); }
+});
