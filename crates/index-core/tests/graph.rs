@@ -45,8 +45,14 @@ fn projection() -> GraphProjection {
     let revision = node(GraphKind::Revision, "revision:1");
     GraphProjection {
         nodes: vec![
-            project.clone(), topic.clone(), file.clone(), memory.clone(),
-            conversation.clone(), entity.clone(), symbol.clone(), import.clone(),
+            project.clone(),
+            topic.clone(),
+            file.clone(),
+            memory.clone(),
+            conversation.clone(),
+            entity.clone(),
+            symbol.clone(),
+            import.clone(),
             revision.clone(),
         ],
         edges: vec![
@@ -63,7 +69,9 @@ fn projection() -> GraphProjection {
 
 fn edge_ids(index: &IndexStore, scope: &str) -> Vec<String> {
     let db = Connection::open(index.path()).unwrap();
-    let mut q = db.prepare("SELECT id FROM graph_edges WHERE scope=?1 ORDER BY id").unwrap();
+    let mut q = db
+        .prepare("SELECT id FROM graph_edges WHERE scope=?1 ORDER BY id")
+        .unwrap();
     q.query_map([scope], |r| r.get::<_, String>(0))
         .unwrap()
         .collect::<rusqlite::Result<Vec<_>>>()
@@ -75,26 +83,37 @@ fn supports_all_semantic_kinds_and_evidence_relations_deterministically() {
     let dir = tempfile::tempdir().unwrap();
     let index = IndexStore::open(dir.path().join("index.sqlite3")).unwrap();
     let input = projection();
-    assert_eq!(index.replace_graph_projection("fixture", &input).unwrap().nodes, 9);
+    assert_eq!(
+        index
+            .replace_graph_projection("fixture", &input)
+            .unwrap()
+            .nodes,
+        9
+    );
     assert_eq!(index.graph_scope_stats("fixture").unwrap().edges, 7);
     let stable = edge_ids(&index, "fixture");
     let db = Connection::open(index.path()).unwrap();
     let (kind, origin, locator): (String, String, String) = db
         .query_row(
             "SELECT relation,origin,locator FROM graph_edges
-             WHERE relation='defines_symbol' LIMIT 1", [], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
-            },
-        ).unwrap();
-    assert_eq!((kind.as_str(), origin.as_str(), locator.as_str()),
-        ("defines_symbol", "deterministic", "line:10-20"));
+             WHERE relation='defines_symbol' LIMIT 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        (kind.as_str(), origin.as_str(), locator.as_str()),
+        ("defines_symbol", "deterministic", "line:10-20")
+    );
     drop(db);
 
     let mut shuffled = input.clone();
     shuffled.nodes.reverse();
     shuffled.edges.reverse();
     shuffled.edges.push(shuffled.edges[0].clone());
-    index.replace_graph_projection("fixture", &shuffled).unwrap();
+    index
+        .replace_graph_projection("fixture", &shuffled)
+        .unwrap();
     assert_eq!(edge_ids(&index, "fixture"), stable);
     let reopened = IndexStore::open(index.path()).unwrap();
     assert_eq!(reopened.graph_scope_stats("fixture").unwrap().edges, 7);
@@ -106,21 +125,33 @@ fn scopes_are_independent_and_empty_replacement_prunes_orphans() {
     let index = IndexStore::open(dir.path().join("index.sqlite3")).unwrap();
     let shared = node(GraphKind::Project, "project:shared");
     let solo = node(GraphKind::Topic, "topic:solo");
-    index.replace_graph_projection(
-        "one", &GraphProjection {
-            nodes: vec![shared.clone(), solo.clone()],
-            edges: vec![relation(&shared, &solo, GraphRelation::Contains)],
-        },
-    ).unwrap();
-    index.replace_graph_projection("two", &GraphProjection {
-        nodes: vec![shared.clone()],
-        edges: vec![],
-    }).unwrap();
-    index.replace_graph_projection("one", &GraphProjection::default()).unwrap();
+    index
+        .replace_graph_projection(
+            "one",
+            &GraphProjection {
+                nodes: vec![shared.clone(), solo.clone()],
+                edges: vec![relation(&shared, &solo, GraphRelation::Contains)],
+            },
+        )
+        .unwrap();
+    index
+        .replace_graph_projection(
+            "two",
+            &GraphProjection {
+                nodes: vec![shared.clone()],
+                edges: vec![],
+            },
+        )
+        .unwrap();
+    index
+        .replace_graph_projection("one", &GraphProjection::default())
+        .unwrap();
     assert_eq!(index.graph_scope_stats("one").unwrap().nodes, 0);
     assert_eq!(index.graph_scope_stats("two").unwrap().nodes, 1);
     let db = Connection::open(index.path()).unwrap();
-    let count: i64 = db.query_row("SELECT COUNT(*) FROM graph_nodes", [], |r| r.get(0)).unwrap();
+    let count: i64 = db
+        .query_row("SELECT COUNT(*) FROM graph_nodes", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(count, 1);
 }
 
@@ -156,10 +187,15 @@ fn rejects_unsupported_or_unproven_edges_and_preserves_old_projection() {
     ));
     assert_eq!(edge_ids(&index, "fixture"), before);
     let mut callbacks = 0;
-    let denied = index.replace_graph_projection_with_check("fixture", &GraphProjection::default(), || {
-        callbacks += 1;
-        if callbacks == 2 { Err(IndexError::Revoked) } else { Ok(()) }
-    });
+    let denied =
+        index.replace_graph_projection_with_check("fixture", &GraphProjection::default(), || {
+            callbacks += 1;
+            if callbacks == 2 {
+                Err(IndexError::Revoked)
+            } else {
+                Ok(())
+            }
+        });
     assert!(matches!(denied, Err(IndexError::Revoked)));
     assert_eq!(edge_ids(&index, "fixture"), before);
 }
@@ -172,26 +208,39 @@ fn legacy_index_migrates_without_discarding_fts_or_modifying_state() {
     let db = Connection::open(&path).unwrap();
     let old = include_str!("../src/schema_v1.sql");
     db.execute_batch(old).unwrap();
-    db.pragma_update(None, "application_id", 0x4D504958i64).unwrap();
+    db.pragma_update(None, "application_id", 0x4D504958i64)
+        .unwrap();
     db.pragma_update(None, "user_version", 1i64).unwrap();
-    db.execute("INSERT INTO index_meta(key,value) VALUES('schema_hash',?1)",
-        [format!("{:x}", Sha256::digest(old.as_bytes()))]).unwrap();
+    db.execute(
+        "INSERT INTO index_meta(key,value) VALUES('schema_hash',?1)",
+        [format!("{:x}", Sha256::digest(old.as_bytes()))],
+    )
+    .unwrap();
     db.execute(
         "INSERT INTO revisions (source_id,archive_id,snapshot_id,provider,
           conversation_id,title,source_url,captured_at,completeness,is_current,seen_generation)
-         VALUES('s','a','v','chatgpt','c','Legacy','url','today','partial',1,1)", [],
-    ).unwrap();
+         VALUES('s','a','v','chatgpt','c','Legacy','url','today','partial',1,1)",
+        [],
+    )
+    .unwrap();
     db.execute(
         "INSERT INTO chunks(source_id,snapshot_id,message_id,part,kind,role,body)
-         VALUES('s','v','m',0,'message','user','legacygraphneedle')", [],
-    ).unwrap();
+         VALUES('s','v','m',0,'message','user','legacygraphneedle')",
+        [],
+    )
+    .unwrap();
     drop(db);
     let before_state_bytes = fs::read(state.path()).unwrap();
     let index = IndexStore::open(&path).unwrap();
-    assert_eq!(index.search("legacygraphneedle", false, 10).unwrap().len(), 1);
+    assert_eq!(
+        index.search("legacygraphneedle", false, 10).unwrap().len(),
+        1
+    );
     assert_eq!(index.graph_scope_stats("archive:chatgpt").unwrap().nodes, 0);
     let db = Connection::open(&path).unwrap();
-    let ver: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+    let ver: i64 = db
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(ver, 2);
     assert_eq!(fs::read(state.path()).unwrap(), before_state_bytes);
     drop(db);
@@ -204,9 +253,16 @@ fn stale_schema_hash_is_rejected_without_automatic_overwrite() {
     let path = dir.path().join("index.sqlite3");
     IndexStore::open(&path).unwrap();
     let db = Connection::open(&path).unwrap();
-    db.execute("UPDATE index_meta SET value='bad' WHERE key='schema_hash'", []).unwrap();
+    db.execute(
+        "UPDATE index_meta SET value='bad' WHERE key='schema_hash'",
+        [],
+    )
+    .unwrap();
     drop(db);
-    assert!(matches!(IndexStore::open(&path), Err(IndexError::InvalidIndex)));
+    assert!(matches!(
+        IndexStore::open(&path),
+        Err(IndexError::InvalidIndex)
+    ));
 }
 
 fn capture(text: &str) -> Capture {
@@ -241,8 +297,12 @@ fn archive_edges_are_source_proven_and_rebuildable_without_raw_changes() {
     let state = StateStore::open(dir.path().join("state.sqlite3")).unwrap();
     let index = IndexStore::open(dir.path().join("index.sqlite3")).unwrap();
     let receipt = archive.save(capture("graphbeacon first")).unwrap();
-    let raw_path = archive.root().join("conversations").join(&receipt.id)
-        .join("captures").join(format!("{}.jsonl", receipt.snapshot_id));
+    let raw_path = archive
+        .root()
+        .join("conversations")
+        .join(&receipt.id)
+        .join("captures")
+        .join(format!("{}.jsonl", receipt.snapshot_id));
     let raw_before = fs::read(&raw_path).unwrap();
     index.sync(&archive, &state).unwrap();
     assert_eq!(index.graph_scope_stats("archive:chatgpt").unwrap().nodes, 3);
@@ -252,11 +312,14 @@ fn archive_edges_are_source_proven_and_rebuildable_without_raw_changes() {
     assert_eq!(edge_ids(&index, "archive:chatgpt"), stable);
     assert_eq!(fs::read(&raw_path).unwrap(), raw_before);
     let db = Connection::open(index.path()).unwrap();
-    let (source, revision, locator): (String, String, String) = db.query_row(
-        "SELECT source_ref,source_revision,locator FROM graph_edges
-         WHERE relation='imported_from'", [],
-        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-    ).unwrap();
+    let (source, revision, locator): (String, String, String) = db
+        .query_row(
+            "SELECT source_ref,source_revision,locator FROM graph_edges
+         WHERE relation='imported_from'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
     assert!(!source.is_empty());
     assert_eq!(revision, receipt.snapshot_id);
     assert!(locator.contains(&receipt.id));
