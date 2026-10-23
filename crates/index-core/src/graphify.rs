@@ -65,8 +65,10 @@ fn valid_pattern(pattern: &str) -> bool {
         && !pattern.contains('\\')
         && !pattern.contains(':')
         && !pattern.contains('<')
-        && !pattern.contains('>')
-        && !pattern.chars().any(char::is_control)
+        && pattern.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric()
+                || matches!(byte, b'/' | b'_' | b'-' | b'.' | b'*' | b'?' | b'[' | b']')
+        })
         && !pattern.split('/').any(|p| p == ".." || p == ".")
 }
 
@@ -205,6 +207,12 @@ pub fn submit_graphify_batch(
     batch: GraphMaintenanceBatch,
 ) -> Result<(GraphBatchReceipt, GraphifyQualification)> {
     let report = qualify_graphify_batch(&batch)?;
+    // A model proposal is never proof of a structural/deterministic fact.
+    // Trusted deterministic producers must use MP-6D's direct job API after
+    // independently verifying exact source structure.
+    if report.deterministic_edges != 0 {
+        return Err(IndexError::InvalidEvidence);
+    }
     let receipt = job.accept_batch(batch)?;
     Ok((receipt, report))
 }
