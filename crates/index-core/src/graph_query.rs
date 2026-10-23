@@ -395,6 +395,8 @@ impl IndexStore {
                     r.get(4)?,
                     r.get(5)?,
                     r.get(6)?,
+                    r.get(7)?,
+                    r.get(8)?,
                 ))
             })?;
             rows.map(|row| edge_from_row(row?)).collect::<Result<_>>()?
