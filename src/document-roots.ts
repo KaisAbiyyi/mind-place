@@ -106,7 +106,7 @@ export function mountDocumentRootSetup(parent: HTMLElement, invoke: Invoke): voi
   searchHeading.textContent = "Search indexed content";
   const searchNote = doc.createElement("p");
   searchNote.className = "document-field-help";
-  searchNote.textContent = "Search covers approved indexed files, not every file on your device. Results show bounded, verified excerpts rather than full source previews.";
+  searchNote.textContent = "Search covers approved indexed files, not every file on your device. Previews are limited to 4,096 verified source characters. Unsupported formats, unreadable files and parser/resource-limit failures may be skipped; the current index report gives a count, not per-file explanations.";
   const searchForm = doc.createElement("form");
   searchForm.className = "document-search-form";
   const searchLabel = doc.createElement("label");
@@ -226,8 +226,13 @@ export function mountDocumentRootSetup(parent: HTMLElement, invoke: Invoke): voi
           pause.type = "button";
           pause.className = "quiet-button";
           pause.dataset.action = "pause-root-refresh";
-          pause.textContent = "Pause automatic refresh";
+          pause.textContent = latest?.paused ? "Resume refresh & re-index" : "Pause automatic refresh";
+          pause.hidden = Boolean(latest && !latest.report.auto_refresh_active && !latest.paused);
           pause.addEventListener("click", () => {
+            if (lastReports.get(root.id)?.paused) {
+              index.click();
+              return;
+            }
             pause.disabled = true;
             void invoke<void>("pause_document_root_refresh", { rootId: root.id })
               .then(() => {
