@@ -502,7 +502,11 @@ fn validity_windows_are_enforced_for_current_and_historical_rankings() {
     assert_eq!(challenged.len(), 3);
     for id in ["claim:expired", "claim:future"] {
         assert_eq!(
-            challenged.iter().find(|r| r.claim.id == id).unwrap().disposition,
+            challenged
+                .iter()
+                .find(|r| r.claim.id == id)
+                .unwrap()
+                .disposition,
             "non_current"
         );
     }
@@ -626,7 +630,9 @@ fn mistaken_contradiction_can_be_resolved_without_rewriting_historical_truth() {
             &policy(RankingMode::Balanced, Some(contested_at)),
         )
         .unwrap();
-    assert!(historical.iter().all(|item| item.disposition == "contested"));
+    assert!(historical
+        .iter()
+        .all(|item| item.disposition == "contested"));
     let current = state
         .rank_claims(
             &["claim:a", "claim:b"],
