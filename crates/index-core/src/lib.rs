@@ -38,8 +38,8 @@ pub use graph::{
     GraphProjectionStats, GraphRelation,
 };
 pub use graph_query::{
-    GraphCommunities, GraphCommunity, GraphDirection, GraphNeighborhood,
-    GraphNeighborhoodRequest, GraphQueryEdge, GraphQueryNode,
+    GraphCommunities, GraphCommunity, GraphDirection, GraphNeighborhood, GraphNeighborhoodRequest,
+    GraphQueryEdge, GraphQueryNode,
 };
 pub use inspection::{ContextInspection, FetchInspection, RetrievalTrace, SearchInspection};
 pub use retrieval::{
