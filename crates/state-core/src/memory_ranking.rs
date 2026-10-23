@@ -84,8 +84,20 @@ fn allowed_scope(claim: &ClaimState, scope: Option<&str>) -> bool {
     }
 }
 
-fn is_live(claim: &ClaimState) -> bool {
-    claim.status == "active"
+fn is_live_at(db: &Connection, claim: &ClaimState, at_ms: i64) -> Result<bool> {
+    if claim.status != "active" {
+        return Ok(false);
+    }
+    // Validity bounds are authoritative epoch seconds in schema v1, while
+    // claim/event clocks and RankingPolicy use inclusive milliseconds.
+    let (valid_from, valid_until): (Option<i64>, Option<i64>) = db.query_row(
+        "SELECT valid_from,valid_until FROM memory_claims WHERE id=?1",
+        [&claim.id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    let at_seconds = at_ms.div_euclid(1000);
+    Ok(valid_from.is_none_or(|v| at_seconds >= v)
+        && valid_until.is_none_or(|v| at_seconds <= v))
 }
 
 fn positive_evidence(claim: &ClaimState) -> usize {
@@ -260,6 +272,9 @@ impl StateStore {
             }
         }
         let cutoff = policy.as_of_ms.unwrap_or(i64::MAX);
+        // Current-version projection selects latest event; validity semantics
+        // must be evaluated against actual wall clock, not i64::MAX.
+        let evaluation_ms = policy.as_of_ms.unwrap_or(now_ms()?);
         let db = self.read_connection()?;
         let tx = db.unchecked_transaction()?;
         let mut claims = BTreeMap::new();
@@ -281,6 +296,30 @@ impl StateStore {
                 }
             }
         }
+        // An already-open store must fail closed if authority source metadata
+        // was modified after open. Foreign keys only prove a row exists, not
+        // that its canonical id still matches its source descriptor.
+        let mut source_refs = BTreeSet::new();
+        for claim in claims.values().chain(neighbors.values()) {
+            for evidence in &claim.evidence {
+                source_refs.insert(evidence.source_ref.clone());
+            }
+        }
+        for edge in &relations {
+            source_refs.insert(edge.source_ref.clone());
+        }
+        for source_id in source_refs {
+            let record = tx
+                .query_row(
+                    "SELECT id,provider,source_namespace,source_kind,key_type,source_key
+                     FROM source_identities WHERE id=?1",
+                    [&source_id],
+                    source_record,
+                )
+                .optional()?
+                .ok_or(StateError::Corrupt)?;
+            verify_source_record(&record)?;
+        }
         let newest = claims
             .values()
             .chain(neighbors.values())
@@ -290,6 +329,7 @@ impl StateStore {
         let mut ranked = Vec::new();
         for (id, claim) in claims {
             let support = positive_evidence(&claim);
+            let current = is_live_at(&tx, &claim, evaluation_ms)?;
             // Confidence is an immutable state field; inferred confidence
             // is a bounded tie-breaker, never stronger than source authority.
             let confidence: Option<f64> = tx.query_row(
@@ -355,19 +395,28 @@ impl StateStore {
                 let Some(opponent) = opponent else {
                     continue;
                 };
-                if !allowed_scope(opponent, policy.scope_id.as_deref()) || !is_live(opponent) {
+                if !allowed_scope(opponent, policy.scope_id.as_deref()) {
                     continue;
                 }
                 related.insert(other_id.clone());
+                // Supersession evidence is append-only. A retracted/superseded
+                // intermediate successor must never silently resurrect the
+                // older claim. Explicit correction is required to reassert it.
+                if edge.relation == "supersedes" && edge.to_claim_id == id {
+                    superseded = true;
+                    continue;
+                }
+                if !is_live_at(&tx, opponent, evaluation_ms)? {
+                    continue;
+                }
                 match edge.relation.as_str() {
-                    "contradicts" if is_live(&claim) => contested = true,
-                    "supersedes" if edge.to_claim_id == id => superseded = true,
+                    "contradicts" if current => contested = true,
                     "refines" if edge.to_claim_id == id => qualified = true,
                     "supports" if edge.to_claim_id == id => score += 20,
                     _ => {}
                 }
             }
-            let disposition = if !is_live(&claim) {
+            let disposition = if !current {
                 "non_current"
             } else if superseded {
                 "superseded"
