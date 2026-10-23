@@ -152,3 +152,41 @@ fn forget_requires_admin_and_hides_all_as_of_context_without_deleting_raw() {
     assert!(db.source(&source).unwrap().is_some());
     assert!(db.apply_memory_write(&"b".repeat(64), "mp5c-forget-owner-02", &op).is_err());
 }
+
+#[test]
+fn forget_cascades_to_successor_and_blocks_future_relations() {
+    use mind_place_state::RelationKind;
+    let (_dir, db, source) = fixture();
+    let proof = evidence(&source);
+    let predecessor = claim("claim:predecessor", "Sensitive old preference");
+    db.apply_memory_write(&"a".repeat(64), "mp5c-chain-create-001", &MemoryWrite::Create {
+        claim: &predecessor, scope_id: None, evidence: &proof,
+    }).unwrap();
+    let successor = claim("claim:successor", "Sensitive corrected preference");
+    db.apply_memory_write(&"a".repeat(64), "mp5c-chain-change-001", &MemoryWrite::Supersede {
+        previous_id: "claim:predecessor", successor: &successor,
+        scope_id: None, evidence: &proof, reason: "Correction",
+    }).unwrap();
+    db.apply_memory_write(&"b".repeat(64), "mp5c-chain-forget-001", &MemoryWrite::Forget {
+        claim_id: "claim:predecessor", reason: "Owner private delete reason",
+    }).unwrap();
+    for id in ["claim:predecessor", "claim:successor"] {
+        assert!(db.claim_as_of(id, i64::MAX).unwrap().is_none());
+        assert!(db.claim_history(id).unwrap().is_none());
+    }
+    let raw = Connection::open(db.path()).unwrap();
+    let count: i64 = raw.query_row(
+        "SELECT COUNT(*) FROM memory_forget_tombstones", [], |r| r.get(0)
+    ).unwrap();
+    assert_eq!(count, 2);
+    let secret: String = raw.query_row(
+        "SELECT reason_sha256 FROM memory_forget_tombstones WHERE claim_id='claim:successor'",
+        [], |r| r.get(0),
+    ).unwrap();
+    assert_eq!(secret.len(), 64);
+    assert_ne!(secret, "Owner private delete reason");
+    assert!(matches!(db.add_claim_relation(
+        "claim:successor", "claim:predecessor", RelationKind::Supports,
+        &source, "Cannot reactivate forgotten claim",
+    ), Err(StateError::MemoryDenied)));
+}
