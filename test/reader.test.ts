@@ -361,3 +361,69 @@ test("stale search results and captured-image reads cannot overwrite newer UI st
   await delay(0);
   assert.equal(root.querySelector<HTMLImageElement>(".captured-image")?.alt, "Current image");
 });
+
+
+test("Settings tabs preserve explicit consent, keyboard navigation and focus restoration", async () => {
+  const commands: string[] = [];
+  const invoke: Invoke = async <T>(command: string) => {
+    commands.push(command);
+    if (command === "list_conversations") return [] as T;
+    if (command === "get_setup") return {
+      archive_path: "C:\\MindPlace\\archive", extension_path: "C:\\extension",
+      host_path: "C:\\host", extension_id: "ext", native_host_name: "host",
+      registered_browsers: [], platform: "Windows", legacy_available: false,
+    } as T;
+    if (command === "list_document_roots" || command === "list_local_mcp_clients") return [] as T;
+    if (command === "get_local_mcp_status") return { running: false, endpoint: "" } as T;
+    if (command === "get_hosted_tunnel_status") return { running: false, tunnel_id: null, connection_verified: false } as T;
+    throw new Error("unexpected command: " + command);
+  };
+  const { dom, root, app } = createReader(invoke);
+  await app.ready;
+  const documents = root.querySelector<HTMLButtonElement>("[data-action='open-document-search']")!;
+  documents.focus();
+  documents.click();
+  await delay(0);
+  await delay(0);
+  assert.equal(root.querySelector<HTMLButtonElement>("#settings-tab-documents")?.getAttribute("aria-selected"), "true");
+  assert.equal(root.querySelector<HTMLElement>("#settings-panel-documents")?.hidden, false);
+  assert.equal(root.querySelector<HTMLElement>("#settings-panel-connections")?.hidden, true);
+  assert.match(root.querySelector<HTMLElement>("#settings-panel-documents")?.textContent ?? "", /Stage/);
+  assert.equal(commands.some((command) => command === "approve_document_root" || command === "refresh_document_root_index"), false);
+  const nav = root.querySelector<HTMLButtonElement>("#settings-tab-documents")!;
+  nav.focus();
+  nav.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+  assert.equal(root.querySelector<HTMLButtonElement>("#settings-tab-connections")?.getAttribute("aria-selected"), "true");
+  assert.equal(dom.window.document.activeElement?.id, "settings-tab-connections");
+  root.querySelector<HTMLButtonElement>("[data-action='close-setup']")!.click();
+  assert.equal(root.querySelector<HTMLDialogElement>("#setup-dialog")!.hasAttribute("open"), false);
+  assert.equal(dom.window.document.activeElement, documents);
+});
+
+test("Settings contains only the selected panel at accessible tab focus", async () => {
+  const invoke: Invoke = async <T>(command: string) => {
+    if (command === "list_conversations") return [] as T;
+    if (command === "get_setup") return {
+      archive_path: "C:\\archive", extension_path: "C:\\extension", host_path: "C:\\host",
+      extension_id: "ext", native_host_name: "host", registered_browsers: [],
+      platform: "Windows", legacy_available: false,
+    } as T;
+    if (command === "list_document_roots" || command === "list_local_mcp_clients") return [] as T;
+    if (command === "get_local_mcp_status") return { running: false, endpoint: "" } as T;
+    if (command === "get_hosted_tunnel_status") return { running: false, tunnel_id: null, connection_verified: false } as T;
+    throw Error(command);
+  };
+  const { dom, root, app } = createReader(invoke);
+  await app.ready;
+  root.querySelector<HTMLButtonElement>("[data-action='open-setup']")!.click();
+  await delay(0);
+  await delay(0);
+  const panels = [...root.querySelectorAll<HTMLElement>("[data-settings-panel]")];
+  assert.equal(panels.length, 4);
+  assert.deepEqual(panels.filter(p => !p.hidden).map(p => p.dataset.settingsPanel), ["archive"]);
+  const tab = root.querySelector<HTMLButtonElement>("#settings-tab-archive")!;
+  tab.focus();
+  tab.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "End", bubbles: true }));
+  assert.deepEqual(panels.filter(p => !p.hidden).map(p => p.dataset.settingsPanel), ["privacy"]);
+  assert.match(root.querySelector<HTMLElement>("#settings-panel-privacy")!.textContent ?? "", /Lock closes owner-only retrieval/);
+});
