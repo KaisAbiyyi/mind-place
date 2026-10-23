@@ -12,6 +12,15 @@ export interface DocumentSearchHit {
   warnings: string[];
 }
 
+export interface DocumentPreview {
+  uri: string;
+  version_id: string;
+  text: string;
+  truncated: boolean;
+  extractor_revision: string;
+  warnings: string[];
+}
+
 export interface DocumentIndexReport {
   root_id: string;
   scanned_files: number;
@@ -120,6 +129,7 @@ export function mountDocumentRootSetup(parent: HTMLElement, invoke: Invoke): voi
   results.className = "document-search-results";
   results.setAttribute("aria-label", "Document search results");
   let searchEpoch = 0;
+  let previewEpoch = 0;
   let revocationPending = false;
   const lastReports = new Map<string, { report: DocumentIndexReport; indexedAt: string; paused: boolean }>();
   section.append(heading, explanation, steps, form, status, folderHeading, list, searchHeading, searchNote, searchForm, searchStatus, results);
@@ -271,6 +281,7 @@ export function mountDocumentRootSetup(parent: HTMLElement, invoke: Invoke): voi
             revoke.disabled = true;
             revocationPending = true;
             searchEpoch++;
+            previewEpoch++;
             results.replaceChildren();
             searchButton.disabled = true;
             searchStatus.textContent = "Folder revocation is pending; previous search results were cleared.";
@@ -317,6 +328,7 @@ export function mountDocumentRootSetup(parent: HTMLElement, invoke: Invoke): voi
       return;
     }
     const epoch = ++searchEpoch;
+    previewEpoch++;
     searchButton.disabled = true;
     results.replaceChildren();
     searchStatus.textContent = "Checking indexed documents and live permissions…";
@@ -346,6 +358,49 @@ export function mountDocumentRootSetup(parent: HTMLElement, invoke: Invoke): voi
           caveats.textContent = `Extractor ${hit.extractor_revision}${hit.warnings.length ? " · " + hit.warnings.join("; ") : ""}`;
           caveats.className = "document-result-warnings";
           item.append(caveats);
+          const preview = doc.createElement("button");
+          preview.type = "button";
+          preview.className = "quiet-button document-preview-button";
+          preview.textContent = "View verified source excerpt";
+          const previewStatus = doc.createElement("p");
+          previewStatus.className = "document-preview-status";
+          previewStatus.setAttribute("role", "status");
+          const previewText = doc.createElement("pre");
+          previewText.className = "document-preview-text";
+          previewText.hidden = true;
+          preview.addEventListener("click", () => {
+            if (!section.isConnected || revocationPending) return;
+            const currentEpoch = searchEpoch;
+            const currentPreview = ++previewEpoch;
+            preview.disabled = true;
+            previewText.hidden = true;
+            previewText.textContent = "";
+            previewStatus.textContent = "Rechecking live folder permission and source revision…";
+            void invoke<DocumentPreview>("preview_document_source", { uri: hit.uri, versionId: hit.version_id })
+              .then((response) => {
+                if (!section.isConnected || revocationPending || currentEpoch !== searchEpoch || currentPreview !== previewEpoch) return;
+                if (response.uri !== hit.uri || response.version_id !== hit.version_id) {
+                  previewStatus.textContent = "Source revision changed. Run a new search.";
+                  return;
+                }
+                previewText.textContent = response.text;
+                previewText.hidden = false;
+                previewStatus.textContent = response.truncated
+                  ? "Verified current source excerpt (first 4,096 characters; truncated)."
+                  : "Verified current source extraction. Displayed as inert text.";
+              })
+              .catch((error: unknown) => {
+                if (section.isConnected && currentEpoch === searchEpoch && currentPreview === previewEpoch) {
+                  previewStatus.textContent = `Preview denied or source changed: ${String(error)}`;
+                }
+              })
+              .finally(() => {
+                if (section.isConnected && currentEpoch === searchEpoch && currentPreview === previewEpoch && !revocationPending) {
+                  preview.disabled = false;
+                }
+              });
+          });
+          item.append(preview, previewStatus, previewText);
           results.append(item);
         }
       })
