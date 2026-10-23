@@ -226,6 +226,21 @@ impl StateStore {
         if bounds[0].0 != bounds[1].0 {
             return Err(StateError::InvalidValue);
         }
+        // Reader caps historical incident edges at 128 per claim. Enforce
+        // the same bound atomically on writers; otherwise the 129th accepted
+        // edge would make ranking that claim fail forever. Resolved edges
+        // still count as immutable history and cannot be silently discarded.
+        for id in [from_id, to_id] {
+            let count: i64 = tx.query_row(
+                "SELECT COUNT(*) FROM memory_claim_relations
+                 WHERE from_claim_id=?1 OR to_claim_id=?1",
+                [id],
+                |r| r.get(0),
+            )?;
+            if count >= MAX_RELATIONS_PER_CLAIM as i64 {
+                return Err(StateError::InvalidValue);
+            }
+        }
         if relation == RelationKind::Supersedes {
             let cycle: Option<i64> = tx
                 .query_row(
