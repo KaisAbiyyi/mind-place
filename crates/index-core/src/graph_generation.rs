@@ -124,6 +124,8 @@ fn projection_digest(projection: &GraphProjection) -> Result<String> {
             edge.evidence.source_ref.clone(),
             edge.evidence.source_revision.clone(),
             edge.evidence.locator.clone(),
+            edge.origin.as_str().to_owned(),
+            edge.origin.confidence_bps().map(|v| v.to_string()).unwrap_or_default(),
         ]);
     }
     edge_rows.sort();
