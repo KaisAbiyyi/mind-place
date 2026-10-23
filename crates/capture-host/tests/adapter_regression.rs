@@ -119,7 +119,11 @@ fn gemini_native_host_roundtrip_revisions_and_fail_closed_identity() {
     assert_eq!(first["ok"], true);
     let id = first["id"].as_str().unwrap();
     let snapshot = first["snapshot_id"].as_str().unwrap();
-    let path = dir.path().join("conversations").join(id).join("captures")
+    let path = dir
+        .path()
+        .join("conversations")
+        .join(id)
+        .join("captures")
         .join(format!("{snapshot}.jsonl"));
     let original = fs::read(&path).unwrap();
 
@@ -133,7 +137,10 @@ fn gemini_native_host_roundtrip_revisions_and_fail_closed_identity() {
     assert_ne!(second["snapshot_id"], snapshot);
     let archive = ArchiveStore::open(dir.path()).unwrap();
     assert_eq!(archive.snapshots(id).unwrap().len(), 2);
-    assert_eq!(archive.read(id, Some(snapshot)).unwrap().capture, first_capture);
+    assert_eq!(
+        archive.read(id, Some(snapshot)).unwrap().capture,
+        first_capture
+    );
     assert_eq!(fs::read(&path).unwrap(), original);
     assert_eq!(
         archive.read(id, None).unwrap().capture.messages[1].text,
@@ -141,8 +148,14 @@ fn gemini_native_host_roundtrip_revisions_and_fail_closed_identity() {
     );
 
     for (field, value) in [
-        ("source_url", json!("https://gemini.google.com.evil.test/app/AbCd1234efGh5678")),
-        ("source_url", json!("https://gemini.google.com/app/AbCd1234efGh5678?temporary=true")),
+        (
+            "source_url",
+            json!("https://gemini.google.com.evil.test/app/AbCd1234efGh5678"),
+        ),
+        (
+            "source_url",
+            json!("https://gemini.google.com/app/AbCd1234efGh5678?temporary=true"),
+        ),
         ("conversation_id", json!("abcd1234efgh5678")),
         ("capture_method", json!("automatic-dom")),
         ("capture_method", json!("legacy-import")),
@@ -153,6 +166,10 @@ fn gemini_native_host_roundtrip_revisions_and_fail_closed_identity() {
         spoofed[field] = value;
         let spoofed: Capture = serde_json::from_value(spoofed).unwrap();
         assert_eq!(submit(&spoofed, isolated.path())["ok"], false, "{field}");
-        assert!(ArchiveStore::open(isolated.path()).unwrap().list("").unwrap().is_empty());
+        assert!(ArchiveStore::open(isolated.path())
+            .unwrap()
+            .list("")
+            .unwrap()
+            .is_empty());
     }
 }

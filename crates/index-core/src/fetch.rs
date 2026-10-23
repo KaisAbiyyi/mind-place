@@ -193,8 +193,8 @@ impl IndexStore {
             .optional()?;
         let (provider, conversation_id, title, source_url, captured_at, completeness, is_current) =
             indexed.ok_or(IndexError::InvalidQuery)?;
-        let namespace = super::namespace_for_provider(&provider)
-            .ok_or(IndexError::InvalidEvidence)?;
+        let namespace =
+            super::namespace_for_provider(&provider).ok_or(IndexError::InvalidEvidence)?;
         let canonical = canonical_source_id(&SourceDescriptor {
             provider: &provider,
             source_namespace: namespace,

@@ -278,17 +278,40 @@ fn gemini_and_chatgpt_have_distinct_indexed_source_identities_and_revisions() {
         source_namespace: "mind-place-gemini-archive-v1",
         source_kind: "conversation",
         key: SourceKey::External("AbCd1234efGh5678"),
-    }).unwrap();
+    })
+    .unwrap();
     assert_eq!(hit[0].source_id, expected);
     assert_ne!(first.id, original_chat.id);
-    assert_eq!(rig.index.search("chatgptonlyindexword", false, 10).unwrap().len(), 1);
+    assert_eq!(
+        rig.index
+            .search("chatgptonlyindexword", false, 10)
+            .unwrap()
+            .len(),
+        1
+    );
 
     gemini.messages[0].text = "geminiregeneratedindexword".into();
     let second = rig.archive.save(gemini).unwrap();
     assert_ne!(first.snapshot_id, second.snapshot_id);
     rig.index.sync(&rig.archive, &rig.state).unwrap();
-    assert!(rig.index.search("geminifirstindexword", false, 10).unwrap().is_empty());
-    assert_eq!(rig.index.search("geminifirstindexword", true, 10).unwrap().len(), 1);
-    assert_eq!(rig.index.search("geminiregeneratedindexword", false, 10).unwrap().len(), 1);
+    assert!(rig
+        .index
+        .search("geminifirstindexword", false, 10)
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        rig.index
+            .search("geminifirstindexword", true, 10)
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        rig.index
+            .search("geminiregeneratedindexword", false, 10)
+            .unwrap()
+            .len(),
+        1
+    );
     assert_eq!(rig.raw(&first.id, &first.snapshot_id), old_raw);
 }

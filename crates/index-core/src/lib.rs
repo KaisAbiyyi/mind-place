@@ -331,8 +331,8 @@ impl IndexStore {
         for summary in conversations {
             check()?;
             let selected = archive.read(&summary.id, None)?;
-            let namespace = namespace_for_provider(&summary.provider)
-                .ok_or(IndexError::InvalidEvidence)?;
+            let namespace =
+                namespace_for_provider(&summary.provider).ok_or(IndexError::InvalidEvidence)?;
             if selected.capture.provider != summary.provider
                 || selected.capture.conversation_id != summary.conversation_id
                 || format!(

@@ -164,10 +164,16 @@ fn gemini_conversation_id_from_url(source: &str) -> Result<String> {
             .any(|needle| key.contains(needle))
             && !matches!(value.to_ascii_lowercase().as_str(), "false" | "0" | "no")
         {
-            return Err(invalid("Private Gemini conversations are excluded from capture"));
+            return Err(invalid(
+                "Private Gemini conversations are excluded from capture",
+            ));
         }
     }
-    let parts: Vec<_> = url.path().split('/').filter(|part| !part.is_empty()).collect();
+    let parts: Vec<_> = url
+        .path()
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .collect();
     let id = match parts.as_slice() {
         ["app", id] => *id,
         ["u", account, "app", id]
@@ -180,7 +186,9 @@ fn gemini_conversation_id_from_url(source: &str) -> Result<String> {
         _ => return Err(invalid("Open a saved Gemini conversation before capturing")),
     };
     if !(8..=128).contains(&id.len())
-        || !id.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+        || !id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
     {
         return Err(invalid("Invalid Gemini conversation identity"));
     }
@@ -222,7 +230,9 @@ fn validate(c: &mut Capture) -> Result<()> {
         c.conversation_id.clone()
     };
     if canonical_id != supplied_id {
-        return Err(invalid("Capture URL and conversation identity do not match"));
+        return Err(invalid(
+            "Capture URL and conversation identity do not match",
+        ));
     }
     c.conversation_id = canonical_id;
     if c.title.trim().is_empty() || c.title.len() > 1024 {
