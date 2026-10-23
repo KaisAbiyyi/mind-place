@@ -254,7 +254,7 @@ fn existing_v2_index_migrates_losslessly_to_v3_with_fts_and_graph() {
     let version: i64 = db
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 3);
+    assert_eq!(version, 4);
     drop(db);
     assert!(IndexStore::open(&path).is_ok());
 }
