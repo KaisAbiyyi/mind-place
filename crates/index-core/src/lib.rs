@@ -23,6 +23,7 @@ pub(crate) fn namespace_for_provider(provider: &str) -> Option<&'static str> {
     match provider {
         "chatgpt" => Some(NAMESPACE),
         "gemini" => Some("mind-place-gemini-archive-v1"),
+        "claude" => Some("mind-place-claude-archive-v1"),
         _ => None,
     }
 }

@@ -337,6 +337,33 @@ test("capture history opens one selected snapshot without merging transcripts", 
   assert.ok(calls.some((call) => call.command === "export_markdown" && call.args?.snapshotId === "earlier"));
 });
 
+test("explicit Refresh synchronizes MCP index, reports failures and never runs on initial load", async () => {
+  const commands: string[] = [];
+  let failIndex = true;
+  const invoke: Invoke = async <T>(command: string) => {
+    commands.push(command);
+    if (command === "list_conversations") return [] as T;
+    if (command === "refresh_archive_index") {
+      if (failIndex) throw new Error("MP_INDEX_INVALID_EVIDENCE");
+      return { sources: 3, revisions: 4 } as T;
+    }
+    throw new Error(`Unexpected command: ${command}`);
+  };
+  const { root, app } = createReader(invoke);
+  await app.ready;
+  assert.deepEqual(commands, ["list_conversations"]);
+
+  await app.refresh();
+  assert.deepEqual(commands, ["list_conversations", "list_conversations", "refresh_archive_index"]);
+  assert.match(root.querySelector("#action-status")?.textContent ?? "", /MCP search index could not refresh/);
+
+  failIndex = false;
+  root.querySelector<HTMLButtonElement>("[data-action='refresh']")!.click();
+  await delay(0);
+  assert.equal(commands.filter((c) => c === "refresh_archive_index").length, 2);
+  assert.match(root.querySelector("#action-status")?.textContent ?? "", /MCP search index refreshed/);
+});
+
 test("stale search results and captured-image reads cannot overwrite newer UI state", async () => {
   const first = summary("e".repeat(64), "Earlier match");
   const second = summary("f".repeat(64), "Current match");
