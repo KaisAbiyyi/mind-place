@@ -857,6 +857,28 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     }
   };
 
+  // A browser native-host Save writes raw archive evidence independently of
+  // this reader. Keep the explicit Refresh action consistent with MCP search:
+  // refresh the reader first, then update the rebuildable index once. Avoid
+  // indexing on every search keystroke or MCP query.
+  let refreshWork: Promise<void> | undefined;
+  const refreshArchive = (): Promise<void> => {
+    if (refreshWork) return refreshWork;
+    refreshWork = (async () => {
+      try {
+        await loadConversations(true);
+        if (!alive) return;
+        await invoke("refresh_archive_index");
+        if (alive) setActionStatus("Archive and MCP search index refreshed");
+      } catch (error) {
+        if (alive) setActionStatus(`Archive loaded, but MCP search index could not refresh: ${errorMessage(error)}`, true);
+      } finally {
+        refreshWork = undefined;
+      }
+    })();
+    return refreshWork;
+  };
+
   const copyAnswer = async (message?: Message) => {
     const current = selectedId ? summaries.find((item) => item.id === selectedId) : undefined;
     if (!current) return;
@@ -1163,7 +1185,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     if (actionElement) {
       const action = actionElement.dataset.action;
       if (action === "lock") onLock?.();
-      else if (action === "refresh") void loadConversations(true);
+      else if (action === "refresh") void refreshArchive();
       else if (action === "workspace-conversations") {
         if (summaries.length) void selectConversation(selectedId ?? summaries[0].id);
         else { hiveWorkspace?.destroy(); hiveWorkspace = undefined; libraryWorkspace?.destroy(); libraryWorkspace = undefined; memoryInspector?.destroy(); memoryInspector = undefined; healthWorkspace?.destroy(); healthWorkspace = undefined; activateWorkspace("conversations"); renderState("Archive is empty", "No saved conversations are available."); focusViewHeading(); }
@@ -1269,7 +1291,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   const ready = loadConversations();
   return {
     ready,
-    refresh: () => loadConversations(true),
+    refresh: refreshArchive,
     destroy: () => {
       hiveWorkspace?.destroy(); hiveWorkspace = undefined;
       libraryWorkspace?.destroy(); libraryWorkspace = undefined;
