@@ -1,5 +1,8 @@
 use mind_place_archive::{ArchiveStore, Capture, Message};
-use mind_place_index::{IndexError, IndexStore};
+use mind_place_index::{
+    FetchRequest, IndexError, IndexStore, MatchMode, QueryTerm, RetrievalFilters, RetrievalRequest,
+    WeightedQuery,
+};
 use mind_place_state::{canonical_source_id, SourceDescriptor, SourceKey, StateStore};
 use sha2::{Digest, Sha256};
 use std::{fs, path::Path};
@@ -314,4 +317,139 @@ fn gemini_and_chatgpt_have_distinct_indexed_source_identities_and_revisions() {
         1
     );
     assert_eq!(rig.raw(&first.id, &first.snapshot_id), old_raw);
+}
+
+#[test]
+fn claude_mixed_provider_sync_supports_mcp_retrieval_and_immutable_history() {
+    let rig = Rig::new();
+    let chatgpt = rig
+        .archive
+        .save(capture("chatgptindexcontrolword"))
+        .unwrap();
+
+    let mut gemini = capture("geminiindexcontrolword");
+    gemini.provider = "gemini".into();
+    gemini.source_url = format!("https://gemini.google.com/app/{CONVERSATION}");
+    let gemini_receipt = rig.archive.save(gemini).unwrap();
+
+    // Same externally observed conversation ID must remain provider-scoped.
+    let mut claude = capture("claudealphaindexword");
+    claude.provider = "claude".into();
+    claude.source_url = format!("https://claude.ai/chat/{CONVERSATION}");
+    claude.title = "MP7 local test reply".into();
+    claude.messages[1].text = "claude alpha reply".into();
+    let alpha = rig.archive.save(claude.clone()).unwrap();
+    let original_bytes = rig.raw(&alpha.id, &alpha.snapshot_id);
+
+    let first_stats = rig.index.sync(&rig.archive, &rig.state).unwrap();
+    assert_eq!(first_stats.sources, 3);
+    let expected_claude = canonical_source_id(&SourceDescriptor {
+        provider: "claude",
+        source_namespace: "mind-place-claude-archive-v1",
+        source_kind: "conversation",
+        key: SourceKey::External(CONVERSATION),
+    })
+    .unwrap();
+    let claude_hit = rig.index.search("claudealphaindexword", false, 10).unwrap();
+    assert_eq!(claude_hit.len(), 1);
+    assert_eq!(claude_hit[0].source_id, expected_claude);
+    assert_ne!(
+        claude_hit[0].source_id,
+        rig.index
+            .search("chatgptindexcontrolword", false, 10)
+            .unwrap()[0]
+            .source_id
+    );
+    assert_ne!(
+        claude_hit[0].source_id,
+        rig.index
+            .search("geminiindexcontrolword", false, 10)
+            .unwrap()[0]
+            .source_id
+    );
+
+    let exact_title = rig
+        .index
+        .retrieve(&RetrievalRequest {
+            queries: vec![QueryTerm::Weighted(WeightedQuery {
+                text: "MP7 local test reply".into(),
+                mode: MatchMode::Exact,
+                weight: 1.0,
+            })],
+            filters: RetrievalFilters {
+                providers: vec!["claude".into()],
+                ..Default::default()
+            },
+            limit: 10,
+        })
+        .unwrap();
+    assert!(exact_title
+        .hits
+        .iter()
+        .any(|hit| hit.source_id == expected_claude && hit.title == "MP7 local test reply"));
+
+    claude.messages[0].text = "claudebetaindexword".into();
+    claude.messages[1].text = "claude beta final answer".into();
+    let beta = rig.archive.save(claude).unwrap();
+    assert_ne!(alpha.snapshot_id, beta.snapshot_id);
+    let updated_stats = rig.index.sync(&rig.archive, &rig.state).unwrap();
+    assert_eq!(updated_stats.sources, 3);
+    assert_eq!(updated_stats.revisions, 4);
+    assert!(rig
+        .index
+        .search("claudealphaindexword", false, 10)
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        rig.index
+            .search("claudealphaindexword", true, 10)
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        rig.index
+            .search("claudebetaindexword", false, 10)
+            .unwrap()
+            .len(),
+        1
+    );
+    let fetched = rig
+        .index
+        .fetch(
+            &rig.archive,
+            &FetchRequest {
+                source_id: expected_claude.clone(),
+                archive_id: beta.id.clone(),
+                snapshot_id: beta.snapshot_id.clone(),
+                message_id: Some("message-two".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(fetched.segments.len(), 1);
+    assert_eq!(fetched.segments[0].text, "claude beta final answer");
+    assert!(fetched.indexed_is_current);
+    assert_eq!(rig.raw(&alpha.id, &alpha.snapshot_id), original_bytes);
+    assert_eq!(
+        rig.index
+            .sync(&rig.archive, &rig.state)
+            .unwrap()
+            .inserted_revisions,
+        0
+    );
+    assert_eq!(
+        rig.index
+            .search("chatgptindexcontrolword", false, 10)
+            .unwrap()[0]
+            .snapshot_id,
+        chatgpt.snapshot_id
+    );
+    assert_eq!(
+        rig.index
+            .search("geminiindexcontrolword", false, 10)
+            .unwrap()[0]
+            .snapshot_id,
+        gemini_receipt.snapshot_id
+    );
 }
