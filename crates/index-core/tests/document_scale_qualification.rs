@@ -1,7 +1,7 @@
 //! MP-10C: opt-in real approved-root -> scanner -> object store -> FTS qualification.
 //! Only synthetic temporary files. Never access an owner's archive.
 #![cfg(windows)]
-use mind_place_index::DocumentIndex;
+use mind_place_index::documents::DocumentIndex;
 use mind_place_state::StateStore;
 use rusqlite::Connection;
 use serde_json::json;
