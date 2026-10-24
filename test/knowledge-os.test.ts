@@ -73,7 +73,7 @@ test("cursor collection deduplicates concurrent loads and ignores stale results 
   assert.equal(resource.snapshot().status, "idle");
 
   let stale!: (value: { items: number[]; nextCursor: string | null }) => void;
-  const delayed = createKnowledgeCollection(() => new Promise(resolve => { stale = resolve; }));
+  const delayed = createKnowledgeCollection<number>(() => new Promise<{ items: number[]; nextCursor: string | null }>(resolve => { stale = resolve; }));
   const request = delayed.loadMore();
   delayed.reset();
   stale({ items: [999], nextCursor: null });
