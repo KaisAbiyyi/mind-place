@@ -59,3 +59,29 @@ test("partial source failure is explicit rather than falsely claiming complete r
   assert.equal(view.querySelectorAll("[data-library-archive]").length, 1);
   handle.destroy();
 });
+
+test("title index hit previews exact snapshot title rather than a pseudo-message", async () => {
+  const titleHit = { ...hit, kind:"title", role:"title", message_id:"@title", title:"Current heading" };
+  const invoke: Invoke = async <T>(command: string) => {
+    if (command === "search_archive_index") return [titleHit] as T;
+    if (command === "search_document_index") return [] as T;
+    if (command === "read_conversation") return {
+      summary: { id:"archive", title:"Latest heading", provider:"chatgpt" },
+      snapshot_id:"snap",
+      capture: {
+        title:"Original archived heading",
+        captured_at:"2026-10-20",
+        messages:[{ id:"msg", text:"Different message body", role:"assistant" }],
+      },
+    } as T;
+    throw Error(command);
+  };
+  const { view, handle, search } = fixture(invoke);
+  search("heading"); await delay(0);
+  view.querySelector<HTMLButtonElement>("[data-library-archive]")!.click(); await delay(0);
+  const preview = view.querySelector(".knowledge-library-preview")!.textContent!;
+  assert.match(preview, /Snapshot: snap · title/);
+  assert.match(preview, /Original archived heading/);
+  assert.doesNotMatch(preview, /Different message body|Source preview unavailable/);
+  handle.destroy();
+});
