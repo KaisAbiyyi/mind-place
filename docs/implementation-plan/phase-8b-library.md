@@ -1,0 +1,3 @@
+# MP-8B · Read-only search and source preview
+
+Cloud-only implementation; canonical issue #84, base 591a4ff19748917f190e51b72fbab6e282e82079. UI surfaced through Archive > Search all sources. Calls existing owner/unlock-gated native search_archive_index (history enabled, at most 40 matches), search_document_index (live root checks, at most 40), and read_conversation only on explicit selection. Source/version identity and stale/destroy fencing required. No raw file reads or fabricated complete pagination. User-facing source subsets can be incomplete when a native index is unavailable. Existing document approval/indexing remains in Connections. No authority/schema/dependency changes. Installed Windows UX gate remains MP-8L/8U.
