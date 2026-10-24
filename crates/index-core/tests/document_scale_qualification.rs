@@ -127,19 +127,37 @@ fn qualifies_document_scale() {
         state.approve_document_root(&grant.id).unwrap();
         ids.push(grant.id);
         paths.push(path);
+        println!(
+            "MP_10C_PROGRESS phase=fixture roots_done={}/{} files_done={} elapsed_ms={}",
+            root + 1,
+            roots,
+            ((root + 1) * ROOT_MAX).min(files),
+            started.elapsed().as_millis()
+        );
     }
     let generation_ms = started.elapsed().as_millis();
     let raw_hash = hash_files(&paths, files);
     let started = Instant::now();
     let mut actual_files = 0;
     let mut actual_chunks = 0;
+    let mut per_root_index_ms = Vec::new();
     for id in &ids {
+        let root_started = Instant::now();
         let report = index.refresh_root(&state, id, || Ok(())).unwrap();
         assert_eq!(report.skipped_files, 0);
         assert_eq!(report.scanned_files, report.indexed_files);
         assert_eq!(report.indexed_chunks, report.indexed_files * SECTIONS);
         actual_files += report.indexed_files;
         actual_chunks += report.indexed_chunks;
+        per_root_index_ms.push(root_started.elapsed().as_millis());
+        println!(
+            "MP_10C_PROGRESS phase=index roots_done={}/{} indexed_files={} extracted_chunks={} elapsed_ms={}",
+            per_root_index_ms.len(),
+            roots,
+            actual_files,
+            actual_chunks,
+            started.elapsed().as_millis()
+        );
     }
     let initial_index_ms = started.elapsed().as_millis();
     assert_eq!(actual_files, files);
@@ -164,6 +182,11 @@ fn qualifies_document_scale() {
     let started = Instant::now();
     let again = index.refresh_root(&state, &ids[0], || Ok(())).unwrap();
     let reconciliation_first_root_ms = started.elapsed().as_millis();
+    println!(
+        "MP_10C_PROGRESS phase=reconciliation files={} elapsed_ms={}",
+        files.min(ROOT_MAX),
+        reconciliation_first_root_ms
+    );
     assert_eq!(again.indexed_chunks, files.min(ROOT_MAX) * SECTIONS);
     let db = Connection::open(&index_path).unwrap();
     let total: i64 = db
@@ -198,6 +221,7 @@ fn qualifies_document_scale() {
         "target_files": files, "indexed_files": actual_files, "extracted_chunks": actual_chunks,
         "approved_roots": roots, "production_files_per_root_cap": ROOT_MAX,
         "generation_ms": generation_ms, "initial_index_ms": initial_index_ms,
+        "per_root_index_ms": per_root_index_ms,
         "reconciliation_first_root_ms": reconciliation_first_root_ms,
         "evidence_search_median_us": query_median_us, "state_and_fts_reopen_ms": reopen_ms,
         "peak_process_working_set_bytes": peak_rss(),

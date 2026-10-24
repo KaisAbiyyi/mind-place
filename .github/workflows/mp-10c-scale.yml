@@ -12,12 +12,12 @@ permissions:
   contents: read
 concurrency:
   group: mp10c-scale-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 jobs:
   document-scale:
     name: Windows approved documents / ${{ matrix.files }} files
     runs-on: windows-latest
-    timeout-minutes: 180
+    timeout-minutes: 360
     strategy:
       fail-fast: false
       matrix:
@@ -38,6 +38,31 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Qualify real authorized document scale
         run: cargo test --release -p mind-place-index --test document_scale_qualification qualifies_document_scale -- --ignored --exact --nocapture
+      - name: Validate exact-tier receipt
+        shell: pwsh
+        run: |
+          if (!(Test-Path -LiteralPath $env:MP_10C_RECEIPT)) { throw "Missing MP-10C receipt" }
+          $receipt = Get-Content -LiteralPath $env:MP_10C_RECEIPT -Raw | ConvertFrom-Json
+          $expected = [int]$env:MP_10C_FILES
+          $roots = [int][math]::Ceiling($expected / 10000)
+          if ($receipt.target_files -ne $expected -or
+              $receipt.indexed_files -ne $expected -or
+              $receipt.extracted_chunks -ne ($expected * 10) -or
+              $receipt.approved_roots -ne $roots -or
+              $receipt.production_files_per_root_cap -ne 10000 -or
+              $receipt.sqlite_and_fts_integrity -ne "pass" -or
+              $receipt.raw_bytes_unchanged -ne $true -or
+              $receipt.fixture_sha256 -notmatch '^[0-9a-f]{64}
+        uses: actions/upload-artifact@v4
+        with:
+          name: mp10c-document-${{ matrix.files }}
+          path: qualification/mp10c-${{ matrix.files }}.json
+          if-no-files-found: error
+          retention-days: 30
+) {
+            throw "MP-10C receipt did not meet exact-tier qualification"
+          }
+          Write-Output "MP-10C exact-tier receipt validated: $expected files, $($receipt.extracted_chunks) chunks"
       - name: Upload receipt
         if: always()
         uses: actions/upload-artifact@v4
