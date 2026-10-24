@@ -1,0 +1,14 @@
+.entity-lenses { margin: 28px 0; padding: 20px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
+.entity-lenses h2 { font-size: 18px; margin: 0 0 12px; }
+.entity-lens-tabs { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
+.entity-lens-tabs button { border: 1px solid var(--line); border-radius: 6px; padding: 9px 16px; color: var(--text); background: #212323; }
+.entity-lens-tabs button[aria-pressed="true"] { outline: 2px solid #ac9575; }
+.entity-lens-form { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; }
+.entity-lens-form input { flex: 1 1 190px; padding: 10px; background: #1b1d1e; color: var(--text); border: 1px solid var(--line); border-radius: 6px; }
+.entity-lens-layout { display: grid; grid-template-columns: minmax(180px,35%) 1fr; gap: 16px; }
+.entity-lens-results { display: grid; align-content: start; gap: 8px; }
+.entity-lens-item { text-align: left; display: grid; gap: 8px; color: var(--text); background: #212323; border: 1px solid var(--line); border-radius: 7px; padding: 10px; overflow-wrap: anywhere; }
+.entity-lens-detail { overflow-wrap: anywhere; padding: 12px; border: 1px solid var(--line); border-radius: 7px; }
+.entity-lens-detail li { margin-bottom: 10px; }
+.entity-lens-timeline p { margin: 5px 0; }
+@media(max-width:800px) { .entity-lens-layout { grid-template-columns: 1fr; } }

@@ -22,14 +22,34 @@ test("workspace registry is explicit, accessible and does not imply unfinished p
   const doc = new JSDOM("<!doctype html><html><body></body></html>").window.document;
   const nav = createWorkspaceNavigation(doc);
   assert.equal(nav.getAttribute("aria-label"), "Knowledge workspaces");
-  assert.equal(nav.querySelectorAll("button").length, 5);
-  assert.equal(WORKSPACES.filter(x => x.phase === "planned").length, 4);
+  assert.equal(nav.querySelectorAll("button").length, 8);
+  assert.equal(WORKSPACES.filter(x => x.phase === "planned").length, 1);
   assert.equal(nav.querySelector("button[disabled]"), null);
   assert.equal(nav.querySelector('[data-workspace="graph"]'), null);
   assert.equal(nav.querySelectorAll('[aria-current="page"]').length, 1);
   setActiveWorkspace(nav, "memories");
   assert.equal(nav.querySelector('[data-workspace="memories"]')?.getAttribute("aria-current"), "page");
   assert.equal(nav.querySelectorAll('[aria-current="page"]').length, 1);
+});
+
+test("entity workspace buttons open scoped investigation without exposing planned graph", async () => {
+  const dom = new JSDOM("<!doctype html><html><body><div id='app'></div></body></html>", { url: "https://local.test/" });
+  const root = dom.window.document.querySelector<HTMLElement>("#app")!;
+  const invoke: Invoke = async <T>(command: string) => {
+    if (command === "list_conversations" || command === "list_memory_inspection") return [] as T;
+    throw new Error("unexpected: " + command);
+  };
+  const app = mountReader({ root, invoke });
+  try {
+    await app.ready;
+    root.querySelector<HTMLButtonElement>('[data-workspace="people"]')!.click();
+    assert.equal(root.querySelector('[data-workspace="people"]')?.getAttribute("aria-current"), "page");
+    assert.equal(root.querySelector("#entity-lens-name")?.previousElementSibling?.textContent, "Person name");
+    assert.equal(root.querySelector<HTMLButtonElement>('[data-entity-lens="people"]')?.getAttribute("aria-pressed"), "true");
+    assert.ok(root.querySelector('[data-workspace="health"]'));
+  } finally {
+    app.destroy();
+  }
 });
 
 test("virtual viewport bounds 100k items to a small constant number of rows", () => {

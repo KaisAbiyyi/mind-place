@@ -4,6 +4,7 @@ import "./style.css";
 import "./knowledge-os.css";
 import "./library-workspace.css";
 import "./memory-inspector.css";
+import "./memory-entity-lenses.css";
 import "./health-workspace.css";
 import "./security.css";
 import type { Invoke } from "./reader.js";
