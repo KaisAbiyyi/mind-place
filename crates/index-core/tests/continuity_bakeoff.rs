@@ -1,8 +1,10 @@
 //! MP-10B: synthetic, isolated bake-off using the actual IndexStore FTS5 retrieval engine.
 //! This test-only projection is NOT the application's authorized source ingestion path.
-//! Graph-only and hybrid use a labeled project-adjacency PROXY, not the production graph API.
+//! The real graph API runs on a synthetic, test-only derived projection, not live authority.
 use mind_place_index::{
-    IndexStore, MatchMode, QueryTerm, RetrievalFilters, RetrievalRequest, WeightedQuery,
+    GraphDirection, GraphEdge, GraphEvidence, GraphKind, GraphNeighborhoodRequest, GraphNode,
+    GraphNodeRef, GraphOrigin, GraphProjection, GraphRelation, IndexStore, MatchMode, QueryTerm,
+    RetrievalFilters, RetrievalRequest, WeightedQuery,
 };
 use rusqlite::{params, Connection};
 use serde::Deserialize;
@@ -185,27 +187,76 @@ fn fts(index: &IndexStore, corpus: &Corpus, question: &str, scoped: bool) -> Vec
         .collect()
 }
 
-// Deliberately modest adjacency proxy: project -> sources, with recency ordering.
-// This DOES NOT measure the production GraphNeighborhoodRequest or memory engine.
-fn graph_project_proxy(corpus: &Corpus, question: &str) -> Vec<String> {
+// Fixture-only graph projection uses the REAL graph write/read API but no live privileges.
+// Every project->source edge is deterministic synthetic metadata, not a learned relationship.
+fn fixture_graph(index: &IndexStore, corpus: &Corpus) {
+    let mut nodes = Vec::new();
+    let mut edges = Vec::new();
+    for project in ["aster", "beryl"] {
+        let project_ref = GraphNodeRef::new(GraphKind::Project, project);
+        nodes.push(GraphNode {
+            identity: project_ref.clone(),
+            label: project.to_owned(),
+            source_ref: format!("synthetic:project:{project}"),
+        });
+        for source in corpus.sources.iter().filter(|s| s.scope == "public" && s.project == project) {
+            let kind = if source.kind == "document" {
+                GraphKind::File
+            } else {
+                GraphKind::Conversation
+            };
+            let source_ref = GraphNodeRef::new(kind, &source.id);
+            nodes.push(GraphNode {
+                identity: source_ref.clone(),
+                label: source.id.clone(),
+                source_ref: source.id.clone(),
+            });
+            edges.push(GraphEdge {
+                from: project_ref.clone(),
+                to: source_ref,
+                relation: GraphRelation::Contains,
+                origin: GraphOrigin::Deterministic,
+                evidence: GraphEvidence {
+                    source_ref: source.id.clone(),
+                    source_revision: source.revision.clone(),
+                    locator: format!("synthetic:{}", source.id),
+                },
+            });
+        }
+    }
+    index.replace_graph_projection("synthetic:mp10b", &GraphProjection { nodes, edges })
+        .expect("persist isolated synthetic graph projection");
+}
+
+// Actual graph query with a benign test-only callback. Its callback is NOT a
+// real unlock, root approval or scoped user authorization in production.
+fn graph_project(index: &IndexStore, corpus: &Corpus, question: &str) -> Vec<String> {
     let Some(project) = project_from_question(question) else {
         return vec![];
     };
-    let mut sources = corpus
-        .sources
-        .iter()
-        .filter(|s| s.scope == "public" && s.project == project)
-        .collect::<Vec<_>>();
-    sources.sort_by(|a, b| {
-        b.observed_at
-            .cmp(&a.observed_at)
-            .then_with(|| a.id.cmp(&b.id))
-    });
-    sources
-        .into_iter()
-        .take(MAX_HITS)
-        .map(|s| s.id.clone())
-        .collect()
+    let result = index.graph_neighbors_with_check(
+        &GraphNeighborhoodRequest {
+            scope: "synthetic:mp10b".to_owned(),
+            seeds: vec![GraphNodeRef::new(GraphKind::Project, project)],
+            direction: GraphDirection::Outbound,
+            max_hops: 1,
+            max_nodes: 100,
+            max_edges: 100,
+        },
+        || Ok(()),
+    ).expect("actual graph API retrieval over test projection");
+    assert!(!result.truncated);
+    let by_id = corpus.sources.iter().map(|s| (s.id.as_str(), s)).collect::<HashMap<_, _>>();
+    let mut ids = result.nodes.into_iter()
+        .filter(|node| node.depth == 1 && node.kind != GraphKind::Project)
+        .map(|node| node.source_ref).collect::<Vec<_>>();
+    assert!(ids.iter().all(|id| by_id.get(id.as_str()).is_some_and(|s| s.scope == "public")));
+    // Graph API returns a deterministic node set; recency is a documented fixture
+    // rerank, not a native graph relevance score or authority.
+    ids.sort_by(|a, b| by_id[b.as_str()].observed_at.cmp(&by_id[a.as_str()].observed_at)
+        .then_with(|| a.cmp(b)));
+    ids.truncate(MAX_HITS);
+    ids
 }
 
 fn fuse(lexical: &[String], graph: &[String]) -> Vec<String> {
@@ -238,10 +289,10 @@ fn run_strategy(
         let ids = match strategy {
             "lexical_fts5" => fts(index, corpus, &question.question, false),
             "structured_fts5" => fts(index, corpus, &question.question, true),
-            "project_graph_proxy" => graph_project_proxy(corpus, &question.question),
-            "hybrid_fts5_project_proxy" => fuse(
+            "project_graph_api" => graph_project(index, corpus, &question.question),
+            "hybrid_fts5_graph_api" => fuse(
                 &fts(index, corpus, &question.question, true),
-                &graph_project_proxy(corpus, &question.question),
+                &graph_project(index, corpus, &question.question),
             ),
             _ => panic!("unknown strategy"),
         };
@@ -275,11 +326,12 @@ fn isolated_product_fts5_and_labeled_proxies_produce_bounded_valid_predictions()
     let dir = tempfile::tempdir().unwrap();
     let index = IndexStore::open(dir.path().join("index.sqlite3")).unwrap();
     fixture_index(&index, &corpus);
+    fixture_graph(&index, &corpus);
     for strategy in [
         "lexical_fts5",
         "structured_fts5",
-        "project_graph_proxy",
-        "hybrid_fts5_project_proxy",
+        "project_graph_api",
+        "hybrid_fts5_graph_api",
     ] {
         let report = run_strategy(&index, &corpus, &gold, strategy);
         assert_eq!(report["cases"].as_array().unwrap().len(), gold.cases.len());
