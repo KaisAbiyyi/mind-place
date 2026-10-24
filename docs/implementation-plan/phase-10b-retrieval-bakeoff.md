@@ -13,10 +13,10 @@ IMPORTANT: test-only direct derived-index seeding bypasses normal StateStore/Arc
 | --- | --- | --- |
 | lexical_fts5 | Real IndexStore::retrieve, bounded question-derived FTS5 query terms | Actual search engine, temporary fixture only |
 | structured_fts5 | Same real FTS5 API with native source_ids filter, selected by fixture project metadata | Real search engine; project-to-source adapter is synthetic |
-| project_graph_proxy | Synthetic project-to-source adjacency, newest-first; NOT GraphNeighborhoodRequest | Proxy, NOT production graph |
-| hybrid_fts5_project_proxy | Reciprocal rank fusion (RRF k=60) of structured FTS5 and project-graph proxy | Proxy, NOT production hybrid |
+| project_graph_api | Real IndexStore::graph_neighbors_with_check API, fed deterministic synthetic project-to-source edges; recency reranked | Real graph API on synthetic projection, NOT live source authority |
+| hybrid_fts5_graph_api | Reciprocal rank fusion (RRF k=60) of structured FTS5 and real graph API over synthetic edges | Real APIs on synthetic projection, NOT production hybrid |
 
-The restricted source e20 is excluded before indexing and from proxy retrieval. Graph/project membership never grants authorization; this synthetic test cannot certify real revocation races.
+The restricted source e20 is excluded before indexing and from proxy retrieval. Graph/project membership never grants authorization; actual graph calls use an always-OK *test-only* callback, so they do NOT certify live revocation or root permissions.
 
 ## Reproduce — only inside a cloud CI runner
 
@@ -37,8 +37,8 @@ The isolated GitHub workflow at .github/workflows/mp10b-bakeoff.yml runs these t
 
 ## Exit and limitations
 
-A full production-real graph/structured/hybrid test still needs a normal temporary authorized ArchiveStore/StateStore projection and the actual graph API; these proxy numbers cannot justify enabling embeddings, vectors or graph default routing. The 24-document set cannot qualify MP-10C's 1M-chunk/100K-file scale. Owner-device/provider and signed-in account validation belongs to later 10L/10U gates.
+A full production-authorized graph/structured/hybrid test still needs a normal temporary authorized ArchiveStore/StateStore projection with live scope and approval checks; these small synthetic API measurements cannot justify enabling embeddings, vectors or graph default routing. The 24-document set cannot qualify MP-10C's 1M-chunk/100K-file scale. Owner-device/provider and signed-in account validation belongs to later 10L/10U gates.
 
 Before Done: exact-head product CI + dedicated bakeoff CI PASS, non-empty scorer report with zero privacy exposures, implementor self-review of precise SHA/diff and constraints, a documented cost/quality choice, merge readiness and Notion/GitHub evidence. Until all are proven, leave this task Review.
 
-**Status:** implementation submitted on a feature branch; CI/review and final acceptance tracked in PR + Notion, not asserted here.
+**Status:** implementation submitted on a feature branch; CI/review and final acceptance tracked in PR + Notion, not asserted here. The previous run 40059690698 measured the earlier proxy implementation; it is NOT the final graph-API design. Results must be regenerated on the final exact HEAD.
