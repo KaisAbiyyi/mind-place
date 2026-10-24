@@ -143,7 +143,9 @@ def probe(rows: int, objects: int, bytes_per_row: int, object_bytes: int, root: 
     assert_rejects(cipher, encrypted.execute("SELECT payload FROM docs WHERE id=?", (target + 1,)).fetchone()[0], AAD_ROW + str(target + 1).encode())
     assert encrypted.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     assert plain.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
-    assert plain.execute("INSERT INTO docs_fts(docs_fts) VALUES('integrity-check')") is not None
+    # FTS5 integrity-check is a write-class command; commit before live backup.
+    plain.execute("INSERT INTO docs_fts(docs_fts) VALUES('integrity-check')")
+    plain.commit()
 
     # Backup through SQLite's consistent online backup API, never raw-copy a live WAL.
     def snapshot(source: sqlite3.Connection, target_file: Path):
