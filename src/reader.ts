@@ -3,6 +3,7 @@ import { CONVERSATION_ROW_HEIGHT, VIRTUAL_LIST_THRESHOLD, createWorkspaceNavigat
 import { mountLocalMcpSetup } from "./mcp-setup.js";
 import { mountDocumentRootSetup } from "./document-roots.js";
 import { mountMemoryInspector, type MemoryInspectorHandle } from "./memory-inspector.js";
+import { mountHealthWorkspace, type HealthWorkspaceHandle } from "./health-workspace.js";
 import { marked } from "marked";
 import renderMathInElement from "katex/contrib/auto-render";
 import type {
@@ -194,6 +195,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   let selectedSnapshotId: string | null = null;
   let exportedMarkdown = "";
   let memoryInspector: MemoryInspectorHandle | undefined;
+  let healthWorkspace: HealthWorkspaceHandle | undefined;
   let alive = true;
   const invoke: Invoke = async <T>(command: string, args?: Record<string, unknown>) => {
     if (!alive) throw new Error("MP_UI_SESSION_EXPIRED");
@@ -357,6 +359,8 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   };
 
   const selectConversation = async (id: string) => {
+    healthWorkspace?.destroy();
+    healthWorkspace = undefined;
     memoryInspector?.destroy();
     memoryInspector = undefined;
     selectedId = id;
@@ -929,6 +933,8 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   };
 
   const openMemoryInspector = () => {
+    healthWorkspace?.destroy();
+    healthWorkspace = undefined;
     activateWorkspace("memories");
     memoryInspector?.destroy();
     ++selectionVersion;
@@ -951,6 +957,30 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     });
   };
 
+  const openHealthWorkspace = () => {
+    memoryInspector?.destroy();
+    memoryInspector = undefined;
+    healthWorkspace?.destroy();
+    healthWorkspace = undefined;
+    ++selectionVersion;
+    selectedId = null;
+    loadedConversation = null;
+    loadedSnapshots = [];
+    selectedSnapshotId = null;
+    exportedMarkdown = "";
+    updateToolbarSelection();
+    setActionStatus("");
+    renderConversationRows(search.value.trim());
+    activateWorkspace("health");
+    toolbarTitle.textContent = "Retrieval health";
+    healthWorkspace = mountHealthWorkspace(view, invoke, () => {
+      healthWorkspace?.destroy();
+      healthWorkspace = undefined;
+      if (summaries.length) void selectConversation(summaries[0].id);
+      else { activateWorkspace("conversations"); renderState("Archive is empty", "No saved conversations are available."); }
+    });
+  };
+
   const clickHandler = (event: Event) => {
     if (!alive) return;
     const target = event.target;
@@ -965,6 +995,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
         else { memoryInspector?.destroy(); memoryInspector = undefined; activateWorkspace("conversations"); renderState("Archive is empty", "No saved conversations are available."); }
       }
       else if (action === "open-memory-inspector") openMemoryInspector();
+      else if (action === "open-health-inspector") openHealthWorkspace();
       else if (action === "retry-selection" && selectedId) void selectConversation(selectedId);
       else if (action === "open-document-search") {
         activateWorkspace("documents");
@@ -1051,6 +1082,8 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     ready,
     refresh: () => loadConversations(true),
     destroy: () => {
+      healthWorkspace?.destroy();
+      healthWorkspace = undefined;
       memoryInspector?.destroy();
       memoryInspector = undefined;
       alive = false;

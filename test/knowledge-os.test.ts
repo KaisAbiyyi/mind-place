@@ -22,8 +22,8 @@ test("workspace registry is explicit, accessible and does not imply unfinished p
   const doc = new JSDOM("<!doctype html><html><body></body></html>").window.document;
   const nav = createWorkspaceNavigation(doc);
   assert.equal(nav.getAttribute("aria-label"), "Knowledge workspaces");
-  assert.equal(nav.querySelectorAll("button").length, 4);
-  assert.equal(WORKSPACES.filter(x => x.phase === "planned").length, 5);
+  assert.equal(nav.querySelectorAll("button").length, 5);
+  assert.equal(WORKSPACES.filter(x => x.phase === "planned").length, 4);
   assert.equal(nav.querySelector("button[disabled]"), null);
   assert.equal(nav.querySelector('[data-workspace="graph"]'), null);
   assert.equal(nav.querySelectorAll('[aria-current="page"]').length, 1);

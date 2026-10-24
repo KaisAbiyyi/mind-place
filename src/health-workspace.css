@@ -1,0 +1,12 @@
+.health-workspace { display: grid; gap: 16px; max-width: 860px; padding: 28px; margin: 0 auto; }
+.health-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.health-heading h1 { margin: 0; font-size: 23px; }
+.health-workspace p { line-height: 1.6; }
+.health-metrics { display: grid; grid-template-columns: minmax(130px, 1fr) minmax(140px, 2fr); gap: 8px 16px; margin: 0; padding: 16px; border: 1px solid var(--border); border-radius: var(--radius); }
+.health-metrics dt { color: var(--muted); }
+.health-metrics dd { margin: 0; overflow-wrap: anywhere; }
+.health-inspection-form { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+.health-inspection-form label { display: grid; gap: 8px; flex: 1 1 220px; }
+.health-inspection-form input { width: 100%; }
+.health-inspection-result { min-height: 48px; overflow-wrap: anywhere; color: var(--muted); }
+@media (max-width: 600px) { .health-workspace { padding: 16px; } .health-metrics { grid-template-columns: 1fr; } }
