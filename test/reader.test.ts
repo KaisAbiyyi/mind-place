@@ -152,6 +152,34 @@ test("conversation dates show original activity per snapshot while capture time 
   assert.doesNotMatch(headingDetails, /Updated/);
 });
 
+test("undated Gemini uses its captured time in the list, without claiming provider activity time", async () => {
+  const id = "7".repeat(64);
+  const gemini: ConversationSummary = {
+    ...summary(id, "Gemini latest"),
+    provider: "gemini",
+    source_url: "https://gemini.google.com/app/AbCd1234efGh5678",
+    captured_at: "2026-10-24T07:53:49Z",
+  };
+  const unknown = summary("6".repeat(64), "Other undated conversation");
+  const invoke: Invoke = async <T>(command: string, args?: Record<string, unknown>) => {
+    if (command === "list_conversations") return [gemini, unknown] as T;
+    if (command === "list_snapshots") return [] as T;
+    if (command === "read_conversation") return conversation(args?.id === gemini.id ? gemini : unknown, "Saved answer") as T;
+    throw new Error(`Unexpected command: ${command}`);
+  };
+  const { root, app } = createReader(invoke);
+  await app.ready;
+  await delay(0);
+
+  const geminiMeta = root.querySelector(`[data-conversation-id="${id}"] .conversation-meta`);
+  const undatedMeta = root.querySelector(`[data-conversation-id="${unknown.id}"] .conversation-meta`);
+  assert.match(geminiMeta?.textContent ?? "", /Captured.*2026.*messages/);
+  assert.doesNotMatch(geminiMeta?.textContent ?? "", /Date unavailable/);
+  assert.match(undatedMeta?.textContent ?? "", /Date unavailable/);
+  assert.doesNotMatch(root.querySelector(".conversation-details")?.textContent ?? "", /Date unavailable/);
+  assert.match(root.querySelector(".conversation-details")?.textContent ?? "", /Captured/);
+});
+
 test("the history selector and export follow the opened snapshot even when it is older than the newest timestamp", async () => {
   const item = summary("d".repeat(64), "Revisited capture");
   const older = "1".repeat(64), newer = "2".repeat(64);

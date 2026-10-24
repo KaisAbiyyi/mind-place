@@ -355,7 +355,10 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
       title.textContent = item.title || "Untitled conversation";
       const meta = document.createElement("span");
       meta.className = "conversation-meta";
-      meta.textContent = `${formatRelativeDate(item.conversation_date)} · ${item.message_count} messages`;
+      const captureDateFallback = item.provider === "gemini" && !item.conversation_date;
+      meta.textContent = captureDateFallback
+        ? `Captured ${formatDate(item.captured_at)} · ${item.message_count} messages`
+        : `${formatRelativeDate(item.conversation_date)} · ${item.message_count} messages`;
       row.append(title, meta);
       if (item.completeness === "partial") {
         const marker = document.createElement("span");
@@ -539,11 +542,15 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     originalDate.textContent = summary.conversation_date
       ? `${originalDateLabel} ${formatDate(summary.conversation_date)}`
       : "Date unavailable";
-    const metadataParts: Node[] = [originalDate];
+    // Gemini without a provider date already has an honest capture timestamp;
+    // avoid showing an unrelated "Date unavailable" beside that timestamp.
+    const metadataParts: Node[] = summary.provider === "gemini" && !summary.conversation_date
+      ? [] : [originalDate];
     if (capture.conversation_created_at && summary.date_source !== "provider-created") {
       const created = document.createElement("span");
       created.textContent = `Created ${formatDate(capture.conversation_created_at)}`;
-      metadataParts.push(document.createTextNode(" · "), created);
+      if (metadataParts.length) metadataParts.push(document.createTextNode(" · "));
+      metadataParts.push(created);
     }
     const date = document.createElement("span");
     date.textContent = `Captured ${formatDate(capture.captured_at)}`;
@@ -553,8 +560,9 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     captureOrigin.textContent = capture.capture_method === "legacy-import" ? "Imported legacy archive"
       : capture.capture_method === "automatic-dom" ? "Automatic browser save · loaded messages only" : "Manual browser save";
     const origin = makeSourceLink(document, capture.source_url || summary.source_url);
+    if (metadataParts.length) metadataParts.push(document.createTextNode(" · "));
     metadataParts.push(
-      document.createTextNode(" · "), date,
+      date,
       document.createTextNode(" · "), messageCount,
       document.createTextNode(" · "), captureOrigin,
       document.createTextNode(" · "), origin,

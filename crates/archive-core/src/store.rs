@@ -415,8 +415,21 @@ fn original_conversation_date(capture: &Capture) -> (Option<String>, Option<Stri
 fn summary_date_order(a: &ConversationSummary, b: &ConversationSummary) -> std::cmp::Ordering {
     use std::cmp::Ordering;
 
-    let a_date = a.conversation_date.as_deref().and_then(parsed_timestamp);
-    let b_date = b.conversation_date.as_deref().and_then(parsed_timestamp);
+    // Gemini does not reliably expose an authored/updated timestamp in its DOM.
+    // Sort undated Gemini captures by when Mind Place actually observed them,
+    // without inventing an original conversation date or provenance in metadata.
+    let effective_date = |item: &ConversationSummary| {
+        item.conversation_date
+            .as_deref()
+            .and_then(parsed_timestamp)
+            .or_else(|| {
+                (item.provider == "gemini" && item.conversation_date.is_none())
+                    .then(|| parsed_timestamp(&item.captured_at))
+                    .flatten()
+            })
+    };
+    let a_date = effective_date(a);
+    let b_date = effective_date(b);
     let date_order = match (a_date, b_date) {
         (Some(a_date), Some(b_date)) => b_date.cmp(&a_date),
         (Some(_), None) => Ordering::Less,
