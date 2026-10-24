@@ -741,7 +741,7 @@ fn native_manifest_path(state: &AppState, browser: &str) -> PathBuf {
 }
 
 fn setup_info(state: &AppState) -> SetupInfo {
-    let registered_browsers = ["chrome", "edge"]
+    let registered_browsers = ["chrome", "edge", "brave"]
         .into_iter()
         .filter(|browser| is_registered(state, browser))
         .map(str::to_owned)
@@ -771,6 +771,7 @@ fn registry_path(browser: &str) -> Option<String> {
     let prefix = match browser {
         "chrome" => "Software\\Google\\Chrome",
         "edge" => "Software\\Microsoft\\Edge",
+        "brave" => "Software\\BraveSoftware\\Brave-Browser",
         _ => return None,
     };
     Some(format!(
@@ -810,8 +811,8 @@ fn is_registered(_state: &AppState, _browser: &str) -> bool {
 #[tauri::command]
 fn register_extension(state: State<'_, AppState>, browser: String) -> Result<SetupInfo, String> {
     let lease = begin_unlocked(&state)?;
-    if !matches!(browser.as_str(), "chrome" | "edge") {
-        return Err("Choose Chrome or Edge".into());
+    if !matches!(browser.as_str(), "chrome" | "edge" | "brave") {
+        return Err("Choose Chrome, Edge or Brave".into());
     }
     #[cfg(windows)]
     {
@@ -845,9 +846,32 @@ fn register_extension(state: State<'_, AppState>, browser: String) -> Result<Set
     {
         let _ = lease;
         Err(
-            "Browser native-host registration is currently implemented for Windows Chrome and Edge"
+            "Browser native-host registration is currently implemented for Windows Chrome, Edge and Brave"
                 .into(),
         )
+    }
+}
+
+#[cfg(all(test, windows))]
+mod browser_registration_tests {
+    use super::registry_path;
+
+    #[test]
+    fn native_host_registry_paths_are_browser_specific_and_unknown_browsers_rejected() {
+        assert_eq!(
+            registry_path("brave").as_deref(),
+            Some("Software\\BraveSoftware\\Brave-Browser\\NativeMessagingHosts\\com.mindplace.capture")
+        );
+        assert_eq!(
+            registry_path("chrome").as_deref(),
+            Some("Software\\Google\\Chrome\\NativeMessagingHosts\\com.mindplace.capture")
+        );
+        assert_eq!(
+            registry_path("edge").as_deref(),
+            Some("Software\\Microsoft\\Edge\\NativeMessagingHosts\\com.mindplace.capture")
+        );
+        assert_eq!(registry_path("opera"), None);
+        assert_eq!(registry_path("brave\\NativeMessagingHosts"), None);
     }
 }
 
