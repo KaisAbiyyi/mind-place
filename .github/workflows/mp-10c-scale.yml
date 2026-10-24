@@ -1,0 +1,48 @@
+name: MP-10C cloud document scale qualification
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/mp-10c-scale.yml'
+      - 'crates/index-core/tests/document_scale_qualification.rs'
+      - 'crates/index-core/src/documents.rs'
+      - 'crates/state-core/src/document_scanner.rs'
+      - 'crates/document-core/**'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: mp10c-scale-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  document-scale:
+    name: Windows approved documents / ${{ matrix.files }} files
+    runs-on: windows-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        files: [100, 100000]
+    env:
+      CARGO_INCREMENTAL: 0
+      CARGO_BUILD_JOBS: 2
+      MP_10C_FILES: ${{ matrix.files }}
+      MP_10C_RECEIPT: ${{ github.workspace }}/qualification/mp10c-${{ matrix.files }}.json
+    steps:
+      - uses: actions/checkout@v5
+      - name: Pinned Rust 1.90
+        shell: pwsh
+        run: |
+          rustup toolchain install 1.90.0 --profile minimal --component rustfmt --no-self-update
+          rustup default 1.90.0
+      - name: Check Rust format
+        run: cargo fmt --all -- --check
+      - name: Qualify real authorized document scale
+        run: cargo test --release -p mind-place-index --test document_scale_qualification qualifies_document_scale -- --ignored --exact --nocapture
+      - name: Upload receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mp10c-document-${{ matrix.files }}
+          path: qualification/mp10c-${{ matrix.files }}.json
+          if-no-files-found: warn
+          retention-days: 30
