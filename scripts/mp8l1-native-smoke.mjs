@@ -54,6 +54,7 @@ async function connectToNativeWebView(port) {
     await sleep(200);
   }
   assert.ok(page, 'Packaged WebView2 application page was unavailable');
+  page.setDefaultTimeout(8_000);
   page.on('pageerror', error => pageErrors.push(String(error.message).slice(0, 250)));
   await page.locator('#security-form').waitFor({ timeout: 30_000 });
 }
@@ -93,10 +94,16 @@ try {
   assert.equal(fixture.status, 0, `Fixture failed: ${fixture.stderr.slice(-400)}`);
   const fixtureReceipt = JSON.parse(fixture.stdout.trim().split(/\r?\n/).at(-1));
   assert.equal(fixtureReceipt.conversations, 2);
-  const archive = fixtureReceipt.archive_path;
-  assert.ok(path.isAbsolute(archive) && archive.startsWith(path.join(root, 'outputs')),
+  const fixtureArchive = fixtureReceipt.archive_path;
+  assert.ok(path.isAbsolute(fixtureArchive) && fixtureArchive.startsWith(path.join(root, 'outputs')),
     'Synthetic data root must remain beneath the isolated D: qualification worktree');
-  const profile = fs.mkdtempSync(path.join(out, 'webview-profile-'));
+  // Security and authoritative/index SQLite state live in the archive's
+  // parent directory. Isolate that parent too, to avoid sharing test secrets
+  // across smoke runs or with any existing Mind Place process.
+  const testParent = fs.mkdtempSync(path.join(out, 'isolated-runtime-'));
+  const archive = path.join(testParent, 'archive-v1');
+  fs.renameSync(fixtureArchive, archive);
+  const profile = path.join(testParent, 'webview-profile');
   const basePort = 49000 + crypto.randomInt(1000);
   const start = performance.now();
 
@@ -126,13 +133,32 @@ try {
       await page.waitForTimeout(120);
       assert.equal(await page.locator(`#knowledge-os-nav [aria-current="page"]`).count(), 1);
       assert.equal(await page.locator(`#knowledge-os-nav [aria-current="page"]`).getAttribute('data-workspace'), workspace);
-      const heading = page.locator('#reader-view h1').first();
-      assert.ok((await heading.textContent())?.trim(), 'Workspace has a visible heading');
+      // Documents opens the dedicated Settings/Documents modal while retaining
+      // the document workspace selection. Close it before visiting other tabs.
+      if (workspace === 'documents') {
+        assert.equal(await page.locator('#setup-dialog').evaluate(element => element.open), true);
+        await page.keyboard.press('Escape');
+        assert.equal(await page.locator('#setup-dialog').evaluate(element => element.open), false);
+      }
+      const content = page.locator('#reader-view');
+      assert.ok((await content.innerText())?.trim(), 'Workspace has visible content');
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1);
       assert.equal(overflow, false, 'Unexpected horizontal viewport overflow');
-      return 'Single selected navigation item, workspace heading and no horizontal overflow';
+      return 'Single selected navigation item, visible content and no horizontal overflow';
     });
   }
+
+  await run('native-webview2-narrow-viewport', async () => {
+    await page.setViewportSize({ width: 390, height: 700 });
+    for (const workspace of ['library', 'memories', 'graph', 'health']) {
+      await page.locator(`[data-workspace="${workspace}"]`).click();
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1);
+      assert.equal(overflow, false, `390px viewport overflow in ${workspace}`);
+    }
+    await page.screenshot({ path: path.join(out, 'native-webview2-narrow-emulated.png') });
+    await page.setViewportSize({ width: 1180, height: 820 });
+    return '390x700 CDP-emulated viewport on native WebView2, four workspaces';
+  });
 
   await run('keyboard-navigation', async () => {
     const first = page.locator('[data-workspace="conversations"]');
@@ -151,6 +177,70 @@ try {
     assert.equal(await trigger.evaluate(element => element === document.activeElement), true);
     return 'Escape closes Settings and restores focus to its trigger';
   });
+  await run('native-index-title-source-preview', async () => {
+    await page.locator('[data-workspace="library"]').click();
+    await page.locator('#library-query').fill('Rust');
+    await page.locator('#library-query').press('Enter');
+    const hit = page.locator('.knowledge-library-results [data-library-archive]').first();
+    await hit.waitFor({ timeout: 15_000 });
+    assert.match(await hit.innerText(), /Rust archive decision/);
+    await hit.click();
+    const preview = page.locator('.knowledge-library-preview');
+    await page.waitForFunction(() => {
+      const content = document.querySelector('.knowledge-library-preview')?.textContent ?? '';
+      return content !== '' && !content.includes('Checking selected snapshot') &&
+        !content.includes('Choose a match to preview');
+    }, null, { timeout: 15_000 });
+    await page.screenshot({ path: path.join(out, 'native-library-preview.png') });
+    const previewText = await preview.innerText();
+    if (!/Archive ID:.*Snapshot:/s.test(previewText)) {
+      const diagnostic = await page.evaluate(async () => {
+        const invoke = window.__TAURI_INTERNALS__?.invoke;
+        if (typeof invoke !== 'function') return { error: 'Native invoke unavailable' };
+        try {
+          const hits = await invoke('search_archive_index', { query: 'Rust', includeHistory: true, limit: 40 });
+          const hit = hits.find(item => item.title === 'Rust archive decision');
+          if (!hit) return { error: 'Native hit missing' };
+          try {
+            const conversation = await invoke('read_conversation', { id: hit.archive_id, snapshotId: hit.snapshot_id });
+            return {
+              hit_kind: hit.kind,
+              summary_matches: conversation.summary?.id === hit.archive_id,
+              snapshot_matches: conversation.snapshot_id === hit.snapshot_id,
+              message_matches: conversation.capture?.messages?.some(item => item.id === hit.message_id),
+              conversation_keys: Object.keys(conversation).slice(0, 8),
+            };
+          } catch (error) { return { error_code: String(error).slice(0, 120) }; }
+        } catch (error) { return { search_error: String(error).slice(0, 120) }; }
+      });
+      throw new Error(`Native preview: ${previewText.slice(0, 100)}; ${JSON.stringify(diagnostic)}`);
+    }
+    return 'Real native FTS5 title match has an inspectable original source';
+  });
+  await run('native-index-message-source-preview', async () => {
+    await page.locator('#library-query').fill('Tauri');
+    await page.locator('#library-query').press('Enter');
+    const hit = page.locator('.knowledge-library-results [data-library-archive]').first();
+    await hit.waitFor({ timeout: 15_000 });
+    await hit.click();
+    await page.waitForFunction(() => {
+      const content = document.querySelector('.knowledge-library-preview')?.textContent ?? '';
+      return content !== '' && !content.includes('Checking selected snapshot') &&
+        !content.includes('Choose a match to preview');
+    }, null, { timeout: 15_000 });
+    const previewText = await page.locator('.knowledge-library-preview').innerText();
+    assert.match(previewText, /Archive ID:.*Snapshot:/s, `Message preview: ${previewText.slice(0, 120)}`);
+    return 'FTS5 message match resolves the canonical snapshot and original message';
+  });
+  await run('native-conversation-search', async () => {
+    await page.locator('[data-workspace="conversations"]').click();
+    const input = page.locator('#archive-search');
+    await input.fill('Rust archive');
+    await page.getByText('Rust archive decision', { exact: true }).first().waitFor({ timeout: 12_000 });
+    assert.equal(await page.locator('#conversation-list').getByText('Archive reading notes').count(), 0);
+    await input.fill('');
+    return 'Conversation list filters the native fixture without exposing nonmatches';
+  });
   await run('native-archive-list', async () => {
     await page.locator('[data-workspace="conversations"]').click();
     await page.getByText('Rust archive decision', { exact: false }).first().waitFor({ timeout: 15_000 });
@@ -160,7 +250,7 @@ try {
 
   await closeApp();
   const secondStart = performance.now();
-  launch(archive, fs.mkdtempSync(path.join(out, 'webview-restart-profile-')), basePort + 1);
+  launch(archive, path.join(testParent, 'webview-restart-profile'), basePort + 1);
   await connectToNativeWebView(basePort + 1);
   const restartMs = Math.round(performance.now() - secondStart);
   await run('locked-on-restart', async () => {
