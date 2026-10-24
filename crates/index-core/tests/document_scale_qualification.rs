@@ -6,7 +6,11 @@ use mind_place_state::StateStore;
 use rusqlite::Connection;
 use serde_json::json;
 use sha2::{Digest, Sha256};
-use std::{env, fs, path::{Path, PathBuf}, time::Instant};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+    time::Instant,
+};
 
 const ROOT_MAX: usize = 10_000;
 const SECTIONS: usize = 10;
@@ -14,18 +18,30 @@ const SECTIONS: usize = 10;
 fn fixture(root: usize, file: usize, last: bool) -> String {
     let mut result = String::new();
     for section in 0..SECTIONS {
-        let marker = if root == 0 && file == 0 && section == 0 { " mp10cfirstneedle" }
-            else if last && section == SECTIONS - 1 { " mp10clastneedle" } else { "" };
+        let marker = if root == 0 && file == 0 && section == 0 {
+            " mp10cfirstneedle"
+        } else if last && section == SECTIONS - 1 {
+            " mp10clastneedle"
+        } else {
+            ""
+        };
         result.push_str(&format!("## Section {section}\nSynthetic evidence root {root:02} file {file:05} segment {section} and provenance{marker}\n"));
     }
     result
 }
-fn filename(root: &Path, file: usize) -> PathBuf { root.join(format!("doc-{file:05}.md")) }
+fn filename(root: &Path, file: usize) -> PathBuf {
+    root.join(format!("doc-{file:05}.md"))
+}
 fn db_bytes(path: &Path) -> u64 {
-    ["", "-wal", "-shm"].iter().map(|ext| {
-        let name = format!("{}{ext}", path.file_name().unwrap().to_string_lossy());
-        fs::metadata(path.with_file_name(name)).map(|v| v.len()).unwrap_or(0)
-    }).sum()
+    ["", "-wal", "-shm"]
+        .iter()
+        .map(|ext| {
+            let name = format!("{}{ext}", path.file_name().unwrap().to_string_lossy());
+            fs::metadata(path.with_file_name(name))
+                .map(|v| v.len())
+                .unwrap_or(0)
+        })
+        .sum()
 }
 fn hash_files(roots: &[PathBuf], total: usize) -> String {
     let mut digest = Sha256::new();
@@ -40,34 +56,52 @@ fn hash_files(roots: &[PathBuf], total: usize) -> String {
 #[repr(C)]
 #[derive(Default)]
 struct Counters {
-    cb: u32, faults: u32,
-    peak_working_set: usize, working_set: usize,
-    peak_paged_pool: usize, paged_pool: usize,
-    peak_nonpaged_pool: usize, nonpaged_pool: usize,
-    pagefile: usize, peak_pagefile: usize,
+    cb: u32,
+    faults: u32,
+    peak_working_set: usize,
+    working_set: usize,
+    peak_paged_pool: usize,
+    paged_pool: usize,
+    peak_nonpaged_pool: usize,
+    nonpaged_pool: usize,
+    pagefile: usize,
+    peak_pagefile: usize,
 }
 #[link(name = "kernel32")]
-unsafe extern "system" { fn GetCurrentProcess() -> *mut std::ffi::c_void; }
+unsafe extern "system" {
+    fn GetCurrentProcess() -> *mut std::ffi::c_void;
+}
 #[link(name = "psapi")]
 unsafe extern "system" {
     fn GetProcessMemoryInfo(process: *mut std::ffi::c_void, out: *mut Counters, size: u32) -> i32;
 }
 fn peak_rss() -> Option<u64> {
-    let mut c = Counters { cb: std::mem::size_of::<Counters>() as u32, ..Default::default() };
+    let mut c = Counters {
+        cb: std::mem::size_of::<Counters>() as u32,
+        ..Default::default()
+    };
     let success = unsafe { GetProcessMemoryInfo(GetCurrentProcess(), &mut c, c.cb) };
     (success != 0).then_some(c.peak_working_set as u64)
 }
 fn median_us(mut f: impl FnMut()) -> u128 {
     f();
     let mut samples = Vec::new();
-    for _ in 0..7 { let begin = Instant::now(); f(); samples.push(begin.elapsed().as_micros()); }
-    samples.sort_unstable(); samples[3]
+    for _ in 0..7 {
+        let begin = Instant::now();
+        f();
+        samples.push(begin.elapsed().as_micros());
+    }
+    samples.sort_unstable();
+    samples[3]
 }
 
 #[test]
 #[ignore = "explicit MP-10C Windows 100/100000 real-document qualification"]
 fn qualifies_document_scale() {
-    let files: usize = env::var("MP_10C_FILES").expect("set MP_10C_FILES").parse().unwrap();
+    let files: usize = env::var("MP_10C_FILES")
+        .expect("set MP_10C_FILES")
+        .parse()
+        .unwrap();
     assert!([100, 100_000].contains(&files), "never silently downscale");
     let dir = tempfile::tempdir().unwrap();
     let state_path = dir.path().join("state.sqlite3");
@@ -83,11 +117,16 @@ fn qualifies_document_scale() {
         fs::create_dir(&path).unwrap();
         let in_root = (files - root * ROOT_MAX).min(ROOT_MAX);
         for file in 0..in_root {
-            fs::write(filename(&path, file), fixture(root, file, root == roots - 1 && file == in_root - 1)).unwrap();
+            fs::write(
+                filename(&path, file),
+                fixture(root, file, root == roots - 1 && file == in_root - 1),
+            )
+            .unwrap();
         }
         let grant = state.register_document_root(&path).unwrap();
         state.approve_document_root(&grant.id).unwrap();
-        ids.push(grant.id); paths.push(path);
+        ids.push(grant.id);
+        paths.push(path);
     }
     let generation_ms = started.elapsed().as_millis();
     let raw_hash = hash_files(&paths, files);
@@ -105,30 +144,52 @@ fn qualifies_document_scale() {
     let initial_index_ms = started.elapsed().as_millis();
     assert_eq!(actual_files, files);
     assert_eq!(actual_chunks, files * SECTIONS);
-    let first = index.search(&state, "mp10cfirstneedle", 5, || Ok(())).unwrap();
-    let last = index.search(&state, "mp10clastneedle", 5, || Ok(())).unwrap();
+    let first = index
+        .search(&state, "mp10cfirstneedle", 5, || Ok(()))
+        .unwrap();
+    let last = index
+        .search(&state, "mp10clastneedle", 5, || Ok(()))
+        .unwrap();
     assert_eq!(first.len(), 1);
     assert_eq!(last.len(), 1);
     assert_ne!(first[0].uri, last[0].uri);
     let query_median_us = median_us(|| {
-        assert_eq!(index.search(&state, "mp10cfirstneedle", 5, || Ok(())).unwrap(), first);
+        assert_eq!(
+            index
+                .search(&state, "mp10cfirstneedle", 5, || Ok(()))
+                .unwrap(),
+            first
+        );
     });
     let started = Instant::now();
     let again = index.refresh_root(&state, &ids[0], || Ok(())).unwrap();
     let reconciliation_first_root_ms = started.elapsed().as_millis();
     assert_eq!(again.indexed_chunks, files.min(ROOT_MAX) * SECTIONS);
     let db = Connection::open(&index_path).unwrap();
-    let total: i64 = db.query_row("SELECT COUNT(*) FROM document_fts", [], |r| r.get(0)).unwrap();
+    let total: i64 = db
+        .query_row("SELECT COUNT(*) FROM document_fts", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(total as usize, actual_chunks);
-    let health: String = db.query_row("PRAGMA quick_check(1)", [], |r| r.get(0)).unwrap();
+    let health: String = db
+        .query_row("PRAGMA quick_check(1)", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(health, "ok");
-    db.execute("INSERT INTO document_fts(document_fts,rank) VALUES('integrity-check',1)", []).unwrap();
+    db.execute(
+        "INSERT INTO document_fts(document_fts,rank) VALUES('integrity-check',1)",
+        [],
+    )
+    .unwrap();
     drop(db);
     let started = Instant::now();
     let reopened_state = StateStore::open(&state_path).unwrap();
     let reopened_index = DocumentIndex::open(&index_path).unwrap();
     let reopen_ms = started.elapsed().as_millis();
-    assert_eq!(reopened_index.search(&reopened_state, "mp10clastneedle", 5, || Ok(())).unwrap(), last);
+    assert_eq!(
+        reopened_index
+            .search(&reopened_state, "mp10clastneedle", 5, || Ok(()))
+            .unwrap(),
+        last
+    );
     assert_eq!(hash_files(&paths, files), raw_hash);
     let report = json!({
         "schema": "mind-place-mp10c-document-scale/v1",
@@ -148,7 +209,9 @@ fn qualifies_document_scale() {
     println!("MP_10C_RECEIPT {output}");
     if let Ok(location) = env::var("MP_10C_RECEIPT") {
         let path = PathBuf::from(location);
-        if let Some(parent) = path.parent() { fs::create_dir_all(parent).unwrap(); }
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
         fs::write(path, format!("{output}\n")).unwrap();
     }
 }
