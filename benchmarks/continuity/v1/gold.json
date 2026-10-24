@@ -1,0 +1,300 @@
+{
+  "schema": "mind-place-continuity-gold/v1",
+  "dataset": "mp10a-synthetic-v1",
+  "top_k": 5,
+  "cases": [
+    {
+      "id": "q01",
+      "question": "What retrieval approach is Aster currently committed to?",
+      "relevant": {
+        "e03": 3,
+        "e01": 1
+      },
+      "required_claims": [
+        "final_lexical_decision"
+      ],
+      "prohibited_claims": [
+        "old_vector_proposal",
+        "beryl_vectors"
+      ],
+      "abstain": false,
+      "excluded_source_ids": [
+        "e20"
+      ]
+    },
+    {
+      "id": "q02",
+      "question": "What was Aster's early vector proposal before final decision?",
+      "relevant": {
+        "e02": 3
+      },
+      "required_claims": [
+        "old_vector_proposal"
+      ],
+      "prohibited_claims": [
+        "final_lexical_decision"
+      ],
+      "abstain": false,
+      "excluded_source_ids": [
+        "e20"
+      ]
+    },
+    {
+      "id": "q03",
+      "question": "Which database files separate Aster authority and search?",
+      "relevant": {
+        "e12": 3
+      },
+      "required_claims": [
+        "aster_sqlite"
+      ],
+      "prohibited_claims": [
+        "beryl_postgres"
+      ],
+      "abstain": false,
+      "excluded_source_ids": [
+        "e20"
+      ]
+    },
+    {
+      "id": "q04",
+      "question": "Which OS qualifies for the first Aster package?",
+      "relevant": {
+        "e05": 3,
+        "e17": 2
+      },
+      "required_claims": [
+        "windows_target",
+        "macos_not_qualified"
+      ],
+      "prohibited_claims": [
+        "old_macos_claim"
+      ],
+      "abstain": false,
+      "excluded_source_ids": [
+        "e20"
+      ]
+    },
+    {
+      "id": "q05",
+      "question": "Does Aster project membership grant filesystem read access?",
+      "relevant": {
+        "e07": 3,
+        "e14": 2
+      },
+      "required_claims": [
+        "approved_roots",
+        "graph_depends_on_permission"
+      ],
+      "prohibited_claims": [],
+      "abstain": false,
+      "excluded_source_ids": [
+        "e20"
+      ]
+    },
+    {
+      "id": "q06",
+      "question": "Can the formerly approved Aster drafts folder still be returned?",
+      "relevant": {
+        "e08": 3,
+        "e07": 2
+      },
+      "required_claims": [
+        "root_revoked",
+        "approved_roots"
+      ],
+      "prohibited_claims": [
+        "restricted_note"
+      ],
+      "abstain": false,
+      "excluded_source_ids": [
+        "e20"
+      ]
+    },
+    {
+      "id": "q07",
+      "question": "How are private hosted AI sessions handled at capture?",
+      "relevant": {
+        "e13": 3
+      },
+      "required_claims": [
+        "private_exclusion"
+      ],
+      "prohibited_claims": [
+        "restricted_note"
+      ],
+      "abstain": false,
+      "excluded_source_ids": [
+        "e20"
+      ]
+    },
+    {
+      "id": "q08",
+      "question": "Are Aster raw captures overwritten when an index is rebuilt?",
+      "relevant": {
+        "e19": 3
+      },
+      "required_claims": [
+        "raw_immutable"
+      ],
+      "prohibited_claims": [],
+      "abstain": false,
+      "excluded_source_ids": [
+        "e20"
+      ]
+    },
+    {
+      "id": "q09",
+      "question": "What evidence is needed to verify Aster hosted continuity?",
+      "relevant": {
+        "e23": 3,
+        "e06": 2
+      },
+      "required_claims": [
+        "hosted_gate",
+        "device_gate"
+      ],
+      "prohibited_claims": [],
+      "abstain": false,
+      "excluded_source_ids": [
+        "e20"
+      ]
+    },
+    {
+      "id": "q10",
+      "question": "What Aster benchmark median bound was documented for ranked search?",
+      "relevant": {
+        "e04": 3
+      },
+      "required_claims": [
+        "synthetic_latency_budget"
+      ],
+      "prohibited_claims": [
+        "beryl_memory_budget"
+      ],
+      "abstain": false,
+      "excluded_source_ids": [
+        "e20"
+      ]
+    },
+    {
+      "id": "q11",
+      "question": "Does Aster preserve exposed regenerated branches?",
+      "relevant": {
+        "e15": 3
+      },
+      "required_claims": [
+        "branch_provenance"
+      ],
+      "prohibited_claims": [],
+      "abstain": false,
+      "excluded_source_ids": [
+        "e20"
+      ]
+    },
+    {
+      "id": "q12",
+      "question": "Can Aster infer hidden reasoning not exposed by a provider?",
+      "relevant": {
+        "e18": 3
+      },
+      "required_claims": [
+        "no_hidden_reasoning"
+      ],
+      "prohibited_claims": [],
+      "abstain": false,
+      "excluded_source_ids": [
+        "e20"
+      ]
+    },
+    {
+      "id": "q13",
+      "question": "What is the RAM budget for Aster hardware?",
+      "relevant": {},
+      "required_claims": [],
+      "prohibited_claims": [
+        "beryl_memory_budget"
+      ],
+      "abstain": true,
+      "excluded_source_ids": [
+        "e20"
+      ]
+    },
+    {
+      "id": "q14",
+      "question": "What was the content of Aster's restricted private note?",
+      "relevant": {},
+      "required_claims": [],
+      "prohibited_claims": [
+        "restricted_note"
+      ],
+      "abstain": true,
+      "excluded_source_ids": [
+        "e20"
+      ]
+    },
+    {
+      "id": "q15",
+      "question": "How does an Aster context packet identify exact evidence?",
+      "relevant": {
+        "e24": 3
+      },
+      "required_claims": [
+        "context_source_refs"
+      ],
+      "prohibited_claims": [],
+      "abstain": false,
+      "excluded_source_ids": [
+        "e20"
+      ]
+    },
+    {
+      "id": "q16",
+      "question": "Who has to approve the Aster release after technical gates?",
+      "relevant": {
+        "e22": 3,
+        "e06": 1
+      },
+      "required_claims": [
+        "explicit_release_approval"
+      ],
+      "prohibited_claims": [],
+      "abstain": false,
+      "excluded_source_ids": [
+        "e20"
+      ]
+    },
+    {
+      "id": "q17",
+      "question": "Which database does Beryl use?",
+      "relevant": {
+        "e11": 3
+      },
+      "required_claims": [
+        "beryl_postgres"
+      ],
+      "prohibited_claims": [
+        "aster_sqlite"
+      ],
+      "abstain": false,
+      "excluded_source_ids": [
+        "e20"
+      ]
+    },
+    {
+      "id": "q18",
+      "question": "What limits protect Aster document parsing?",
+      "relevant": {
+        "e09": 3
+      },
+      "required_claims": [
+        "parser_bounds"
+      ],
+      "prohibited_claims": [],
+      "abstain": false,
+      "excluded_source_ids": [
+        "e20"
+      ]
+    }
+  ]
+}
