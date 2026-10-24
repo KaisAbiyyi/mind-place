@@ -119,7 +119,7 @@ test("reader virtualizes large archives and navigates visible rows without loadi
           capture_method: "manual-dom", completeness: "complete", warnings: [],
           messages: [],
         },
-      } satisfies Conversation as T;
+      } satisfies Conversation as unknown as T;
     }
     throw new Error("unexpected: " + command);
   };
