@@ -52,14 +52,7 @@ jobs:
               $receipt.production_files_per_root_cap -ne 10000 -or
               $receipt.sqlite_and_fts_integrity -ne "pass" -or
               $receipt.raw_bytes_unchanged -ne $true -or
-              $receipt.fixture_sha256 -notmatch '^[0-9a-f]{64}
-        uses: actions/upload-artifact@v4
-        with:
-          name: mp10c-document-${{ matrix.files }}
-          path: qualification/mp10c-${{ matrix.files }}.json
-          if-no-files-found: error
-          retention-days: 30
-) {
+              $receipt.fixture_sha256 -notmatch '^[0-9a-f]{64}$') {
             throw "MP-10C receipt did not meet exact-tier qualification"
           }
           Write-Output "MP-10C exact-tier receipt validated: $expected files, $($receipt.extracted_chunks) chunks"
@@ -69,5 +62,5 @@ jobs:
         with:
           name: mp10c-document-${{ matrix.files }}
           path: qualification/mp10c-${{ matrix.files }}.json
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 30
