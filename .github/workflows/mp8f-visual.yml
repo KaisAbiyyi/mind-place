@@ -1,0 +1,35 @@
+name: MP-8F Cloud Visual Regression
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'test/**'
+      - 'scripts/mp8f-visual-smoke.mjs'
+      - '.github/workflows/mp8f-visual.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  visual-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Synthetic desktop and narrow-screen screenshot/keyboard qualification
+        run: node scripts/mp8f-visual-smoke.mjs
+      - name: Save synthetic screenshot evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mp8f-visual-${{ github.sha }}
+          path: artifacts/mp8f-visual/
+          if-no-files-found: warn
+          retention-days: 14
