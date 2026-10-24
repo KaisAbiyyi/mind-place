@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import "katex/dist/katex.min.css";
 import "./style.css";
 import "./knowledge-os.css";
+import "./library-workspace.css";
 import "./memory-inspector.css";
 import "./health-workspace.css";
 import "./security.css";

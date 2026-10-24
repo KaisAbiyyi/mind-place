@@ -3,6 +3,7 @@ import { CONVERSATION_ROW_HEIGHT, VIRTUAL_LIST_THRESHOLD, createWorkspaceNavigat
 import { mountLocalMcpSetup } from "./mcp-setup.js";
 import { mountDocumentRootSetup } from "./document-roots.js";
 import { mountMemoryInspector, type MemoryInspectorHandle } from "./memory-inspector.js";
+import { mountLibraryWorkspace, type LibraryHandle } from "./library-workspace.js";
 import { mountHealthWorkspace, type HealthWorkspaceHandle } from "./health-workspace.js";
 import { marked } from "marked";
 import renderMathInElement from "katex/contrib/auto-render";
@@ -70,6 +71,7 @@ const STATIC_APP_SHELL = `
       </div>
       <div class="library-footer">
         <div class="offline-note"><span class="offline-dot" aria-hidden="true"></span><span>Stored on this device</span></div>
+        <button class="setup-link" type="button" data-action="open-library-workspace">Search all sources</button>
         <button class="setup-link" type="button" data-action="open-memory-inspector">Memories &amp; evidence</button>
         <button class="setup-link" type="button" data-action="open-document-search">Search indexed documents</button>
         <button class="setup-link" type="button" data-action="open-setup">
@@ -196,6 +198,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   let exportedMarkdown = "";
   let memoryInspector: MemoryInspectorHandle | undefined;
   let healthWorkspace: HealthWorkspaceHandle | undefined;
+  let libraryWorkspace: LibraryHandle | undefined;
   let alive = true;
   const invoke: Invoke = async <T>(command: string, args?: Record<string, unknown>) => {
     if (!alive) throw new Error("MP_UI_SESSION_EXPIRED");
@@ -359,6 +362,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   };
 
   const selectConversation = async (id: string) => {
+    libraryWorkspace?.destroy(); libraryWorkspace = undefined;
     healthWorkspace?.destroy();
     healthWorkspace = undefined;
     memoryInspector?.destroy();
@@ -933,6 +937,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   };
 
   const openMemoryInspector = () => {
+    libraryWorkspace?.destroy(); libraryWorkspace = undefined;
     healthWorkspace?.destroy();
     healthWorkspace = undefined;
     activateWorkspace("memories");
@@ -958,6 +963,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   };
 
   const openHealthWorkspace = () => {
+    libraryWorkspace?.destroy(); libraryWorkspace = undefined;
     memoryInspector?.destroy();
     memoryInspector = undefined;
     healthWorkspace?.destroy();
@@ -981,6 +987,27 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     });
   };
 
+  const openLibraryWorkspace = () => {
+    memoryInspector?.destroy(); memoryInspector = undefined;
+    healthWorkspace?.destroy(); healthWorkspace = undefined;
+    libraryWorkspace?.destroy(); libraryWorkspace = undefined;
+    ++selectionVersion;
+    selectedId = null;
+    loadedConversation = null;
+    loadedSnapshots = [];
+    selectedSnapshotId = null;
+    exportedMarkdown = "";
+    updateToolbarSelection();
+    toolbarTitle.textContent = "Library search";
+    setActionStatus("");
+    renderConversationRows(search.value.trim());
+    libraryWorkspace = mountLibraryWorkspace(view, invoke, () => {
+      libraryWorkspace?.destroy(); libraryWorkspace = undefined;
+      if (summaries.length) void selectConversation(summaries[0].id);
+      else { activateWorkspace("conversations"); renderState("Archive is empty", "No saved conversations are available."); }
+    });
+  };
+
   const clickHandler = (event: Event) => {
     if (!alive) return;
     const target = event.target;
@@ -995,6 +1022,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
         else { memoryInspector?.destroy(); memoryInspector = undefined; activateWorkspace("conversations"); renderState("Archive is empty", "No saved conversations are available."); }
       }
       else if (action === "open-memory-inspector") openMemoryInspector();
+      else if (action === "open-library-workspace") openLibraryWorkspace();
       else if (action === "open-health-inspector") openHealthWorkspace();
       else if (action === "retry-selection" && selectedId) void selectConversation(selectedId);
       else if (action === "open-document-search") {
@@ -1082,6 +1110,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     ready,
     refresh: () => loadConversations(true),
     destroy: () => {
+      libraryWorkspace?.destroy(); libraryWorkspace = undefined;
       healthWorkspace?.destroy();
       healthWorkspace = undefined;
       memoryInspector?.destroy();
