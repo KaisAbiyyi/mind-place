@@ -7,6 +7,8 @@
  */
 import { spawnSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { evaluate, loadSuite } from './benchmark-continuity.mjs';
 
 const strategies = ['lexical_fts5', 'structured_fts5', 'project_graph_proxy', 'hybrid_fts5_project_proxy'];
@@ -94,7 +96,7 @@ function main() {
   if (args.length === 2) writeFileSync(args[1], json, { flag: 'w' });
   process.stdout.write(json);
 }
-if (process.argv[1] && import.meta.url === new URL('file://' + process.argv[1].replace(/\\/g, '/')).href) {
+if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   try { main(); } catch (error) {
     process.stderr.write(String(error.stack ?? error) + '\n');
     process.exitCode = 1;
