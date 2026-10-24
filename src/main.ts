@@ -3,6 +3,7 @@ import "katex/dist/katex.min.css";
 import "./style.css";
 import "./knowledge-os.css";
 import "./memory-inspector.css";
+import "./memory-entity-lenses.css";
 import "./security.css";
 import type { Invoke } from "./reader.js";
 import { mountApplication } from "./app.js";

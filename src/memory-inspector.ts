@@ -1,4 +1,5 @@
 import type { Invoke } from "./reader.js";
+import { mountEntityLenses } from "./memory-entity-lenses.js";
 
 export interface MemoryClaimView {
   id: string;
@@ -123,6 +124,7 @@ export function mountMemoryInspector({ view, invoke, copyText, onClose }: Option
   layout.append(listSection, detailSection);
   shell.append(top, form, layout);
   view.append(shell);
+  const entityLenses = mountEntityLenses(shell, invoke);
 
   function showCards() {
     cards.replaceChildren();
@@ -298,6 +300,7 @@ export function mountMemoryInspector({ view, invoke, copyText, onClose }: Option
 
   return {
     destroy() {
+      entityLenses.destroy();
       alive = false;
       ++request;
       ++detailRequest;
