@@ -4,6 +4,7 @@ import { mountLocalMcpSetup } from "./mcp-setup.js";
 import { mountDocumentRootSetup } from "./document-roots.js";
 import { mountMemoryInspector, type MemoryInspectorHandle } from "./memory-inspector.js";
 import { mountHiveWorkspace, type HiveHandle } from "./hive-workspace.js";
+import { mountLibraryWorkspace, type LibraryHandle } from "./library-workspace.js";
 import { mountHealthWorkspace, type HealthWorkspaceHandle } from "./health-workspace.js";
 import { marked } from "marked";
 import renderMathInElement from "katex/contrib/auto-render";
@@ -71,6 +72,7 @@ const STATIC_APP_SHELL = `
       </div>
       <div class="library-footer">
         <div class="offline-note"><span class="offline-dot" aria-hidden="true"></span><span>Stored on this device</span></div>
+        <button class="setup-link" type="button" data-action="open-library-workspace">Search all sources</button>
         <button class="setup-link" type="button" data-action="open-memory-inspector">Memories &amp; evidence</button>
         <button class="setup-link" type="button" data-action="open-document-search">Search indexed documents</button>
         <button class="setup-link" type="button" data-action="open-setup">
@@ -197,6 +199,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   let exportedMarkdown = "";
   let memoryInspector: MemoryInspectorHandle | undefined;
   let healthWorkspace: HealthWorkspaceHandle | undefined;
+  let libraryWorkspace: LibraryHandle | undefined;
   let hiveWorkspace: HiveHandle | undefined;
   let alive = true;
   const invoke: Invoke = async <T>(command: string, args?: Record<string, unknown>) => {
@@ -362,6 +365,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
 
   const selectConversation = async (id: string) => {
     hiveWorkspace?.destroy(); hiveWorkspace = undefined;
+    libraryWorkspace?.destroy(); libraryWorkspace = undefined;
     healthWorkspace?.destroy();
     healthWorkspace = undefined;
     memoryInspector?.destroy();
@@ -935,11 +939,12 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     get<HTMLButtonElement>("[data-action='open-setup']").focus();
   };
 
-  const openMemoryInspector = () => {
+  const openMemoryInspector = (workspace: "memories" | "projects" | "people" | "topics" = "memories") => {
     hiveWorkspace?.destroy(); hiveWorkspace = undefined;
+    libraryWorkspace?.destroy(); libraryWorkspace = undefined;
     healthWorkspace?.destroy();
     healthWorkspace = undefined;
-    activateWorkspace("memories");
+    activateWorkspace(workspace);
     memoryInspector?.destroy();
     ++selectionVersion;
     selectedId = null;
@@ -949,8 +954,9 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     updateToolbarSelection();
     setActionStatus("");
     renderConversationRows(search.value.trim());
-    toolbarTitle.textContent = "Memory inspector";
+    toolbarTitle.textContent = workspace === "memories" ? "Memory inspector" : workspace[0].toUpperCase() + workspace.slice(1) + " investigation";
     memoryInspector = mountMemoryInspector({
+      initialLens: workspace === "memories" ? undefined : workspace,
       view, invoke, copyText: (value) => safeClipboard.writeText(value),
       onClose: () => {
         memoryInspector?.destroy();
@@ -963,6 +969,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
 
   const openHealthWorkspace = () => {
     hiveWorkspace?.destroy(); hiveWorkspace = undefined;
+    libraryWorkspace?.destroy(); libraryWorkspace = undefined;
     memoryInspector?.destroy();
     memoryInspector = undefined;
     healthWorkspace?.destroy();
@@ -986,8 +993,31 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     });
   };
 
+  const openLibraryWorkspace = () => {
+    hiveWorkspace?.destroy(); hiveWorkspace = undefined;
+    memoryInspector?.destroy(); memoryInspector = undefined;
+    healthWorkspace?.destroy(); healthWorkspace = undefined;
+    libraryWorkspace?.destroy(); libraryWorkspace = undefined;
+    ++selectionVersion;
+    selectedId = null;
+    loadedConversation = null;
+    loadedSnapshots = [];
+    selectedSnapshotId = null;
+    exportedMarkdown = "";
+    updateToolbarSelection();
+    toolbarTitle.textContent = "Library search";
+    setActionStatus("");
+    renderConversationRows(search.value.trim());
+    libraryWorkspace = mountLibraryWorkspace(view, invoke, () => {
+      libraryWorkspace?.destroy(); libraryWorkspace = undefined;
+      if (summaries.length) void selectConversation(summaries[0].id);
+      else { activateWorkspace("conversations"); renderState("Archive is empty", "No saved conversations are available."); }
+    });
+  };
+
   const openHiveWorkspace = () => {
     const initialKey = summaries.find(x => x.id === selectedId)?.id ?? summaries[0]?.id ?? "";
+    libraryWorkspace?.destroy(); libraryWorkspace = undefined;
     memoryInspector?.destroy(); memoryInspector = undefined;
     healthWorkspace?.destroy(); healthWorkspace = undefined;
     hiveWorkspace?.destroy(); hiveWorkspace = undefined;
@@ -1003,8 +1033,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     activateWorkspace("graph");
     toolbarTitle.textContent = "Hive graph";
     hiveWorkspace = mountHiveWorkspace(view, invoke, () => {
-      hiveWorkspace?.destroy();
-      hiveWorkspace = undefined;
+      hiveWorkspace?.destroy(); hiveWorkspace = undefined;
       if (summaries.length) void selectConversation(summaries[0].id);
       else { activateWorkspace("conversations"); renderState("Archive is empty", "No saved conversations are available."); }
     }, initialKey);
@@ -1024,6 +1053,11 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
         else { memoryInspector?.destroy(); memoryInspector = undefined; activateWorkspace("conversations"); renderState("Archive is empty", "No saved conversations are available."); }
       }
       else if (action === "open-memory-inspector") openMemoryInspector();
+      else if (action === "open-entity-workspace") {
+        const workspace = actionElement.dataset.workspace;
+        if (workspace === "projects" || workspace === "people" || workspace === "topics") openMemoryInspector(workspace);
+      }
+      else if (action === "open-library-workspace") openLibraryWorkspace();
       else if (action === "open-hive-explorer") openHiveWorkspace();
       else if (action === "open-health-inspector") openHealthWorkspace();
       else if (action === "retry-selection" && selectedId) void selectConversation(selectedId);
@@ -1113,6 +1147,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     refresh: () => loadConversations(true),
     destroy: () => {
       hiveWorkspace?.destroy(); hiveWorkspace = undefined;
+      libraryWorkspace?.destroy(); libraryWorkspace = undefined;
       healthWorkspace?.destroy();
       healthWorkspace = undefined;
       memoryInspector?.destroy();
