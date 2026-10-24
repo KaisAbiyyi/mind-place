@@ -48,6 +48,12 @@ The cloud GitHub-only repair's exact head is `3590af735b569033849843e2398da859ab
 
 The baseline FAIL is reproducible and remains historical evidence; the fix candidate resolves it in native smoke. Overall **MP-8L1 remains PARTIAL** until the reviewed repair lands on main and full installed/owner qualification is completed.
 
+### Owner's actual Windows DPI scaling screenshots (2026-10-24)
+
+The owner supplied **four ordered native Mind Place screenshots**, explicitly identifying display scaling as **100%, 125%, 150%, 175%**. The real loaded Gemini snapshot and reader toolbar remained visible throughout. At 100% and 125% the sidebar conversations list remained usable (**PASS**); at 150% the list was compressed to a thin strip (**PARTIAL**); at 175% it became essentially unusable (**FAIL**). These screenshots contain personal archived text, so the image bytes are intentionally **not** copied into GitHub or artifacts. This is a local display-qualification finding, and overrides the prior "physical DPI scaling NOT_RUN" item in the matrix.
+
+Root cause evidence in `src/style.css` and `src/knowledge-os.css`: the eight-row sidebar grid allocates `minmax(0, 1fr)` to the list after fixed navigation, search, and footer sections have consumed available CSS-pixel height. The independent cloud-only repair is [issue #115](https://github.com/KaisAbiyyi/mind-place/issues/115) / [draft PR #116](https://github.com/KaisAbiyyi/mind-place/pull/116), cloud head `122753b73399f364d24c3f1a95e3a0c36bfcd575`, which retains a minimum list viewport and permits parent sidebar scroll for short desktop heights. Cloud `visual-smoke` (including simulated 100/125/150/175% CSS viewports) **PASS**, `verify:repo`/TypeScript **PASS** locally; Windows CI still requires completion. The owner's four actual screenshots validate the **old candidate**, so **native display scaling must be repeated after #116 is reviewed/merged and a new exact-head package is built**. Do not interpret cloud Chromium smoke as owner Windows acceptance.
+
 Do not substitute the observed partial synthetic pass for real owner-account/index/content acceptance, installed NSIS upgrade behavior, physical display-scaling exercise or MP-8L2 performance qualification. MP-8L2 and MP-8U1 stay blocked until MP-8L1 actually receives its full LOCAL PASS.
 
 Local acceptance is independent of cloud CI. Native UI defects should be triaged into bounded cloud repair units before claiming the local gate `PASS`.
