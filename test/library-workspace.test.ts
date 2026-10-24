@@ -18,7 +18,7 @@ function fixture(invoke: Invoke) {
 const hit = { source_id:"s", archive_id:"archive", snapshot_id:"snap", message_id:"msg", kind:"body", role:"assistant", title:"Test", snippet:"<img src=x onerror=alert(1)>", score:1 };
 test("search is bounded, excerpts inert, preview pinned to snapshot and source identity", async () => {
   const commands: string[] = [];
-  const invoke: Invoke = async <T>(command, args) => {
+  const invoke: Invoke = async <T>(command: string, args?: Record<string, unknown>) => {
     commands.push(command);
     if (command === "search_archive_index") {
       assert.equal(args?.limit, 40);
@@ -43,13 +43,13 @@ test("search is bounded, excerpts inert, preview pinned to snapshot and source i
 test("stale response after destroy cannot reveal source details", async () => {
   let resolve!: (value: any) => void;
   const pending = new Promise<any>(r=>resolve=r);
-  const invoke: Invoke = async <T>(command) => command === "search_archive_index" ? pending as T : [] as T;
+  const invoke: Invoke = async <T>(command: string) => command === "search_archive_index" ? pending as T : [] as T;
   const {view,handle,search} = fixture(invoke);
   search("secret"); handle.destroy(); resolve([hit]); await delay(0);
   assert.equal(view.textContent, "");
 });
 test("partial source failure is explicit rather than falsely claiming complete results", async () => {
-  const invoke: Invoke = async <T>(command) => {
+  const invoke: Invoke = async <T>(command: string) => {
     if (command === "search_archive_index") return [hit] as T;
     throw Error("offline");
   };
