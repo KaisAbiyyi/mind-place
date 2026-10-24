@@ -5,7 +5,7 @@
 
 ## Measurement boundary
 
-The Rust harness crates/index-core/tests/continuity_bakeoff.rs constructs a temporary derived SQLite index using only 24 public synthetic MP-10A source records and calls actual production IndexStore::retrieve (SQLite FTS5). It never opens a private archive, real approved root or signed-in provider, and never accesses local user files.
+The Rust harness crates/index-core/tests/continuity_bakeoff.rs constructs a temporary derived SQLite index using the 24-record synthetic MP-10A fixture (one restricted record is excluded before indexing) and calls actual production IndexStore::retrieve (SQLite FTS5). It never opens a private archive, real approved root or signed-in provider, and never accesses local user files.
 
 IMPORTANT: test-only direct derived-index seeding bypasses normal StateStore/ArchiveStore source registration and should NOT be presented as a production ingestion route.
 
