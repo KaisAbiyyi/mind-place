@@ -27,6 +27,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Cloud format receipt for isolated Rust fixture
+        run: |
+          cargo fmt --all
+          echo MP10B_FMT_BEGIN
+          cat crates/index-core/tests/continuity_bakeoff.rs
+          echo MP10B_FMT_END
       - name: Validate independent scorer adapter and negative privacy cases
         run: node --test test/retrieval-bakeoff.test.mjs
       - name: Benchmark real Rust FTS5 using isolated synthetic data
