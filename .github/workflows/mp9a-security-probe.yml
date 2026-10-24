@@ -1,0 +1,39 @@
+name: MP-9A synthetic encryption and backup measurements
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'scripts/mp9a-encryption-probe.py'
+      - 'docs/implementation-plan/phase-9a-encryption-design.md'
+      - '.github/workflows/mp9a-security-probe.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  measure:
+    name: synthetic encryption probe (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install probe-only pinned AES-GCM dependency
+        run: python -m pip install cryptography==46.0.3
+      - name: Run isolated synthetic probe
+        run: python scripts/mp9a-encryption-probe.py --rows 1000 --objects 128 --row-bytes 1024 --object-bytes 16384 --receipt mp9a-receipt.json
+      - name: Upload aggregate receipt only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mp9a-synthetic-${{ matrix.os }}
+          path: mp9a-receipt.json
+          if-no-files-found: error
+          retention-days: 14
