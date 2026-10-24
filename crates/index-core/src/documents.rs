@@ -45,6 +45,17 @@ pub struct DocumentIndexReport {
     pub generation: i64,
 }
 
+/// Bounded, freshly verified owner-only extracted source preview.
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub struct DocumentPreview {
+    pub uri: String,
+    pub version_id: String,
+    pub text: String,
+    pub truncated: bool,
+    pub extractor_revision: String,
+    pub warnings: Vec<String>,
+}
+
 #[derive(Clone, Debug, Serialize, PartialEq)]
 pub struct DocumentHit {
     pub uri: String,
@@ -431,6 +442,83 @@ impl DocumentIndex {
             .collect::<std::result::Result<Vec<_>, _>>()?;
         state.with_approved_document_roots(&roots, || Ok::<_, IndexError>(hits))
     }
+
+    /// Preview an indexed version only. Never accepts an absolute native path,
+    /// stale version, unapproved URI or unverified index/source bytes.
+    pub fn preview(
+        &self,
+        state: &StateStore,
+        uri: &str,
+        version_id: &str,
+        mut check: impl FnMut() -> Result<()>,
+    ) -> Result<DocumentPreview> {
+        const MAX_PREVIEW_CHARS: usize = 4096;
+        check()?;
+        let path = VirtualDocumentPath::parse(uri)?;
+        let objects = DocumentObjectStore::open(state.clone())?;
+        let head = objects
+            .current_version(uri, || lease(&mut check))?
+            .ok_or(IndexError::Revoked)?;
+        if head.id != version_id
+            || head.byte_length > ExtractionLimits::default().max_input_bytes as u64
+        {
+            return Err(IndexError::Revoked);
+        }
+        // Only documents in the published owner-triggered index can be previewed.
+        // A head alone is not evidence of successful extraction or indexing.
+        let db = self.connection()?;
+        let indexed: i64 = db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM document_fts WHERE uri=?1 AND version_id=?2)",
+            params![uri, version_id],
+            |row| row.get(0),
+        )?;
+        if indexed == 0 {
+            return Err(IndexError::InvalidEvidence);
+        }
+        drop(db);
+        // Re-read the current authorized file through NTFS handle containment,
+        // not a cached FTS row or an arbitrary path supplied by the browser.
+        let bytes = state.read_document_bytes(uri, ExtractionLimits::default().max_input_bytes)?;
+        if bytes.len() as u64 != head.byte_length
+            || format!("{:x}", Sha256::digest(&bytes)) != head.content_hash
+        {
+            return Err(IndexError::InvalidEvidence);
+        }
+        let format = format_for_uri(uri).ok_or(IndexError::InvalidQuery)?;
+        let extracted = extract_with_check(format, &bytes, ExtractionLimits::default(), || {
+            check().is_ok() && state.require_approved_document_uri(uri).is_ok()
+        })
+        .map_err(|error| match error {
+            ExtractionError::Revoked => IndexError::Revoked,
+            _ => IndexError::InvalidEvidence,
+        })?;
+        check()?;
+        if objects
+            .current_version(uri, || lease(&mut check))?
+            .map(|version| version.id)
+            != Some(head.id.clone())
+        {
+            return Err(IndexError::Revoked);
+        }
+        // Bounded UTF-8 output; never return unbounded original source bytes.
+        let mut chars = extracted.text.chars();
+        let text: String = chars.by_ref().take(MAX_PREVIEW_CHARS).collect();
+        let truncated = chars.next().is_some();
+        let preview = DocumentPreview {
+            uri: uri.to_owned(),
+            version_id: head.id,
+            text,
+            truncated,
+            extractor_revision: EXTRACTOR_REVISION.to_owned(),
+            warnings: extracted.warnings,
+        };
+        check()?;
+        // Final disclosure fence serializes against a completed owner revoke.
+        state.with_approved_document_roots(&[path.root_id().to_owned()], || {
+            check()?;
+            Ok::<_, IndexError>(preview)
+        })
+    }
 }
 
 #[cfg(test)]
@@ -450,6 +538,35 @@ mod tests {
         state.approve_document_root(&root.id).unwrap();
         let index = DocumentIndex::open(dir.path().join("document-index.sqlite3")).unwrap();
         (dir, state, index, root.id)
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn preview_revalidates_current_source_revision_and_permission() {
+        let (dir, state, index, root_id) = approved_fixture();
+        index.refresh_root(&state, &root_id, || Ok(())).unwrap();
+        let hits = index.search(&state, "uniquephrase", 1, || Ok(())).unwrap();
+        let hit = &hits[0];
+        let preview = index
+            .preview(&state, &hit.uri, &hit.version_id, || Ok(()))
+            .unwrap();
+        assert!(preview.text.contains("uniquephrase"));
+        assert!(!preview.truncated);
+        assert_eq!(preview.version_id, hit.version_id);
+        assert!(index
+            .preview(&state, &hit.uri, "docver:v1:stale", || Ok(()))
+            .is_err());
+
+        // Changing the authorized live bytes invalidates the saved head hash.
+        std::fs::write(dir.path().join("approved").join("notes.md"), "changed").unwrap();
+        assert!(index
+            .preview(&state, &hit.uri, &hit.version_id, || Ok(()))
+            .is_err());
+
+        state.revoke_document_root(&root_id).unwrap();
+        assert!(index
+            .preview(&state, &hit.uri, &hit.version_id, || Ok(()))
+            .is_err());
     }
 
     #[cfg(windows)]

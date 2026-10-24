@@ -74,10 +74,10 @@ const STATIC_APP_SHELL = `
         <div class="offline-note"><span class="offline-dot" aria-hidden="true"></span><span>Stored on this device</span></div>
         <button class="setup-link" type="button" data-action="open-library-workspace">Search all sources</button>
         <button class="setup-link" type="button" data-action="open-memory-inspector">Memories &amp; evidence</button>
-        <button class="setup-link" type="button" data-action="open-document-search">Search indexed documents</button>
+        <button class="setup-link" type="button" data-action="open-document-search">Documents &amp; folders</button>
         <button class="setup-link" type="button" data-action="open-setup">
           <svg aria-hidden="true" viewBox="0 0 20 20"><path d="M10 2.5v2M10 15.5v2M2.5 10h2m11 0h2m-12.28-5.22 1.42 1.42m7.72 7.72 1.42 1.42m0-10.56-1.42 1.42m-7.72 7.72-1.42 1.42"></path><circle cx="10" cy="10" r="4"></circle></svg>
-          <span>Manual capture setup</span>
+          <span>Settings</span>
         </button>
       </div>
     </aside>
@@ -101,11 +101,19 @@ const STATIC_APP_SHELL = `
   </div>
   <dialog id="setup-dialog" class="setup-dialog" aria-labelledby="setup-title">
     <div class="dialog-header">
-      <div><p class="eyebrow">Local connection</p><h2 id="setup-title">Manual capture setup</h2></div>
+      <div><p class="eyebrow">Mind Place / Preferences</p><h2 id="setup-title">Settings</h2><p class="settings-subtitle">Manage your archive, documents and connections.</p></div>
       <button class="icon-button" type="button" data-action="close-setup" aria-label="Close setup">×</button>
     </div>
-    <div id="setup-content" class="setup-content">
-      <p class="list-note">Loading setup details…</p>
+    <div class="settings-layout">
+      <nav class="settings-nav" role="tablist" aria-label="Settings categories" aria-orientation="vertical">
+        <button class="settings-tab" type="button" role="tab" id="settings-tab-archive" aria-controls="settings-panel-archive" aria-selected="true" tabindex="0" data-settings-tab="archive"><span>01</span>Archive &amp; Capture</button>
+        <button class="settings-tab" type="button" role="tab" id="settings-tab-documents" aria-controls="settings-panel-documents" aria-selected="false" tabindex="-1" data-settings-tab="documents"><span>02</span>Documents &amp; Permissions</button>
+        <button class="settings-tab" type="button" role="tab" id="settings-tab-connections" aria-controls="settings-panel-connections" aria-selected="false" tabindex="-1" data-settings-tab="connections"><span>03</span>Connections &amp; MCP</button>
+        <button class="settings-tab" type="button" role="tab" id="settings-tab-privacy" aria-controls="settings-panel-privacy" aria-selected="false" tabindex="-1" data-settings-tab="privacy"><span>04</span>Privacy &amp; Security</button>
+      </nav>
+      <div id="setup-content" class="setup-content" aria-live="off">
+        <p class="list-note">Loading settings…</p>
+      </div>
     </div>
     <div class="dialog-footer"><button class="quiet-button" type="button" data-action="lock">Lock</button><button class="quiet-button" type="button" data-action="close-setup">Done</button></div>
   </dialog>
@@ -193,6 +201,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   let selectionVersion = 0;
   let listVersion = 0;
   let setupVersion = 0;
+  let activeSettingsTab: "archive" | "documents" | "connections" | "privacy" = "archive";
   let loadedConversation: Conversation | null = null;
   let loadedSnapshots: CaptureSnapshot[] = [];
   let selectedSnapshotId: string | null = null;
@@ -643,8 +652,41 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     updateToolbarSelection(summary);
   }
 
+  const selectSettingsTab = (tab: typeof activeSettingsTab, focusTab = false) => {
+    activeSettingsTab = tab;
+    for (const button of root.querySelectorAll<HTMLButtonElement>("[data-settings-tab]")) {
+      const selected = button.dataset.settingsTab === tab;
+      button.setAttribute("aria-selected", String(selected));
+      button.tabIndex = selected ? 0 : -1;
+      if (selected && focusTab) button.focus();
+    }
+    for (const panel of setupContent.querySelectorAll<HTMLElement>("[data-settings-panel]")) {
+      panel.hidden = panel.dataset.settingsPanel !== tab;
+    }
+  };
+
   const renderSetup = (info: SetupInfo) => {
     setupContent.replaceChildren();
+    const makePanel = (tab: typeof activeSettingsTab, title: string, description: string) => {
+      const panel = document.createElement("section");
+      panel.className = "settings-panel";
+      panel.id = `settings-panel-${tab}`;
+      panel.dataset.settingsPanel = tab;
+      panel.setAttribute("role", "tabpanel");
+      panel.setAttribute("aria-labelledby", `settings-tab-${tab}`);
+      const heading = document.createElement("h3");
+      heading.className = "settings-page-title";
+      heading.textContent = title;
+      const note = document.createElement("p");
+      note.className = "settings-page-description";
+      note.textContent = description;
+      panel.append(heading, note);
+      return panel;
+    };
+    const archivePanel = makePanel("archive", "Archive & Capture", "Configure browser capture and find the locally stored archive.");
+    const documentPanel = makePanel("documents", "Documents & Permissions", "Approve only folders you choose. No filesystem read occurs when you stage a path.");
+    const connectionPanel = makePanel("connections", "Connections & MCP", "Local AI clients and hosted access remain stopped until you explicitly start them.");
+    const privacyPanel = makePanel("privacy", "Privacy & Security", "Mind Place starts locked. Folder approval and remote connections require owner consent.");
     const connection = document.createElement("p");
     connection.className = "setup-intro";
     connection.textContent = `The reader stores archives locally. Register the extension once to connect manual saves from ${info.platform || "this device"}.`;
@@ -703,7 +745,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     importStatus.setAttribute("role", "status");
     importStatus.setAttribute("aria-live", "polite");
 
-    setupContent.append(connection, pathList, registered, register, divider, legacyTitle, legacyText, legacyButton, importStatus);
+    archivePanel.append(connection, pathList, registered, register, divider, legacyTitle, legacyText, legacyButton, importStatus);
     const genericTitle = document.createElement("h3");
     genericTitle.className = "setup-section-title";
     genericTitle.textContent = "Import a generic transcript";
@@ -723,9 +765,24 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     genericStatus.dataset.genericStatus = "true";
     genericStatus.setAttribute("role", "status");
     genericStatus.setAttribute("aria-live", "polite");
-    setupContent.append(document.createElement("hr"), genericTitle, genericInfo, genericFile, genericButton, genericStatus);
-    mountLocalMcpSetup(setupContent, invoke, safeClipboard);
-    mountDocumentRootSetup(setupContent, invoke);
+    archivePanel.append(document.createElement("hr"), genericTitle, genericInfo, genericFile, genericButton, genericStatus);
+    mountLocalMcpSetup(connectionPanel, invoke, safeClipboard);
+    mountDocumentRootSetup(documentPanel, invoke);
+    const boundaries = document.createElement("ul");
+    boundaries.className = "settings-boundaries";
+    for (const explanation of [
+      "Only an explicitly approved document root may be indexed. Folder labels and paths do not grant additional access.",
+      "Staging a folder does not scan it. Indexing begins only after approval and a separate Index folder action.",
+      "Lock closes owner-only retrieval and active connections. Revoke permanently removes one folder's permission and invalidates its indexed results.",
+      "Capture history is preserved as immutable raw revisions; search indexes can be rebuilt. Hosted access requires separate consent.",
+    ]) {
+      const item = document.createElement("li");
+      item.textContent = explanation;
+      boundaries.append(item);
+    }
+    privacyPanel.append(boundaries);
+    setupContent.append(archivePanel, documentPanel, connectionPanel, privacyPanel);
+    selectSettingsTab(activeSettingsTab);
   };
 
   const loadSetup = async () => {
@@ -961,10 +1018,11 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     else workspaceNav.querySelector<HTMLButtonElement>(`[data-workspace="${activeWorkspace}"]`)?.focus({ preventScroll: true });
   };
 
-  const openSetupDialog = (trigger: HTMLElement, workspace: "connections" | "documents") => {
+  const openSetupDialog = (trigger: HTMLElement, workspace: "connections" | "documents", tab: typeof activeSettingsTab) => {
     if (dialog.hasAttribute("open")) return;
     modalReturnWorkspace = activeWorkspace;
     modalReturnFocus = trigger;
+    activeSettingsTab = tab;
     activateWorkspace(workspace);
     if (typeof dialog.showModal === "function") {
       try { dialog.showModal(); } catch { dialog.setAttribute("open", ""); }
@@ -973,7 +1031,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     const focusVersion = setupVersion;
     void pendingSetup.then(() => {
       if (!alive || !dialog.hasAttribute("open") || focusVersion !== setupVersion) return;
-      if (workspace === "documents") setupContent.querySelector<HTMLInputElement>(".document-search-form input")?.focus();
+      if (tab === "documents") setupContent.querySelector<HTMLInputElement>(".document-search-form input")?.focus();
       else get<HTMLButtonElement>("[data-action='close-setup']").focus();
     });
   };
@@ -1111,8 +1169,9 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
       else if (action === "open-hive-explorer") openHiveWorkspace();
       else if (action === "open-health-inspector") openHealthWorkspace();
       else if (action === "retry-selection" && selectedId) void selectConversation(selectedId);
-      else if (action === "open-document-search") openSetupDialog(actionElement, "documents");
-      else if (action === "open-setup") openSetupDialog(actionElement, "connections"); else if (action === "close-setup") closeSetup();
+      else if (action === "open-document-search") openSetupDialog(actionElement, "documents", "documents");
+      else if (action === "open-setup") openSetupDialog(actionElement, "connections", "archive");
+      else if (action === "close-setup") closeSetup();
       else if (action === "load-setup") void loadSetup();
       else if (action === "export-markdown") void exportMarkdown();
       else if (action === "copy-markdown") void copyMarkdown();
@@ -1125,6 +1184,11 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
         void registerBrowser(action.slice("register-".length) as "chrome" | "edge", actionElement as HTMLButtonElement);
       } else if (action === "import-legacy") void importLegacy(actionElement as HTMLButtonElement);
       else if (action === "import-generic") void importGeneric(actionElement as HTMLButtonElement);
+      return;
+    }
+    const tabButton = target.closest<HTMLButtonElement>("[data-settings-tab]");
+    if (tabButton?.dataset.settingsTab) {
+      selectSettingsTab(tabButton.dataset.settingsTab as typeof activeSettingsTab, true);
       return;
     }
     const row = target.closest<HTMLElement>("[data-conversation-id]");
@@ -1161,7 +1225,21 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     }
   };
   const keyHandler = (event: KeyboardEvent) => {
-    if (event.key === "Escape" && dialog.hasAttribute("open")) { event.preventDefault(); closeSetup(); return; }
+    if (event.key === "Escape" && dialog.hasAttribute("open")) {
+      event.preventDefault();
+      closeSetup();
+      return;
+    }
+    const selectedTab = document.activeElement?.closest<HTMLElement>("[data-settings-tab]");
+    if (dialog.hasAttribute("open") && selectedTab && ["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+      event.preventDefault();
+      const tabs = [...root.querySelectorAll<HTMLButtonElement>("[data-settings-tab]")];
+      const index = tabs.indexOf(selectedTab as HTMLButtonElement);
+      const next = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1
+        : (index + (event.key === "ArrowDown" ? 1 : -1) + tabs.length) % tabs.length;
+      selectSettingsTab(tabs[next].dataset.settingsTab as typeof activeSettingsTab, true);
+      return;
+    }
     if (dialog.hasAttribute("open") || event.defaultPrevented) return;
     if (event.key === "/" && !event.ctrlKey && !event.metaKey && !event.altKey) {
       const active = document.activeElement;
