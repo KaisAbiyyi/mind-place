@@ -53,12 +53,17 @@ export function captureClaudeConversation(options = {}) {
     return value && /^[a-zA-Z0-9_-]{1,80}$/.test(value) ? value : null;
   };
   const render = root => {
+    const relativeClock = /^(?:just now|(?:a|an|\d+)\s+(?:seconds?|minutes?|hours?|days?|weeks?|months?|years?)\s+ago)$/i;
     const walk = node => {
       if (node.nodeType === 3) return node.nodeValue ?? '';
       if (node.nodeType !== 1) return '';
       const tag = node.tagName.toLowerCase();
-      if (['script','style','noscript','button','input','textarea','select','svg'].includes(tag)
+      // A separate UI clock element is not part of the assistant's answer.
+      // Do not strip these words from a real paragraph or other answer text.
+      if (['span','small'].includes(tag) && node !== root && relativeClock.test(node.textContent?.trim() ?? '')) return '';
+      if (['script','style','noscript','button','input','textarea','select','svg','time'].includes(tag)
         || node.hasAttribute('inert') || node.getAttribute('aria-hidden') === 'true'
+        || node.matches('[data-testid*="timestamp" i],[data-testid*="relative-time" i],[data-testid*="message-time" i],[data-state="tooltip"],[role="tooltip"]')
         || node.matches('[data-testid*="thinking"],[data-testid*="reasoning"],[contenteditable="true"]')) return '';
       const style = globalThis.getComputedStyle?.(node);
       if (node.hidden || style?.display === 'none' || style?.visibility === 'hidden') return '';

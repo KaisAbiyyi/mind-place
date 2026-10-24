@@ -71,3 +71,24 @@ test('Claude refuses ambiguous messages and never invents absent provider metada
     assert.equal(dom.window.eval('(' + adapter.capture.toString() + ')()').ok, false);
   } finally { dom.window.close(); }
 });
+
+test('Claude drops volatile assistant UI time, preserving unchanged capture and real edits', () => {
+  const { adapter } = resolveCaptureAdapter(source);
+  const dom = new JSDOM('<title>Clock - Claude</title><main><div data-testid="user-message">Question</div><div data-testid="assistant-message"><p>Stable answer</p><span data-testid="relative-time">10 minutes ago</span></div></main>', { url: source, runScripts: 'outside-only' });
+  dom.window.TextEncoder = TextEncoder;
+  try {
+    const read = () => dom.window.eval('(' + adapter.capture.toString() + ')()');
+    const first = read();
+    assert.equal(first.capture.messages[1].text, 'Stable answer');
+    dom.window.document.querySelector('[data-testid="relative-time"]').textContent = '2 hours ago';
+    const same = read();
+    assert.deepEqual(same.capture.messages, first.capture.messages);
+    // Unlabelled relative clock fallback observed in an actual owner Claude capture.
+    dom.window.document.querySelector('[data-testid="assistant-message"]').innerHTML = '<p>Stable answer</p><span>2 hours ago</span>';
+    assert.deepEqual(read().capture.messages, first.capture.messages);
+    dom.window.document.querySelector('[data-testid="assistant-message"]').innerHTML = '<p>Changed answer</p><span>2 hours ago</span>';
+    assert.equal(read().capture.messages[1].text, 'Changed answer');
+    dom.window.document.querySelector('[data-testid="assistant-message"]').innerHTML = '<p>Something happened 2 hours ago</p>';
+    assert.equal(read().capture.messages[1].text, 'Something happened 2 hours ago');
+  } finally { dom.window.close(); }
+});
