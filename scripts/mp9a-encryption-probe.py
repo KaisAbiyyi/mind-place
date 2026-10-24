@@ -163,7 +163,7 @@ def probe(rows: int, objects: int, bytes_per_row: int, object_bytes: int, root: 
 
     backup_payload = enc_snap.read_bytes()
     wrap_ms, portable = elapsed(lambda: seal(cipher, backup_payload, AAD_BACKUP))
-    assert portable[:16] != b"SQLite format 3\\x00"
+    assert not portable.startswith(b"SQLite format 3")
     assert_rejects(cipher, portable, AAD_BACKUP)
 
     def recover():
@@ -220,7 +220,7 @@ def probe(rows: int, objects: int, bytes_per_row: int, object_bytes: int, root: 
         "scope": "microbenchmark ONLY; not production SQLite codec or SQLCipher",
         "platform": platform.system(),
         "python": platform.python_version(),
-        "sqlite": sqlite3.sqlite_version,
+        "sqlite_version": sqlite3.sqlite_version,
         "cryptography": __import__("cryptography").__version__,
         "fixture": {"rows": rows, "row_bytes": bytes_per_row, "objects": objects, "object_bytes": object_bytes},
         "sqlite": {
