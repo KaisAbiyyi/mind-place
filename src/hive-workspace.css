@@ -1,0 +1,20 @@
+.hive-workspace { display: grid; gap: 14px; padding: 24px; max-width: 1100px; margin: auto; }
+.hive-heading { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
+.hive-heading h1 { font-size: 24px; margin: 0; }
+.hive-search-form { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
+.hive-search-form label { display: grid; gap: 5px; min-width: 120px; flex: 1; }
+.hive-search-form input { min-width: 180px; width: 100%; }
+.hive-controls { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+.hive-controls label { display: grid; gap: 5px; flex: 1 1 220px; }
+.hive-revision-label { overflow-wrap: anywhere; }
+.hive-map { width: 100%; min-height: 220px; max-height: 520px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.hive-edge { stroke: var(--muted); stroke-width: 1.4px; opacity: .65; }
+.hive-inferred { stroke-dasharray: 4 3; }
+.hive-node { fill: var(--accent-strong); stroke: var(--text); stroke-width: 1px; }
+.hive-selected { fill: var(--text); stroke: var(--accent-strong); stroke-width: 2px; }
+.hive-node-list { display: flex; gap: 6px; overflow-x: auto; padding: 6px 0; }
+.hive-node-choice { flex: 0 0 auto; max-width: 210px; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
+.hive-node-choice[aria-pressed="true"] { outline: 2px solid var(--accent-strong); }
+.hive-details { overflow-wrap: anywhere; max-height: 300px; overflow-y: auto; }
+.hive-evidence { font-size: 12px; border-left: 2px solid var(--border); padding-left: 12px; }
+@media (max-width: 600px) { .hive-workspace { padding: 12px; } .hive-map { min-height: 180px; } }
