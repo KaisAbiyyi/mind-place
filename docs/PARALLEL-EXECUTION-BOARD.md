@@ -8,6 +8,16 @@
 
 This governance work uses the independent `license-governance/release-notices` lock; it can execute in parallel with the already-claimed `MP-4F` (`document-integration/retrieval`) without taking over or delaying its unrelated technical implementation. The Notion three-column Current State is the **live** focus/claim authority; this section records priority/dependencies, not a competing snapshot. The plan does not authorize unreviewed relicensing.
 
+## Live focus-lane enforcement (24 October 2026)
+
+The Notion Current State board is the live source of task state, not the historical static phase registry below. Reconcile every AND prerequisite against Done/merged evidence at each checker pass:
+
+- **Now:** All actionable tasks with all AND predecessors Done, including **unclaimed Ready** tasks, active implementation, and **Review**. Do not hide Ready work from Now because its gate is LOCAL or OWNER; leave local acceptance NOT_RUN until actually tested. Parallel Now tasks are allowed when resource locks do not conflict.
+- **Up Next:** Only direct successors that are truly **Blocked on tasks currently in Now**. Do not park already Ready tasks or unrelated backlog in Up Next; include multiple successors when applicable.
+- **Last Done:** At most the five most recent accepted tasks. Remove older accepted tasks from this focus lane, without changing their Done status. Implementors self-review exact SHA/diff and CI; absent local/owner evidence is never a PASS.
+
+**Corrected provider gates (date-scoped snapshot):** MP-7E is Done. MP-7L1 (Claude local Windows, [#96](https://github.com/KaisAbiyyi/mind-place/issues/96)) and MP-7L2 (Gemini local Windows, [#97](https://github.com/KaisAbiyyi/mind-place/issues/97)) are independent Ready candidates in Now. Their direct owner-acceptance successors MP-7U1 ([#98](https://github.com/KaisAbiyyi/mind-place/issues/98)) and MP-7U2 ([#99](https://github.com/KaisAbiyyi/mind-place/issues/99)) are Blocked / Up Next. Recheck live Notion for subsequent changes.
+
 ## How to request work
 
 Say `ambil MP-4E` (or `ambil 4E` in Mind Place context). The agent first **checks latest GitHub task claims/PRs, the current roadmap and dependencies**, then declares `CLAIM MP-4E` with unique session ID, resource locks, branch and base SHA before editing. If claimed by another agent, do **REPORT_ONLY** or request fenced transfer; do not silently duplicate the work. Descriptive unit IDs are stable, vendor-neutral, and independent of ChatGPT/Codex/Gemini identity. GitHub comments alone are not atomic claims: serialize conflicting units without a real coordinator.
