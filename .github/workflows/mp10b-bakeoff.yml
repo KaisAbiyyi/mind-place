@@ -1,0 +1,45 @@
+name: MP-10B Synthetic Retrieval Bakeoff
+
+on:
+  pull_request:
+    paths:
+      - 'crates/index-core/tests/continuity_bakeoff.rs'
+      - 'scripts/benchmark-retrieval.mjs'
+      - 'test/retrieval-bakeoff.test.mjs'
+      - 'benchmarks/continuity/v1/**'
+      - '.github/workflows/mp10b-bakeoff.yml'
+      - 'docs/implementation-plan/phase-10b-retrieval-bakeoff.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-retrieval-bakeoff:
+    name: Isolated FTS5 + scorer + labeled proxies
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify Rust formatting
+        run: cargo fmt --all -- --check
+      - name: Validate independent scorer adapter and negative privacy cases
+        run: node --test test/retrieval-bakeoff.test.mjs
+      - name: Benchmark real Rust FTS5 using isolated synthetic data
+        run: node scripts/benchmark-retrieval.mjs --output mp10b-report.json
+        env:
+          MP10B_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Preserve exact-run measurements
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mp10b-synthetic-retrieval-report
+          path: mp10b-report.json
+          if-no-files-found: error
+          retention-days: 14
