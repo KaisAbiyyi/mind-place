@@ -234,6 +234,76 @@ fn original_dates_keep_recaptured_old_chats_below_newer_conversations() {
 }
 
 #[test]
+fn gemini_missing_original_date_uses_capture_time_for_list_order_only() {
+    let dir = tempdir().unwrap();
+    let store = ArchiveStore::open(dir.path()).unwrap();
+
+    let mut chatgpt = named_capture(
+        "12345678-1234-4123-8123-123456789abc",
+        "ChatGPT known date",
+        "2026-10-15T08:00:00Z",
+    );
+    chatgpt.conversation_updated_at = Some("2026-10-15T07:00:00Z".into());
+    store.save(chatgpt).unwrap();
+
+    let mut unknown = named_capture(
+        "12345678-1234-4123-8123-123456789abd",
+        "ChatGPT undated",
+        "2026-10-25T09:00:00Z",
+    );
+    unknown.conversation_updated_at = None;
+    store.save(unknown).unwrap();
+
+    let mut gemini = named_capture(
+        "AbCd1234efGh5678",
+        "Gemini fresh capture",
+        "2026-10-24T07:53:49Z",
+    );
+    gemini.provider = "gemini".into();
+    gemini.source_url = "https://gemini.google.com/app/AbCd1234efGh5678".into();
+    let saved = store.save(gemini).unwrap();
+
+    let mut dated_gemini = named_capture(
+        "AbCd1234efGh5679",
+        "Gemini has original date",
+        "2026-10-26T07:53:49Z",
+    );
+    dated_gemini.provider = "gemini".into();
+    dated_gemini.source_url = "https://gemini.google.com/app/AbCd1234efGh5679".into();
+    dated_gemini.messages[0].authored_at = Some("2025-01-01T02:00:00Z".into());
+    store.save(dated_gemini).unwrap();
+
+    let summaries = store.list("").unwrap();
+    assert_eq!(
+        summaries
+            .iter()
+            .map(|s| s.title.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "Gemini fresh capture",
+            "ChatGPT known date",
+            "Gemini has original date",
+            "ChatGPT undated"
+        ]
+    );
+    let gemini_summary = &summaries[0];
+    assert_eq!(gemini_summary.conversation_date, None);
+    assert_eq!(gemini_summary.date_source, None);
+    assert_eq!(gemini_summary.captured_at, "2026-10-24T07:53:49Z");
+    let reloaded = store.read(&saved.id, None).unwrap();
+    assert_eq!(reloaded.summary.conversation_date, None);
+    assert_eq!(reloaded.summary.date_source, None);
+    assert_eq!(
+        summaries[2].date_source.as_deref(),
+        Some("message-authored")
+    );
+    assert_eq!(
+        summaries[2].conversation_date.as_deref(),
+        Some("2025-01-01T02:00:00Z")
+    );
+}
+
+#[test]
 fn list_orders_parsed_instants_then_unknown_dates_by_title_and_id() {
     let dir = tempdir().unwrap();
     let store = ArchiveStore::open(dir.path()).unwrap();
