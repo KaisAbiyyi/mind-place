@@ -103,14 +103,18 @@ export function mountLibraryWorkspace(view: HTMLElement, invoke: Invoke, onClose
       if (result.summary.id !== hit.archive_id || (result.snapshot_id && result.snapshot_id !== hit.snapshot_id)) {
         throw new Error("Returned source/version differs from selected index result");
       }
-      const matching = result.capture.messages.find((message) => message.id === hit.message_id);
-      if (!matching) throw new Error("Selected source message not available in this snapshot");
+      // The index stores source titles with the reserved @title pseudo-message ID.
+      // Resolve title matches against the exact authenticated capture, not messages.
+      const titleHit = hit.kind === "title" && hit.message_id === "@title";
+      const matching = titleHit ? undefined : result.capture.messages.find((message) => message.id === hit.message_id);
+      if (!titleHit && !matching) throw new Error("Selected source message not available in this snapshot");
+      const sourceText = titleHit ? result.capture.title : matching!.text;
       preview.replaceChildren(
         make("h2", result.summary.title || "Conversation source"),
         make("p", "Archive ID: " + hit.archive_id),
-        make("p", "Snapshot: " + hit.snapshot_id + " · message " + hit.message_id),
+        make("p", "Snapshot: " + hit.snapshot_id + (titleHit ? " · title" : " · message " + hit.message_id)),
         make("p", "Provider: " + result.summary.provider + " · captured " + result.capture.captured_at),
-        make("pre", matching.text.slice(0, 1800) + (matching.text.length > 1800 ? "…" : "")),
+        make("pre", sourceText.slice(0, 1800) + (sourceText.length > 1800 ? "…" : "")),
       );
     } catch {
       if (alive && version === previewEpoch) preview.replaceChildren(make("p", "Source preview unavailable or no longer authorized. Refresh the search."));
