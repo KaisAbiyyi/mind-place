@@ -928,8 +928,8 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     get<HTMLButtonElement>("[data-action='open-setup']").focus();
   };
 
-  const openMemoryInspector = () => {
-    activateWorkspace("memories");
+  const openMemoryInspector = (workspace: "memories" | "projects" | "people" | "topics" = "memories") => {
+    activateWorkspace(workspace);
     memoryInspector?.destroy();
     ++selectionVersion;
     selectedId = null;
@@ -939,8 +939,9 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     updateToolbarSelection();
     setActionStatus("");
     renderConversationRows(search.value.trim());
-    toolbarTitle.textContent = "Memory inspector";
+    toolbarTitle.textContent = workspace === "memories" ? "Memory inspector" : workspace[0].toUpperCase() + workspace.slice(1) + " investigation";
     memoryInspector = mountMemoryInspector({
+      initialLens: workspace === "memories" ? undefined : workspace,
       view, invoke, copyText: (value) => safeClipboard.writeText(value),
       onClose: () => {
         memoryInspector?.destroy();
@@ -965,6 +966,10 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
         else { memoryInspector?.destroy(); memoryInspector = undefined; activateWorkspace("conversations"); renderState("Archive is empty", "No saved conversations are available."); }
       }
       else if (action === "open-memory-inspector") openMemoryInspector();
+      else if (action === "open-entity-workspace") {
+        const workspace = actionElement.dataset.workspace;
+        if (workspace === "projects" || workspace === "people" || workspace === "topics") openMemoryInspector(workspace);
+      }
       else if (action === "retry-selection" && selectedId) void selectConversation(selectedId);
       else if (action === "open-document-search") {
         activateWorkspace("documents");

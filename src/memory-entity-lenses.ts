@@ -6,10 +6,10 @@ export interface EntityLensHandle { destroy(): void }
 
 /** Explicit name-based investigation lenses over visible GLOBAL claims only.
  * This does not create or infer authoritative entity identity, claim scope or relationships. */
-export function mountEntityLenses(parent: HTMLElement, invoke: Invoke): EntityLensHandle {
+export function mountEntityLenses(parent: HTMLElement, invoke: Invoke, initialLens: EntityLens = "projects"): EntityLensHandle {
   const doc = parent.ownerDocument;
   let alive = true, queryEpoch = 0, detailEpoch = 0;
-  let lens: EntityLens = "projects";
+  let lens: EntityLens = initialLens;
   let claims: RankedMemory[] = [];
   const el = <K extends keyof HTMLElementTagNameMap>(name: K, text?: string) => {
     const result = doc.createElement(name);
@@ -26,7 +26,7 @@ export function mountEntityLenses(parent: HTMLElement, invoke: Invoke): EntityLe
     b.type = "button"; b.dataset.entityLens = kind; b.setAttribute("aria-pressed", String(kind === lens)); tabs.append(b);
   }
   const form = el("form"); form.className = "entity-lens-form";
-  const label = el("label", "Project name"); label.htmlFor = "entity-lens-name";
+  const label = el("label", lens === "projects" ? "Project name" : lens === "people" ? "Person name" : "Topic name"); label.htmlFor = "entity-lens-name";
   const input = el("input"); input.id = "entity-lens-name"; input.type = "search"; input.maxLength = 128; input.autocomplete = "off"; input.required = true;
   const searchButton = el("button", "Inspect mentions"); searchButton.type = "submit"; searchButton.className = "quiet-button";
   form.append(label, input, searchButton);
@@ -85,7 +85,8 @@ export function mountEntityLenses(parent: HTMLElement, invoke: Invoke): EntityLe
       const timeline = el("ol"); timeline.className = "entity-lens-timeline";
       for (const rev of [...result.history].sort((a,b) => a.recorded_at_ms - b.recorded_at_ms || a.revision - b.revision).slice(0, 100)) {
         const item = el("li");
-        const date = Number.isFinite(rev.recorded_at_ms) ? new Date(rev.recorded_at_ms).toISOString() : "Time unavailable";
+        const at = new Date(rev.recorded_at_ms);
+        const date = Number.isFinite(rev.recorded_at_ms) && Number.isFinite(at.getTime()) ? at.toISOString() : "Time unavailable";
         item.append(el("strong", "Revision " + rev.revision + " · " + rev.event_type + " · " + rev.status));
         item.append(el("p", date + (rev.reason ? " · " + rev.reason : "")));
         if (rev.superseded_by) item.append(el("p", "Successor: " + rev.superseded_by));

@@ -20,9 +20,9 @@ export const WORKSPACES: readonly WorkspaceDefinition[] = [
   { id: "memories", label: "Memories", action: "open-memory-inspector", phase: "available" },
   { id: "documents", label: "Documents", action: "open-document-search", phase: "available" },
   { id: "connections", label: "Connections", action: "open-setup", phase: "available" },
-  { id: "projects", label: "Projects", action: null, phase: "planned" },
-  { id: "people", label: "People", action: null, phase: "planned" },
-  { id: "topics", label: "Topics", action: null, phase: "planned" },
+  { id: "projects", label: "Projects", action: "open-entity-workspace", phase: "available" },
+  { id: "people", label: "People", action: "open-entity-workspace", phase: "available" },
+  { id: "topics", label: "Topics", action: "open-entity-workspace", phase: "available" },
   { id: "graph", label: "Hive graph", action: null, phase: "planned" },
   { id: "health", label: "Health", action: null, phase: "planned" },
 ] as const;

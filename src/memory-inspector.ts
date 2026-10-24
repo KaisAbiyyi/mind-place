@@ -1,5 +1,5 @@
 import type { Invoke } from "./reader.js";
-import { mountEntityLenses } from "./memory-entity-lenses.js";
+import { mountEntityLenses, type EntityLens } from "./memory-entity-lenses.js";
 
 export interface MemoryClaimView {
   id: string;
@@ -47,6 +47,7 @@ interface Options {
   invoke: Invoke;
   copyText: (value: string) => Promise<void>;
   onClose: () => void;
+  initialLens?: EntityLens;
 }
 
 const descriptions: Record<string, string> = {
@@ -77,7 +78,7 @@ function describe(disposition: string): string {
 
 /** Owner-unlocked, global-only memory inspection. Never render evidence as HTML
  * or treat a source reference as a permission to fetch private bytes. */
-export function mountMemoryInspector({ view, invoke, copyText, onClose }: Options): MemoryInspectorHandle {
+export function mountMemoryInspector({ view, invoke, copyText, onClose, initialLens }: Options): MemoryInspectorHandle {
   const document = view.ownerDocument;
   let alive = true;
   let request = 0;
@@ -124,7 +125,7 @@ export function mountMemoryInspector({ view, invoke, copyText, onClose }: Option
   layout.append(listSection, detailSection);
   shell.append(top, form, layout);
   view.append(shell);
-  const entityLenses = mountEntityLenses(shell, invoke);
+  const entityLenses = mountEntityLenses(shell, invoke, initialLens);
 
   function showCards() {
     cards.replaceChildren();
