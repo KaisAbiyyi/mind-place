@@ -4,6 +4,7 @@ import "./style.css";
 import "./knowledge-os.css";
 import "./memory-inspector.css";
 import "./hive-workspace.css";
+import "./health-workspace.css";
 import "./security.css";
 import type { Invoke } from "./reader.js";
 import { mountApplication } from "./app.js";

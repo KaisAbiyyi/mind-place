@@ -24,7 +24,7 @@ export const WORKSPACES: readonly WorkspaceDefinition[] = [
   { id: "people", label: "People", action: null, phase: "planned" },
   { id: "topics", label: "Topics", action: null, phase: "planned" },
   { id: "graph", label: "Hive graph", action: "open-hive-explorer", phase: "available" },
-  { id: "health", label: "Health", action: null, phase: "planned" },
+  { id: "health", label: "Health", action: "open-health-inspector", phase: "available" },
 ] as const;
 
 export function createWorkspaceNavigation(document: Document): HTMLElement {
