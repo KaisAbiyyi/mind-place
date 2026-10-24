@@ -66,7 +66,8 @@
 .knowledge-list-spacer { height: 0; pointer-events: none; }
 /* No animation or forced viewport scroll on virtual updates. */
 @media (max-width: 700px) {
-  .library { grid-template-rows: auto auto auto auto auto auto minmax(48px, 1fr) auto; }
+  /* The search label is hidden at this breakpoint, leaving seven visible tracks. */
+  .library { grid-template-rows: auto auto auto auto auto minmax(48px, 1fr) auto; }
   .knowledge-os-nav {
     display: flex;
     flex-wrap: nowrap;
