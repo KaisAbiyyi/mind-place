@@ -866,6 +866,10 @@ Planned workload: **C6 / L2 / U2**.
 - all primary library/search/memory/health flows;
 - Windows/WebView2 behavior and startup/restart.
 
+**Owner UX scope decision (2026-10-24):** The Phase 8 navigation shell will be replaced later. Current real Windows 150%/175% sidebar compression is known temporary visual debt ([#115](https://github.com/KaisAbiyyi/mind-place/issues/115)); the owner explicitly waives this cosmetic/layout acceptance item as a blocker for *functional* MP-8L1 progress. Preserve the FAIL evidence without turning the whole project into a UI polish gate. Keep required packaged/native security, real archive search/source, startup/persistence, installation and data-integrity qualification truthful. Phase 9, independent backend and performance tasks retain their own eligibility independent of optional visual CSS patch [#116](https://github.com/KaisAbiyyi/mind-place/pull/116).
+
+**Backlog: MP-UXR-01 navigation architecture research** ([#117](https://github.com/KaisAbiyyi/mind-place/issues/117)). Explore a permanent icon-only activity rail with independently expandable contextual child sidebar per workspace. Assess keyboard/focus, compact windows, accessibility, interaction hierarchy and measured memory/latency. Alternatives and prototypes require owner decision before implementation; no prior Cloud or Local functionality is blocked by this research.
+
 **Local 8L2 — real-scale UI performance qualification**
 
 - representative large library and graph;
