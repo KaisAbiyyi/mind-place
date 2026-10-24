@@ -48,7 +48,7 @@ export function createCaptureWorker(chromeApi, { saveTimeoutMs = 15_000, capture
           const detail = chromeApi.runtime.lastError?.message;
           reject(new Error(submitted
             ? 'The save acknowledgement was lost. The conversation may have been saved; check the archive before retrying.'
-            : `Mind Place native host is unavailable. Open Manual capture setup and register Chrome/Edge.${detail ? ` ${detail.slice(0, 160)}` : ''}`));
+            : `Mind Place native host is unavailable. Open Settings → Archive & Capture and register Chrome, Edge or Brave.${detail ? ` ${detail.slice(0, 160)}` : ''}`));
         };
         port.onMessage.addListener(onMessage);
         port.onDisconnect.addListener(onDisconnect);

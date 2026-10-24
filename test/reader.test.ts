@@ -453,10 +453,42 @@ test("Settings contains only the selected panel at accessible tab focus", async 
   assert.ok(root.querySelector("#settings-panel-archive [data-generic-file='true']"));
   assert.ok(root.querySelector("#settings-panel-archive [data-action='import-generic']"));
   assert.ok(root.querySelector("#settings-panel-archive [data-action='register-chrome']"));
+  const brave = root.querySelector<HTMLButtonElement>("#settings-panel-archive [data-action='register-brave']");
+  assert.equal(brave?.textContent, "Register Brave");
   assert.ok(root.querySelector("#settings-panel-connections .setup-mcp"));
   const tab = root.querySelector<HTMLButtonElement>("#settings-tab-archive")!;
   tab.focus();
   tab.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "End", bubbles: true }));
   assert.deepEqual(panels.filter(p => !p.hidden).map(p => p.dataset.settingsPanel), ["privacy"]);
   assert.match(root.querySelector<HTMLElement>("#settings-panel-privacy")!.textContent ?? "", /Lock closes owner-only retrieval/);
+});
+
+test("Register Brave is an explicit Settings action and reports native host registration", async () => {
+  let registeredBrowser: string | null = null;
+  const invoke: Invoke = async <T>(command: string, args?: Record<string, unknown>) => {
+    if (command === "list_conversations" || command === "list_document_roots" || command === "list_local_mcp_clients") return [] as T;
+    if (command === "get_local_mcp_status") return { running: false, endpoint: "" } as T;
+    if (command === "get_hosted_tunnel_status") return { running: false } as T;
+    if (command === "get_setup" || command === "register_extension") {
+      if (command === "register_extension") registeredBrowser = String(args?.browser);
+      return {
+        archive_path: "D:\\archive", extension_path: "D:\\extension", host_path: "D:\\host",
+        extension_id: "test-extension", native_host_name: "com.mindplace.capture",
+        registered_browsers: registeredBrowser ? [registeredBrowser] : [],
+        platform: "windows", legacy_available: false,
+      } as T;
+    }
+    throw Error(`Unexpected command ${command}`);
+  };
+  const { root, app } = createReader(invoke);
+  await app.ready;
+  root.querySelector<HTMLButtonElement>("[data-action='open-setup']")!.click();
+  await delay(0);
+  await delay(0);
+  assert.equal(registeredBrowser, null, "Opening Settings must not register Brave automatically");
+  root.querySelector<HTMLButtonElement>("[data-action='register-brave']")!.click();
+  await delay(0);
+  assert.equal(registeredBrowser, "brave");
+  assert.match(root.querySelector<HTMLElement>(".registered-status")?.textContent ?? "", /Registered in Brave/);
+  assert.equal(root.querySelector<HTMLButtonElement>("[data-action='register-chrome']")?.disabled, false);
 });

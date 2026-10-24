@@ -18,9 +18,9 @@ The popup and the conversation page show progress with **Stop & save** and **Can
 
 ## Load for development
 
-1. Open `chrome://extensions` (or `edge://extensions`) and enable Developer mode.
+1. Open `chrome://extensions`, `edge://extensions` or `brave://extensions` and enable Developer mode.
 2. Choose **Load unpacked** and select this `extension/` directory.
-3. Open Mind Place → Settings → Manual capture setup and register this extension in Chrome or Edge.
+3. Open Mind Place → Settings → Archive & Capture and select **Register Chrome**, **Register Edge**, or **Register Brave** to match the browser. Each registration uses an independent per-user native messaging host entry while preserving the same exact extension identity and local archive.
 4. Open a regular ChatGPT conversation, click the Mind Place extension button, and choose **Save this conversation**.
 
 After updating the unpacked extension, choose **Reload** in the browser's extension manager. The extension ID and native host name are unchanged. Chromium 105+ is required for the native port's worker lifetime behavior.

@@ -724,7 +724,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
 
     const register = document.createElement("div");
     register.className = "register-actions";
-    for (const browser of ["chrome", "edge"] as const) {
+    for (const browser of ["chrome", "edge", "brave"] as const) {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "quiet-button";
@@ -918,7 +918,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     }
   };
 
-  const registerBrowser = async (browser: "chrome" | "edge", button: HTMLButtonElement) => {
+  const registerBrowser = async (browser: "chrome" | "edge" | "brave", button: HTMLButtonElement) => {
     button.disabled = true;
     setActionStatus(`Registering ${titleCase(browser)}…`);
     try {
@@ -1188,8 +1188,8 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
         const messageId = actionElement.dataset.messageId;
         const message = loadedConversation?.capture.messages.find((item) => item.id === messageId);
         void copyAnswer(message);
-      } else if (action === "register-chrome" || action === "register-edge") {
-        void registerBrowser(action.slice("register-".length) as "chrome" | "edge", actionElement as HTMLButtonElement);
+      } else if (action === "register-chrome" || action === "register-edge" || action === "register-brave") {
+        void registerBrowser(action.slice("register-".length) as "chrome" | "edge" | "brave", actionElement as HTMLButtonElement);
       } else if (action === "import-legacy") void importLegacy(actionElement as HTMLButtonElement);
       else if (action === "import-generic") void importGeneric(actionElement as HTMLButtonElement);
       return;
