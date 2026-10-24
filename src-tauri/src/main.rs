@@ -13,9 +13,8 @@ use mind_place_archive::{
 use mind_place_index::documents::{DocumentHit, DocumentIndex, DocumentIndexReport};
 use mind_place_index::{
     ContextInspection, ContextPack, ContextRequest, FetchInspection, FetchRequest, FetchResponse,
-    GraphDirection, GraphKind, GraphNeighborhoodRequest, GraphNodeRef,
-    IndexError, IndexStats, IndexStore, RetrievalRequest, RetrievalResponse, SearchHit,
-    SearchInspection,
+    GraphDirection, GraphKind, GraphNeighborhoodRequest, GraphNodeRef, IndexError, IndexStats,
+    IndexStore, RetrievalRequest, RetrievalResponse, SearchHit, SearchInspection,
 };
 use mind_place_integration::transport::LocalMcpServer;
 use mind_place_security::{SecurityError, SecurityGate, SecurityStatus, UnlockLease};
@@ -249,35 +248,49 @@ async fn read_archive_hive(
             max_nodes: 120,
             max_edges: 240,
         };
-        let graph = IndexStore::open(index_path)?.graph_neighbors_with_check(
-            &query,
-            || security.validate_lease(lease).map_err(|_| IndexError::Revoked),
-        )?;
-        let nodes = graph.nodes.iter().map(|node| serde_json::json!({
-            "id": node.id,
-            "kind": node.kind.as_str(),
-            "canonical_key": node.canonical_key,
-            "label": node.label,
-            "source_ref": node.source_ref,
-            "depth": node.depth,
-        })).collect::<Vec<_>>();
-        let edges = graph.edges.iter().map(|edge| serde_json::json!({
-            "id": edge.id,
-            "from_node": edge.from_node,
-            "to_node": edge.to_node,
-            "relation": edge.relation.as_str(),
-            "origin": edge.origin.as_str(),
-            "confidence_bps": edge.origin.confidence_bps(),
-            "source_ref": edge.source_ref,
-            "source_revision": edge.source_revision,
-            "locator": edge.locator,
-        })).collect::<Vec<_>>();
+        let graph = IndexStore::open(index_path)?.graph_neighbors_with_check(&query, || {
+            security
+                .validate_lease(lease)
+                .map_err(|_| IndexError::Revoked)
+        })?;
+        let nodes = graph
+            .nodes
+            .iter()
+            .map(|node| {
+                serde_json::json!({
+                    "id": node.id,
+                    "kind": node.kind.as_str(),
+                    "canonical_key": node.canonical_key,
+                    "label": node.label,
+                    "source_ref": node.source_ref,
+                    "depth": node.depth,
+                })
+            })
+            .collect::<Vec<_>>();
+        let edges = graph
+            .edges
+            .iter()
+            .map(|edge| {
+                serde_json::json!({
+                    "id": edge.id,
+                    "from_node": edge.from_node,
+                    "to_node": edge.to_node,
+                    "relation": edge.relation.as_str(),
+                    "origin": edge.origin.as_str(),
+                    "confidence_bps": edge.origin.confidence_bps(),
+                    "source_ref": edge.source_ref,
+                    "source_revision": edge.source_revision,
+                    "locator": edge.locator,
+                })
+            })
+            .collect::<Vec<_>>();
         Ok(serde_json::json!({
             "nodes": nodes,
             "edges": edges,
             "truncated": graph.truncated,
         }))
-    }).await
+    })
+    .await
 }
 
 #[tauri::command]
