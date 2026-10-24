@@ -49,6 +49,9 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Visual Settings scroll and footer regression
+        run: node scripts/verify-settings-render.mjs
+
       - name: Qualify bundled SQLite runtime
         run: cargo test -p mind-place-state bundled_sqlite_version_is_supported -- --nocapture
 
