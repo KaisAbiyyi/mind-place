@@ -1,0 +1,87 @@
+/* MP-8A reusable Knowledge OS shell tokens and density. */
+:root {
+  --ko-space-1: 4px;
+  --ko-space-2: 8px;
+  --ko-space-3: 12px;
+  --ko-space-4: 16px;
+  --ko-space-6: 24px;
+  --ko-focus: var(--accent-strong);
+  --ko-row-height: 76px;
+  --ko-nav-active: #2a2926;
+  --ko-nav-border: #5b4c39;
+  --ko-font-xs: 11px;
+  --ko-font-sm: 12px;
+  --ko-font-md: 14px;
+  --ko-font-lg: 19px;
+}
+
+/* The new navigation adds one explicit grid row. Do not let the library list
+   fall into an implicit auto track and overflow its scroll container. */
+.library { grid-template-rows: auto auto auto auto auto auto minmax(0, 1fr) auto; }
+.knowledge-os-nav {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--ko-space-1);
+  margin: -18px 2px 20px;
+}
+.knowledge-os-nav-item {
+  min-width: 0;
+  min-height: 33px;
+  padding: 0 var(--ko-space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--muted);
+  font: 550 var(--ko-font-sm)/1.3 inherit;
+  text-align: left;
+}
+.knowledge-os-nav-item:hover { background: var(--surface-hover); color: var(--text); }
+.knowledge-os-nav-item[aria-current="page"] {
+  border-color: var(--ko-nav-border);
+  background: var(--ko-nav-active);
+  color: var(--accent-strong);
+}
+.knowledge-os-nav-item:focus-visible {
+  outline: 2px solid var(--ko-focus);
+  outline-offset: 2px;
+}
+.conversation-list.is-virtualized {
+  display: block;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overflow-anchor: none;
+}
+.conversation-list.is-virtualized .conversation-row {
+  height: var(--ko-row-height);
+  min-height: 0;
+  margin: 0;
+  padding: 8px 10px;
+  gap: 2px;
+  overflow: hidden;
+}
+.knowledge-list-spacer { height: 0; pointer-events: none; }
+/* No animation or forced viewport scroll on virtual updates. */
+@media (max-width: 700px) {
+  .library { grid-template-rows: auto auto auto auto auto auto minmax(48px, 1fr) auto; }
+  .knowledge-os-nav {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 4px;
+    margin: 0 0 5px;
+    scrollbar-width: thin;
+  }
+  .knowledge-os-nav-item {
+    flex: 0 0 auto;
+    min-height: 28px;
+    padding-inline: 9px;
+    font-size: 11px;
+    text-align: center;
+  }
+  .conversation-list.is-virtualized .conversation-row { width: 100%; }
+  .conversation-list.is-virtualized { align-items: initial; }
+}
+@media (forced-colors: active) {
+  .knowledge-os-nav-item[aria-current="page"] { border: 2px solid Highlight; color: Highlight; }
+}
