@@ -1,4 +1,5 @@
 import createDOMPurify from "dompurify";
+import { CONVERSATION_ROW_HEIGHT, VIRTUAL_LIST_THRESHOLD, createWorkspaceNavigation, getVirtualWindow, setActiveWorkspace, type WorkspaceId } from "./knowledge-os.js";
 import { mountLocalMcpSetup } from "./mcp-setup.js";
 import { mountDocumentRootSetup } from "./document-roots.js";
 import { mountMemoryInspector, type MemoryInspectorHandle } from "./memory-inspector.js";
@@ -182,6 +183,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   };
 
   root.innerHTML = STATIC_APP_SHELL;
+  root.querySelector(".brand-lockup")?.after(createWorkspaceNavigation(document));
   let summaries: ConversationSummary[] = [];
   let selectedId: string | null = null;
   let selectionVersion = 0;
@@ -215,6 +217,8 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   };
 
   const list = get<HTMLDivElement>("#conversation-list");
+  const workspaceNav = get<HTMLElement>("#knowledge-os-nav");
+  const activateWorkspace = (id: WorkspaceId) => setActiveWorkspace(workspaceNav, id);
   const view = get<HTMLElement>("#reader-view");
   const search = get<HTMLInputElement>("#archive-search");
   const dialog = get<HTMLDialogElement>("#setup-dialog");
@@ -232,6 +236,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   const setViewBusy = (busy: boolean) => view.setAttribute("aria-busy", String(busy));
 
   const renderListMessage = (text: string, error = false) => {
+    list.classList.remove("is-virtualized");
     list.replaceChildren();
     const paragraph = document.createElement("p");
     paragraph.className = error ? "list-note list-error" : "list-note";
@@ -285,15 +290,32 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   };
 
   const renderConversationRows = (query: string) => {
-    list.replaceChildren();
-    for (const item of summaries) {
+    const focusId = (document.activeElement as HTMLElement | null)?.dataset?.conversationId;
+    const virtual = summaries.length > VIRTUAL_LIST_THRESHOLD;
+    const previousScroll = list.scrollTop;
+    const range = virtual
+      ? getVirtualWindow(summaries.length, previousScroll, list.clientHeight, CONVERSATION_ROW_HEIGHT)
+      : { start: 0, end: summaries.length, beforePx: 0, afterPx: 0 };
+    const fragment = document.createDocumentFragment();
+    const spacer = (height: number) => {
+      const element = document.createElement("div");
+      element.className = "knowledge-list-spacer";
+      element.setAttribute("aria-hidden", "true");
+      element.style.height = `${height}px`;
+      return element;
+    };
+    if (virtual && range.beforePx) fragment.append(spacer(range.beforePx));
+    for (let i = range.start; i < range.end; i++) {
+      const item = summaries[i];
       const row = document.createElement("button");
       row.type = "button";
       row.className = "conversation-row";
       row.dataset.conversationId = item.id;
+      row.dataset.rowIndex = String(i);
       row.setAttribute("role", "listitem");
+      row.setAttribute("aria-setsize", String(summaries.length));
+      row.setAttribute("aria-posinset", String(i + 1));
       row.setAttribute("aria-pressed", String(item.id === selectedId));
-
       const title = document.createElement("span");
       title.className = "conversation-title";
       title.textContent = item.title || "Untitled conversation";
@@ -307,7 +329,20 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
         marker.textContent = "Partial capture";
         row.append(marker);
       }
-      list.append(row);
+      fragment.append(row);
+    }
+    if (virtual && range.afterPx) fragment.append(spacer(range.afterPx));
+    list.classList.toggle("is-virtualized", virtual);
+    list.replaceChildren(fragment);
+    if (virtual && list.scrollTop !== previousScroll) list.scrollTop = previousScroll;
+    // Replacing the visible window must not strand keyboard focus when its row stays mounted.
+    if (focusId && document.activeElement === document.body) {
+      for (const row of list.querySelectorAll<HTMLButtonElement>("[data-conversation-id]")) {
+        if (row.dataset.conversationId === focusId) {
+          row.focus({ preventScroll: true });
+          break;
+        }
+      }
     }
 
     if (summaries.length === 0) {
@@ -325,6 +360,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     memoryInspector?.destroy();
     memoryInspector = undefined;
     selectedId = id;
+    activateWorkspace("conversations");
     loadedConversation = null;
     loadedSnapshots = [];
     selectedSnapshotId = null;
@@ -882,6 +918,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   };
 
   const closeSetup = () => {
+    activateWorkspace(selectedId ? "conversations" : memoryInspector ? "memories" : "conversations");
     setupContent.querySelector("[data-mcp-secret]")?.replaceChildren();
     if (typeof dialog.close === "function") {
       try { dialog.close(); } catch { dialog.removeAttribute("open"); }
@@ -892,6 +929,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   };
 
   const openMemoryInspector = () => {
+    activateWorkspace("memories");
     memoryInspector?.destroy();
     ++selectionVersion;
     selectedId = null;
@@ -922,9 +960,14 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
       const action = actionElement.dataset.action;
       if (action === "lock") onLock?.();
       else if (action === "refresh") void loadConversations(true);
+      else if (action === "workspace-conversations") {
+        if (summaries.length) void selectConversation(selectedId ?? summaries[0].id);
+        else { memoryInspector?.destroy(); memoryInspector = undefined; activateWorkspace("conversations"); renderState("Archive is empty", "No saved conversations are available."); }
+      }
       else if (action === "open-memory-inspector") openMemoryInspector();
       else if (action === "retry-selection" && selectedId) void selectConversation(selectedId);
       else if (action === "open-document-search") {
+        activateWorkspace("documents");
         if (typeof dialog.showModal === "function") {
           try { dialog.showModal(); } catch { dialog.setAttribute("open", ""); }
         } else dialog.setAttribute("open", "");
@@ -933,6 +976,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
         });
       }
       else if (action === "open-setup") {
+        activateWorkspace("connections");
         if (typeof dialog.showModal === "function") {
           try { dialog.showModal(); } catch { dialog.setAttribute("open", ""); }
         } else dialog.setAttribute("open", "");
@@ -956,7 +1000,29 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     if (row?.dataset.conversationId) void selectConversation(row.dataset.conversationId);
   };
 
-  const searchHandler = () => { void loadConversations(); };
+  const searchHandler = () => { list.scrollTop = 0; void loadConversations(); };
+  const listScrollHandler = () => {
+    if (alive && summaries.length > VIRTUAL_LIST_THRESHOLD) renderConversationRows(search.value.trim());
+  };
+  const listKeyHandler = (event: KeyboardEvent) => {
+    if (!alive || !["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+    const row = (event.target as Element).closest?.<HTMLButtonElement>("[data-row-index]");
+    if (!row || !summaries.length) return;
+    const index = Number(row.dataset.rowIndex);
+    if (!Number.isSafeInteger(index)) return;
+    const next = event.key === "Home" ? 0 : event.key === "End" ? summaries.length - 1
+      : Math.max(0, Math.min(summaries.length - 1, index + (event.key === "ArrowDown" ? 1 : -1)));
+    event.preventDefault();
+    if (next === index) return;
+    if (summaries.length > VIRTUAL_LIST_THRESHOLD) {
+      const top = next * CONVERSATION_ROW_HEIGHT;
+      const bottom = top + CONVERSATION_ROW_HEIGHT;
+      if (top < list.scrollTop) list.scrollTop = top;
+      else if (bottom > list.scrollTop + list.clientHeight) list.scrollTop = bottom - Math.max(list.clientHeight, CONVERSATION_ROW_HEIGHT);
+    }
+    renderConversationRows(search.value.trim());
+    list.querySelector<HTMLButtonElement>(`[data-row-index="${next}"]`)?.focus({ preventScroll: true });
+  };
   const changeHandler = (event: Event) => {
     const target = event.target;
     if (target instanceof document.defaultView!.HTMLSelectElement && target.dataset.action === "select-snapshot") {
@@ -976,6 +1042,8 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   root.addEventListener("click", clickHandler);
   root.addEventListener("change", changeHandler);
   search.addEventListener("input", searchHandler);
+  list.addEventListener("scroll", listScrollHandler);
+  list.addEventListener("keydown", listKeyHandler);
   root.addEventListener("keydown", keyHandler);
 
   const ready = loadConversations();
@@ -1003,6 +1071,8 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
       root.removeEventListener("click", clickHandler);
       root.removeEventListener("change", changeHandler);
       search.removeEventListener("input", searchHandler);
+      list.removeEventListener("scroll", listScrollHandler);
+      list.removeEventListener("keydown", listKeyHandler);
       root.removeEventListener("keydown", keyHandler);
       root.replaceChildren();
     },
