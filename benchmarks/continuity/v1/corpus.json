@@ -1,0 +1,319 @@
+{
+  "schema": "mind-place-continuity-corpus/v1",
+  "dataset": "mp10a-synthetic-v1",
+  "license": "synthetic-only",
+  "sources": [
+    {
+      "id": "e01",
+      "provider": "chatgpt",
+      "kind": "conversation",
+      "project": "aster",
+      "observed_at": "2026-01-05",
+      "revision": "r1",
+      "scope": "public",
+      "claims": [
+        "initial_lexical_plan"
+      ],
+      "text": "Aster search baseline: plan to evaluate SQLite FTS5 lexical retrieval before optional vectors."
+    },
+    {
+      "id": "e02",
+      "provider": "claude",
+      "kind": "conversation",
+      "project": "aster",
+      "observed_at": "2026-01-02",
+      "revision": "r1",
+      "scope": "public",
+      "claims": [
+        "old_vector_proposal"
+      ],
+      "text": "Earlier Aster brainstorming proposed mandatory vector embeddings; proposal was not final."
+    },
+    {
+      "id": "e03",
+      "provider": "chatgpt",
+      "kind": "conversation",
+      "project": "aster",
+      "observed_at": "2026-01-12",
+      "revision": "r2",
+      "scope": "public",
+      "claims": [
+        "final_lexical_decision"
+      ],
+      "text": "Final Aster owner decision: use FTS5 plus structured and graph retrieval. Embeddings are optional and benchmark-gated."
+    },
+    {
+      "id": "e04",
+      "provider": "generic",
+      "kind": "document",
+      "project": "aster",
+      "observed_at": "2026-01-13",
+      "revision": "v2",
+      "scope": "public",
+      "claims": [
+        "synthetic_latency_budget"
+      ],
+      "text": "Aster synthetic benchmark budget for the ranked search median is 50 milliseconds. This is not a user hardware SLA."
+    },
+    {
+      "id": "e05",
+      "provider": "claude",
+      "kind": "conversation",
+      "project": "aster",
+      "observed_at": "2026-01-15",
+      "revision": "r1",
+      "scope": "public",
+      "claims": [
+        "windows_target"
+      ],
+      "text": "Aster first packaged release targets Windows x64; other platforms are not qualified."
+    },
+    {
+      "id": "e06",
+      "provider": "gemini",
+      "kind": "conversation",
+      "project": "aster",
+      "observed_at": "2026-01-16",
+      "revision": "r1",
+      "scope": "public",
+      "claims": [
+        "device_gate"
+      ],
+      "text": "Aster Windows hardware and signed-in provider browser qualification still require real-device owner evidence."
+    },
+    {
+      "id": "e07",
+      "provider": "generic",
+      "kind": "document",
+      "project": "aster",
+      "observed_at": "2026-01-17",
+      "revision": "v1",
+      "scope": "public",
+      "claims": [
+        "approved_roots"
+      ],
+      "text": "Aster folder search reads only owner-approved roots. Project membership never expands filesystem permissions."
+    },
+    {
+      "id": "e08",
+      "provider": "chatgpt",
+      "kind": "conversation",
+      "project": "aster",
+      "observed_at": "2026-01-18",
+      "revision": "r3",
+      "scope": "public",
+      "claims": [
+        "root_revoked"
+      ],
+      "text": "Owner revoked the former Aster drafts folder root. Old index entries must not be disclosed after revocation."
+    },
+    {
+      "id": "e09",
+      "provider": "generic",
+      "kind": "document",
+      "project": "aster",
+      "observed_at": "2026-01-19",
+      "revision": "v1",
+      "scope": "public",
+      "claims": [
+        "parser_bounds"
+      ],
+      "text": "Aster parser enforces bounded input sizes and rejects malformed documents without accessing unrelated directories."
+    },
+    {
+      "id": "e10",
+      "provider": "generic",
+      "kind": "document",
+      "project": "beryl",
+      "observed_at": "2026-01-20",
+      "revision": "v1",
+      "scope": "public",
+      "claims": [
+        "beryl_memory_budget"
+      ],
+      "text": "Beryl hardware memory budget is 8 GiB. This statement does not apply to Aster."
+    },
+    {
+      "id": "e11",
+      "provider": "claude",
+      "kind": "conversation",
+      "project": "beryl",
+      "observed_at": "2026-01-21",
+      "revision": "r1",
+      "scope": "public",
+      "claims": [
+        "beryl_postgres"
+      ],
+      "text": "Beryl uses PostgreSQL as its durable state store."
+    },
+    {
+      "id": "e12",
+      "provider": "chatgpt",
+      "kind": "conversation",
+      "project": "aster",
+      "observed_at": "2026-01-22",
+      "revision": "r4",
+      "scope": "public",
+      "claims": [
+        "aster_sqlite"
+      ],
+      "text": "Aster uses state.sqlite3 for authority and rebuildable index.sqlite3 for search."
+    },
+    {
+      "id": "e13",
+      "provider": "gemini",
+      "kind": "conversation",
+      "project": "aster",
+      "observed_at": "2026-01-23",
+      "revision": "r1",
+      "scope": "public",
+      "claims": [
+        "private_exclusion"
+      ],
+      "text": "Aster excludes visibly private provider sessions from capture before native submission."
+    },
+    {
+      "id": "e14",
+      "provider": "generic",
+      "kind": "document",
+      "project": "aster",
+      "observed_at": "2026-01-24",
+      "revision": "v1",
+      "scope": "public",
+      "claims": [
+        "graph_depends_on_permission"
+      ],
+      "text": "Aster document graph edges may link project to source, but no graph edge grants new root authorization."
+    },
+    {
+      "id": "e15",
+      "provider": "chatgpt",
+      "kind": "conversation",
+      "project": "aster",
+      "observed_at": "2026-01-25",
+      "revision": "r5",
+      "scope": "public",
+      "claims": [
+        "branch_provenance"
+      ],
+      "text": "Aster captures a regeneration as a distinguishable branch or revision when the provider exposes it."
+    },
+    {
+      "id": "e16",
+      "provider": "generic",
+      "kind": "document",
+      "project": "aster",
+      "observed_at": "2026-01-07",
+      "revision": "v0",
+      "scope": "public",
+      "claims": [
+        "old_macos_claim"
+      ],
+      "text": "Old Aster marketing draft mistakenly claimed macOS production release support; superseded by the Windows-only qualification."
+    },
+    {
+      "id": "e17",
+      "provider": "generic",
+      "kind": "document",
+      "project": "aster",
+      "observed_at": "2026-01-26",
+      "revision": "v2",
+      "scope": "public",
+      "claims": [
+        "macos_not_qualified"
+      ],
+      "text": "Aster release notes: macOS and Linux packages have not completed installed-device qualification."
+    },
+    {
+      "id": "e18",
+      "provider": "chatgpt",
+      "kind": "conversation",
+      "project": "aster",
+      "observed_at": "2026-01-27",
+      "revision": "r6",
+      "scope": "public",
+      "claims": [
+        "no_hidden_reasoning"
+      ],
+      "text": "Aster capture must not fabricate private hidden reasoning or unseen message history."
+    },
+    {
+      "id": "e19",
+      "provider": "generic",
+      "kind": "document",
+      "project": "aster",
+      "observed_at": "2026-01-28",
+      "revision": "v1",
+      "scope": "public",
+      "claims": [
+        "raw_immutable"
+      ],
+      "text": "Aster raw captured revisions remain immutable. Indexes and summaries may be rebuilt independently."
+    },
+    {
+      "id": "e20",
+      "provider": "generic",
+      "kind": "document",
+      "project": "aster",
+      "observed_at": "2026-01-29",
+      "revision": "v1",
+      "scope": "restricted",
+      "claims": [
+        "restricted_note"
+      ],
+      "text": "Restricted synthetic sample: this entry has no content authorized for benchmark answers."
+    },
+    {
+      "id": "e21",
+      "provider": "claude",
+      "kind": "conversation",
+      "project": "beryl",
+      "observed_at": "2026-01-30",
+      "revision": "r2",
+      "scope": "public",
+      "claims": [
+        "beryl_vectors"
+      ],
+      "text": "Beryl uses a mandatory vector search path. This is a separate project, not Aster."
+    },
+    {
+      "id": "e22",
+      "provider": "generic",
+      "kind": "document",
+      "project": "aster",
+      "observed_at": "2026-02-01",
+      "revision": "v1",
+      "scope": "public",
+      "claims": [
+        "explicit_release_approval"
+      ],
+      "text": "Aster release requires an explicit human approval after cloud and Windows qualification."
+    },
+    {
+      "id": "e23",
+      "provider": "gemini",
+      "kind": "conversation",
+      "project": "aster",
+      "observed_at": "2026-02-02",
+      "revision": "r1",
+      "scope": "public",
+      "claims": [
+        "hosted_gate"
+      ],
+      "text": "Hosted provider session continuity is not proved by synthetic cloud CI."
+    },
+    {
+      "id": "e24",
+      "provider": "generic",
+      "kind": "document",
+      "project": "aster",
+      "observed_at": "2026-02-03",
+      "revision": "v1",
+      "scope": "public",
+      "claims": [
+        "context_source_refs"
+      ],
+      "text": "Aster context packets include stable source/revision/message references and must never use temporary FTS rowids as authority."
+    }
+  ]
+}
