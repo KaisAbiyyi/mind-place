@@ -16,7 +16,7 @@ function fixture(invoke: Invoke) {
  return {view,handle,search};
 }
 test("named entity lens retains hypothesis semantics and renders timeline/source pointers as inert text",async()=>{
- const invoke:Invoke=async <T>(command,args)=>{
+ const invoke:Invoke=async <T>(command: string, args?: Record<string, unknown>)=>{
   if(command==="list_memory_inspection") { assert.deepEqual(args,{query:"P"}); return [claim] as T; }
   if(command==="get_memory_inspection") { assert.deepEqual(args,{claimId:"claim1"});return {ranked:claim,history:[{revision:1,recorded_at_ms:1000,event_type:"created",status:"active",reason:null,superseded_by:null,evidence:[{source_ref:"raw-1",evidence_kind:"message"}]}],relations:[]} as T; }
   throw Error(command);
