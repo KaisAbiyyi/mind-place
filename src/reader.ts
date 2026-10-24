@@ -969,8 +969,10 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     if (typeof dialog.showModal === "function") {
       try { dialog.showModal(); } catch { dialog.setAttribute("open", ""); }
     } else dialog.setAttribute("open", "");
-    void loadSetup().then(() => {
-      if (!alive || !dialog.hasAttribute("open")) return;
+    const pendingSetup = loadSetup();
+    const focusVersion = setupVersion;
+    void pendingSetup.then(() => {
+      if (!alive || !dialog.hasAttribute("open") || focusVersion !== setupVersion) return;
       if (workspace === "documents") setupContent.querySelector<HTMLInputElement>(".document-search-form input")?.focus();
       else get<HTMLButtonElement>("[data-action='close-setup']").focus();
     });
