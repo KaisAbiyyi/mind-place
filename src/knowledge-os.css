@@ -32,7 +32,10 @@
   border-radius: var(--radius);
   background: transparent;
   color: var(--muted);
-  font: 550 var(--ko-font-sm)/1.3 inherit;
+  font-family: inherit;
+  font-size: var(--ko-font-sm);
+  font-weight: 550;
+  line-height: 1.3;
   text-align: left;
 }
 .knowledge-os-nav-item:hover { background: var(--surface-hover); color: var(--text); }
@@ -63,7 +66,7 @@
 .knowledge-list-spacer { height: 0; pointer-events: none; }
 /* No animation or forced viewport scroll on virtual updates. */
 @media (max-width: 700px) {
-  .library { grid-template-rows: auto auto auto auto auto auto minmax(48px, 1fr) auto; }
+  .library { grid-template-rows: auto auto auto auto auto minmax(48px, 1fr) auto; }
   .knowledge-os-nav {
     display: flex;
     flex-wrap: nowrap;
