@@ -1,5 +1,5 @@
 import createDOMPurify from "dompurify";
-import { CONVERSATION_ROW_HEIGHT, VIRTUAL_LIST_THRESHOLD, createWorkspaceNavigation, getVirtualWindow, setActiveWorkspace, type WorkspaceId } from "./knowledge-os.js";
+import { CONVERSATION_ROW_HEIGHT, VIRTUAL_LIST_THRESHOLD, WORKSPACES, bindWorkspaceNavigationKeyboard, createWorkspaceNavigation, getVirtualWindow, setActiveWorkspace, type WorkspaceId } from "./knowledge-os.js";
 import { mountLocalMcpSetup } from "./mcp-setup.js";
 import { mountDocumentRootSetup } from "./document-roots.js";
 import { mountMemoryInspector, type MemoryInspectorHandle } from "./memory-inspector.js";
@@ -49,7 +49,7 @@ const ALLOWED_IMAGE_MIME_TYPES = new Set([
 ]);
 
 const STATIC_APP_SHELL = `
-  <a class="skip-link" href="#reader-view">Skip to conversation</a>
+  <a class="skip-link" href="#reader-view">Skip to main content</a>
   <div class="app-shell">
     <aside class="library" aria-label="Conversation archive">
       <div class="brand-lockup">
@@ -225,8 +225,26 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
 
   const list = get<HTMLDivElement>("#conversation-list");
   const workspaceNav = get<HTMLElement>("#knowledge-os-nav");
-  const activateWorkspace = (id: WorkspaceId) => setActiveWorkspace(workspaceNav, id);
+  const disposeWorkspaceKeys = bindWorkspaceNavigationKeyboard(workspaceNav);
   const view = get<HTMLElement>("#reader-view");
+  let activeWorkspace: WorkspaceId = "conversations";
+  let modalReturnWorkspace: WorkspaceId = "conversations";
+  let modalReturnFocus: HTMLElement | null = null;
+  const activateWorkspace = (id: WorkspaceId) => {
+    activeWorkspace = id;
+    setActiveWorkspace(workspaceNav, id);
+    const label = WORKSPACES.find(item => item.id === id)?.label ?? "Archive";
+    view.setAttribute("aria-label", label + " workspace");
+  };
+  const focusViewHeading = () => {
+    view.scrollTop = 0;
+    const heading = view.querySelector<HTMLElement>("h1, .state-panel h2");
+    if (heading) {
+      heading.tabIndex = -1;
+      heading.focus({ preventScroll: true });
+    }
+  };
+  activateWorkspace("conversations");
   const search = get<HTMLInputElement>("#archive-search");
   const dialog = get<HTMLDialogElement>("#setup-dialog");
   const setupContent = get<HTMLDivElement>("#setup-content");
@@ -929,14 +947,43 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   };
 
   const closeSetup = () => {
-    activateWorkspace(selectedId ? "conversations" : memoryInspector ? "memories" : "conversations");
+    ++setupVersion; // Ignore setup responses arriving after the dialog closes.
+    activateWorkspace(modalReturnWorkspace);
     setupContent.querySelector("[data-mcp-secret]")?.replaceChildren();
     if (typeof dialog.close === "function") {
       try { dialog.close(); } catch { dialog.removeAttribute("open"); }
     } else {
       dialog.removeAttribute("open");
     }
-    get<HTMLButtonElement>("[data-action='open-setup']").focus();
+    const returnFocus = modalReturnFocus;
+    modalReturnFocus = null;
+    if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
+    else workspaceNav.querySelector<HTMLButtonElement>(`[data-workspace="${activeWorkspace}"]`)?.focus({ preventScroll: true });
+  };
+
+  const openSetupDialog = (trigger: HTMLElement, workspace: "connections" | "documents") => {
+    if (dialog.hasAttribute("open")) return;
+    modalReturnWorkspace = activeWorkspace;
+    modalReturnFocus = trigger;
+    activateWorkspace(workspace);
+    if (typeof dialog.showModal === "function") {
+      try { dialog.showModal(); } catch { dialog.setAttribute("open", ""); }
+    } else dialog.setAttribute("open", "");
+    void loadSetup().then(() => {
+      if (!alive || !dialog.hasAttribute("open")) return;
+      if (workspace === "documents") setupContent.querySelector<HTMLInputElement>(".document-search-form input")?.focus();
+      else get<HTMLButtonElement>("[data-action='close-setup']").focus();
+    });
+  };
+
+  const returnToConversations = () => {
+    if (summaries.length) void selectConversation(summaries[0].id);
+    else {
+      activateWorkspace("conversations");
+      renderState("Archive is empty", "No saved conversations are available.");
+      focusViewHeading();
+    }
+    workspaceNav.querySelector<HTMLButtonElement>('[data-workspace="conversations"]')?.focus({ preventScroll: true });
   };
 
   const openMemoryInspector = (workspace: "memories" | "projects" | "people" | "topics" = "memories") => {
@@ -961,10 +1008,10 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
       onClose: () => {
         memoryInspector?.destroy();
         memoryInspector = undefined;
-        if (summaries.length) void selectConversation(summaries[0].id);
-        else renderState("Archive is empty", "No saved conversations are available.");
+        returnToConversations();
       },
     });
+    focusViewHeading();
   };
 
   const openHealthWorkspace = () => {
@@ -988,9 +1035,9 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     healthWorkspace = mountHealthWorkspace(view, invoke, () => {
       healthWorkspace?.destroy();
       healthWorkspace = undefined;
-      if (summaries.length) void selectConversation(summaries[0].id);
-      else { activateWorkspace("conversations"); renderState("Archive is empty", "No saved conversations are available."); }
+      returnToConversations();
     });
+    focusViewHeading();
   };
 
   const openLibraryWorkspace = () => {
@@ -1005,14 +1052,15 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     selectedSnapshotId = null;
     exportedMarkdown = "";
     updateToolbarSelection();
+    activateWorkspace("library");
     toolbarTitle.textContent = "Library search";
     setActionStatus("");
     renderConversationRows(search.value.trim());
     libraryWorkspace = mountLibraryWorkspace(view, invoke, () => {
       libraryWorkspace?.destroy(); libraryWorkspace = undefined;
-      if (summaries.length) void selectConversation(summaries[0].id);
-      else { activateWorkspace("conversations"); renderState("Archive is empty", "No saved conversations are available."); }
+      returnToConversations();
     });
+    focusViewHeading();
   };
 
   const openHiveWorkspace = () => {
@@ -1034,9 +1082,9 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     toolbarTitle.textContent = "Hive graph";
     hiveWorkspace = mountHiveWorkspace(view, invoke, () => {
       hiveWorkspace?.destroy(); hiveWorkspace = undefined;
-      if (summaries.length) void selectConversation(summaries[0].id);
-      else { activateWorkspace("conversations"); renderState("Archive is empty", "No saved conversations are available."); }
+      returnToConversations();
     }, initialKey);
+    focusViewHeading();
   };
 
   const clickHandler = (event: Event) => {
@@ -1050,7 +1098,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
       else if (action === "refresh") void loadConversations(true);
       else if (action === "workspace-conversations") {
         if (summaries.length) void selectConversation(selectedId ?? summaries[0].id);
-        else { memoryInspector?.destroy(); memoryInspector = undefined; activateWorkspace("conversations"); renderState("Archive is empty", "No saved conversations are available."); }
+        else { hiveWorkspace?.destroy(); hiveWorkspace = undefined; libraryWorkspace?.destroy(); libraryWorkspace = undefined; memoryInspector?.destroy(); memoryInspector = undefined; healthWorkspace?.destroy(); healthWorkspace = undefined; activateWorkspace("conversations"); renderState("Archive is empty", "No saved conversations are available."); focusViewHeading(); }
       }
       else if (action === "open-memory-inspector") openMemoryInspector();
       else if (action === "open-entity-workspace") {
@@ -1061,22 +1109,8 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
       else if (action === "open-hive-explorer") openHiveWorkspace();
       else if (action === "open-health-inspector") openHealthWorkspace();
       else if (action === "retry-selection" && selectedId) void selectConversation(selectedId);
-      else if (action === "open-document-search") {
-        activateWorkspace("documents");
-        if (typeof dialog.showModal === "function") {
-          try { dialog.showModal(); } catch { dialog.setAttribute("open", ""); }
-        } else dialog.setAttribute("open", "");
-        void loadSetup().then(() => {
-          if (alive) setupContent.querySelector<HTMLInputElement>(".document-search-form input")?.focus();
-        });
-      }
-      else if (action === "open-setup") {
-        activateWorkspace("connections");
-        if (typeof dialog.showModal === "function") {
-          try { dialog.showModal(); } catch { dialog.setAttribute("open", ""); }
-        } else dialog.setAttribute("open", "");
-        void loadSetup();
-      } else if (action === "close-setup") closeSetup();
+      else if (action === "open-document-search") openSetupDialog(actionElement, "documents");
+      else if (action === "open-setup") openSetupDialog(actionElement, "connections"); else if (action === "close-setup") closeSetup();
       else if (action === "load-setup") void loadSetup();
       else if (action === "export-markdown") void exportMarkdown();
       else if (action === "copy-markdown") void copyMarkdown();
@@ -1125,15 +1159,18 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     }
   };
   const keyHandler = (event: KeyboardEvent) => {
-    if (event.key === "Escape" && dialog.hasAttribute("open")) closeSetup();
+    if (event.key === "Escape" && dialog.hasAttribute("open")) { event.preventDefault(); closeSetup(); return; }
+    if (dialog.hasAttribute("open") || event.defaultPrevented) return;
     if (event.key === "/" && !event.ctrlKey && !event.metaKey && !event.altKey) {
       const active = document.activeElement;
-      if (active instanceof document.defaultView!.HTMLElement && /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName)) return;
+      if (active instanceof document.defaultView!.HTMLElement && (active.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName))) return;
       event.preventDefault();
       search.focus();
     }
   };
 
+  const modalCancelHandler = (event: Event) => { event.preventDefault(); if (alive) closeSetup(); };
+  dialog.addEventListener("cancel", modalCancelHandler);
   root.addEventListener("click", clickHandler);
   root.addEventListener("change", changeHandler);
   search.addEventListener("input", searchHandler);
@@ -1167,6 +1204,8 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
       if (dialog.open) {
         try { dialog.close(); } catch { dialog.removeAttribute("open"); }
       }
+      disposeWorkspaceKeys();
+      dialog.removeEventListener("cancel", modalCancelHandler);
       root.removeEventListener("click", clickHandler);
       root.removeEventListener("change", changeHandler);
       search.removeEventListener("input", searchHandler);

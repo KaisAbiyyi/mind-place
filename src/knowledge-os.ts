@@ -5,7 +5,7 @@
  * All data still comes from live, unlock-epoch-gated native commands.
  */
 export type WorkspaceId =
-  | "conversations" | "memories" | "documents" | "connections"
+  | "conversations" | "library" | "memories" | "documents" | "connections"
   | "projects" | "people" | "topics" | "graph" | "health";
 
 export interface WorkspaceDefinition {
@@ -17,6 +17,7 @@ export interface WorkspaceDefinition {
 
 export const WORKSPACES: readonly WorkspaceDefinition[] = [
   { id: "conversations", label: "Conversations", action: "workspace-conversations", phase: "available" },
+  { id: "library", label: "Library search", action: "open-library-workspace", phase: "available" },
   { id: "memories", label: "Memories", action: "open-memory-inspector", phase: "available" },
   { id: "documents", label: "Documents", action: "open-document-search", phase: "available" },
   { id: "connections", label: "Connections", action: "open-setup", phase: "available" },
@@ -52,6 +53,31 @@ export function setActiveWorkspace(nav: HTMLElement, id: WorkspaceId): void {
     if (button.dataset.workspace === id) button.setAttribute("aria-current", "page");
     else button.removeAttribute("aria-current");
   }
+}
+
+/** Keyboard navigation changes focus, never opens a workspace without an explicit activation. */
+export function bindWorkspaceNavigationKeyboard(nav: HTMLElement): () => void {
+  const handler = (event: KeyboardEvent) => {
+    if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
+    const target = event.target;
+    if (!(target instanceof nav.ownerDocument.defaultView!.HTMLButtonElement) || !nav.contains(target)) return;
+    const buttons = [...nav.querySelectorAll<HTMLButtonElement>("button[data-workspace]:not(:disabled)")];
+    const index = buttons.indexOf(target);
+    if (index < 0) return;
+    const key = event.key;
+    const next = key === "Home" ? 0 : key === "End" ? buttons.length - 1
+      : key === "ArrowRight" ? Math.min(buttons.length - 1, index + 1)
+      : key === "ArrowLeft" ? Math.max(0, index - 1)
+      : key === "ArrowDown" ? Math.min(buttons.length - 1, index + 2)
+      : key === "ArrowUp" ? Math.max(0, index - 2) : -1;
+    if (next < 0) return;
+    event.preventDefault();
+    buttons[next]?.focus({ preventScroll: true });
+    // CSS switches to an overflow-x row at narrow widths.
+    buttons[next]?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+  };
+  nav.addEventListener("keydown", handler);
+  return () => nav.removeEventListener("keydown", handler);
 }
 
 export const CONVERSATION_ROW_HEIGHT = 76;
