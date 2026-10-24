@@ -13,8 +13,8 @@ use mind_place_archive::{
 use mind_place_index::documents::{DocumentHit, DocumentIndex, DocumentIndexReport};
 use mind_place_index::{
     ContextInspection, ContextPack, ContextRequest, FetchInspection, FetchRequest, FetchResponse,
-    IndexError, IndexStats, IndexStore, RetrievalRequest, RetrievalResponse, SearchHit,
-    SearchInspection,
+    GraphDirection, GraphKind, GraphNeighborhoodRequest, GraphNodeRef, IndexError, IndexStats,
+    IndexStore, RetrievalRequest, RetrievalResponse, SearchHit, SearchInspection,
 };
 use mind_place_integration::transport::LocalMcpServer;
 use mind_place_security::{SecurityError, SecurityGate, SecurityStatus, UnlockLease};
@@ -214,6 +214,81 @@ async fn rebuild_archive_index(state: State<'_, AppState>) -> Result<IndexStats,
                 .validate_lease(lease)
                 .map_err(|_| IndexError::Revoked)
         })
+    })
+    .await
+}
+
+/// MP-8E archive-only read surface. Never accepts an arbitrary document/root
+/// graph scope. The owner unlock epoch is checked during traversal and before
+/// disclosing data, and the graph query itself enforces node/edge budgets.
+#[tauri::command]
+async fn read_archive_hive(
+    state: State<'_, AppState>,
+    kind: String,
+    key: String,
+    max_hops: Option<usize>,
+) -> Result<serde_json::Value, String> {
+    let seed_kind = match kind.as_str() {
+        "conversation" => GraphKind::Conversation,
+        "revision" => GraphKind::Revision,
+        "import" => GraphKind::Import,
+        _ => return Err("MP_HIVE_INVALID_KIND".into()),
+    };
+    if key.trim().is_empty() || key.len() > 4096 || key.as_bytes().contains(&0) {
+        return Err("MP_HIVE_INVALID_KEY".into());
+    }
+    let hops = max_hops.unwrap_or(2).min(3);
+    let index_path = state.index_path.clone();
+    index_task(&state, move |lease, security| {
+        let query = GraphNeighborhoodRequest {
+            scope: "archive:chatgpt".into(),
+            seeds: vec![GraphNodeRef::new(seed_kind, key)],
+            direction: GraphDirection::Both,
+            max_hops: hops,
+            max_nodes: 120,
+            max_edges: 240,
+        };
+        let graph = IndexStore::open(index_path)?.graph_neighbors_with_check(&query, || {
+            security
+                .validate_lease(lease)
+                .map_err(|_| IndexError::Revoked)
+        })?;
+        let nodes = graph
+            .nodes
+            .iter()
+            .map(|node| {
+                serde_json::json!({
+                    "id": node.id,
+                    "kind": node.kind.as_str(),
+                    "canonical_key": node.canonical_key,
+                    "label": node.label,
+                    "source_ref": node.source_ref,
+                    "depth": node.depth,
+                })
+            })
+            .collect::<Vec<_>>();
+        let edges = graph
+            .edges
+            .iter()
+            .map(|edge| {
+                serde_json::json!({
+                    "id": edge.id,
+                    "from_node": edge.from_node,
+                    "to_node": edge.to_node,
+                    "relation": edge.relation.as_str(),
+                    "origin": edge.origin.as_str(),
+                    "confidence_bps": edge.origin.confidence_bps(),
+                    "source_ref": edge.source_ref,
+                    "source_revision": edge.source_revision,
+                    "locator": edge.locator,
+                })
+            })
+            .collect::<Vec<_>>();
+        Ok(serde_json::json!({
+            "nodes": nodes,
+            "edges": edges,
+            "truncated": graph.truncated,
+        }))
     })
     .await
 }
@@ -838,6 +913,7 @@ fn main() {
             refresh_archive_index,
             rebuild_archive_index,
             get_archive_index_stats,
+            read_archive_hive,
             search_archive_index,
             search_retrieval,
             fetch_retrieval,

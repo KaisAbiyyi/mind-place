@@ -23,7 +23,7 @@ export const WORKSPACES: readonly WorkspaceDefinition[] = [
   { id: "projects", label: "Projects", action: "open-entity-workspace", phase: "available" },
   { id: "people", label: "People", action: "open-entity-workspace", phase: "available" },
   { id: "topics", label: "Topics", action: "open-entity-workspace", phase: "available" },
-  { id: "graph", label: "Hive graph", action: null, phase: "planned" },
+  { id: "graph", label: "Hive graph", action: "open-hive-explorer", phase: "available" },
   { id: "health", label: "Health", action: "open-health-inspector", phase: "available" },
 ] as const;
 

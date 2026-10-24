@@ -22,17 +22,17 @@ test("workspace registry is explicit, accessible and does not imply unfinished p
   const doc = new JSDOM("<!doctype html><html><body></body></html>").window.document;
   const nav = createWorkspaceNavigation(doc);
   assert.equal(nav.getAttribute("aria-label"), "Knowledge workspaces");
-  assert.equal(nav.querySelectorAll("button").length, 8);
-  assert.equal(WORKSPACES.filter(x => x.phase === "planned").length, 1);
+  assert.equal(nav.querySelectorAll("button").length, 9);
+  assert.equal(WORKSPACES.filter(x => x.phase === "planned").length, 0);
   assert.equal(nav.querySelector("button[disabled]"), null);
-  assert.equal(nav.querySelector('[data-workspace="graph"]'), null);
+  assert.ok(nav.querySelector('[data-workspace="graph"]'));
   assert.equal(nav.querySelectorAll('[aria-current="page"]').length, 1);
   setActiveWorkspace(nav, "memories");
   assert.equal(nav.querySelector('[data-workspace="memories"]')?.getAttribute("aria-current"), "page");
   assert.equal(nav.querySelectorAll('[aria-current="page"]').length, 1);
 });
 
-test("entity workspace buttons open scoped investigation without exposing planned graph", async () => {
+test("entity workspace buttons open scoped investigation alongside Hive and Health", async () => {
   const dom = new JSDOM("<!doctype html><html><body><div id='app'></div></body></html>", { url: "https://local.test/" });
   const root = dom.window.document.querySelector<HTMLElement>("#app")!;
   const invoke: Invoke = async <T>(command: string) => {
