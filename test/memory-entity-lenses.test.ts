@@ -32,7 +32,7 @@ test("named entity lens retains hypothesis semantics and renders timeline/source
 test("changing entity lens invalidates outstanding search response",async()=>{
  let finish!: (v:any)=>void;
  const pending=new Promise<any>(r=>finish=r);
- const invoke:Invoke=async <T>(command)=>command==="list_memory_inspection"?pending as T:null as T;
+ const invoke:Invoke=async <T>(command: string)=>command==="list_memory_inspection"?pending as T:null as T;
  const {view,handle,search}=fixture(invoke);
  search("secret");
  view.querySelector<HTMLButtonElement>('[data-entity-lens="people"]')!.click();
@@ -43,7 +43,7 @@ test("changing entity lens invalidates outstanding search response",async()=>{
 test("destroy clears sensitive input and prevents late detail render",async()=>{
  let finish!: (v:any)=>void;
  const pending=new Promise<any>(r=>finish=r);
- const invoke:Invoke=async <T>(command)=>command==="list_memory_inspection"?[claim] as T:pending as T;
+ const invoke:Invoke=async <T>(command: string)=>command==="list_memory_inspection"?[claim] as T:pending as T;
  const {view,handle,search}=fixture(invoke);
  search("private");await delay(0);
  view.querySelector<HTMLButtonElement>("[data-entity-claim]")!.click();
