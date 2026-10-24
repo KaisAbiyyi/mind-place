@@ -26,7 +26,7 @@ test('MP-10B scorer integration accepts four distinct strategy receipts', () => 
 
 test('MP-10B refuses incomplete, unrecognized and repeated result markers', () => {
   assert.throws(() => parseRuns(''), /Missing/);
-  assert.throws(() => parseRuns(markerRuns().replace(/project_graph_proxy.*/, '')), /Missing/);
+  assert.throws(() => parseRuns(markerRuns().split('\n').filter(line => !line.startsWith('MP10B_PREDICTIONS|project_graph_proxy|')).join('\n')), /Missing/);
   assert.throws(() => parseRuns(markerRuns() + '\n' + markerRuns().split('\n')[0]), /duplicate/);
   assert.throws(() => parseRuns(markerRuns().replace('lexical_fts5', 'unknown_strategy')), /Invalid/);
 });
