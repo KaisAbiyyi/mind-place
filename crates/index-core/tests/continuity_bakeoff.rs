@@ -199,7 +199,11 @@ fn fixture_graph(index: &IndexStore, corpus: &Corpus) {
             label: project.to_owned(),
             source_ref: format!("synthetic:project:{project}"),
         });
-        for source in corpus.sources.iter().filter(|s| s.scope == "public" && s.project == project) {
+        for source in corpus
+            .sources
+            .iter()
+            .filter(|s| s.scope == "public" && s.project == project)
+        {
             let kind = if source.kind == "document" {
                 GraphKind::File
             } else {
@@ -224,7 +228,8 @@ fn fixture_graph(index: &IndexStore, corpus: &Corpus) {
             });
         }
     }
-    index.replace_graph_projection("synthetic:mp10b", &GraphProjection { nodes, edges })
+    index
+        .replace_graph_projection("synthetic:mp10b", &GraphProjection { nodes, edges })
         .expect("persist isolated synthetic graph projection");
 }
 
@@ -234,27 +239,42 @@ fn graph_project(index: &IndexStore, corpus: &Corpus, question: &str) -> Vec<Str
     let Some(project) = project_from_question(question) else {
         return vec![];
     };
-    let result = index.graph_neighbors_with_check(
-        &GraphNeighborhoodRequest {
-            scope: "synthetic:mp10b".to_owned(),
-            seeds: vec![GraphNodeRef::new(GraphKind::Project, project)],
-            direction: GraphDirection::Outbound,
-            max_hops: 1,
-            max_nodes: 100,
-            max_edges: 100,
-        },
-        || Ok(()),
-    ).expect("actual graph API retrieval over test projection");
+    let result = index
+        .graph_neighbors_with_check(
+            &GraphNeighborhoodRequest {
+                scope: "synthetic:mp10b".to_owned(),
+                seeds: vec![GraphNodeRef::new(GraphKind::Project, project)],
+                direction: GraphDirection::Outbound,
+                max_hops: 1,
+                max_nodes: 100,
+                max_edges: 100,
+            },
+            || Ok(()),
+        )
+        .expect("actual graph API retrieval over test projection");
     assert!(!result.truncated);
-    let by_id = corpus.sources.iter().map(|s| (s.id.as_str(), s)).collect::<HashMap<_, _>>();
-    let mut ids = result.nodes.into_iter()
+    let by_id = corpus
+        .sources
+        .iter()
+        .map(|s| (s.id.as_str(), s))
+        .collect::<HashMap<_, _>>();
+    let mut ids = result
+        .nodes
+        .into_iter()
         .filter(|node| node.depth == 1 && node.kind != GraphKind::Project)
-        .map(|node| node.source_ref).collect::<Vec<_>>();
-    assert!(ids.iter().all(|id| by_id.get(id.as_str()).is_some_and(|s| s.scope == "public")));
+        .map(|node| node.source_ref)
+        .collect::<Vec<_>>();
+    assert!(ids
+        .iter()
+        .all(|id| by_id.get(id.as_str()).is_some_and(|s| s.scope == "public")));
     // Graph API returns a deterministic node set; recency is a documented fixture
     // rerank, not a native graph relevance score or authority.
-    ids.sort_by(|a, b| by_id[b.as_str()].observed_at.cmp(&by_id[a.as_str()].observed_at)
-        .then_with(|| a.cmp(b)));
+    ids.sort_by(|a, b| {
+        by_id[b.as_str()]
+            .observed_at
+            .cmp(&by_id[a.as_str()].observed_at)
+            .then_with(|| a.cmp(b))
+    });
     ids.truncate(MAX_HITS);
     ids
 }
