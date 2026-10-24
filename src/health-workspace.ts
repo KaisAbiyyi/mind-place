@@ -77,6 +77,8 @@ export function mountHealthWorkspace(view: HTMLElement, invoke: Invoke, onClose:
     if (refreshing) return refreshing;
     const requestVersion = ++version;
     refreshButton.disabled = true;
+    run.disabled = true;
+    tracePanel.replaceChildren();
     status.textContent = "Checking live local services…";
     const task = (async () => {
       try {
@@ -119,10 +121,11 @@ export function mountHealthWorkspace(view: HTMLElement, invoke: Invoke, onClose:
           ? "Live local status checked." : "Partial status: one or more checks unavailable.";
       } catch {
         if (!alive || requestVersion !== version) return;
+        activeEpoch = null;
         summary.replaceChildren(); tracePanel.replaceChildren();
         status.textContent = "Health unavailable or Mind Place locked. Unlock and retry.";
       } finally {
-        if (alive && requestVersion === version) refreshButton.disabled = false;
+        if (alive && requestVersion === version) { refreshButton.disabled = false; run.disabled = false; }
       }
     })();
     refreshing = task;
