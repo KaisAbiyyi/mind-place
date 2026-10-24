@@ -2,11 +2,11 @@
 
 This file is the small execution-order pointer for cloud agents. Strategy lives in `../BIG-IMPLEMENTATION-PLAN.md`; detailed design notes live beside this file. If older phase labels conflict with this file, follow this file for the current execution order.
 
-## Current execution gate — 2026-10-23
+## Current execution gate ï¿½ 2026-10-23
 
-**MP-4L2: native document qualification recovery**, [PR #42](https://github.com/KaisAbiyyi/mind-place/pull/42). The optimized Windows real-corpus gate passes 10/10 with no skips on product SHA `60233a0`; [implementation receipt](../implementation-summary/2026-10-23-mp-4l2-native-parser-recovery.md) and [machine-readable evidence](../qualification/2026-10-23-mp-4l2-release.json). Final-head CI and reviewed merge are required for integration acceptance. This local bounded repair was explicitly owner-authorized.
+**MP-4L2 DONE:** [PR #42](https://github.com/KaisAbiyyi/mind-place/pull/42) merged at `6454d23fe5f54e19067efa0a69e80b28315d25ad`; final Windows CI + storage CI PASS and exact merged-SHA real Windows document qualification 10/10 PASS. [Implementation receipt](../implementation-summary/2026-10-23-mp-4l2-native-parser-recovery.md); [qualification evidence](../qualification/2026-10-23-mp-4l2-release.json).
 
-**Immediate successor: MP-4U**, owner folder add/search/revoke workflow acceptance after #42 integration. Phases 5/6/7 remain gated by that owner decision. Historical phase labels below do not move execution back to Phase 3; live task status is maintained in the Notion execution board.
+**NOW: MP-4UX-00 â€” P0 Settings/dialog and Documents UX redesign** ([GitHub #43](https://github.com/KaisAbiyyi/mind-place/issues/43), Cloud; Ready, unclaimed). Owner defers MP-4U due to unusable Settings structure and document workflows. Redesign category hierarchy, folder onboarding/index/search/preview/revoke UI, responsive/accessibility/visual behavior; review/CI/merge and qualified Windows installer smoke. **UP NEXT: MP-4U**, a single owner **functional + visual usability** acceptance session requiring both `MP-4L2` and `MP-4UX-00`. Phase 5A/6A/7A depend on its explicit PASS. Broader app UI redesign remains Phase 8; final visual sign-off at 10U2. Notion task lanes hold live state; this pointer records execution order.
 
 ## Baseline
 
@@ -126,4 +126,4 @@ Do not weaken Phase 1A to fake those later guarantees. UI/documentation must sta
 
 ## Handoff rule
 
-A cloud unit is complete only when its PR/branch is CI-green and its final SHA is reported. If a bug is fixed, rerun the relevant checks before merge. The immediate priority is **local MP-3L1**, then real hosted MP-3L2 and user MP-3U qualification. MP-4A is gated by MP-3U acceptance. Do not misreport build/CI/package evidence as a real tunnel or ChatGPT account proof.
+A cloud unit is complete only when its PR/branch is CI-green and its final SHA is reported. If a bug is fixed, rerun the relevant checks before merge. The immediate priority (2026-10-23) is **MP-4UX-00**, then **MP-4U** owner gate after reviewed cloud implementation and Windows packaged UX smoke. MP-3L1/3L2/3U and MP-4L2 are historical completed prerequisites. Do not misreport build/CI/package evidence as a real tunnel or ChatGPT account proof.
