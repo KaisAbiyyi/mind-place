@@ -3,7 +3,7 @@
  * feed all ranked source IDs to the independent MP-10A scorer and compare cost.
  *
  * NOT a deployed product benchmark: the fixture bypasses normal capture/authority,
- * and project_graph_proxy / hybrid_fts5_project_proxy are in-memory experiments.
+ * and graph strategies use real APIs on synthetic projections, not live permissions.
  */
 import { spawnSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
@@ -11,7 +11,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { evaluate, loadSuite } from './benchmark-continuity.mjs';
 
-const strategies = ['lexical_fts5', 'structured_fts5', 'project_graph_proxy', 'hybrid_fts5_project_proxy'];
+const strategies = ['lexical_fts5', 'structured_fts5', 'project_graph_api', 'hybrid_fts5_graph_api'];
 const run = (exe, args) => spawnSync(exe, args, {
   encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, shell: false,
 });
@@ -42,7 +42,7 @@ export function summarize(suite, outputs) {
       throw new Error(strategy + ' exposed a restricted or excluded synthetic source');
     }
     evaluated[strategy] = {
-      engine: strategy.includes('proxy') ? 'SYNTHETIC_PROXY_NOT_PRODUCT_GRAPH' : 'MIND_PLACE_FTS5_ISOLATED_INDEX',
+      engine: strategy.includes('graph_api') ? 'MIND_PLACE_GRAPH_API_SYNTHETIC_PROJECTION' : 'MIND_PLACE_FTS5_ISOLATED_INDEX',
       summary: report.summary,
       misses: report.cases.filter(c => c.relevant_total > 0 && c.recall_at_k < 1)
         .map(c => ({ id: c.id, recall_at_k: c.recall_at_k, rank: c.reciprocal_rank })),
@@ -57,7 +57,7 @@ export function summarize(suite, outputs) {
   return {
     schema: 'mind-place-retrieval-bakeoff/v1',
     dataset: suite.corpus.dataset,
-    mode: 'isolated_synthetic_real_fts5_plus_labeled_project_adjacency_proxies',
+    mode: 'isolated_synthetic_real_fts5_and_graph_api_with_synthetic_project_edges',
     fixture_sha256: suite.fixture_sha256,
     code_head_sha: process.env.MP10B_HEAD_SHA || null,
     platform: process.platform,
@@ -70,7 +70,7 @@ export function summarize(suite, outputs) {
       '18 questions / 24 synthetic records, not 1M-chunk scale or native hardware proof.',
       'FTS5 is real IndexStore::retrieve; test-only synthetic injection skips state/capture authorization.',
       'No user archive, approved-root I/O, provider session, live permission check or network call.',
-      'Project edge graph is a documented in-memory proxy, not production GraphNeighborhoodRequest.',
+      'GraphNeighborhoodRequest API is real; synthetic project edges and always-OK test callback are not production authorization or graphify inference.',
       'No generated answers or verified claims: answer accuracy/support and abstention are NOT qualified.',
       'Latency is warm in-process retrieval, not startup/UI/packaged Windows SLA.',
       'Context tokens are estimated as ceil(UTF-8 string length / 4), not billed tokens.',
