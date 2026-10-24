@@ -1,5 +1,15 @@
 # Working on Mind Place
 
+## Universal execution board — direct successors only (2026-10-24)
+
+**Owner-corrected global policy; supersedes any older Up Next examples, broad blocked-task queues, and one-card-only defaults in this repository.** This policy is universal across CoSoS, Mind Place, Sibambo umbrella/children, BOMC Modular Builder, and future projects; see the Notion `Projects` page for the canonical rule.
+
+- **Now (`02 · Now`)**: all tasks eligible for action right now, or actively claimed/in review, including concurrent Cloud / Local Windows / Owner tasks where prerequisites, resource locks, and authorization permit. Do not invent a claim, test PASS, or native/owner evidence when promoting a task to Now.
+- **Up Next (`03 · Up Next`)**: **only the immediate successors currently blocked by one or more tasks that are in Now**. A task qualifies if (1) it directly depends on at least one task in the current Now set; (2) **every other prerequisite is either already accepted Done or also in the current Now set**; and (3) completing the relevant Now prerequisites would make it the next actionable task after a fresh ownership/lock/environment check. Exclude any task blocked by unfinished work outside Now, unrelated tasks, merely later-roadmap tasks, and tasks already runnable now. Up Next tasks may still be Status=Blocked; Up Next is a forecast, not an acceptance or implementation claim. Multiple direct children may be displayed; shared locks mean sequential execution, not a false parallel claim. If no direct successor exists, **leave Up Next empty** instead of adding filler.
+- **Last Done (`01 · Last Done`)**: at most five most recently accepted tasks; preserve all other tasks/evidence in the full database.
+- **Recompute Now and Up Next after every claim, merge, gate PASS/FAIL, task unblock, blocker change, or handoff**. Read the canonical dependency DAG and live Notion/GitHub status; evaluate all AND prerequisites (not just the named predecessor), existing owner/resource locks, and Cloud/Local/Owner proof. Remove stale `Focus Lane` selections without deleting tasks or falsely changing `Status`. Synchronize Notion and GitHub, and verify the lane projection. Self-review and exact-head CI remain required as documented elsewhere; native tests cannot be replaced by hosted CI.
+
+
 Mind Place is developed **cloud-first and agentic-workflow first**. GitHub is the implementation source of truth. Local Windows checkouts are primarily qualification targets unless the user explicitly authorizes local implementation.
 
 Read `README.md`, `docs/current-product.md`, `docs/BIG-IMPLEMENTATION-PLAN.md`, and `docs/implementation-plan/CURRENT-PHASE.md` before changing product behavior. For current agentic runtime/import direction also read `docs/implementation-plan/2026-10-18-agentic-first-runtime-and-imports.md`. `CURRENT-PHASE.md` wins when older roadmap labels disagree about the current execution order.
