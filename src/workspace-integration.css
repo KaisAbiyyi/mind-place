@@ -1,0 +1,73 @@
+/* MP-8F: shared, keyboard-visible, bounded desktop UI vocabulary. */
+:root {
+  --workspace-radius: 9px;
+  --workspace-min-target: 36px;
+  --workspace-panel-line: var(--line);
+  --workspace-reading-width: 1120px;
+}
+.knowledge-library, .memory-inspector, .hive-workspace, .health-workspace {
+  width: 100%;
+  min-width: 0;
+  max-width: var(--workspace-reading-width);
+  box-sizing: border-box;
+  color: var(--text);
+}
+.knowledge-library h1, .memory-header h1, .hive-heading h1, .health-heading h1 {
+  color: var(--text);
+  font-size: clamp(20px, 2.5vw, 26px);
+  line-height: 1.25;
+  letter-spacing: -.02em;
+  overflow-wrap: anywhere;
+}
+.knowledge-library :is(button, input), .memory-inspector :is(button, input),
+.hive-workspace :is(button, input, select), .health-workspace :is(button, input) {
+  min-height: var(--workspace-min-target);
+}
+.knowledge-library :is(button, input):focus-visible,
+.memory-inspector :is(button, input, textarea):focus-visible,
+.hive-workspace :is(button, input, select):focus-visible,
+.health-workspace :is(button, input):focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 2px;
+}
+.knowledge-library-results, .memory-layout, .entity-lens-layout,
+.hive-map, .health-metrics { min-width: 0; }
+.knowledge-library-hit, .memory-card, .entity-lens-item, .hive-node-choice {
+  border-radius: var(--workspace-radius);
+  overflow-wrap: anywhere;
+}
+.knowledge-library-hit:hover, .entity-lens-item:hover { border-color: var(--accent); background: var(--surface-hover); }
+.knowledge-library-hit[aria-pressed="true"], .entity-lens-item[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--ko-nav-active);
+}
+.knowledge-library :is([role="status"], [role="alert"]), .memory-inspector :is([role="status"], [role="alert"]),
+.hive-workspace :is([role="status"], [role="alert"]), .health-workspace :is([role="status"], [role="alert"]) {
+  overflow-wrap: anywhere;
+}
+.reader-view :is(h1, .state-panel h2)[tabindex="-1"]:focus { outline: none; }
+.reader-view :is(h1, .state-panel h2)[tabindex="-1"]:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 4px;
+}
+/* Navigation and transcript can shrink independently in short WebView2 windows. */
+@media (min-width: 701px) {
+  .knowledge-os-nav { max-height: min(28vh, 220px); overflow-y: auto; padding: 2px; scrollbar-width: thin; }
+}
+@media (max-width: 700px) {
+  .knowledge-os-nav { scroll-snap-type: x proximity; }
+  .knowledge-os-nav-item { scroll-snap-align: start; min-height: 36px; }
+  .library-footer { flex-wrap: wrap; justify-content: flex-start; max-height: 65px; overflow-y: auto; }
+  .offline-note { flex: 1 0 100%; }
+  .toolbar-actions { overflow-x: auto; scrollbar-width: thin; }
+  .toolbar-actions > button { flex: 0 0 auto; }
+  .reader-view { overflow-x: hidden; }
+  .knowledge-library, .memory-inspector, .hive-workspace, .health-workspace { padding: 16px 14px 40px; }
+  .knowledge-library-form :is(label, input) { flex-basis: 100%; }
+  .knowledge-library-results { grid-template-columns: minmax(0, 1fr); }
+  .knowledge-library-preview pre, .memory-detail, .hive-details { max-width: 100%; overflow-wrap: anywhere; }
+}
+@media (forced-colors: active) {
+  .knowledge-os-nav-item[aria-current="page"],
+  .knowledge-library-hit[aria-pressed="true"] { outline: 2px solid Highlight; }
+}

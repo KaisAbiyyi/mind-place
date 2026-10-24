@@ -7,6 +7,7 @@ import "./memory-inspector.css";
 import "./memory-entity-lenses.css";
 import "./hive-workspace.css";
 import "./health-workspace.css";
+import "./workspace-integration.css";
 import "./security.css";
 import type { Invoke } from "./reader.js";
 import { mountApplication } from "./app.js";
