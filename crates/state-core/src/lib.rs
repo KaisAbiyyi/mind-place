@@ -174,8 +174,11 @@ impl StateStore {
         Self::open_internal(path, None)
     }
     /// Encrypted vaults only. Caller must validate unlock epoch before and after usage.
-    pub fn open_encrypted(path: impl AsRef<Path>, raw_key: [u8; 32]) -> Result<Self> {
-        Self::open_internal(path, Some(CipherKey::new(raw_key)))
+    pub fn open_encrypted(
+        path: impl AsRef<Path>, raw_key: [u8; 32],
+        gate: &mind_place_security::SecurityGate, lease: mind_place_security::UnlockLease
+    ) -> Result<Self> {
+        Self::open_internal(path, Some(CipherKey::new(raw_key, gate, lease)))
     }
     fn open_internal(
         path: impl AsRef<Path>,
