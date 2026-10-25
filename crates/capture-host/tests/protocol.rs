@@ -158,13 +158,10 @@ fn vault_marker_denies_native_capture_before_plaintext_archive_creation() {
     std::fs::write(vault.join("vault-v1.json"), b"synthetic-marker").unwrap();
     let root = vault.join("archive");
     let mut out = vec![];
-    serve_one(
-        Cursor::new(frame(request())),
-        &mut out,
-        &root,
-        &origin(),
-    )
-    .unwrap();
+    serve_one(Cursor::new(frame(request())), &mut out, &root, &origin()).unwrap();
     assert_eq!(response(&out)["ok"], false);
-    assert!(!root.exists(), "plaintext archive was created inside a vault");
+    assert!(
+        !root.exists(),
+        "plaintext archive was created inside a vault"
+    );
 }
