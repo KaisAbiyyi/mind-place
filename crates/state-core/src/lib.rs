@@ -381,7 +381,7 @@ impl StateStore {
         drop(source);
         let mut first = [0u8; 16];
         File::open(destination)?.read_exact(&mut first)?;
-        if &first == b"SQLite format 3\\0" {
+        if &first == b"SQLite format 3\0" {
             return Err(StateError::Corrupt);
         }
         Ok(())
