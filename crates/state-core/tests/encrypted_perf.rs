@@ -48,11 +48,11 @@ fn emit_synthetic_native_sqlcipher_overhead_receipt() {
     let clear = temp.path().join("plain/state.sqlite3");
     let encrypted = temp.path().join("encrypted/state.sqlite3");
     let gate = SecurityGate::open(temp.path().join("security.json")).unwrap();
-    gate.initialize(b"synthetic native benchmark credential").unwrap();
+    gate.initialize(b"synthetic native benchmark credential")
+        .unwrap();
     let lease = gate.require_unlocked().unwrap();
     let clear_store = StateStore::open(&clear).unwrap();
-    let encrypted_store =
-        StateStore::open_encrypted(&encrypted, [0x9e; 32], &gate, lease).unwrap();
+    let encrypted_store = StateStore::open_encrypted(&encrypted, [0x9e; 32], &gate, lease).unwrap();
 
     // Identical ordered writes and point-lookups on isolated synthetic DBs.
     let (clear_write_ms, clear_read_ms) = exercise(&clear_store);
@@ -61,7 +61,9 @@ fn emit_synthetic_native_sqlcipher_overhead_receipt() {
     let encrypted_bytes = disk_bytes(&encrypted);
     assert!(clear_bytes > 0 && encrypted_bytes > 0);
     assert!(fs::read(&clear).unwrap().starts_with(b"SQLite format 3\0"));
-    assert!(!fs::read(&encrypted).unwrap().starts_with(b"SQLite format 3\0"));
+    assert!(!fs::read(&encrypted)
+        .unwrap()
+        .starts_with(b"SQLite format 3\0"));
     println!(
         "MP9B_SYNTHETIC_PERF_RECEIPT={}",
         serde_json::json!({
