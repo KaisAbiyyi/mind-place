@@ -133,6 +133,10 @@ impl DocumentIndex {
         let path = path.as_ref().to_owned();
         let parent = path.parent().ok_or(IndexError::UnsafePath)?;
         safe_path(parent)?;
+        // Reject a legacy plaintext open path once the vault marker exists.
+        if cipher_key.is_none() && parent.join("vault-v1.json").exists() {
+            return Err(IndexError::ForeignDatabase);
+        }
         fs::create_dir_all(parent)?;
         safe_path(&path)?;
         let existed = path.exists();
