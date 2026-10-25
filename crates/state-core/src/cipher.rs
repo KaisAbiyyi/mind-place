@@ -24,10 +24,16 @@ impl CipherKey {
         let version: Option<String> = db
             .query_row("PRAGMA cipher_version", [], |r| r.get(0))
             .optional()?;
-        let supported = version.as_deref().and_then(|v| {
-            let mut parts = v.split('.');
-            Some((parts.next()?.parse::<u32>().ok()?, parts.next()?.parse::<u32>().ok()?))
-        }).is_some_and(|(major, minor)| major > 4 || (major == 4 && minor >= 17));
+        let supported = version
+            .as_deref()
+            .and_then(|v| {
+                let mut parts = v.split('.');
+                Some((
+                    parts.next()?.parse::<u32>().ok()?,
+                    parts.next()?.parse::<u32>().ok()?,
+                ))
+            })
+            .is_some_and(|(major, minor)| major > 4 || (major == 4 && minor >= 17));
         if !supported || rusqlite::version_number() < 3_053_002 {
             return Err(rusqlite::Error::InvalidQuery);
         }
