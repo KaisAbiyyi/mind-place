@@ -3,7 +3,8 @@
 use crate::vault::{ContentKind, CryptoVault, VaultManifest};
 use crate::{Result, SecurityError, SecurityGate, UnlockLease};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use sha2::{Digest, Sha256};
+use hmac::{Hmac, Mac};
+use sha2::Sha256;
 use std::{
     fs::{self, File},
     io::{Read, Write},
@@ -43,6 +44,18 @@ impl<'a> ImmutableVaultStorage<'a> {
         })
     }
 
+    /// A keyed plaintext commitment prevents cross-vault equality leaks that
+    /// would occur if the immutable file header contained a bare SHA-256.
+    fn commitment(&self, gate: &SecurityGate, lease: UnlockLease, input: &[u8]) -> Result<[u8; 32]> {
+        let key = self.vault.derived_key(gate, lease, b"object-content-commitment/v1")?;
+        let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(key.as_ref()).map_err(|_| SecurityError::Crypto)?;
+        mac.update(input);
+        let digest = mac.finalize().into_bytes();
+        let mut out = [0u8; 32];
+        out.copy_from_slice(&digest);
+        gate.validate_lease(lease)?;
+        Ok(out)
+    }
     fn location(
         &self,
         gate: &SecurityGate,
@@ -83,7 +96,7 @@ impl<'a> ImmutableVaultStorage<'a> {
         header[0..5].copy_from_slice(MAGIC);
         header[5..13].copy_from_slice(&(payload.len() as u64).to_be_bytes());
         header[13..17].copy_from_slice(&(chunks as u32).to_be_bytes());
-        header[17..49].copy_from_slice(&Sha256::digest(payload));
+        header[17..49].copy_from_slice(&self.commitment(gate, lease, payload)?);
         file.write_all(&header)?;
         for i in 0..chunks {
             gate.validate_lease(lease)?;
@@ -179,7 +192,7 @@ impl<'a> ImmutableVaultStorage<'a> {
         let mut trailing = [0u8; 1];
         if file.read(&mut trailing)? != 0
             || assembled.len() != total
-            || Sha256::digest(assembled.as_slice()).as_slice() != &header[17..49]
+            || self.commitment(gate, lease, assembled.as_slice())?.as_slice() != &header[17..49]
         {
             return Err(SecurityError::Crypto);
         }
