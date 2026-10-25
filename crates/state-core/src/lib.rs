@@ -18,6 +18,8 @@ mod memory_inspection;
 mod memory_ranking;
 mod memory_writes;
 mod ntfs;
+#[cfg(feature = "sqlcipher-preview")]
+pub mod vault_bootstrap;
 pub use clients::{ClientAuditEvent, ClientCapability, ClientRecord};
 pub use document_objects::{
     DocumentMetadata, DocumentObjectStore, DocumentPreserveReceipt, DocumentVersion,
