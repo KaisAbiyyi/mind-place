@@ -340,9 +340,7 @@ fn inventory(root: &Path) -> Result<Vec<PathBuf>> {
         match name {
             "vault-v1.json" if meta.is_file() => {}
             ".state-schema.lock" if meta.is_file() && meta.len() == 0 => {}
-            "state.sqlite3" | "index.sqlite3" | "document-index.sqlite3"
-                if meta.is_file() =>
-            {
+            "state.sqlite3" | "index.sqlite3" | "document-index.sqlite3" if meta.is_file() => {
                 for suffix in ["-wal", "-shm", "-journal"] {
                     if root.join(format!("{name}{suffix}")).exists() {
                         return Err(SecurityError::InvalidConfig);
@@ -630,7 +628,11 @@ mod tests {
     fn refuse_unclassified_vault_state_and_nonempty_schema_lock() {
         let (temp, gate, lease, vault, _) = fixture();
         let root = temp.path().join("vault");
-        fs::write(root.join("unmigrated-preferences.json"), b"{\"private\":true}").unwrap();
+        fs::write(
+            root.join("unmigrated-preferences.json"),
+            b"{\"private\":true}",
+        )
+        .unwrap();
         let destination = temp.path().join("incomplete-backup");
         assert!(PortableBackup::create(&gate, lease, &vault, &root, &destination, 30).is_err());
         assert!(!destination.exists());
