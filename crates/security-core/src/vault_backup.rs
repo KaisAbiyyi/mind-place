@@ -128,7 +128,13 @@ impl PortableBackup {
             if cumulative > MAX_TOTAL_SIZE {
                 return Err(SecurityError::InvalidConfig);
             }
-            if rel != Path::new("state.sqlite3") && !starts_with(&source, b"MPOS\x01")? {
+            if !matches!(
+                rel.as_path(),
+                p if p == Path::new("state.sqlite3")
+                    || p == Path::new("index.sqlite3")
+                    || p == Path::new("document-index.sqlite3")
+            ) && !starts_with(&source, b"MPOS\x01")?
+            {
                 return Err(SecurityError::Crypto);
             }
             let target = staging.join("payload").join(&rel);
@@ -566,7 +572,7 @@ mod tests {
         assert!(PortableBackup::create(&gate, lease, &vault, &root, &blocked, 92).is_err());
         assert!(!blocked.exists());
         fs::remove_file(root.join("index.sqlite3-wal")).unwrap();
-        fs::write(root.join("document-index.sqlite3"), b"SQLite format 3\\0plaintext").unwrap();
+        fs::write(root.join("document-index.sqlite3"), b"SQLite format 3\0plaintext").unwrap();
         let plaintext = temp.path().join("plaintext-index");
         assert!(PortableBackup::create(&gate, lease, &vault, &root, &plaintext, 93).is_err());
         assert!(!plaintext.exists());
