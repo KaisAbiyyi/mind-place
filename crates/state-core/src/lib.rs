@@ -192,6 +192,11 @@ impl StateStore {
         let path = path.as_ref().to_owned();
         let parent = path.parent().ok_or(StateError::UnsafePath)?;
         safe_path(parent)?;
+        // A recognized encrypted-vault root must never fall back to plaintext
+        // SQLite, even when its database has not yet been created.
+        if cipher_key.is_none() && parent.join("vault-v1.json").exists() {
+            return Err(StateError::Corrupt);
+        }
         fs::create_dir_all(parent)?;
         safe_path(parent)?;
         safe_path(&path)?;
