@@ -1,7 +1,7 @@
 //! MP-9B: prove product StateStore writes encrypted SQLCipher pages, not just an
 //! application-layer cipher that leaves SQLite and its WAL in plaintext.
-use mind_place_state::StateStore;
 use mind_place_security::SecurityGate;
+use mind_place_state::StateStore;
 use std::fs;
 
 #[test]
@@ -12,17 +12,33 @@ fn encrypted_state_roundtrip_and_wrong_key_fail_closed() {
     let gate = SecurityGate::open(temp.path().join("security.json")).unwrap();
     gate.initialize(b"synthetic full-length secret").unwrap();
     let lease = gate.require_unlocked().unwrap();
-    let authority = StateStore::open_encrypted(&db, key, &gate, lease).expect("SQLCipher must open");
+    let authority =
+        StateStore::open_encrypted(&db, key, &gate, lease).expect("SQLCipher must open");
     drop(authority);
     let bytes = fs::read(&db).unwrap();
-    assert!(!bytes.starts_with(b"SQLite format 3\0"), "unencrypted database header");
-    assert!(!bytes.windows(17).any(|w| w == b"source_identities"), "database schema leaked");
-    assert!(StateStore::open_encrypted(&db, [0x46u8; 32], &gate, lease).is_err(), "wrong key adopted vault");
-    assert!(StateStore::open(&db).is_err(), "plain open must not accept ciphertext");
+    assert!(
+        !bytes.starts_with(b"SQLite format 3\0"),
+        "unencrypted database header"
+    );
+    assert!(
+        !bytes.windows(17).any(|w| w == b"source_identities"),
+        "database schema leaked"
+    );
+    assert!(
+        StateStore::open_encrypted(&db, [0x46u8; 32], &gate, lease).is_err(),
+        "wrong key adopted vault"
+    );
+    assert!(
+        StateStore::open(&db).is_err(),
+        "plain open must not accept ciphertext"
+    );
     StateStore::open_encrypted(&db, key, &gate, lease).expect("correct key and schema readback");
     let secured = StateStore::open_encrypted(&db, key, &gate, lease).unwrap();
     gate.lock();
-    assert!(secured.source("source:v1:invalid").is_err(), "stale lease disclosed authority");
+    assert!(
+        secured.source("source:v1:invalid").is_err(),
+        "stale lease disclosed authority"
+    );
 }
 #[test]
 fn plaintext_state_cannot_be_silently_adopted() {
@@ -35,5 +51,9 @@ fn plaintext_state_cannot_be_silently_adopted() {
     gate.initialize(b"synthetic full-length secret").unwrap();
     let lease = gate.require_unlocked().unwrap();
     assert!(StateStore::open_encrypted(&db, [0x77u8; 32], &gate, lease).is_err());
-    assert_eq!(fs::read(&db).unwrap(), before, "failed adoption mutated plaintext state");
+    assert_eq!(
+        fs::read(&db).unwrap(),
+        before,
+        "failed adoption mutated plaintext state"
+    );
 }

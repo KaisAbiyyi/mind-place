@@ -119,8 +119,10 @@ impl DocumentIndex {
         Self::open_internal(path, None)
     }
     pub fn open_encrypted(
-        path: impl AsRef<Path>, raw_key: [u8; 32],
-        gate: &mind_place_security::SecurityGate, lease: mind_place_security::UnlockLease
+        path: impl AsRef<Path>,
+        raw_key: [u8; 32],
+        gate: &mind_place_security::SecurityGate,
+        lease: mind_place_security::UnlockLease,
     ) -> Result<Self> {
         Self::open_internal(path, Some(CipherKey::new(raw_key, gate, lease)))
     }

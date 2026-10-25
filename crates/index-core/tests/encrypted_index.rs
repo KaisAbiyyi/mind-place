@@ -1,7 +1,7 @@
 //! MP-9B: FTS5/graph derived indexes cannot remain visible at rest.
+use mind_place_index::documents::DocumentIndex;
 use mind_place_index::IndexStore;
 use mind_place_security::SecurityGate;
-use mind_place_index::documents::DocumentIndex;
 use std::fs;
 
 #[test]
@@ -22,7 +22,10 @@ fn search_fts_is_ciphered_and_key_checked() {
     assert!(IndexStore::open(&db).is_err());
     let index = IndexStore::open_encrypted(&db, key, &gate, lease).unwrap();
     gate.lock();
-    assert!(index.stats().is_err(), "locked stale index remained readable");
+    assert!(
+        index.stats().is_err(),
+        "locked stale index remained readable"
+    );
 }
 #[test]
 fn document_fts_is_ciphered() {
