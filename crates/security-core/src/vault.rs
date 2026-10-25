@@ -8,7 +8,7 @@ use aes_gcm::{
 use base64::{engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD}, Engine as _};
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 use std::{
     fs::{self, OpenOptions},
     io::{Read, Write},
@@ -36,11 +36,11 @@ impl RecoverySecret {
 
     /// Explicit one-time offline export; callers must never log, persist in
     /// plaintext, or automatically copy this code into telemetry/clipboard.
-    pub fn export_code(&self) -> String {
+    pub fn export_code(&self) -> Zeroizing<String> {
         let code = URL_SAFE_NO_PAD.encode(self.0.as_ref());
         let digest = Sha256::digest(self.0.as_ref());
         let check = URL_SAFE_NO_PAD.encode(&digest[..4]);
-        format!("{RECOVERY_CODE_PREFIX}{code}-{check}")
+        Zeroizing::new(format!("{RECOVERY_CODE_PREFIX}{code}.{check}"))
     }
 
     /// Strict typed, versioned recovery input. AEAD verification of the
@@ -49,7 +49,7 @@ impl RecoverySecret {
         let encoded = input
             .strip_prefix(RECOVERY_CODE_PREFIX)
             .ok_or(SecurityError::InvalidConfig)?;
-        let (key, check) = encoded.split_once('-').ok_or(SecurityError::InvalidConfig)?;
+        let (key, check) = encoded.split_once('.').ok_or(SecurityError::InvalidConfig)?;
         if key.len() != 43 || check.len() != 6 {
             return Err(SecurityError::InvalidConfig);
         }
@@ -604,7 +604,7 @@ mod tests {
         let reopened = CryptoVault::restore_with_recovery(&gate, lease, &manifest, &recovered).unwrap();
         assert_eq!(reopened.id(), vault.id());
         assert!(RecoverySecret::from_export_code(&export.replace("MP-RECOVERY-1-", "MP-RECOVERY-2-")).is_err());
-        let mut typo = export.clone().into_bytes();
+        let mut typo = export.as_bytes().to_vec();
         let pos = RECOVERY_CODE_PREFIX.len() + 8;
         typo[pos] = if typo[pos] == b'A' { b'B' } else { b'A' };
         assert!(RecoverySecret::from_export_code(&String::from_utf8(typo).unwrap()).is_err());
