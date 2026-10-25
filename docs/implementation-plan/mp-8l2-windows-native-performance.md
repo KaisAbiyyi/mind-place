@@ -59,6 +59,8 @@ Local machine-readable receipts (intentionally excluded from GitHub and containi
 - `D:\projects\mind-place-mp8l2-20261025\outputs\mp-8l2\2026-10-25T04-07-41-641Z\receipt.json` (800).
 - `D:\projects\mind-place-mp8l2-20261025\outputs\mp-8l2\2026-10-25T04-13-14-822Z\receipt.json` (3,000).
 
+After making the runner self-contained (generating a fresh seed through checked-in `scripts/smoke-native.mjs` instead of requiring a previous worktree's outputs), a 200-conversation replay of a previously generated synthetic-only fixture passed **11/11 checks**, with no page errors and 120 real Hive nodes. Receipt: `D:\projects\mind-place-mp8l2-20261025\outputs\mp-8l2\2026-10-25T04-20-16-932Z\receipt.json`; script SHA-256 `a8da1236c3956ce01c152a3231ad0ea20f74763215a73e0722e41eb46aaa5866`. This is a runner reproducibility check, not another controlled performance trial.
+
 The exact qualification result is **PARTIAL**, pending (1) repeated warm/cold trials under recorded idle and busy host-load conditions, (2) investigation of the slow first unlock and index concurrency, (3) explicit latency/RAM acceptance budgets before declaring performance PASS, and (4) a representative graph/owner workload where authorized. Process-tree working-set growth across one sequence is not by itself proof of a memory leak. Do not treat cloud CI or two synthetic native test passes as MP-8U2 human Hive acceptance.
 
 Security and product code were not modified in this PR. The test records original executable SHA, source commit, sanitized timings, bounds and known limitations; private owner PIN, corpus, UI screenshots and credentials are never included.

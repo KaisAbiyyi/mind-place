@@ -145,10 +145,17 @@ try {
   fs.mkdirSync(archive, { recursive: true });
   fs.mkdirSync(profile, { recursive: true });
 
-  const seedArchive = path.join(sourcePackageRoot, 'outputs');
-  const candidate = fs.readdirSync(seedArchive).find(name => name.startsWith('native-smoke-'));
-  assert.ok(candidate, 'An isolated synthetic smoke-native source fixture is required');
-  const sourceConversations = path.join(seedArchive, candidate, 'conversations');
+  // Generate a fresh synthetic seed from the checked-in production capture
+  // fixture. Do not depend on residual files from a previous MP-8L1 run.
+  const seedJob = spawnSync(process.execPath, [path.join(root, 'scripts', 'smoke-native.mjs'), host], {
+    cwd: root, encoding: 'utf8', windowsHide: true, timeout: 30_000, maxBuffer: 1024 * 1024,
+  });
+  assert.equal(seedJob.status, 0, 'Synthetic native-host seed generation failed');
+  const seedReceipt = JSON.parse(seedJob.stdout.trim().split(/\r?\n/).at(-1));
+  assert.equal(seedReceipt.conversations, 2, 'Unexpected seed corpus');
+  assert.ok(path.resolve(seedReceipt.archive_path).startsWith(path.join(root, 'outputs') + path.sep),
+    'Synthetic seed must be generated under the isolated D: project');
+  const sourceConversations = path.join(seedReceipt.archive_path, 'conversations');
   const seed = fs.readdirSync(sourceConversations)[0];
   const seedCaptureDir = path.join(sourceConversations, seed, 'captures');
   const seedCapture = JSON.parse(fs.readFileSync(path.join(seedCaptureDir, fs.readdirSync(seedCaptureDir)[0]), 'utf8'));
