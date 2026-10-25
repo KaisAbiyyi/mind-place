@@ -65,39 +65,9 @@ impl PortableBackup {
         if destination.exists() {
             return Err(SecurityError::AlreadyConfigured);
         }
-        // This API is deliberately OFFLINE / quiesced only. All app-owned DBs
-        // (including rebuildable projections if present) must be checkpointed.
-        // Never copy an active WAL or silently skip a plaintext derived index.
-        let mut files = Vec::new();
-        for name in ["state.sqlite3", "index.sqlite3", "document-index.sqlite3"] {
-            let source = vault_root.join(name);
-            safe(&source)?;
-            if !source.exists() {
-                if name == "state.sqlite3" {
-                    return Err(SecurityError::InvalidConfig);
-                }
-                continue;
-            }
-            if !fs::metadata(&source)?.is_file() {
-                return Err(SecurityError::InvalidConfig);
-            }
-            for suffix in ["-wal", "-shm", "-journal"] {
-                if vault_root.join(format!("{name}{suffix}")).exists() {
-                    return Err(SecurityError::InvalidConfig);
-                }
-            }
-            if starts_with(&source, b"SQLite format 3\0")? {
-                return Err(SecurityError::Crypto);
-            }
-            files.push(PathBuf::from(name));
-        }
-        for category in ["archive", "document-objects"] {
-            let directory = vault_root.join(category);
-            if directory.exists() {
-                gather(vault_root, &directory, &mut files)?;
-            }
-        }
-        files.sort();
+        // Conservative offline inventory: refuse unexpected app-owned files
+        // rather than silently produce an incomplete "full" backup.
+        let files = inventory(vault_root)?;
         if files.len() > MAX_FILES {
             return Err(SecurityError::InvalidConfig);
         }
@@ -335,26 +305,7 @@ fn verify_quiescent_sources(
     expected: &[PathBuf],
     receipts: &[FileReceipt],
 ) -> Result<()> {
-    let mut current = Vec::new();
-    for name in ["state.sqlite3", "index.sqlite3", "document-index.sqlite3"] {
-        let source = root.join(name);
-        safe(&source)?;
-        if source.exists() {
-            for suffix in ["-wal", "-shm", "-journal"] {
-                if root.join(format!("{name}{suffix}")).exists() {
-                    return Err(SecurityError::Crypto);
-                }
-            }
-            current.push(PathBuf::from(name));
-        }
-    }
-    for category in ["archive", "document-objects"] {
-        let dir = root.join(category);
-        if dir.exists() {
-            gather(root, &dir, &mut current)?;
-        }
-    }
-    current.sort();
+    let current = inventory(root)?;
     if current != expected || expected.len() != receipts.len() {
         return Err(SecurityError::Crypto);
     }
@@ -371,6 +322,56 @@ fn verify_quiescent_sources(
         }
     }
     Ok(())
+}
+/// Dedicated-vault allowlist. New root layouts MUST update the backup contract
+/// before rollout; otherwise partial "complete backups" would silently omit
+/// state. Only zero-length schema locks are excluded.
+fn inventory(root: &Path) -> Result<Vec<PathBuf>> {
+    safe(root)?;
+    let mut files = Vec::new();
+    let mut has_state = false;
+    for entry in fs::read_dir(root)? {
+        let entry = entry?;
+        let path = entry.path();
+        safe(&path)?;
+        let name = entry.file_name();
+        let name = name.to_str().ok_or(SecurityError::InvalidConfig)?;
+        let meta = fs::symlink_metadata(&path)?;
+        match name {
+            "vault-v1.json" if meta.is_file() => {}
+            ".state-schema.lock" if meta.is_file() && meta.len() == 0 => {}
+            "state.sqlite3" | "index.sqlite3" | "document-index.sqlite3"
+                if meta.is_file() =>
+            {
+                for suffix in ["-wal", "-shm", "-journal"] {
+                    if root.join(format!("{name}{suffix}")).exists() {
+                        return Err(SecurityError::InvalidConfig);
+                    }
+                }
+                if starts_with(&path, b"SQLite format 3\0")? {
+                    return Err(SecurityError::Crypto);
+                }
+                if name == "state.sqlite3" {
+                    has_state = true;
+                }
+                files.push(PathBuf::from(name));
+            }
+            "archive" | "document-objects" if meta.is_dir() => {
+                gather(root, &path, &mut files)?;
+            }
+            // Unknown/unmigrated state, WAL, plaintext cache, directory, or
+            // unclassified app-owned file makes the backup unsafe/incomplete.
+            _ => return Err(SecurityError::InvalidConfig),
+        }
+        if files.len() > MAX_FILES {
+            return Err(SecurityError::InvalidConfig);
+        }
+    }
+    if !has_state {
+        return Err(SecurityError::InvalidConfig);
+    }
+    files.sort();
+    Ok(files)
 }
 fn valid_relative(path: &Path) -> Result<()> {
     if !allowed(path)
@@ -625,6 +626,21 @@ mod tests {
         }];
         assert!(verify_quiescent_sources(&root, &paths, &receipts).is_err());
     }
+    #[test]
+    fn refuse_unclassified_vault_state_and_nonempty_schema_lock() {
+        let (temp, gate, lease, vault, _) = fixture();
+        let root = temp.path().join("vault");
+        fs::write(root.join("unmigrated-preferences.json"), b"{\"private\":true}").unwrap();
+        let destination = temp.path().join("incomplete-backup");
+        assert!(PortableBackup::create(&gate, lease, &vault, &root, &destination, 30).is_err());
+        assert!(!destination.exists());
+        fs::remove_file(root.join("unmigrated-preferences.json")).unwrap();
+        fs::write(root.join(".state-schema.lock"), b"private").unwrap();
+        assert!(PortableBackup::create(&gate, lease, &vault, &root, &destination, 31).is_err());
+        fs::write(root.join(".state-schema.lock"), b"").unwrap();
+        PortableBackup::create(&gate, lease, &vault, &root, &destination, 32).unwrap();
+    }
+
     #[test]
     fn never_mistake_legacy_plaintext_for_an_encrypted_state() {
         let (temp, gate, lease, vault, _) = fixture();
