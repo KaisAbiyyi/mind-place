@@ -525,11 +525,29 @@ mod tests {
             CryptoVault::restore_with_recovery(&gate, lease, &manifest, &recovery),
             Err(SecurityError::UnsupportedSchema)
         ));
-        let sealed = vault.seal(&gate, lease, ContentKind::Backup, b"generation-1", b"backup").unwrap();
-        assert!(vault.unseal(&gate, lease, ContentKind::Backup, b"generation-2", &sealed).is_err());
+        let sealed = vault
+            .seal(
+                &gate,
+                lease,
+                ContentKind::Backup,
+                b"generation-1",
+                b"backup",
+            )
+            .unwrap();
+        assert!(vault
+            .unseal(&gate, lease, ContentKind::Backup, b"generation-2", &sealed)
+            .is_err());
         let mut malformed = sealed.clone();
         malformed[0] = 0;
-        assert!(vault.unseal(&gate, lease, ContentKind::Backup, b"generation-1", &malformed).is_err());
+        assert!(vault
+            .unseal(
+                &gate,
+                lease,
+                ContentKind::Backup,
+                b"generation-1",
+                &malformed
+            )
+            .is_err());
     }
     #[cfg(unix)]
     #[test]
