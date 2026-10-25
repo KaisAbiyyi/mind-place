@@ -6,7 +6,10 @@ use mind_place_security::{
     vault::{CryptoVault, RecoverySecret, VaultManifest},
     SecurityGate, UnlockLease,
 };
-use std::{fs, path::{Path, PathBuf}};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 use zeroize::{Zeroize, Zeroizing};
 
 /// Staged only in memory. Not persisted until the owner types the independent
@@ -65,8 +68,8 @@ impl PreparedFirstRunVault {
         lease: UnlockLease,
     ) -> Result<StateStore> {
         gate.validate_lease(lease).map_err(|_| StateError::Corrupt)?;
-        let recovered =
-            RecoverySecret::from_export_code(entered_code).map_err(|_| StateError::Corrupt)?;
+        let recovered = RecoverySecret::from_export_code(entered_code)
+            .map_err(|_| StateError::Corrupt)?;
         let confirmed =
             CryptoVault::restore_with_recovery(gate, lease, &self.manifest, &recovered)
                 .map_err(|_| StateError::Corrupt)?;
@@ -147,9 +150,11 @@ mod tests {
         let (home, gate, lease) = fixture();
         let state = home.path().join("state.sqlite3");
         StateStore::open(&state).unwrap();
-        assert!(PreparedFirstRunVault::prepare(&home.path().join("vault"), &gate, lease).is_err());
+        assert!(PreparedFirstRunVault::prepare(&home.path().join("vault"), &gate, lease)
+            .is_err());
         fs::remove_file(state).unwrap();
-        let pending = PreparedFirstRunVault::prepare(&home.path().join("vault"), &gate, lease).unwrap();
+        let pending =
+            PreparedFirstRunVault::prepare(&home.path().join("vault"), &gate, lease).unwrap();
         let code = pending.recovery_code();
         gate.lock();
         assert!(pending.confirm_and_provision(&code, &gate, lease).is_err());
