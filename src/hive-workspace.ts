@@ -79,18 +79,23 @@ export function mountHiveWorkspace(view: HTMLElement, invoke: Invoke, onClose: (
   back.addEventListener("click", onClose);
   header.append(heading, back);
   const hint = document.createElement("p");
-  hint.textContent = "Read-only archive graph. Explore a conversation, revision or import identity. This view excludes approved-root Graphify scopes pending a permission-aware selector.";
+  hint.textContent = "Read-only archive graph. The saved conversation ID is an archive/import seed, not an indexed conversation source ID. Use the prefilled ID and Explore. Conversation and revision seed types require internal index identities, not titles or chat URLs.";
   const form = document.createElement("form"); form.className = "hive-search-form";
   const kindLabel = document.createElement("label"); kindLabel.textContent = "Seed type";
   const kind = document.createElement("select");
-  for (const value of ["conversation", "revision", "import"]) {
-    const option = document.createElement("option"); option.value = value; option.textContent = value;
+  for (const [value, label] of [
+    ["import", "Saved archive ID (recommended)"],
+    ["conversation", "Indexed source ID (advanced)"],
+    ["revision", "Source ID / snapshot ID (advanced)"],
+  ]) {
+    const option = document.createElement("option"); option.value = value; option.textContent = label;
     kind.append(option);
   }
   kindLabel.append(kind);
-  const keyLabel = document.createElement("label"); keyLabel.textContent = "Exact seed identity";
+  const keyLabel = document.createElement("label"); keyLabel.textContent = "Exact seed identity (not a chat title or URL)";
   const key = document.createElement("input"); key.type = "text"; key.maxLength = 4096;
   key.required = true; key.value = initialKey; key.autocomplete = "off";
+  key.placeholder = "Select a saved conversation to prefill its archive ID";
   keyLabel.append(key);
   const submit = document.createElement("button"); submit.type = "submit";
   submit.className = "primary-button"; submit.textContent = "Explore";
@@ -214,7 +219,7 @@ export function mountHiveWorkspace(view: HTMLElement, invoke: Invoke, onClose: (
         const after = await invoke<{locked: boolean; epoch: number}>("get_security_status");
         if (!alive || current !== generation || after.locked || after.epoch !== security.epoch) throw Error("expired");
         graph = reply; selectedId = reply.nodes[0]?.id ?? null; revisionIndex = 0;
-        status.textContent = !reply.nodes.length ? "No authorized archive graph nodes match this seed."
+        status.textContent = !reply.nodes.length ? "No indexed graph matches that exact seed. For a saved conversation ID, choose Saved archive ID, then retry after the archive index finishes refreshing."
           : reply.nodes.length + " nodes · " + reply.edges.length + " edges" +
             (reply.truncated ? " · Display truncated by graph safety limits" : "");
         render();
