@@ -436,7 +436,7 @@ Each phase below lists:
 - **L** — planned local qualification sessions;
 - **U** — planned manual user acceptance sessions.
 
-Fix/retry units created after a failed gate are intentionally not counted in the base plan.
+Fix/retry units created after a failed gate are intentionally not counted in the base plan. **Owner-triggered P0 additive task `MP-4UX-00`** (2026-10-23) is likewise a scoped pre-4U usability repair; it does not rewrite the original C6/L2/U1 estimate.
 
 Base planning matrix:
 
@@ -679,12 +679,21 @@ Planned workload: **C6 / L2 / U1**.
 - validate parser limits on harmless stress fixtures;
 - confirm preserved document versions/dedup on real storage.
 
-**User 4U — folder UX acceptance**
+**Owner-triggered Cloud MP-4UX-00 — P0 Settings and Documents UX repair (additive gate, after 4L2)**
+
+- Redesign the overloaded Settings dialog into clear settings categories and accessible, responsive layouts; preserve all consent/unlock/MCP boundaries.
+- Make Documents a discoverable workspace, with guided Stage → Approve → Index, clear approved/excluded/skipped reasons, progress, refresh/pause state and unambiguous destructive revoke confirmation.
+- Make document search usable: readable source/result cards, revision/snippet/warnings, safe bounded source preview/fetch (if the needed capability is missing, implement with fresh authorization and provenance tests), immediate revocation/lock suppression and helpful errors/empty states.
+- Establish scoped visual tokens/components reused later in Phase 8; cloud test/review/merge then local packaged NSIS/WebView smoke and exact runtime receipt. [GitHub #43](https://github.com/KaisAbiyyi/mind-place/issues/43).
+
+**User 4U — combined folder functionality + Settings/Documents UX acceptance (after MP-4UX-00)**
 
 - add a real folder from the UI;
 - inspect what Mind Place says it can read and exclude;
 - search/fetch a few known documents;
-- revoke it and verify the behavior is understandable.
+- revoke it and verify post-revocation search and preview/fetch disclose no data; confirm the behavior and copy-retention wording are understandable.
+- independently judge navigation, hierarchy, readability, form errors, progress, focus/keyboard behavior and responsive Settings/Documents presentation on the installed UI.
+- record exact installed build SHA, screenshots, owner PASS/FAIL/PARTIAL; do not accept on CI or agent visual review alone. MP-5A/6A/7A remain gated until this **joint** decision.
 
 Exit: chat and personal documents are one searchable evidence universe.
 
@@ -823,7 +832,8 @@ Planned workload: **C6 / L2 / U2**.
 
 - navigation/data contracts;
 - virtualization/lazy loading primitives;
-- responsive/error/loading states.
+- responsive/error/loading states;
+- shared design system: typography, spacing, color/contrast, density, interaction, navigation patterns and accessible primitives evolving the Phase 4 UX foundation; audit whole-app hierarchy and information architecture, not just the old Settings dialog.
 
 **Cloud 8B — conversations/files/search library**
 
@@ -858,7 +868,8 @@ Planned workload: **C6 / L2 / U2**.
 - large-library rendering budgets;
 - keyboard/accessibility pass;
 - error/recovery states;
-- final phase integration polish without redesigning proven backend contracts.
+- final phase integration polish without redesigning proven backend contracts;
+- whole-app UI consistency review across library, search, memories, graph, settings and permission surfaces; screenshot/interaction regression states across desktop and narrow windows.
 
 **Local 8L1 — packaged desktop functional qualification**
 
@@ -875,7 +886,7 @@ Planned workload: **C6 / L2 / U2**.
 **User 8U1 — daily-library UX acceptance**
 
 - perform normal daily navigation/search/context-preview tasks without developer instructions;
-- report confusing labels/flows only after functionality is green.
+- judge visual hierarchy, consistency, readability, navigation and task clarity as an explicit usability gate only after functionality is green; return a blocking UX list when needed.
 
 **User 8U2 — Hive UX acceptance**
 
@@ -1011,6 +1022,7 @@ Optional semantic/search branch if justified: **+C2 / +L1 / U0 by default**.
 **User 10U2 — release acceptance**
 
 - use the RC as a normal user across the critical daily flows;
+- explicitly evaluate whole-product information hierarchy, interaction/accessibility consistency, polished Settings and document permissions UX, and subjective day-to-day usability as well as functional correctness;
 - explicitly approve the release or return a short blocking list.
 
 **Optional Cloud 10S1 — semantic retrieval experiment/integration**
