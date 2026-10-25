@@ -24,20 +24,35 @@ impl CipherKey {
         let version: Option<String> = db
             .query_row("PRAGMA cipher_version", [], |r| r.get(0))
             .optional()?;
-        if version.as_deref().unwrap_or("").is_empty() {
+        let supported = version.as_deref().and_then(|v| {
+            let mut parts = v.split('.');
+            Some((parts.next()?.parse::<u32>().ok()?, parts.next()?.parse::<u32>().ok()?))
+        }).is_some_and(|(major, minor)| major > 4 || (major == 4 && minor >= 17));
+        if !supported || rusqlite::version_number() < 3_053_002 {
             return Err(rusqlite::Error::InvalidQuery);
         }
-        let mut hex = String::with_capacity(64);
+        // Do not create an unzeroized format! copy of the vault key.
+        let mut pragma = String::with_capacity(84);
+        pragma.push_str("PRAGMA key = \"x'");
         for byte in self.material.iter() {
             use fmt::Write as _;
-            let _ = write!(&mut hex, "{byte:02x}");
+            let _ = write!(&mut pragma, "{byte:02x}");
         }
-        let result = db.execute_batch(&format!("PRAGMA key = \"x'{hex}'\";"));
-        hex.zeroize();
+        pragma.push_str("'\";");
+        let result = db.execute_batch(&pragma);
+        pragma.zeroize();
         result?;
         db.query_row("SELECT count(*) FROM sqlite_master", [], |r| {
             r.get::<_, i64>(0)
         })?;
+        // SQLCipher 4.12+ reports 1 only when the keyed pager is active.
+        // Refuse a provider that silently ignores PRAGMA key.
+        let status: Option<i64> = db
+            .query_row("PRAGMA cipher_status", [], |r| r.get(0))
+            .optional()?;
+        if status != Some(1) {
+            return Err(rusqlite::Error::InvalidQuery);
+        }
         db.pragma_update(None, "temp_store", "MEMORY")?;
         db.pragma_update(None, "cipher_memory_security", "ON")?;
         self.gate
