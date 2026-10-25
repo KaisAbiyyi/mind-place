@@ -53,10 +53,19 @@ impl CipherKey {
         })?;
         // SQLCipher 4.12+ reports 1 only when the keyed pager is active.
         // Refuse a provider that silently ignores PRAGMA key.
-        let status: Option<i64> = db
-            .query_row("PRAGMA cipher_status", [], |r| r.get(0))
+        // SQLCipher returns cipher_status as TEXT "1" on some providers.
+        // Only an explicit active result is acceptable; NULL, 0 and unknown
+        // representations must all fail closed.
+        let active: Option<bool> = db
+            .query_row("PRAGMA cipher_status", [], |r| {
+                match r.get_ref(0)? {
+                    rusqlite::types::ValueRef::Integer(1) => Ok(true),
+                    rusqlite::types::ValueRef::Text(bytes) => Ok(bytes == b"1"),
+                    _ => Ok(false),
+                }
+            })
             .optional()?;
-        if status != Some(1) {
+        if active != Some(true) {
             return Err(rusqlite::Error::InvalidQuery);
         }
         db.pragma_update(None, "temp_store", "MEMORY")?;
