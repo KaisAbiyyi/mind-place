@@ -1,7 +1,7 @@
 //! Rebuildable, non-authoritative archive search projection.
 //! Every durable source ID is registered in state.sqlite3, never assigned by this DB.
 use mind_place_archive::{ArchiveStore, Capture};
-use mind_place_state::{SourceDescriptor, SourceKey, StateStore};
+use mind_place_state::{CipherKey, SourceDescriptor, SourceKey, StateStore};
 use rusqlite::{
     params, Connection, OpenFlags, OptionalExtension, Transaction, TransactionBehavior,
 };
@@ -118,6 +118,7 @@ impl IndexError {
 #[derive(Clone, Debug)]
 pub struct IndexStore {
     path: PathBuf,
+    cipher_key: Option<std::sync::Arc<CipherKey>>,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
@@ -220,6 +221,13 @@ impl IndexStore {
     /// Open after unlock only. Refuses an existing foreign/unrecognized file.
     /// Missing index files are safe to initialize because they contain no authority.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        Self::open_internal(path, None)
+    }
+    /// New encrypted vaults only; never modifies an existing plaintext index.
+    pub fn open_encrypted(path: impl AsRef<Path>, raw_key: [u8; 32]) -> Result<Self> {
+        Self::open_internal(path, Some(CipherKey::new(raw_key)))
+    }
+    fn open_internal(path: impl AsRef<Path>, cipher_key: Option<std::sync::Arc<CipherKey>>) -> Result<Self> {
         let path = path.as_ref().to_owned();
         let parent = path.parent().ok_or(IndexError::UnsafePath)?;
         safe_path(parent)?;
@@ -231,6 +239,7 @@ impl IndexStore {
                 &path,
                 OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
             )?;
+            if let Some(key) = cipher_key.as_ref() { key.unlock(&ro)?; }
             verify(&ro, true)?;
         }
         let mut db = Connection::open_with_flags(
@@ -239,6 +248,7 @@ impl IndexStore {
                 | OpenFlags::SQLITE_OPEN_CREATE
                 | OpenFlags::SQLITE_OPEN_NOFOLLOW,
         )?;
+        if let Some(key) = cipher_key.as_ref() { key.unlock(&db)?; }
         configure(&db)?;
         if !existed {
             let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -275,7 +285,7 @@ impl IndexStore {
             }
         }
         verify(&db, false)?;
-        Ok(Self { path })
+        Ok(Self { path, cipher_key })
     }
 
     pub fn path(&self) -> &Path {
@@ -288,6 +298,7 @@ impl IndexStore {
             &self.path,
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
         )?;
+        if let Some(key) = self.cipher_key.as_ref() { key.unlock(&db)?; }
         configure(&db)?;
         // Full integrity scans are done on open, not per hot search or transaction.
         verify(&db, false)?;

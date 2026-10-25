@@ -7,6 +7,7 @@ use std::{
     path::{Path, PathBuf},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
+mod cipher;
 mod clients;
 mod document_objects;
 mod document_roots;
@@ -45,6 +46,7 @@ const MIGRATION_V6: &str = include_str!("schema_v6.sql");
 const MIGRATION_V7: &str = include_str!("schema_v7.sql");
 const MIGRATION_V8: &str = include_str!("schema_v8.sql");
 const MIGRATION_V9: &str = include_str!("schema_v9.sql");
+pub use cipher::CipherKey;
 pub type Result<T> = std::result::Result<T, StateError>;
 
 #[derive(Debug, thiserror::Error)]
@@ -101,6 +103,7 @@ impl StateError {
 #[derive(Clone, Debug)]
 pub struct StateStore {
     path: PathBuf,
+    cipher_key: Option<std::sync::Arc<CipherKey>>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Project {
@@ -168,6 +171,13 @@ impl StateStore {
     /// Call only after authorized unlock. Never wipe, recreate, or auto-repair
     /// an existing unknown/corrupt/future-schema database.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        Self::open_internal(path, None)
+    }
+    /// Encrypted vaults only. Caller must validate unlock epoch before and after usage.
+    pub fn open_encrypted(path: impl AsRef<Path>, raw_key: [u8; 32]) -> Result<Self> {
+        Self::open_internal(path, Some(CipherKey::new(raw_key)))
+    }
+    fn open_internal(path: impl AsRef<Path>, cipher_key: Option<std::sync::Arc<CipherKey>>) -> Result<Self> {
         if rusqlite::version_number() < MIN_SQLITE_NUMBER {
             return Err(StateError::SqliteTooOld);
         }
@@ -192,6 +202,7 @@ impl StateStore {
                 &path,
                 OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
             )?;
+            if let Some(key) = cipher_key.as_ref() { key.unlock(&ro)?; }
             identity(&ro)?;
             let version = user_version(&ro)?;
             if version > SCHEMA_VERSION {
@@ -209,6 +220,7 @@ impl StateStore {
                 | OpenFlags::SQLITE_OPEN_CREATE
                 | OpenFlags::SQLITE_OPEN_NOFOLLOW,
         )?;
+        if let Some(key) = cipher_key.as_ref() { key.unlock(&db)?; }
         db.busy_timeout(Duration::from_secs(5))?;
         db.pragma_update(None, "foreign_keys", "ON")?;
         db.pragma_update(None, "journal_mode", "WAL")?;
@@ -218,6 +230,11 @@ impl StateStore {
         }
         let previous_version = user_version(&db)?;
         if previous_version < SCHEMA_VERSION {
+            if existed && cipher_key.is_some() {
+                // Encrypted schema migrations require separately consented staging;
+                // ordinary snapshots would leak plaintext.
+                return Err(StateError::Corrupt);
+            }
             if existed {
                 backup(&db, parent, previous_version)?;
             }
@@ -293,7 +310,7 @@ impl StateStore {
         validate(&db)?;
         drop(db);
         FileExt::unlock(&lock)?;
-        Ok(Self { path })
+        Ok(Self { path, cipher_key })
     }
     pub fn path(&self) -> &Path {
         &self.path
@@ -304,6 +321,7 @@ impl StateStore {
             &self.path,
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
         )?;
+        if let Some(key) = self.cipher_key.as_ref() { key.unlock(&db)?; }
         db.busy_timeout(Duration::from_secs(5))?;
         db.pragma_update(None, "foreign_keys", "ON")?;
         db.pragma_update(None, "synchronous", "FULL")?;
@@ -321,6 +339,7 @@ impl StateStore {
             &self.path,
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
         )?;
+        if let Some(key) = self.cipher_key.as_ref() { key.unlock(&db)?; }
         db.busy_timeout(Duration::from_secs(5))?;
         identity(&db)?;
         if user_version(&db)? != SCHEMA_VERSION {
