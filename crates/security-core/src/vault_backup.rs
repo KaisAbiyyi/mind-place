@@ -321,7 +321,7 @@ fn allowed(relative: &Path) -> bool {
                 || first == "document-index.sqlite3" =>
         {
             components.next().is_none()
-        },
+        }
         Some(Component::Normal(first)) if first == "archive" || first == "document-objects" => {
             components.next().is_some()
         }
@@ -329,7 +329,7 @@ fn allowed(relative: &Path) -> bool {
     }
 }
 /// This rejects obvious archive/index changes during an offline backup.
-    /// It is not a replacement for an application-wide writer/quiescence gate.
+/// It is not a replacement for an application-wide writer/quiescence gate.
 fn verify_quiescent_sources(
     root: &Path,
     expected: &[PathBuf],
@@ -557,7 +557,11 @@ mod tests {
         let (temp, gate, lease, vault, recovery) = fixture();
         let root = temp.path().join("vault");
         for name in ["index.sqlite3", "document-index.sqlite3"] {
-            fs::write(root.join(name), [b"ENCRYPTED_INDEX_FIXTURE".as_slice(), &[0x27; 128]].concat()).unwrap();
+            fs::write(
+                root.join(name),
+                [b"ENCRYPTED_INDEX_FIXTURE".as_slice(), &[0x27; 128]].concat(),
+            )
+            .unwrap();
         }
         let backup = temp.path().join("complete");
         let receipt = PortableBackup::create(&gate, lease, &vault, &root, &backup, 91).unwrap();
@@ -565,14 +569,21 @@ mod tests {
         let restored = temp.path().join("complete-restored");
         PortableBackup::restore(&gate, lease, &backup, &restored, &recovery).unwrap();
         for name in ["state.sqlite3", "index.sqlite3", "document-index.sqlite3"] {
-            assert_eq!(fs::read(root.join(name)).unwrap(), fs::read(restored.join(name)).unwrap());
+            assert_eq!(
+                fs::read(root.join(name)).unwrap(),
+                fs::read(restored.join(name)).unwrap()
+            );
         }
         fs::write(root.join("index.sqlite3-wal"), b"pending page").unwrap();
         let blocked = temp.path().join("unquiesced");
         assert!(PortableBackup::create(&gate, lease, &vault, &root, &blocked, 92).is_err());
         assert!(!blocked.exists());
         fs::remove_file(root.join("index.sqlite3-wal")).unwrap();
-        fs::write(root.join("document-index.sqlite3"), b"SQLite format 3\0plaintext").unwrap();
+        fs::write(
+            root.join("document-index.sqlite3"),
+            b"SQLite format 3\0plaintext",
+        )
+        .unwrap();
         let plaintext = temp.path().join("plaintext-index");
         assert!(PortableBackup::create(&gate, lease, &vault, &root, &plaintext, 93).is_err());
         assert!(!plaintext.exists());
@@ -590,7 +601,16 @@ mod tests {
             sha256: format!("{:x}", Sha256::digest(&original)),
         };
         let paths = vec![PathBuf::from("state.sqlite3")];
-        verify_quiescent_sources(&root, &paths, &[FileReceipt { path: receipt.path.clone(), length: receipt.length, sha256: receipt.sha256.clone() }]).unwrap();
+        verify_quiescent_sources(
+            &root,
+            &paths,
+            &[FileReceipt {
+                path: receipt.path.clone(),
+                length: receipt.length,
+                sha256: receipt.sha256.clone(),
+            }],
+        )
+        .unwrap();
         fs::write(root.join("state.sqlite3"), b"modified").unwrap();
         assert!(verify_quiescent_sources(&root, &paths, &[receipt]).is_err());
         fs::write(root.join("state.sqlite3"), original).unwrap();
@@ -598,7 +618,10 @@ mod tests {
         let receipts = vec![FileReceipt {
             path: "state.sqlite3".into(),
             length: fs::metadata(root.join("state.sqlite3")).unwrap().len(),
-            sha256: format!("{:x}", Sha256::digest(fs::read(root.join("state.sqlite3")).unwrap())),
+            sha256: format!(
+                "{:x}",
+                Sha256::digest(fs::read(root.join("state.sqlite3")).unwrap())
+            ),
         }];
         assert!(verify_quiescent_sources(&root, &paths, &receipts).is_err());
     }
