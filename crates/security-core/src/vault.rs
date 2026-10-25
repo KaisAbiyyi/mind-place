@@ -71,6 +71,14 @@ fn fixed<const N: usize>(value: &str) -> Result<[u8; N]> {
         .map_err(|_| SecurityError::InvalidConfig)?;
     decoded.try_into().map_err(|_| SecurityError::InvalidConfig)
 }
+fn guarded_path(path: &Path) -> Result<()> {
+    for part in path.ancestors() {
+        if !part.as_os_str().is_empty() {
+            super::validate_path(part)?;
+        }
+    }
+    Ok(())
+}
 fn cipher(key: &[u8; 32]) -> Result<Aes256Gcm> {
     Aes256Gcm::new_from_slice(key).map_err(|_| SecurityError::Crypto)
 }
@@ -275,9 +283,9 @@ impl VaultManifest {
     /// A crash can leave an incomplete empty vault directory, never overwrite legacy bytes.
     pub fn persist_new(&self, root: &Path) -> Result<()> {
         self.validate()?;
-        super::validate_path(root)?;
+        guarded_path(root)?;
         let parent = root.parent().ok_or(SecurityError::UnsafePath)?;
-        super::validate_path(parent)?;
+        guarded_path(parent)?;
         let json = serde_json::to_vec(self).map_err(|_| SecurityError::InvalidConfig)?;
         if json.len() as u64 > MAX_MANIFEST_BYTES {
             return Err(SecurityError::InvalidConfig);
@@ -293,9 +301,9 @@ impl VaultManifest {
         Ok(())
     }
     pub fn read(root: &Path) -> Result<Self> {
-        super::validate_path(root)?;
+        guarded_path(root)?;
         let path = root.join("vault-v1.json");
-        super::validate_path(&path)?;
+        guarded_path(&path)?;
         let file = OpenOptions::new().read(true).open(&path)?;
         let mut json = Vec::new();
         file.take(MAX_MANIFEST_BYTES + 1).read_to_end(&mut json)?;
@@ -507,6 +515,36 @@ mod tests {
             VaultManifest::read(&fresh).unwrap().vault_id_b64,
             manifest.vault_id_b64
         );
+    }
+    #[test]
+    fn malformed_metadata_and_replay_are_rejected() {
+        let (_, gate, lease) = fixture();
+        let (vault, recovery, mut manifest) = CryptoVault::provision(&gate, lease).unwrap();
+        manifest.format_version = 2;
+        assert!(matches!(
+            CryptoVault::restore_with_recovery(&gate, lease, &manifest, &recovery),
+            Err(SecurityError::UnsupportedSchema)
+        ));
+        let sealed = vault.seal(&gate, lease, ContentKind::Backup, b"generation-1", b"backup").unwrap();
+        assert!(vault.unseal(&gate, lease, ContentKind::Backup, b"generation-2", &sealed).is_err());
+        let mut malformed = sealed.clone();
+        malformed[0] = 0;
+        assert!(vault.unseal(&gate, lease, ContentKind::Backup, b"generation-1", &malformed).is_err());
+    }
+    #[cfg(unix)]
+    #[test]
+    fn ancestor_symlink_is_rejected() {
+        use std::os::unix::fs::symlink;
+        let (dir, gate, lease) = fixture();
+        let (_, _, manifest) = CryptoVault::provision(&gate, lease).unwrap();
+        let actual = dir.path().join("actual");
+        fs::create_dir(&actual).unwrap();
+        let alias = dir.path().join("alias");
+        symlink(&actual, &alias).unwrap();
+        assert!(matches!(
+            manifest.persist_new(&alias.join("new-vault")),
+            Err(SecurityError::UnsafePath)
+        ));
     }
     #[cfg(windows)]
     #[test]
