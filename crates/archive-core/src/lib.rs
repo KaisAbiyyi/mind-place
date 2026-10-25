@@ -252,10 +252,7 @@ mod encrypted_vault_boundary_tests {
         let store = ArchiveStore::open(&legacy_archive).unwrap();
         std::fs::write(vault.join("vault-v1.json"), b"synthetic-marker").unwrap();
 
-        assert!(matches!(
-            store.lock(),
-            Err(ArchiveError::Invalid(_))
-        ));
+        assert!(matches!(store.lock(), Err(ArchiveError::Invalid(_))));
         assert!(!legacy_archive.join(".archive.lock").exists());
     }
 }
