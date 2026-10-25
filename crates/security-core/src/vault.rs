@@ -6,8 +6,8 @@ use aes_gcm::{
     Aes256Gcm, KeyInit, Nonce,
 };
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use serde::{Deserialize, Serialize};
 use hmac::{Hmac, Mac};
+use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use std::{
     fs::{self, OpenOptions},
@@ -196,11 +196,17 @@ impl CryptoVault {
 
     /// Domain-separated HMAC-SHA256 on high-entropy, per-vault secret material.
     pub fn derived_key(
-        &self, gate: &SecurityGate, lease: UnlockLease, domain: &[u8]
+        &self,
+        gate: &SecurityGate,
+        lease: UnlockLease,
+        domain: &[u8],
     ) -> Result<Zeroizing<[u8; 32]>> {
         gate.validate_lease(lease)?;
-        if domain.is_empty() || domain.len() > 128 { return Err(SecurityError::InvalidConfig); }
-        let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(self.dek.as_ref()).map_err(|_| SecurityError::Crypto)?;
+        if domain.is_empty() || domain.len() > 128 {
+            return Err(SecurityError::InvalidConfig);
+        }
+        let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(self.dek.as_ref())
+            .map_err(|_| SecurityError::Crypto)?;
         mac.update(b"mind-place/key-derivation/v1");
         mac.update(&self.vault_id);
         mac.update(&(domain.len() as u32).to_be_bytes());
@@ -214,11 +220,18 @@ impl CryptoVault {
 
     /// Opaque dedup name for immutable objects; never use unsalted public SHA256.
     pub fn storage_name(
-        &self, gate: &SecurityGate, lease: UnlockLease, kind: ContentKind, identity: &[u8]
+        &self,
+        gate: &SecurityGate,
+        lease: UnlockLease,
+        kind: ContentKind,
+        identity: &[u8],
     ) -> Result<String> {
-        if identity.is_empty() || identity.len() > 3500 { return Err(SecurityError::InvalidConfig); }
+        if identity.is_empty() || identity.len() > 3500 {
+            return Err(SecurityError::InvalidConfig);
+        }
         let key = self.derived_key(gate, lease, b"object-filename/v1")?;
-        let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(key.as_ref()).map_err(|_| SecurityError::Crypto)?;
+        let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(key.as_ref())
+            .map_err(|_| SecurityError::Crypto)?;
         mac.update(kind.label());
         mac.update(&(identity.len() as u32).to_be_bytes());
         mac.update(identity);
