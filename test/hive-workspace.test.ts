@@ -68,3 +68,33 @@ test("hive: lock boundary and destroy suppress late data", async () => {
   await tick();
   assert.equal(view.textContent, "");
 });
+
+test("hive: opening selected saved conversation uses archive/import seed, not indexed source id", async () => {
+  const selectedArchiveId = "a".repeat(64);
+  const calls: { kind: string; key: string }[] = [];
+  const invoke: Invoke = async <T>(command: string, args?: Record<string, unknown>) => {
+    if (command === "get_security_status") return { locked: false, epoch: 2 } as T;
+    if (command !== "read_archive_hive") throw Error(command);
+    const input = { kind: String(args?.kind), key: String(args?.key) };
+    calls.push(input);
+    // The graph projection uses an archive_id on import nodes, and a DIFFERENT
+    // state-authority source_id on conversation nodes.
+    return (input.kind === "import" && input.key === selectedArchiveId
+      ? fixture : { nodes: [], edges: [], truncated: false }) as T;
+  };
+  const dom = new JSDOM("<!doctype html><main id='view'></main>");
+  const view = dom.window.document.querySelector<HTMLElement>("#view")!;
+  const handle = mountHiveWorkspace(view, invoke, () => {}, selectedArchiveId);
+  try {
+    assert.equal(view.querySelector<HTMLSelectElement>(".hive-search-form select")!.value, "import");
+    assert.equal(view.querySelector<HTMLInputElement>(".hive-search-form input")!.value, selectedArchiveId);
+    assert.match(view.textContent!, /saved conversation ID is an archive\/import seed/);
+    view.querySelector<HTMLFormElement>(".hive-search-form")!.dispatchEvent(
+      new dom.window.Event("submit", { bubbles: true, cancelable: true }),
+    );
+    await tick(); await tick();
+    assert.deepEqual(calls, [{ kind: "import", key: selectedArchiveId }]);
+    assert.match(view.querySelector("[role='status']")!.textContent!, /2 nodes · 2 edges/);
+    assert.equal(view.querySelectorAll("svg circle").length, 2);
+  } finally { handle.destroy(); dom.window.close(); }
+});
