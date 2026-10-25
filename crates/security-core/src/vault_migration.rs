@@ -171,7 +171,9 @@ fn collect_file(root: &Path, path: &Path, out: &mut Vec<LegacyFileReceipt>) -> R
         if amount == 0 {
             break;
         }
-        size = size.checked_add(amount as u64).ok_or(SecurityError::Crypto)?;
+        size = size
+            .checked_add(amount as u64)
+            .ok_or(SecurityError::Crypto)?;
         if size > MAX_SINGLE_FILE {
             return Err(SecurityError::InvalidConfig);
         }
@@ -181,7 +183,9 @@ fn collect_file(root: &Path, path: &Path, out: &mut Vec<LegacyFileReceipt>) -> R
     if total.checked_add(size).ok_or(SecurityError::Crypto)? > MAX_TOTAL_BYTES {
         return Err(SecurityError::InvalidConfig);
     }
-    let relative = path.strip_prefix(root).map_err(|_| SecurityError::UnsafePath)?;
+    let relative = path
+        .strip_prefix(root)
+        .map_err(|_| SecurityError::UnsafePath)?;
     out.push(LegacyFileReceipt {
         relative: relative.to_owned(),
         bytes: size,
@@ -201,7 +205,11 @@ mod tests {
         fs::create_dir_all(legacy.join("archive-v1/conversations")).unwrap();
         fs::create_dir_all(legacy.join("document-objects")).unwrap();
         fs::write(legacy.join("state.sqlite3"), b"SQLite format 3\0synthetic").unwrap();
-        fs::write(legacy.join("archive-v1/conversations/snapshot.jsonl"), b"synthetic-chat").unwrap();
+        fs::write(
+            legacy.join("archive-v1/conversations/snapshot.jsonl"),
+            b"synthetic-chat",
+        )
+        .unwrap();
         fs::write(legacy.join("document-objects/blob"), b"synthetic-object").unwrap();
         let output = home.path().join("vault-new");
         let preflight = LegacyMigrationPreflight::inspect(&legacy, &output).unwrap();
@@ -209,10 +217,17 @@ mod tests {
         assert!(preflight.total_bytes() > 0);
         preflight.verify_unchanged().unwrap();
         assert!(!output.exists());
-        fs::write(legacy.join("archive-v1/conversations/snapshot.jsonl"), b"changed").unwrap();
+        fs::write(
+            legacy.join("archive-v1/conversations/snapshot.jsonl"),
+            b"changed",
+        )
+        .unwrap();
         assert!(preflight.verify_unchanged().is_err());
         assert!(!output.exists());
-        assert_eq!(fs::read(legacy.join("archive-v1/conversations/snapshot.jsonl")).unwrap(), b"changed");
+        assert_eq!(
+            fs::read(legacy.join("archive-v1/conversations/snapshot.jsonl")).unwrap(),
+            b"changed"
+        );
     }
 
     #[test]
