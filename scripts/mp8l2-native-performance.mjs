@@ -26,6 +26,7 @@ const output = path.join(root, 'outputs', 'mp-8l2');
 const args = process.argv.slice(2);
 const option = name => args.includes(name) ? args[args.indexOf(name) + 1] : undefined;
 const count = Number(option('--conversations') ?? '800');
+const fixtureSource = option('--source-fixture');
 const runId = new Date().toISOString().replace(/[:.]/g, '-');
 const runDir = path.join(output, runId);
 // Keep native fixture paths short: capture filenames include two 64-char hashes,
@@ -154,34 +155,53 @@ try {
   assert.equal(seedCapture.provider, 'chatgpt');
   const createStart = performance.now();
   let seedArchiveId, graphCapture;
-  for (let i = 0; i < count; i++) {
-    const id = crypto.randomUUID();
-    const capture = structuredClone(seedCapture);
-    capture.conversation_id = id;
-    capture.source_url = `https://chatgpt.com/c/${id}`;
-    capture.title = `Synthetic library corpus item ${String(i).padStart(5, '0')}`;
-    capture.messages = capture.messages.map((message, index) => ({
-      ...message, id: `synthetic-msg-${index}-${i}`,
-      text: `Synthetic archive retrieval benchmark ${i}. ${index === 0 ? 'Request' : 'Reply'} about native performance and source provenance.`,
-      attachments: [],
-    }));
-    const saved = saveCapture(capture);
-    if (i === 0) { seedArchiveId = saved.id; graphCapture = structuredClone(capture); }
-    if ((i + 1) % 100 === 0) process.stdout.write(`Fixture: ${i + 1}/${count}\n`);
-  }
-  gate('packaged-native-capture', 'PASS', `${count} unique synthetic archive saves through packaged native host`);
-  assert.ok(seedArchiveId, 'No seed archived');
+  const extraRevisions = 130;
+  if (fixtureSource) {
+    const source = path.resolve(fixtureSource);
+    const allowed = path.join(path.dirname(root), 'mp8l2-native-runs') + path.sep;
+    assert.ok(source.toLowerCase().startsWith(allowed.toLowerCase()) &&
+      path.basename(source).toLowerCase() === 'archive-v1' &&
+      source.toLowerCase() !== archive.toLowerCase(), 'Only own synthetic MP-8L2 archive may be reused');
+    const folders = fs.readdirSync(path.join(source, 'conversations'));
+    assert.equal(folders.length, count, 'Reused synthetic archive size mismatch');
+    const graphFolder = folders.find(name =>
+      fs.readdirSync(path.join(source, 'conversations', name, 'captures')).length === extraRevisions + 1);
+    assert.ok(graphFolder, 'Synthetic revision graph fixture missing');
+    const meta = JSON.parse(fs.readFileSync(path.join(source, 'conversations', graphFolder, 'meta.json'), 'utf8'));
+    assert.match(meta.summary.title, /^Synthetic library corpus item /, 'Not an isolated synthetic MP-8L2 fixture');
+    seedArchiveId = graphFolder;
+    fs.cpSync(path.join(source, 'conversations'), path.join(archive, 'conversations'), { recursive: true });
+    gate('packaged-native-capture', 'PASS', `Reused ${count} native-host-created synthetic saves`);
+    gate('real-native-graph-fixture', 'PASS', 'Reused 131 immutable synthetic revisions');
+  } else {
+    for (let i = 0; i < count; i++) {
+      const id = crypto.randomUUID();
+      const capture = structuredClone(seedCapture);
+      capture.conversation_id = id;
+      capture.source_url = `https://chatgpt.com/c/${id}`;
+      capture.title = `Synthetic library corpus item ${String(i).padStart(5, '0')}`;
+      capture.messages = capture.messages.map((message, index) => ({
+        ...message, id: `synthetic-msg-${index}-${i}`,
+        text: `Synthetic archive retrieval benchmark ${i}. ${index === 0 ? 'Request' : 'Reply'} about native performance and source provenance.`,
+        attachments: [],
+      }));
+      const saved = saveCapture(capture);
+      if (i === 0) { seedArchiveId = saved.id; graphCapture = structuredClone(capture); }
+      if ((i + 1) % 100 === 0) process.stdout.write(`Fixture: ${i + 1}/${count}\n`);
+    }
+    gate('packaged-native-capture', 'PASS', `${count} unique synthetic archive saves through packaged native host`);
+    assert.ok(seedArchiveId, 'No seed archived');
   // A single real archive with 131 immutable snapshots yields a connected Hive
   // neighborhood above the actual 120-node/240-edge retrieval limits. It is
   // stored through the same packaged host and indexed by the real Tauri app.
-  const extraRevisions = 130;
-  for (let i = 0; i < extraRevisions; i++) {
-    const revision = structuredClone(graphCapture);
-    revision.messages[0].text += ` Snapshot revision ${i}.`;
-    const saved = saveCapture(revision);
-    assert.equal(saved.id, seedArchiveId);
+    for (let i = 0; i < extraRevisions; i++) {
+      const revision = structuredClone(graphCapture);
+      revision.messages[0].text += ` Snapshot revision ${i}.`;
+      const saved = saveCapture(revision);
+      assert.equal(saved.id, seedArchiveId);
+    }
+    gate('real-native-graph-fixture', 'PASS', `${extraRevisions + 1} immutable revisions on one synthetic archive`);
   }
-  gate('real-native-graph-fixture', 'PASS', `${extraRevisions + 1} immutable revisions on one synthetic archive`);
   samples.push({ name: 'fixture-generation', ms: Math.round(performance.now() - createStart) });
 
   const port = 51000 + crypto.randomInt(1000);
@@ -235,10 +255,21 @@ try {
   gate('native-navigation', 'PASS', '12 switches among 4 workspaces');
   sampleMemory('after-navigation');
 
-  // Archive listing is independent of the derived index. Explicitly complete
-  // native FTS/graph synchronization before claiming a native Hive result.
-  const indexStats = await timed('native-index-synchronization', () => page.evaluate(async () =>
-    window.__TAURI_INTERNALS__.invoke('refresh_archive_index')));
+  // The application begins its own index sync upon unlock. Wait for that job
+  // instead of racing a second write transaction against SQLite.
+  // The timeout is a qualification failure, not a hidden fallback.
+  const indexStats = await timed('native-index-synchronization', async () => {
+    for (let attempt = 0; attempt < 240; attempt++) {
+      try {
+        const stats = await page.evaluate(() => window.__TAURI_INTERNALS__.invoke('get_archive_index_stats'));
+        if (stats.sources >= count && stats.revisions >= count + extraRevisions) return stats;
+      } catch (error) {
+        if (!/database is locked|SQLITE_BUSY/i.test(String(error))) throw error;
+      }
+      await sleep(500);
+    }
+    throw Error('Background native index sync did not reach expected source/revision counts within 120s');
+  });
   assert.ok(indexStats.sources >= count, 'Index did not include entire test corpus');
   assert.ok(indexStats.revisions >= count + extraRevisions,
     'Index did not include all synthetic graph revisions');
@@ -316,6 +347,7 @@ try {
     measured_at: new Date().toISOString(), host: { os: os.release(), arch: process.arch,
       cpus: os.cpus().length, totalRamGiB: Math.round(os.totalmem() / 1073741824) },
     package_source_sha: packageSha, runner_source_sha: git(root),
+    runner_script_sha256: sha256(fileURLToPath(import.meta.url)),
     executable_sha256: sha256(executable), host_sha256: sha256(host),
     conversations: count, graph: { native_status: nativeGraphStatus,
       native_nodes: svgNodes, native_edges: svgEdges, archived_revisions: extraRevisions + 1 },
