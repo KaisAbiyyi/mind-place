@@ -189,14 +189,73 @@ pub struct ArchiveStore {
 }
 
 impl ArchiveStore {
+    /// Legacy plaintext storage must not be used in an MP-9B encrypted vault.
+    /// This is also enforced at write time for already-open desktop handles,
+    /// while the independent native capture host reopens on every save.
+    pub(crate) fn ensure_not_encrypted_vault(&self) -> Result<()> {
+        for parent in [Some(self.root.as_path()), self.root.parent()]
+            .into_iter()
+            .flatten()
+        {
+            let marker = parent.join("vault-v1.json");
+            match std::fs::symlink_metadata(marker) {
+                Ok(_) => {
+                    return Err(ArchiveError::Invalid(
+                        "Encrypted vault detected: legacy plaintext archive access is disabled"
+                            .into(),
+                    ));
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(ArchiveError::Io(error)),
+            }
+        }
+        Ok(())
+    }
+
     pub fn open(root: impl AsRef<Path>) -> Result<Self> {
         let store = Self {
             root: root.as_ref().to_owned(),
         };
+        store.ensure_not_encrypted_vault()?;
         store.initialize()?;
         Ok(store)
     }
     pub fn root(&self) -> &Path {
         &self.root
+    }
+}
+
+#[cfg(test)]
+mod encrypted_vault_boundary_tests {
+    use super::*;
+
+    #[test]
+    fn plaintext_archive_open_refuses_marked_vault_without_creating_directories() {
+        let fixture = tempfile::tempdir().unwrap();
+        let vault = fixture.path().join("vault");
+        std::fs::create_dir(&vault).unwrap();
+        std::fs::write(vault.join("vault-v1.json"), b"synthetic-marker").unwrap();
+
+        let legacy_archive = vault.join("archive");
+        assert!(matches!(
+            ArchiveStore::open(&legacy_archive),
+            Err(ArchiveError::Invalid(_))
+        ));
+        assert!(!legacy_archive.exists());
+    }
+
+    #[test]
+    fn already_open_plaintext_handle_refuses_vault_marker_before_writing() {
+        let fixture = tempfile::tempdir().unwrap();
+        let vault = fixture.path().join("vault");
+        let legacy_archive = vault.join("archive");
+        let store = ArchiveStore::open(&legacy_archive).unwrap();
+        std::fs::write(vault.join("vault-v1.json"), b"synthetic-marker").unwrap();
+
+        assert!(matches!(
+            store.lock(),
+            Err(ArchiveError::Invalid(_))
+        ));
+        assert!(!legacy_archive.join(".archive.lock").exists());
     }
 }
