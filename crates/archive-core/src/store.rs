@@ -449,6 +449,9 @@ impl ArchiveStore {
     }
 
     pub(crate) fn lock(&self) -> Result<File> {
+        // Recheck at the serialization boundary: a vault marker may have been
+        // provisioned after a desktop process opened this legacy store.
+        self.ensure_not_encrypted_vault()?;
         let path = self.root.join(".archive.lock");
         no_link(&path)?;
         let file = OpenOptions::new()
