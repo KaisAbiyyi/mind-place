@@ -57,12 +57,10 @@ impl CipherKey {
         // Only an explicit active result is acceptable; NULL, 0 and unknown
         // representations must all fail closed.
         let active: Option<bool> = db
-            .query_row("PRAGMA cipher_status", [], |r| {
-                match r.get_ref(0)? {
-                    rusqlite::types::ValueRef::Integer(1) => Ok(true),
-                    rusqlite::types::ValueRef::Text(bytes) => Ok(bytes == b"1"),
-                    _ => Ok(false),
-                }
+            .query_row("PRAGMA cipher_status", [], |r| match r.get_ref(0)? {
+                rusqlite::types::ValueRef::Integer(1) => Ok(true),
+                rusqlite::types::ValueRef::Text(bytes) => Ok(bytes == b"1"),
+                _ => Ok(false),
             })
             .optional()?;
         if active != Some(true) {
