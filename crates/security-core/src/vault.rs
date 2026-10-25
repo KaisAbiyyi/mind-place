@@ -7,6 +7,8 @@ use aes_gcm::{
 };
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
+use hmac::{Hmac, Mac};
+use sha2::Sha256;
 use std::{
     fs::{self, OpenOptions},
     io::{Read, Write},
@@ -52,7 +54,7 @@ pub enum ContentKind {
     Backup,
 }
 impl ContentKind {
-    fn label(self) -> &'static [u8] {
+    pub(crate) fn label(self) -> &'static [u8] {
         match self {
             Self::Archive => b"archive",
             Self::DocumentObject => b"document-object",
@@ -190,6 +192,39 @@ impl CryptoVault {
 
     pub fn id(&self) -> [u8; 16] {
         self.vault_id
+    }
+
+    /// Domain-separated HMAC-SHA256 on high-entropy, per-vault secret material.
+    pub fn derived_key(
+        &self, gate: &SecurityGate, lease: UnlockLease, domain: &[u8]
+    ) -> Result<Zeroizing<[u8; 32]>> {
+        gate.validate_lease(lease)?;
+        if domain.is_empty() || domain.len() > 128 { return Err(SecurityError::InvalidConfig); }
+        let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(self.dek.as_ref()).map_err(|_| SecurityError::Crypto)?;
+        mac.update(b"mind-place/key-derivation/v1");
+        mac.update(&self.vault_id);
+        mac.update(&(domain.len() as u32).to_be_bytes());
+        mac.update(domain);
+        let digest = mac.finalize().into_bytes();
+        let mut derived = Zeroizing::new([0u8; 32]);
+        derived.copy_from_slice(&digest);
+        gate.validate_lease(lease)?;
+        Ok(derived)
+    }
+
+    /// Opaque dedup name for immutable objects; never use unsalted public SHA256.
+    pub fn storage_name(
+        &self, gate: &SecurityGate, lease: UnlockLease, kind: ContentKind, identity: &[u8]
+    ) -> Result<String> {
+        if identity.is_empty() || identity.len() > 3500 { return Err(SecurityError::InvalidConfig); }
+        let key = self.derived_key(gate, lease, b"object-filename/v1")?;
+        let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(key.as_ref()).map_err(|_| SecurityError::Crypto)?;
+        mac.update(kind.label());
+        mac.update(&(identity.len() as u32).to_be_bytes());
+        mac.update(identity);
+        let digest = mac.finalize().into_bytes();
+        gate.validate_lease(lease)?;
+        Ok(digest.iter().map(|b| format!("{b:02x}")).collect())
     }
 
     /// Envelopes are versioned and AEAD-bound to vault, kind and canonical identity.
