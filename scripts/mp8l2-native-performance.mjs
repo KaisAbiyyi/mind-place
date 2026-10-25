@@ -288,7 +288,10 @@ try {
   await page.locator('[data-workspace="graph"]').click();
   // The archive receipt is the graph Import node's canonical key. Conversation
   // nodes instead use provider-neutral source IDs from the authority store.
-  await page.locator('.hive-search-form select').selectOption('import');
+  // Do not silently repair the seed type inside the test harness: users should
+  // get the correct choice by default when opening Hive from their archive.
+  assert.equal(await page.locator('.hive-search-form select').inputValue(), 'import',
+    'Hive must default to archive/import for the auto-filled saved conversation ID');
   await page.locator('.hive-search-form input').fill(seedArchiveId);
   await timed('native-index-graph-neighbors', async () => {
     await page.locator('.hive-search-form button[type="submit"]').click();
