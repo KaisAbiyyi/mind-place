@@ -30,9 +30,17 @@ export async function mountApplication({ root, invoke, clipboard }: ApplicationO
       onUnlocked: () => {
         if (generation !== expectedGeneration) return;
         generation++;
-        reader = mountReader({ root, invoke, clipboard, onLock: () => { void lock(); } });
-        // Index refresh neither starts MCP nor holds up the reader.
-        void invoke("refresh_archive_index").catch(() => {});
+        const epoch = generation;
+        const currentReader = mountReader({ root, invoke, clipboard, onLock: () => { void lock(); } });
+        reader = currentReader;
+        // The first library read and the derived index would otherwise scan
+        // the same thousands of archive files concurrently on cold unlock.
+        // Let the owner see the library before starting the background index.
+        // A late list completion must never start indexing after Lock.
+        void currentReader.ready.then(() => {
+          if (generation !== epoch || reader !== currentReader) return;
+          return invoke("refresh_archive_index");
+        }).catch(() => {});
       },
     });
   };

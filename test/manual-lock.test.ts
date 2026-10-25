@@ -138,10 +138,14 @@ test("late archive result cannot repopulate the locked UI and fresh unlock never
   };
   try {
     await mountApp(root, invoke);
+    assert.equal(commands.includes("refresh_archive_index"), false,
+      "background index must not overlap the first library read");
     lockButton(root).click();
     await delay(0);
     pendingList.resolve([{ id: "a".repeat(64), title: "late private title", conversation_id: "fixture", provider: "chatgpt", source_url: "https://chatgpt.com/c/fixture", captured_at: "2026-10-21T00:00:00Z", message_count: 0, snapshot_count: 1, completeness: "partial", warnings: [] }]);
     await delay(0);
+    assert.equal(commands.includes("refresh_archive_index"), false,
+      "an expired unlock epoch must not schedule indexing after the list settles");
     assert.doesNotMatch(root.textContent ?? "", /late private title/);
     const input = root.querySelector<HTMLInputElement>("#security-secret")!;
     input.value = "fixture-password";
@@ -152,5 +156,27 @@ test("late archive result cannot repopulate the locked UI and fresh unlock never
     assert.equal(commands.includes("start_local_mcp"), false);
     assert.equal(commands.includes("start_hosted_tunnel"), false);
     assert.doesNotMatch(root.textContent ?? "", /late private title/);
+  } finally { dom.window.close(); }
+});
+
+test("cold unlock loads native library before starting derived indexing", async () => {
+  const { dom, root } = fixture();
+  const pendingList = deferred<unknown[]>();
+  const commands: string[] = [];
+  const invoke: Invoke = async <T>(command: string) => {
+    commands.push(command);
+    if (command === "get_security_status") return unlocked as T;
+    if (command === "list_conversations") return await pendingList.promise as T;
+    if (command === "refresh_archive_index") return {} as T;
+    throw new Error(`Unexpected native command: ${command}`);
+  };
+  try {
+    await mountApp(root, invoke);
+    assert.equal(commands.includes("refresh_archive_index"), false);
+    pendingList.resolve([]);
+    await delay(0);
+    assert.deepEqual(commands.filter(command =>
+      command === "list_conversations" || command === "refresh_archive_index"),
+      ["list_conversations", "refresh_archive_index"]);
   } finally { dom.window.close(); }
 });
