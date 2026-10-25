@@ -227,7 +227,10 @@ impl IndexStore {
     pub fn open_encrypted(path: impl AsRef<Path>, raw_key: [u8; 32]) -> Result<Self> {
         Self::open_internal(path, Some(CipherKey::new(raw_key)))
     }
-    fn open_internal(path: impl AsRef<Path>, cipher_key: Option<std::sync::Arc<CipherKey>>) -> Result<Self> {
+    fn open_internal(
+        path: impl AsRef<Path>,
+        cipher_key: Option<std::sync::Arc<CipherKey>>,
+    ) -> Result<Self> {
         let path = path.as_ref().to_owned();
         let parent = path.parent().ok_or(IndexError::UnsafePath)?;
         safe_path(parent)?;
@@ -239,7 +242,9 @@ impl IndexStore {
                 &path,
                 OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
             )?;
-            if let Some(key) = cipher_key.as_ref() { key.unlock(&ro)?; }
+            if let Some(key) = cipher_key.as_ref() {
+                key.unlock(&ro)?;
+            }
             verify(&ro, true)?;
         }
         let mut db = Connection::open_with_flags(
@@ -248,7 +253,9 @@ impl IndexStore {
                 | OpenFlags::SQLITE_OPEN_CREATE
                 | OpenFlags::SQLITE_OPEN_NOFOLLOW,
         )?;
-        if let Some(key) = cipher_key.as_ref() { key.unlock(&db)?; }
+        if let Some(key) = cipher_key.as_ref() {
+            key.unlock(&db)?;
+        }
         configure(&db)?;
         if !existed {
             let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -298,7 +305,9 @@ impl IndexStore {
             &self.path,
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
         )?;
-        if let Some(key) = self.cipher_key.as_ref() { key.unlock(&db)?; }
+        if let Some(key) = self.cipher_key.as_ref() {
+            key.unlock(&db)?;
+        }
         configure(&db)?;
         // Full integrity scans are done on open, not per hot search or transaction.
         verify(&db, false)?;

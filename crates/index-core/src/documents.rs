@@ -121,7 +121,10 @@ impl DocumentIndex {
     pub fn open_encrypted(path: impl AsRef<Path>, raw_key: [u8; 32]) -> Result<Self> {
         Self::open_internal(path, Some(CipherKey::new(raw_key)))
     }
-    fn open_internal(path: impl AsRef<Path>, cipher_key: Option<std::sync::Arc<CipherKey>>) -> Result<Self> {
+    fn open_internal(
+        path: impl AsRef<Path>,
+        cipher_key: Option<std::sync::Arc<CipherKey>>,
+    ) -> Result<Self> {
         let path = path.as_ref().to_owned();
         let parent = path.parent().ok_or(IndexError::UnsafePath)?;
         safe_path(parent)?;
@@ -135,7 +138,9 @@ impl DocumentIndex {
                 &path,
                 OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
             )?;
-            if let Some(key) = cipher_key.as_ref() { key.unlock(&ro)?; }
+            if let Some(key) = cipher_key.as_ref() {
+                key.unlock(&ro)?;
+            }
             let id: i64 = ro.query_row("PRAGMA application_id", [], |r| r.get(0))?;
             let version: i64 = ro.query_row("PRAGMA user_version", [], |r| r.get(0))?;
             if id != APPLICATION_ID || !matches!(version, 1 | SCHEMA_VERSION) {
@@ -161,7 +166,9 @@ impl DocumentIndex {
                 | OpenFlags::SQLITE_OPEN_CREATE
                 | OpenFlags::SQLITE_OPEN_NOFOLLOW,
         )?;
-        if let Some(key) = cipher_key.as_ref() { key.unlock(&db)?; }
+        if let Some(key) = cipher_key.as_ref() {
+            key.unlock(&db)?;
+        }
         configure(&db)?;
         if !existed {
             db.execute_batch(SCHEMA)?;
@@ -186,14 +193,18 @@ impl DocumentIndex {
             &self.path,
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
         )?;
-        if let Some(key) = self.cipher_key.as_ref() { key.unlock(&ro)?; }
+        if let Some(key) = self.cipher_key.as_ref() {
+            key.unlock(&ro)?;
+        }
         verify_document_database(&ro, false)?;
         drop(ro);
         let db = Connection::open_with_flags(
             &self.path,
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
         )?;
-        if let Some(key) = self.cipher_key.as_ref() { key.unlock(&db)?; }
+        if let Some(key) = self.cipher_key.as_ref() {
+            key.unlock(&db)?;
+        }
         configure(&db)?;
         verify_document_database(&db, false)?;
         Ok(db)

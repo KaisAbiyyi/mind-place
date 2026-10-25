@@ -177,7 +177,10 @@ impl StateStore {
     pub fn open_encrypted(path: impl AsRef<Path>, raw_key: [u8; 32]) -> Result<Self> {
         Self::open_internal(path, Some(CipherKey::new(raw_key)))
     }
-    fn open_internal(path: impl AsRef<Path>, cipher_key: Option<std::sync::Arc<CipherKey>>) -> Result<Self> {
+    fn open_internal(
+        path: impl AsRef<Path>,
+        cipher_key: Option<std::sync::Arc<CipherKey>>,
+    ) -> Result<Self> {
         if rusqlite::version_number() < MIN_SQLITE_NUMBER {
             return Err(StateError::SqliteTooOld);
         }
@@ -202,7 +205,9 @@ impl StateStore {
                 &path,
                 OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
             )?;
-            if let Some(key) = cipher_key.as_ref() { key.unlock(&ro)?; }
+            if let Some(key) = cipher_key.as_ref() {
+                key.unlock(&ro)?;
+            }
             identity(&ro)?;
             let version = user_version(&ro)?;
             if version > SCHEMA_VERSION {
@@ -220,7 +225,9 @@ impl StateStore {
                 | OpenFlags::SQLITE_OPEN_CREATE
                 | OpenFlags::SQLITE_OPEN_NOFOLLOW,
         )?;
-        if let Some(key) = cipher_key.as_ref() { key.unlock(&db)?; }
+        if let Some(key) = cipher_key.as_ref() {
+            key.unlock(&db)?;
+        }
         db.busy_timeout(Duration::from_secs(5))?;
         db.pragma_update(None, "foreign_keys", "ON")?;
         db.pragma_update(None, "journal_mode", "WAL")?;
@@ -321,7 +328,9 @@ impl StateStore {
             &self.path,
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
         )?;
-        if let Some(key) = self.cipher_key.as_ref() { key.unlock(&db)?; }
+        if let Some(key) = self.cipher_key.as_ref() {
+            key.unlock(&db)?;
+        }
         db.busy_timeout(Duration::from_secs(5))?;
         db.pragma_update(None, "foreign_keys", "ON")?;
         db.pragma_update(None, "synchronous", "FULL")?;
@@ -339,7 +348,9 @@ impl StateStore {
             &self.path,
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
         )?;
-        if let Some(key) = self.cipher_key.as_ref() { key.unlock(&db)?; }
+        if let Some(key) = self.cipher_key.as_ref() {
+            key.unlock(&db)?;
+        }
         db.busy_timeout(Duration::from_secs(5))?;
         identity(&db)?;
         if user_version(&db)? != SCHEMA_VERSION {
