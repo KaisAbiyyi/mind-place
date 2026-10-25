@@ -186,7 +186,9 @@ fn collect_file(
         }
         sha.update(&block[..amount]);
     }
-    let next_total = accumulated.checked_add(size).ok_or(SecurityError::Crypto)?;
+    let next_total = accumulated
+        .checked_add(size)
+        .ok_or(SecurityError::Crypto)?;
     if next_total > MAX_TOTAL_BYTES {
         return Err(SecurityError::InvalidConfig);
     }
