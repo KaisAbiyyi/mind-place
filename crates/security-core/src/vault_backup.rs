@@ -292,7 +292,9 @@ fn allowed(relative: &Path) -> bool {
         {
             components.next().is_none()
         }
-        Some(Component::Normal(first)) if first == "archive" || first == "document-objects" => {
+        Some(Component::Normal(first))
+            if first == "archive" || first == "document-objects" || first == "backups" =>
+        {
             components.next().is_some()
         }
         _ => false,
@@ -354,7 +356,7 @@ fn inventory(root: &Path) -> Result<Vec<PathBuf>> {
                 }
                 files.push(PathBuf::from(name));
             }
-            "archive" | "document-objects" if meta.is_dir() => {
+            "archive" | "document-objects" | "backups" if meta.is_dir() => {
                 gather(root, &path, &mut files)?;
             }
             // Unknown/unmigrated state, WAL, plaintext cache, directory, or
@@ -527,12 +529,21 @@ mod tests {
                 b"synthetic document",
             )
             .unwrap();
+        store
+            .write_immutable(
+                &gate,
+                lease,
+                ContentKind::Backup,
+                b"prior-generation",
+                b"synthetic prior backup object",
+            )
+            .unwrap();
         let backup = temp.path().join("backup");
         let meta = PortableBackup::create(&gate, lease, &vault, &root, &backup, 7).unwrap();
-        assert_eq!(meta.count, 3);
+        assert_eq!(meta.count, 4);
         let restore = temp.path().join("restored");
         let restored = PortableBackup::restore(&gate, lease, &backup, &restore, &recovery).unwrap();
-        assert_eq!(restored.count, 3);
+        assert_eq!(restored.count, 4);
         assert_eq!(
             fs::read(restore.join("state.sqlite3")).unwrap(),
             fs::read(root.join("state.sqlite3")).unwrap()
