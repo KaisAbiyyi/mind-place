@@ -166,7 +166,7 @@ impl PortableBackup {
             gate.validate_lease(lease)?;
             let relative = Path::new(&receipt.path);
             valid_relative(relative)?;
-            if !allowed(relative) || !seen.insert(&receipt.path) || receipt.length > MAX_FILE_SIZE {
+            if !allowed(relative) || !seen.insert(receipt.path.clone()) || receipt.length > MAX_FILE_SIZE {
                 return Err(SecurityError::Crypto);
             }
             total = total.checked_add(receipt.length).ok_or(SecurityError::Crypto)?;
