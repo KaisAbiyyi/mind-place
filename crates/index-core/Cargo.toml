@@ -10,7 +10,7 @@ mind-place-archive = { path = "../archive-core" }
 mind-place-state = { path = "../state-core" }
 mind-place-security = { path = "../security-core" }
 mind-place-documents = { path = "../document-core" }
-rusqlite = { version = "=0.40.2", features = ["bundled-sqlcipher-vendored-openssl"] }
+rusqlite = { version = "=0.40.2", features = ["bundled"] }
 sha2.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -19,3 +19,6 @@ thiserror.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+
+[features]
+sqlcipher-preview = ["mind-place-state/sqlcipher-preview", "rusqlite/bundled-sqlcipher-vendored-openssl"]

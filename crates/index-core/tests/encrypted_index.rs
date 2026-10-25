@@ -1,3 +1,4 @@
+#![cfg(feature = "sqlcipher-preview")]
 //! MP-9B: FTS5/graph derived indexes cannot remain visible at rest.
 use mind_place_index::documents::DocumentIndex;
 use mind_place_index::IndexStore;

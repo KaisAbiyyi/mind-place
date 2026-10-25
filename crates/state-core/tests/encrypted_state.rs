@@ -1,3 +1,4 @@
+#![cfg(feature = "sqlcipher-preview")]
 //! MP-9B: prove product StateStore writes encrypted SQLCipher pages, not just an
 //! application-layer cipher that leaves SQLite and its WAL in plaintext.
 use mind_place_security::SecurityGate;
