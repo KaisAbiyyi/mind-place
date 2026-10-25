@@ -738,41 +738,89 @@ impl ArchiveStore {
         Ok(out)
     }
 
+    fn list_entry(&self, path: &Path, query: &str) -> Result<Option<ConversationSummary>> {
+        let Some(id) = path.file_name().and_then(|s| s.to_str()) else {
+            return Ok(None);
+        };
+        if !hex_id(id) {
+            return Ok(None);
+        }
+        no_link(path)?;
+        if !path.join("meta.json").exists() {
+            return Ok(None);
+        }
+        let meta: StoredMeta =
+            serde_json::from_slice(&bounded_read(&path.join("meta.json"), 128 * 1024)?)?;
+        if !query.is_empty() && !meta.summary.title.to_lowercase().contains(query) {
+            let text = String::from_utf8(bounded_read(
+                &path.join("search.txt"),
+                MAX_CAPTURE_BYTES + 2048,
+            )?)
+            .map_err(|_| invalid("Search index is not UTF-8"))?;
+            if !text.to_lowercase().contains(query) {
+                return Ok(None);
+            }
+        }
+        let mut summary = meta.summary;
+        self.backfill_summary_date(id, &meta.latest_snapshot, &mut summary)?;
+        Ok(Some(summary))
+    }
+
     pub fn list(&self, query: &str) -> Result<Vec<ConversationSummary>> {
         if query.len() > 1024 {
             return Err(invalid("Search query is too long"));
         }
         let query = query.trim().to_lowercase();
-        let mut out = vec![];
-        no_link(&self.root.join("conversations"))?;
-        for entry in fs::read_dir(self.root.join("conversations"))? {
-            let path = entry?.path();
-            let Some(id) = path.file_name().and_then(|s| s.to_str()) else {
-                continue;
-            };
-            if !hex_id(id) {
-                continue;
-            }
-            no_link(&path)?;
-            if !path.join("meta.json").exists() {
-                continue;
-            }
-            let meta: StoredMeta =
-                serde_json::from_slice(&bounded_read(&path.join("meta.json"), 128 * 1024)?)?;
-            if !query.is_empty() && !meta.summary.title.to_lowercase().contains(&query) {
-                let text = String::from_utf8(bounded_read(
-                    &path.join("search.txt"),
-                    MAX_CAPTURE_BYTES + 2048,
-                )?)
-                .map_err(|_| invalid("Search index is not UTF-8"))?;
-                if !text.to_lowercase().contains(&query) {
-                    continue;
+        let directory = self.root.join("conversations");
+        no_link(&directory)?;
+        let paths = fs::read_dir(directory)?
+            .map(|entry| entry.map(|entry| entry.path()))
+            .collect::<std::io::Result<Vec<_>>>()?;
+
+        // Cold Windows archive reads can be dominated by thousands of tiny
+        // metadata + legacy-date reads. Bound concurrency rather than opening
+        // an unbounded number of files or keeping every snapshot in memory.
+        // Each worker retains the existing per-path no-link and size checks.
+        let workers = thread::available_parallelism()
+            .map(|n| n.get().min(8))
+            .unwrap_or(1);
+        let mut out = if paths.len() < 160 || workers <= 1 {
+            let mut items = Vec::new();
+            for path in &paths {
+                if let Some(item) = self.list_entry(path, &query)? {
+                    items.push(item);
                 }
             }
-            let mut summary = meta.summary;
-            self.backfill_summary_date(id, &meta.latest_snapshot, &mut summary)?;
-            out.push(summary);
-        }
+            items
+        } else {
+            thread::scope(|scope| -> Result<Vec<ConversationSummary>> {
+                let batch = paths.len().div_ceil(workers);
+                let handles = paths
+                    .chunks(batch)
+                    .map(|chunk| {
+                        let query = query.as_str();
+                        scope.spawn(move || -> Result<Vec<ConversationSummary>> {
+                            let mut items = Vec::new();
+                            for path in chunk {
+                                if let Some(item) = self.list_entry(path, query)? {
+                                    items.push(item);
+                                }
+                            }
+                            Ok(items)
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                let mut items = Vec::new();
+                for handle in handles {
+                    items.extend(
+                        handle
+                            .join()
+                            .map_err(|_| invalid("Archive listing worker failed"))??,
+                    );
+                }
+                Ok(items)
+            })?
+        };
         out.sort_by(summary_date_order);
         Ok(out)
     }

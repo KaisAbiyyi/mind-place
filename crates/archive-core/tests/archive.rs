@@ -48,6 +48,47 @@ fn named_capture(conversation_id: &str, title: &str, captured_at: &str) -> Captu
 }
 
 #[test]
+fn parallel_large_archive_listing_preserves_search_order_and_raw_snapshots() {
+    let dir = tempdir().unwrap();
+    let store = ArchiveStore::open(dir.path()).unwrap();
+    let mut immutable = Vec::new();
+    for i in 0..160 {
+        let id = format!("12345678-1234-4123-8123-{i:012x}");
+        let mut item = named_capture(
+            &id,
+            &format!("Synthetic entry {i:03}"),
+            "2026-10-15T08:00:00Z",
+        );
+        if i % 5 == 0 {
+            item.title.push_str(" needle");
+        }
+        let saved = store.save(item).unwrap();
+        if i == 0 || i == 159 {
+            let file = dir
+                .path()
+                .join("conversations")
+                .join(&saved.id)
+                .join("captures")
+                .join(format!("{}.jsonl", saved.snapshot_id));
+            immutable.push((file.clone(), fs::read(file).unwrap()));
+        }
+    }
+    let first = store.list("").unwrap();
+    let second = store.list("").unwrap();
+    assert_eq!(first.len(), 160);
+    assert_eq!(
+        first.iter().map(|row| &row.id).collect::<Vec<_>>(),
+        second.iter().map(|row| &row.id).collect::<Vec<_>>()
+    );
+    assert_eq!(first[0].title, "Synthetic entry 000 needle");
+    assert_eq!(first[159].title, "Synthetic entry 159");
+    assert_eq!(store.list("needle").unwrap().len(), 32);
+    for (file, bytes) in immutable {
+        assert_eq!(fs::read(file).unwrap(), bytes);
+    }
+}
+
+#[test]
 fn automatic_windows_preserve_previous_raw_and_known_original_date() {
     let dir = tempdir().unwrap();
     let store = ArchiveStore::open(dir.path()).unwrap();

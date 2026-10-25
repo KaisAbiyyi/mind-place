@@ -630,6 +630,7 @@ mod tests {
             security: security.clone(),
             state_path,
             index_path: dir.path().join("index.sqlite3"),
+            archive_index_write_gate: std::sync::Arc::new(std::sync::Mutex::new(())),
             authority_ready: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
             document_authority_gate: std::sync::Arc::new(std::sync::Mutex::new(())),
             document_refresh: std::sync::Arc::new(crate::DocumentRefreshRegistry::default()),

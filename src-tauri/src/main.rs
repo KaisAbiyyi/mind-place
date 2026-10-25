@@ -39,6 +39,9 @@ struct AppState {
     security: SecurityGate,
     state_path: PathBuf,
     index_path: PathBuf,
+    // One derived-index writer per process. Avoid competing refresh/rebuild
+    // transactions and revalidate the unlock epoch after a queued writer wakes.
+    archive_index_write_gate: Arc<Mutex<()>>,
     authority_ready: Arc<AtomicBool>,
     // Serializes owner filesystem grants against Lock; prevents late approvals.
     document_authority_gate: Arc<Mutex<()>>,
@@ -147,6 +150,60 @@ async fn index_task<T: Send + 'static>(
     Ok(result)
 }
 
+fn serialized_archive_index_writer<T>(
+    gate: &Mutex<()>,
+    security: &SecurityGate,
+    lease: UnlockLease,
+    operation: impl FnOnce() -> mind_place_index::Result<T>,
+) -> mind_place_index::Result<T> {
+    let _guard = gate.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    security
+        .validate_lease(lease)
+        .map_err(|_| IndexError::Revoked)?;
+    operation()
+}
+
+#[cfg(test)]
+mod archive_index_writer_regression_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    #[test]
+    fn queued_refresh_cannot_write_after_owner_locks() {
+        let folder = tempfile::tempdir().unwrap();
+        let security = SecurityGate::open(folder.path().join("security.json")).unwrap();
+        security.initialize(b"synthetic-index-gate-secret").unwrap();
+        let lease = security.require_unlocked().unwrap();
+        let gate = Arc::new(Mutex::new(()));
+        let hold = gate.lock().unwrap();
+        let ran = Arc::new(AtomicBool::new(false));
+        let worker_gate = gate.clone();
+        let worker_security = security.clone();
+        let worker_ran = ran.clone();
+        let pending = std::thread::spawn(move || {
+            serialized_archive_index_writer(&worker_gate, &worker_security, lease, || {
+                worker_ran.store(true, Ordering::SeqCst);
+                Ok(())
+            })
+        });
+        security.lock();
+        drop(hold);
+        assert!(matches!(pending.join().unwrap(), Err(IndexError::Revoked)));
+        assert!(!ran.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn current_writer_runs_with_valid_epoch() {
+        let folder = tempfile::tempdir().unwrap();
+        let security = SecurityGate::open(folder.path().join("security.json")).unwrap();
+        security.initialize(b"synthetic-index-gate-secret").unwrap();
+        let lease = security.require_unlocked().unwrap();
+        let gate = Mutex::new(());
+        let value = serialized_archive_index_writer(&gate, &security, lease, || Ok(7)).unwrap();
+        assert_eq!(value, 7);
+    }
+}
+
 async fn read_memory_authority<T: Send + 'static>(
     state: &AppState,
     operation: impl FnOnce(StateStore) -> mind_place_state::Result<T> + Send + 'static,
@@ -191,13 +248,16 @@ async fn refresh_archive_index(state: State<'_, AppState>) -> Result<IndexStats,
     let archive = state.store.clone();
     let state_path = state.state_path.clone();
     let index_path = state.index_path.clone();
+    let write_gate = state.archive_index_write_gate.clone();
     index_task(&state, move |lease, security| {
-        let authority = StateStore::open(state_path)?;
-        let index = IndexStore::open(index_path)?;
-        index.sync_with_check(&archive, &authority, || {
-            security
-                .validate_lease(lease)
-                .map_err(|_| IndexError::Revoked)
+        serialized_archive_index_writer(&write_gate, &security, lease, || {
+            let authority = StateStore::open(state_path)?;
+            let index = IndexStore::open(index_path)?;
+            index.sync_with_check(&archive, &authority, || {
+                security
+                    .validate_lease(lease)
+                    .map_err(|_| IndexError::Revoked)
+            })
         })
     })
     .await
@@ -208,13 +268,16 @@ async fn rebuild_archive_index(state: State<'_, AppState>) -> Result<IndexStats,
     let archive = state.store.clone();
     let state_path = state.state_path.clone();
     let index_path = state.index_path.clone();
+    let write_gate = state.archive_index_write_gate.clone();
     index_task(&state, move |lease, security| {
-        let authority = StateStore::open(state_path)?;
-        let index = IndexStore::open(index_path)?;
-        index.rebuild_with_check(&archive, &authority, || {
-            security
-                .validate_lease(lease)
-                .map_err(|_| IndexError::Revoked)
+        serialized_archive_index_writer(&write_gate, &security, lease, || {
+            let authority = StateStore::open(state_path)?;
+            let index = IndexStore::open(index_path)?;
+            index.rebuild_with_check(&archive, &authority, || {
+                security
+                    .validate_lease(lease)
+                    .map_err(|_| IndexError::Revoked)
+            })
         })
     })
     .await
@@ -903,6 +966,7 @@ fn main() {
                 security,
                 state_path,
                 index_path,
+                archive_index_write_gate: Arc::new(Mutex::new(())),
                 authority_ready: Arc::new(AtomicBool::new(false)),
                 document_authority_gate: Arc::new(Mutex::new(())),
                 document_refresh: Arc::new(DocumentRefreshRegistry::default()),
