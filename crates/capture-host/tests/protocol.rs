@@ -149,3 +149,22 @@ fn ping_has_no_storage_side_effects() {
     assert_eq!(response(&out)["protocol"], 1);
     assert!(!root.exists());
 }
+
+#[test]
+fn vault_marker_denies_native_capture_before_plaintext_archive_creation() {
+    let dir = tempdir().unwrap();
+    let vault = dir.path().join("encrypted-vault");
+    std::fs::create_dir(&vault).unwrap();
+    std::fs::write(vault.join("vault-v1.json"), b"synthetic-marker").unwrap();
+    let root = vault.join("archive");
+    let mut out = vec![];
+    serve_one(
+        Cursor::new(frame(request())),
+        &mut out,
+        &root,
+        &origin(),
+    )
+    .unwrap();
+    assert_eq!(response(&out)["ok"], false);
+    assert!(!root.exists(), "plaintext archive was created inside a vault");
+}
