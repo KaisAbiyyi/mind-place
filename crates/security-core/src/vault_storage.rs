@@ -219,6 +219,7 @@ fn sync_parent(parent: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sha2::Digest;
     fn fixture() -> (tempfile::TempDir, SecurityGate, UnlockLease, CryptoVault) {
         let dir = tempfile::tempdir().unwrap();
         let security = SecurityGate::open(dir.path().join("security.json")).unwrap();
@@ -246,6 +247,8 @@ mod tests {
             )
             .unwrap();
         let bytes = fs::read(&p).unwrap();
+        // Public SHA256 of plaintext must never be exposed in ciphertext headers.
+        assert_ne!(&bytes[17..49], sha2::Sha256::digest(&content).as_slice());
         assert!(!bytes
             .windows(24)
             .any(|part| part.iter().all(|b| *b == 0x54)));
