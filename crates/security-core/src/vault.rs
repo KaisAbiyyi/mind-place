@@ -5,7 +5,7 @@ use aes_gcm::{
     aead::{Aead, Payload},
     Aes256Gcm, KeyInit, Nonce,
 };
-use base64::{engine::general_purpose::STANDARD, Engine as _};
+use base64::{engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD}, Engine as _};
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
@@ -21,6 +21,7 @@ const ENVELOPE_PREFIX: &[u8; 5] = b"MPVE\x01";
 const MAX_MANIFEST_BYTES: u64 = 16 * 1024;
 const MAX_PAYLOAD_BYTES: usize = 32 * 1024 * 1024;
 const MAX_ID_BYTES: usize = 4096;
+const RECOVERY_CODE_PREFIX: &str = "MP-RECOVERY-1-";
 
 /// Independently generated 256-bit offline recovery secret; NOT a PIN or verifier.
 /// A caller must explicitly display/export this once and verify secure retention.
@@ -31,6 +32,34 @@ impl RecoverySecret {
     }
     pub fn from_exported_bytes(bytes: [u8; 32]) -> Self {
         Self(Zeroizing::new(bytes))
+    }
+
+    /// Explicit one-time offline export; callers must never log, persist in
+    /// plaintext, or automatically copy this code into telemetry/clipboard.
+    pub fn export_code(&self) -> String {
+        let code = URL_SAFE_NO_PAD.encode(self.0.as_ref());
+        let digest = Sha256::digest(self.0.as_ref());
+        let check = URL_SAFE_NO_PAD.encode(&digest[..4]);
+        format!("{RECOVERY_CODE_PREFIX}{code}-{check}")
+    }
+
+    /// Strict typed, versioned recovery input. AEAD verification of the
+    /// wrapped DEK still provides the actual cryptographic authorization.
+    pub fn from_export_code(input: &str) -> Result<Self> {
+        let encoded = input
+            .strip_prefix(RECOVERY_CODE_PREFIX)
+            .ok_or(SecurityError::InvalidConfig)?;
+        let (key, check) = encoded.split_once('-').ok_or(SecurityError::InvalidConfig)?;
+        if key.len() != 43 || check.len() != 6 {
+            return Err(SecurityError::InvalidConfig);
+        }
+        let decoded = URL_SAFE_NO_PAD.decode(key).map_err(|_| SecurityError::InvalidConfig)?;
+        let raw: [u8; 32] = decoded.try_into().map_err(|_| SecurityError::InvalidConfig)?;
+        let checksum = Sha256::digest(raw);
+        if URL_SAFE_NO_PAD.encode(&checksum[..4]) != check {
+            return Err(SecurityError::InvalidConfig);
+        }
+        Ok(Self(Zeroizing::new(raw)))
     }
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -563,6 +592,23 @@ mod tests {
             VaultManifest::read(&fresh).unwrap().vault_id_b64,
             manifest.vault_id_b64
         );
+    }
+    #[test]
+    fn portable_recovery_code_is_versioned_and_rejects_transcription_errors() {
+        let (_, gate, lease) = fixture();
+        let (vault, secret, manifest) = CryptoVault::provision(&gate, lease).unwrap();
+        let export = secret.export_code();
+        assert!(export.starts_with("MP-RECOVERY-1-"));
+        assert!(!export.contains('='));
+        let recovered = RecoverySecret::from_export_code(&export).unwrap();
+        let reopened = CryptoVault::restore_with_recovery(&gate, lease, &manifest, &recovered).unwrap();
+        assert_eq!(reopened.id(), vault.id());
+        assert!(RecoverySecret::from_export_code(&export.replace("MP-RECOVERY-1-", "MP-RECOVERY-2-")).is_err());
+        let mut typo = export.clone().into_bytes();
+        let pos = RECOVERY_CODE_PREFIX.len() + 8;
+        typo[pos] = if typo[pos] == b'A' { b'B' } else { b'A' };
+        assert!(RecoverySecret::from_export_code(&String::from_utf8(typo).unwrap()).is_err());
+        assert!(RecoverySecret::from_export_code(&format!("{export} ")).is_err());
     }
     #[test]
     fn malformed_metadata_and_replay_are_rejected() {
