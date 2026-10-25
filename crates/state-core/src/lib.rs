@@ -372,8 +372,7 @@ impl StateStore {
         // Verify real schema and active keyed codec, not just an opaque header.
         key.unlock(&target)?;
         validate(&target)?;
-        let health: String =
-            target.query_row("PRAGMA quick_check(1)", [], |row| row.get(0))?;
+        let health: String = target.query_row("PRAGMA quick_check(1)", [], |row| row.get(0))?;
         if health != "ok" {
             return Err(StateError::Corrupt);
         }
