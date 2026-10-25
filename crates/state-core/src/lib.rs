@@ -329,6 +329,64 @@ impl StateStore {
         FileExt::unlock(&lock)?;
         Ok(Self { path, cipher_key })
     }
+    /// Create a consistent, still-encrypted snapshot of the authoritative state,
+    /// including committed WAL content, using SQLite's Online Backup API.
+    ///
+    /// This is a single-database primitive, NOT an atomic cross-database/object
+    /// vault backup. A higher-level owner-authorized coordinator must fence all
+    /// writers, capture every database/object at the same generation, and then
+    /// package the verified results. It never reads or mutates legacy plaintext.
+    #[cfg(feature = "sqlcipher-preview")]
+    pub fn create_encrypted_online_snapshot(&self, destination: impl AsRef<Path>) -> Result<()> {
+        use rusqlite::backup::Backup;
+        use std::io::Read;
+
+        let key = self.cipher_key.as_ref().ok_or(StateError::Corrupt)?;
+        let destination = destination.as_ref();
+        let parent = destination.parent().ok_or(StateError::UnsafePath)?;
+        safe_path(parent)?;
+        safe_path(destination)?;
+        if destination == self.path || !parent.is_dir() {
+            return Err(StateError::UnsafePath);
+        }
+
+        // Exclusive creation ensures no existing owner backup can be overwritten.
+        // On failure, the staged output remains for explicit owner disposition.
+        // Its destination pager is keyed *before* any SQLite pages are copied.
+        let source = self.read_connection()?;
+        let placeholder = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(destination)?;
+        placeholder.sync_all()?;
+        drop(placeholder);
+        let mut target = Connection::open_with_flags(
+            destination,
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+        )?;
+        key.unlock(&target)?;
+        {
+            let backup = Backup::new(&source, &mut target)?;
+            backup.run_to_completion(64, Duration::from_millis(50), None)?;
+        }
+        // Verify real schema and active keyed codec, not just an opaque header.
+        key.unlock(&target)?;
+        validate(&target)?;
+        let health: String =
+            target.query_row("PRAGMA quick_check(1)", [], |row| row.get(0))?;
+        if health != "ok" {
+            return Err(StateError::Corrupt);
+        }
+        drop(target);
+        drop(source);
+        let mut first = [0u8; 16];
+        File::open(destination)?.read_exact(&mut first)?;
+        if &first == b"SQLite format 3\\0" {
+            return Err(StateError::Corrupt);
+        }
+        Ok(())
+    }
+
     pub fn path(&self) -> &Path {
         &self.path
     }
