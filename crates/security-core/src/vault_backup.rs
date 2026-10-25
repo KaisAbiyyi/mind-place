@@ -177,6 +177,11 @@ impl PortableBackup {
             staging.join("vault-v1.json"),
             serde_json::to_vec(&original).map_err(|_| SecurityError::Crypto)?,
         )?;
+        // Windows denies renaming directories containing files whose open
+        // handles do not share DELETE. Finish and close *all* staging writers
+        // before publishing the complete snapshot via atomic rename.
+        drop(metadata_file);
+        drop(encrypted_manifest);
         gate.validate_lease(lease)?;
         fs::rename(&staging, destination)?;
         sync_parent(parent)?;
@@ -278,6 +283,9 @@ impl PortableBackup {
                 return Err(SecurityError::Crypto);
             }
         }
+        // Close the restored manifest handle before directory publication.
+        // Otherwise Windows reports ERROR_ACCESS_DENIED on the rename.
+        drop(config);
         gate.validate_lease(lease)?;
         fs::rename(&staging, destination)?;
         sync_parent(destination.parent().ok_or(SecurityError::UnsafePath)?)?;
