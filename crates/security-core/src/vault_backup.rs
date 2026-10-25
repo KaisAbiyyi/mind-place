@@ -65,24 +65,32 @@ impl PortableBackup {
         if destination.exists() {
             return Err(SecurityError::AlreadyConfigured);
         }
-        let state = vault_root.join("state.sqlite3");
-        safe(&state)?;
-        let state_meta = fs::metadata(&state)?;
-        if !state_meta.is_file() {
-            return Err(SecurityError::InvalidConfig);
-        }
-        for suffix in ["-wal", "-shm", "-journal"] {
-            let suffix_path = vault_root.join(format!("state.sqlite3{suffix}"));
-            if suffix_path.exists() {
+        // This API is deliberately OFFLINE / quiesced only. All app-owned DBs
+        // (including rebuildable projections if present) must be checkpointed.
+        // Never copy an active WAL or silently skip a plaintext derived index.
+        let mut files = Vec::new();
+        for name in ["state.sqlite3", "index.sqlite3", "document-index.sqlite3"] {
+            let source = vault_root.join(name);
+            safe(&source)?;
+            if !source.exists() {
+                if name == "state.sqlite3" {
+                    return Err(SecurityError::InvalidConfig);
+                }
+                continue;
+            }
+            if !fs::metadata(&source)?.is_file() {
                 return Err(SecurityError::InvalidConfig);
             }
+            for suffix in ["-wal", "-shm", "-journal"] {
+                if vault_root.join(format!("{name}{suffix}")).exists() {
+                    return Err(SecurityError::InvalidConfig);
+                }
+            }
+            if starts_with(&source, b"SQLite format 3\0")? {
+                return Err(SecurityError::Crypto);
+            }
+            files.push(PathBuf::from(name));
         }
-        if starts_with(&state, b"SQLite format 3\0")? {
-            // An accidentally supplied pre-encryption vault must never be backed
-            // up and misleadingly presented as protected at rest.
-            return Err(SecurityError::Crypto);
-        }
-        let mut files = vec![PathBuf::from("state.sqlite3")];
         for category in ["archive", "document-objects"] {
             let directory = vault_root.join(category);
             if directory.exists() {
@@ -102,6 +110,7 @@ impl PortableBackup {
         fs::create_dir(&staging)?;
         // On errors the staging folder is intentionally left for explicit
         // owner disposition; never auto-delete snapshots on catch/rollback.
+        let expected_files = files.clone();
         let mut receipts = Vec::with_capacity(files.len());
         let mut cumulative = 0u64;
         for rel in files {
@@ -144,6 +153,11 @@ impl PortableBackup {
                 sha256: digest,
             });
         }
+        // Detect source changes or newly added immutable objects before publish.
+        // This is a fail-closed offline verification, NOT an online snapshot
+        // coordinator. Writers must still be stopped by the caller.
+        verify_quiescent_sources(vault_root, &expected_files, &receipts)?;
+        gate.validate_lease(lease)?;
         let manifest = PackageManifest {
             version: VERSION,
             vault_id_b64: STANDARD.encode(vault.id()),
@@ -295,12 +309,62 @@ impl PortableBackup {
 fn allowed(relative: &Path) -> bool {
     let mut components = relative.components();
     match components.next() {
-        Some(Component::Normal(first)) if first == "state.sqlite3" => components.next().is_none(),
+        Some(Component::Normal(first))
+            if first == "state.sqlite3"
+                || first == "index.sqlite3"
+                || first == "document-index.sqlite3" =>
+        {
+            components.next().is_none()
+        },
         Some(Component::Normal(first)) if first == "archive" || first == "document-objects" => {
             components.next().is_some()
         }
         _ => false,
     }
+}
+/// This rejects obvious archive/index changes during an offline backup.
+    /// It is not a replacement for an application-wide writer/quiescence gate.
+fn verify_quiescent_sources(
+    root: &Path,
+    expected: &[PathBuf],
+    receipts: &[FileReceipt],
+) -> Result<()> {
+    let mut current = Vec::new();
+    for name in ["state.sqlite3", "index.sqlite3", "document-index.sqlite3"] {
+        let source = root.join(name);
+        safe(&source)?;
+        if source.exists() {
+            for suffix in ["-wal", "-shm", "-journal"] {
+                if root.join(format!("{name}{suffix}")).exists() {
+                    return Err(SecurityError::Crypto);
+                }
+            }
+            current.push(PathBuf::from(name));
+        }
+    }
+    for category in ["archive", "document-objects"] {
+        let dir = root.join(category);
+        if dir.exists() {
+            gather(root, &dir, &mut current)?;
+        }
+    }
+    current.sort();
+    if current != expected || expected.len() != receipts.len() {
+        return Err(SecurityError::Crypto);
+    }
+    for (relative, receipt) in expected.iter().zip(receipts) {
+        if relative.to_string_lossy().replace('\\', "/") != receipt.path {
+            return Err(SecurityError::Crypto);
+        }
+        let source = root.join(relative);
+        safe(&source)?;
+        let mut stream = File::open(source)?;
+        let (len, digest) = digest_file(&mut stream)?;
+        if len != receipt.length || digest != receipt.sha256 {
+            return Err(SecurityError::Crypto);
+        }
+    }
+    Ok(())
 }
 fn valid_relative(path: &Path) -> Result<()> {
     if !allowed(path)
@@ -481,6 +545,56 @@ mod tests {
             &recovery
         )
         .is_err());
+    }
+    #[test]
+    fn backup_covers_encrypted_derived_databases_and_rejects_active_wal() {
+        let (temp, gate, lease, vault, recovery) = fixture();
+        let root = temp.path().join("vault");
+        for name in ["index.sqlite3", "document-index.sqlite3"] {
+            fs::write(root.join(name), [b"ENCRYPTED_INDEX_FIXTURE".as_slice(), &[0x27; 128]].concat()).unwrap();
+        }
+        let backup = temp.path().join("complete");
+        let receipt = PortableBackup::create(&gate, lease, &vault, &root, &backup, 91).unwrap();
+        assert_eq!(receipt.count, 3);
+        let restored = temp.path().join("complete-restored");
+        PortableBackup::restore(&gate, lease, &backup, &restored, &recovery).unwrap();
+        for name in ["state.sqlite3", "index.sqlite3", "document-index.sqlite3"] {
+            assert_eq!(fs::read(root.join(name)).unwrap(), fs::read(restored.join(name)).unwrap());
+        }
+        fs::write(root.join("index.sqlite3-wal"), b"pending page").unwrap();
+        let blocked = temp.path().join("unquiesced");
+        assert!(PortableBackup::create(&gate, lease, &vault, &root, &blocked, 92).is_err());
+        assert!(!blocked.exists());
+        fs::remove_file(root.join("index.sqlite3-wal")).unwrap();
+        fs::write(root.join("document-index.sqlite3"), b"SQLite format 3\\0plaintext").unwrap();
+        let plaintext = temp.path().join("plaintext-index");
+        assert!(PortableBackup::create(&gate, lease, &vault, &root, &plaintext, 93).is_err());
+        assert!(!plaintext.exists());
+    }
+    #[test]
+    fn quiescent_validator_detects_added_removed_or_changed_files() {
+        let (temp, gate, lease, vault, _) = fixture();
+        let root = temp.path().join("vault");
+        let backup = temp.path().join("initial");
+        PortableBackup::create(&gate, lease, &vault, &root, &backup, 17).unwrap();
+        let original = fs::read(root.join("state.sqlite3")).unwrap();
+        let receipt = FileReceipt {
+            path: "state.sqlite3".into(),
+            length: original.len() as u64,
+            sha256: format!("{:x}", Sha256::digest(&original)),
+        };
+        let paths = vec![PathBuf::from("state.sqlite3")];
+        verify_quiescent_sources(&root, &paths, &[FileReceipt { path: receipt.path.clone(), length: receipt.length, sha256: receipt.sha256.clone() }]).unwrap();
+        fs::write(root.join("state.sqlite3"), b"modified").unwrap();
+        assert!(verify_quiescent_sources(&root, &paths, &[receipt]).is_err());
+        fs::write(root.join("state.sqlite3"), original).unwrap();
+        fs::write(root.join("index.sqlite3"), b"ENCRYPTED").unwrap();
+        let receipts = vec![FileReceipt {
+            path: "state.sqlite3".into(),
+            length: fs::metadata(root.join("state.sqlite3")).unwrap().len(),
+            sha256: format!("{:x}", Sha256::digest(fs::read(root.join("state.sqlite3")).unwrap())),
+        }];
+        assert!(verify_quiescent_sources(&root, &paths, &receipts).is_err());
     }
     #[test]
     fn never_mistake_legacy_plaintext_for_an_encrypted_state() {
