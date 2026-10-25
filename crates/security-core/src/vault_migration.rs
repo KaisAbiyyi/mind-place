@@ -93,6 +93,7 @@ impl LegacyMigrationPreflight {
 
     fn inventory(&self) -> Result<Vec<LegacyFileReceipt>> {
         let mut receipts = Vec::new();
+        let mut accumulated = 0u64;
         // Derived FTS and security verifiers are excluded deliberately:
         // these must be rebuilt/reinitialized rather than accepted as keys.
         let state = self.source.join("state.sqlite3");
@@ -103,12 +104,12 @@ impl LegacyMigrationPreflight {
             if &header != b"SQLite format 3\0" {
                 return Err(SecurityError::Crypto);
             }
-            collect_file(&self.source, &state, &mut receipts)?;
+            collect_file(&self.source, &state, &mut receipts, &mut accumulated)?;
         }
         for folder in ["archive-v1", "document-objects"] {
             let directory = self.source.join(folder);
             if directory.exists() {
-                scan(&self.source, &directory, 0, &mut receipts)?;
+                scan(&self.source, &directory, 0, &mut receipts, &mut accumulated)?;
             }
         }
         receipts.sort_by(|a, b| a.relative.cmp(&b.relative));
@@ -130,6 +131,7 @@ fn scan(
     directory: &Path,
     depth: usize,
     out: &mut Vec<LegacyFileReceipt>,
+    accumulated: &mut u64,
 ) -> Result<()> {
     if depth > MAX_DEPTH {
         return Err(SecurityError::InvalidConfig);
@@ -146,9 +148,9 @@ fn scan(
         check(&child)?;
         let metadata = fs::symlink_metadata(&child)?;
         if metadata.is_dir() {
-            scan(root, &child, depth + 1, out)?;
+            scan(root, &child, depth + 1, out, accumulated)?;
         } else if metadata.is_file() {
-            collect_file(root, &child, out)?;
+            collect_file(root, &child, out, accumulated)?;
         } else {
             return Err(SecurityError::UnsafePath);
         }
@@ -156,7 +158,12 @@ fn scan(
     Ok(())
 }
 
-fn collect_file(root: &Path, path: &Path, out: &mut Vec<LegacyFileReceipt>) -> Result<()> {
+fn collect_file(
+    root: &Path,
+    path: &Path,
+    out: &mut Vec<LegacyFileReceipt>,
+    accumulated: &mut u64,
+) -> Result<()> {
     check(path)?;
     let metadata = fs::symlink_metadata(path)?;
     if !metadata.is_file() || metadata.len() > MAX_SINGLE_FILE || out.len() >= MAX_FILES {
@@ -179,10 +186,11 @@ fn collect_file(root: &Path, path: &Path, out: &mut Vec<LegacyFileReceipt>) -> R
         }
         sha.update(&block[..amount]);
     }
-    let total: u64 = out.iter().map(|item| item.bytes).sum();
-    if total.checked_add(size).ok_or(SecurityError::Crypto)? > MAX_TOTAL_BYTES {
+    let next_total = accumulated.checked_add(size).ok_or(SecurityError::Crypto)?;
+    if next_total > MAX_TOTAL_BYTES {
         return Err(SecurityError::InvalidConfig);
     }
+    *accumulated = next_total;
     let relative = path
         .strip_prefix(root)
         .map_err(|_| SecurityError::UnsafePath)?;
