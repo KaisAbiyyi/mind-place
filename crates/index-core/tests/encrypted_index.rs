@@ -18,7 +18,7 @@ fn search_fts_is_ciphered_and_key_checked() {
     drop(index);
     let disk = fs::read(&db).unwrap();
     assert!(!disk.starts_with(b"SQLite format 3\0"));
-    assert!(!disk.windows(7).any(|w| w == b"fts5("));
+    assert!(!disk.windows(b"fts5(".len()).any(|w| w == b"fts5("));
     assert!(IndexStore::open_encrypted(&db, [0x9bu8; 32], &gate, lease).is_err());
     assert!(IndexStore::open(&db).is_err());
     let index = IndexStore::open_encrypted(&db, key, &gate, lease).unwrap();
