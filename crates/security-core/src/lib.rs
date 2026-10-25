@@ -1,5 +1,6 @@
 pub mod vault;
 pub mod vault_storage;
+pub mod vault_backup;
 
 use argon2::{
     password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
