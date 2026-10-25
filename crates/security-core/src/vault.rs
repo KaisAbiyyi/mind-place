@@ -5,7 +5,10 @@ use aes_gcm::{
     aead::{Aead, Payload},
     Aes256Gcm, KeyInit, Nonce,
 };
-use base64::{engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD}, Engine as _};
+use base64::{
+    engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
+    Engine as _,
+};
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -49,12 +52,18 @@ impl RecoverySecret {
         let encoded = input
             .strip_prefix(RECOVERY_CODE_PREFIX)
             .ok_or(SecurityError::InvalidConfig)?;
-        let (key, check) = encoded.split_once('.').ok_or(SecurityError::InvalidConfig)?;
+        let (key, check) = encoded
+            .split_once('.')
+            .ok_or(SecurityError::InvalidConfig)?;
         if key.len() != 43 || check.len() != 6 {
             return Err(SecurityError::InvalidConfig);
         }
-        let decoded = URL_SAFE_NO_PAD.decode(key).map_err(|_| SecurityError::InvalidConfig)?;
-        let raw: [u8; 32] = decoded.try_into().map_err(|_| SecurityError::InvalidConfig)?;
+        let decoded = URL_SAFE_NO_PAD
+            .decode(key)
+            .map_err(|_| SecurityError::InvalidConfig)?;
+        let raw: [u8; 32] = decoded
+            .try_into()
+            .map_err(|_| SecurityError::InvalidConfig)?;
         let checksum = Sha256::digest(raw);
         if URL_SAFE_NO_PAD.encode(&checksum[..4]) != check {
             return Err(SecurityError::InvalidConfig);
@@ -601,9 +610,13 @@ mod tests {
         assert!(export.starts_with("MP-RECOVERY-1-"));
         assert!(!export.contains('='));
         let recovered = RecoverySecret::from_export_code(&export).unwrap();
-        let reopened = CryptoVault::restore_with_recovery(&gate, lease, &manifest, &recovered).unwrap();
+        let reopened =
+            CryptoVault::restore_with_recovery(&gate, lease, &manifest, &recovered).unwrap();
         assert_eq!(reopened.id(), vault.id());
-        assert!(RecoverySecret::from_export_code(&export.replace("MP-RECOVERY-1-", "MP-RECOVERY-2-")).is_err());
+        assert!(RecoverySecret::from_export_code(
+            &export.replace("MP-RECOVERY-1-", "MP-RECOVERY-2-")
+        )
+        .is_err());
         let mut typo = export.as_bytes().to_vec();
         let pos = RECOVERY_CODE_PREFIX.len() + 8;
         typo[pos] = if typo[pos] == b'A' { b'B' } else { b'A' };
