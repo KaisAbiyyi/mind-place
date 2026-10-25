@@ -21,4 +21,4 @@ mind-place-security = { path = "../security-core" }
 [features]
 # Opt-in SQLCipher qualification: the bundled 0.41.x provider requires exact-head
 # FTS/WAL/temp, key-lifecycle and Windows acceptance before shipping encrypted vaults.
-sqlcipher-preview = ["rusqlite/bundled-sqlcipher-vendored-openssl"]
+sqlcipher-preview = ["rusqlite/bundled-sqlcipher-vendored-openssl", "rusqlite/backup"]
