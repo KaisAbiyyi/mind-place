@@ -27,6 +27,7 @@ const args = process.argv.slice(2);
 const option = name => args.includes(name) ? args[args.indexOf(name) + 1] : undefined;
 const count = Number(option('--conversations') ?? '800');
 const fixtureSource = option('--source-fixture');
+const expectedPackageCommit = option('--package-commit') ?? 'bfff35463880533e25866efae7e4f14e004cafd6';
 const runId = new Date().toISOString().replace(/[:.]/g, '-');
 const runDir = path.join(output, runId);
 // Keep native fixture paths short: capture filenames include two 64-char hashes,
@@ -136,11 +137,12 @@ async function closeApp() {
 try {
   assert.equal(process.platform, 'win32', 'Native Windows qualification only');
   assert.ok(Number.isSafeInteger(count) && count >= 200 && count <= 10_000, 'Invalid corpus size');
+  assert.match(expectedPackageCommit, /^[0-9a-f]{40}$/, 'Package source commit must be an exact Git SHA');
   assert.equal(path.parse(root).root.toLowerCase(), 'd:\\', 'Qualification worktree must reside on D:');
   assert.ok(fs.existsSync(executable) && fs.existsSync(host), 'Packaged EXE/host not found');
   const packageSha = git(sourcePackageRoot);
-  assert.equal(packageSha, 'bfff35463880533e25866efae7e4f14e004cafd6',
-    'Packaged build source must be verified baseline main SHA');
+  assert.equal(packageSha, expectedPackageCommit,
+    'Packaged build source must match the explicitly pinned Git commit');
   fs.mkdirSync(runDir, { recursive: true });
   fs.mkdirSync(archive, { recursive: true });
   fs.mkdirSync(profile, { recursive: true });

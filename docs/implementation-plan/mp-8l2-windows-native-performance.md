@@ -64,3 +64,35 @@ After making the runner self-contained (generating a fresh seed through checked-
 The exact qualification result is **PARTIAL**, pending (1) repeated warm/cold trials under recorded idle and busy host-load conditions, (2) investigation of the slow first unlock and index concurrency, (3) explicit latency/RAM acceptance budgets before declaring performance PASS, and (4) a representative graph/owner workload where authorized. Process-tree working-set growth across one sequence is not by itself proof of a memory leak. Do not treat cloud CI or two synthetic native test passes as MP-8U2 human Hive acceptance.
 
 Security and product code were not modified in this PR. The test records original executable SHA, source commit, sanitized timings, bounds and known limitations; private owner PIN, corpus, UI screenshots and credentials are never included.
+
+## Post-repair local qualification — 25 October 2026
+
+The earlier PARTIAL measurements above are retained unmodified as a faithful *baseline*. The product performance repair is separately reviewed at [PR #122](https://github.com/KaisAbiyyi/mind-place/pull/122), source commit `f28a7c5b86c537c70d77992db3173cad00c32205`, with newly built native executable SHA-256 `2483c767d1e8cd5a14bbfdc7eb5fb9b8a71465ef5724602623812494c404c749`. It introduces bounded parallel (up to eight workers) archive metadata reading, defers background indexing until the initial list settles, and serializes native index writers with an unlock-epoch fence. Raw archive captures remain immutable.
+
+| Native Windows observation | Previous build, 3,000 sources | Fixed build, 3,000 sources (two runs) | Fixed build, 800 sources |
+| --- | ---: | ---: | ---: |
+| First unlock to virtualized list | 102,906.8 / 90,216.0 ms | **8,965.0 / 6,416.6 ms** | **1,849.0 ms** |
+| Background index ready (observed after UI operations) | 30,376.5 ms | 23,120.9 / 19,222.4 ms | 4,294.6 ms |
+| Virtual scroll p95 | 21.1 ms | 21.4 / 36.3 ms | 39.1 ms |
+| Hive zoom p95 | 18.4 ms | ~20 ms (second run 19.4) | 20.2 ms |
+| Final process-tree working set | 455.3 MiB | 472.8 / 510.9 MiB | 498.9 MiB |
+| Native functional checks | 11/11 PASS | **11/11 PASS, each** | **11/11 PASS** |
+| WebView2 page exceptions | 0 | **0 / 0** | **0** |
+| Real native Hive graph | 120 nodes / 119 edges | 120 / 119, each | 120 / 119 |
+
+All repaired-run receipts use independent, isolated D:-resident security/index/WebView2 profiles and a copy of the same native-host-created synthetic source fixture. They contain no owner secrets. Local JSON receipts:
+
+- 3,000 A: `D:\projects\mind-place-mp8l2-20261025\outputs\mp-8l2\2026-10-25T04-59-50-109Z\receipt.json`.
+- 3,000 B: `D:\projects\mind-place-mp8l2-20261025\outputs\mp-8l2\2026-10-25T05-01-33-695Z\receipt.json`.
+- 800: `D:\projects\mind-place-mp8l2-20261025\outputs\mp-8l2\2026-10-25T05-02-37-335Z\receipt.json`.
+
+**Retrospective acceptance review** (not pre-registered service-level objectives): for this representative synthetic 16-GiB Windows device, cold large-list readiness under 15 seconds for 3,000 items and under 5 seconds for 800, scroll p95 under 50 ms, valid bounded graph and index counts, process tree under 600 MiB in the observed sequence, 11/11 gates PASS and zero runtime exceptions. Every repaired run satisfies these comparison guardrails, without claiming formal leak/endurance proof. Reproducibility is limited by uncontrolled background device load and instrumented synthetic rather than private human corpus. Future long-running memory endurance and real owner navigation acceptance remain **separate scopes**, not silently marked PASS here.
+
+To pin a different qualified product build during replay:
+
+```powershell
+$env:MP8L2_PACKAGE_ROOT = 'D:\projects\mind-place-mp8l2-cold-unlock-20261025'
+node scripts/mp8l2-native-performance.mjs --conversations 3000 --package-commit f28a7c5b86c537c70d77992db3173cad00c32205 --source-fixture 'D:\projects\mp8l2-native-runs\2026-10-25T04-13-14-822Z\archive-v1'
+```
+
+**Review disposition:** product and native qualification are functionally PASS in this measured scope. Promote MP-8L2 to Done only after exact-head GitHub CI for both PRs passes and the reviewed implementation and evidence are merged. MP-8U2 remains an independent human acceptance gate until explicitly performed.
