@@ -621,7 +621,7 @@ mod tests {
         let pos = RECOVERY_CODE_PREFIX.len() + 8;
         typo[pos] = if typo[pos] == b'A' { b'B' } else { b'A' };
         assert!(RecoverySecret::from_export_code(&String::from_utf8(typo).unwrap()).is_err());
-        assert!(RecoverySecret::from_export_code(&format!("{export} ")).is_err());
+        assert!(RecoverySecret::from_export_code(&format!("{} ", export.as_str())).is_err());
     }
     #[test]
     fn malformed_metadata_and_replay_are_rejected() {
