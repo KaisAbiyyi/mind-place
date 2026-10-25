@@ -21,11 +21,9 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Cargo.lock crates/state-core/src crates/index-core/src crates/security-core/src
+          git add Cargo.lock crates/state-core crates/index-core crates/security-core
           if ! git diff --cached --quiet; then
             git commit -m "chore(mp-9b): format keyed storage and resolve SQLCipher dependencies"
-            git fetch origin feat/mp-9b-encrypted-vault-cloud-20261025
-            git rebase origin/feat/mp-9b-encrypted-vault-cloud-20261025
             git push origin HEAD:feat/mp-9b-encrypted-vault-cloud-20261025
           fi
       - name: Storage tests
