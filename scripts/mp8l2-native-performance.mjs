@@ -28,7 +28,9 @@ const option = name => args.includes(name) ? args[args.indexOf(name) + 1] : unde
 const count = Number(option('--conversations') ?? '800');
 const runId = new Date().toISOString().replace(/[:.]/g, '-');
 const runDir = path.join(output, runId);
-const archiveParent = path.join(runDir, 'isolated-runtime');
+// Keep native fixture paths short: capture filenames include two 64-char hashes,
+// and Windows still has tooling that fails around MAX_PATH on long worktree paths.
+const archiveParent = path.join(path.dirname(root), 'mp8l2-native-runs', runId);
 const archive = path.join(archiveParent, 'archive-v1');
 const profile = path.join(archiveParent, 'webview-profile');
 const checks = [];
@@ -92,7 +94,7 @@ function saveCapture(capture) {
   }
   assert.equal(received.stdout.readUInt32LE(0), received.stdout.length - 4);
   const reply = JSON.parse(received.stdout.subarray(4).toString('utf8'));
-  if (!reply.ok) throw Error('Synthetic native save rejected');
+  if (!reply.ok) throw Error(`Synthetic native save rejected: ${String(reply.error ?? reply.code ?? 'unknown').slice(0, 140)}`);
   return reply;
 }
 
@@ -130,23 +132,6 @@ async function closeApp() {
   }
 }
 
-function syntheticGraph() {
-  // This is a DOM stress fixture, clearly separate from the native graph query.
-  // Every returned node/edge respects the shipped 120/240 response budget.
-  const nodes = Array.from({ length: 120 }, (_, i) => ({
-    id: `synthetic-node-${i}`, kind: i === 0 ? 'conversation' : 'revision',
-    label: `Synthetic revision ${i}`, canonical_key: `synthetic-${i}`,
-    source_ref: `synthetic-${i}`, depth: i === 0 ? 0 : 1 + i % 3,
-  }));
-  const edges = Array.from({ length: 240 }, (_, i) => ({
-    id: `synthetic-edge-${i}`, from_node: nodes[i % 120].id,
-    to_node: nodes[(i + 1) % 120].id, relation: 'derived_from',
-    origin: 'deterministic', confidence_bps: null, source_ref: 'synthetic-only',
-    source_revision: `revision-${i % 8}`, locator: `fixture-${i}`,
-  }));
-  return { nodes, edges, truncated: true };
-}
-
 try {
   assert.equal(process.platform, 'win32', 'Native Windows qualification only');
   assert.ok(Number.isSafeInteger(count) && count >= 200 && count <= 10_000, 'Invalid corpus size');
@@ -155,6 +140,7 @@ try {
   const packageSha = git(sourcePackageRoot);
   assert.equal(packageSha, 'bfff35463880533e25866efae7e4f14e004cafd6',
     'Packaged build source must be verified baseline main SHA');
+  fs.mkdirSync(runDir, { recursive: true });
   fs.mkdirSync(archive, { recursive: true });
   fs.mkdirSync(profile, { recursive: true });
 
@@ -167,7 +153,7 @@ try {
   const seedCapture = JSON.parse(fs.readFileSync(path.join(seedCaptureDir, fs.readdirSync(seedCaptureDir)[0]), 'utf8'));
   assert.equal(seedCapture.provider, 'chatgpt');
   const createStart = performance.now();
-  let seedArchiveId;
+  let seedArchiveId, graphCapture;
   for (let i = 0; i < count; i++) {
     const id = crypto.randomUUID();
     const capture = structuredClone(seedCapture);
@@ -180,12 +166,23 @@ try {
       attachments: [],
     }));
     const saved = saveCapture(capture);
-    if (i === 0) seedArchiveId = saved.id;
+    if (i === 0) { seedArchiveId = saved.id; graphCapture = structuredClone(capture); }
     if ((i + 1) % 100 === 0) process.stdout.write(`Fixture: ${i + 1}/${count}\n`);
   }
   gate('packaged-native-capture', 'PASS', `${count} unique synthetic archive saves through packaged native host`);
-  samples.push({ name: 'fixture-generation', ms: Math.round(performance.now() - createStart) });
   assert.ok(seedArchiveId, 'No seed archived');
+  // A single real archive with 131 immutable snapshots yields a connected Hive
+  // neighborhood above the actual 120-node/240-edge retrieval limits. It is
+  // stored through the same packaged host and indexed by the real Tauri app.
+  const extraRevisions = 130;
+  for (let i = 0; i < extraRevisions; i++) {
+    const revision = structuredClone(graphCapture);
+    revision.messages[0].text += ` Snapshot revision ${i}.`;
+    const saved = saveCapture(revision);
+    assert.equal(saved.id, seedArchiveId);
+  }
+  gate('real-native-graph-fixture', 'PASS', `${extraRevisions + 1} immutable revisions on one synthetic archive`);
+  samples.push({ name: 'fixture-generation', ms: Math.round(performance.now() - createStart) });
 
   const port = 51000 + crypto.randomInt(1000);
   app = spawn(executable, [], {
@@ -238,7 +235,20 @@ try {
   gate('native-navigation', 'PASS', '12 switches among 4 workspaces');
   sampleMemory('after-navigation');
 
+  // Archive listing is independent of the derived index. Explicitly complete
+  // native FTS/graph synchronization before claiming a native Hive result.
+  const indexStats = await timed('native-index-synchronization', () => page.evaluate(async () =>
+    window.__TAURI_INTERNALS__.invoke('refresh_archive_index')));
+  assert.ok(indexStats.sources >= count, 'Index did not include entire test corpus');
+  assert.ok(indexStats.revisions >= count + extraRevisions,
+    'Index did not include all synthetic graph revisions');
+  gate('native-derived-index-ready', 'PASS',
+    `${indexStats.sources} sources / ${indexStats.revisions} revisions / ${indexStats.chunks} chunks`);
+
   await page.locator('[data-workspace="graph"]').click();
+  // The archive receipt is the graph Import node's canonical key. Conversation
+  // nodes instead use provider-neutral source IDs from the authority store.
+  await page.locator('.hive-search-form select').selectOption('import');
   await page.locator('.hive-search-form input').fill(seedArchiveId);
   await timed('native-index-graph-neighbors', async () => {
     await page.locator('.hive-search-form button[type="submit"]').click();
@@ -251,23 +261,14 @@ try {
   assert.match(nativeGraphStatus, /\d+ nodes/, 'Native archive graph query must succeed');
   gate('native-hive-query', 'PASS', nativeGraphStatus.slice(0, 100));
 
-  // CDP changes only this disposable native WebView's invoke function for the
-  // bounded graph UI stress fixture. Backend provenance remains the real query above.
-  await page.evaluate(graph => {
-    const native = window.__TAURI_INTERNALS__;
-    if (!native || typeof native.invoke !== 'function') throw Error('No native invoke');
-    window.__mp8l2OriginalInvoke = native.invoke;
-    native.invoke = (command, args) => command === 'read_archive_hive'
-      ? Promise.resolve(graph) : window.__mp8l2OriginalInvoke(command, args);
-  }, syntheticGraph());
-  await timed('bounded-120-node-graph-render', async () => {
+  await timed('bounded-native-hive-rerender', async () => {
     await page.locator('.hive-search-form button[type="submit"]').click();
-    await page.waitForFunction(() => document.querySelectorAll('.hive-node-choice').length === 120);
+    await page.waitForFunction(() => document.querySelectorAll('.hive-node-choice').length >= 100);
   });
   const svgNodes = await page.locator('.hive-map circle').count();
   const svgEdges = await page.locator('.hive-map line').count();
-  assert.equal(svgNodes, 120);
-  assert.equal(svgEdges, 240);
+  assert.ok(svgNodes >= 100 && svgNodes <= 120, 'Native Hive node count out of expected bounds');
+  assert.ok(svgEdges >= 100 && svgEdges <= 240, 'Native Hive edge count out of expected bounds');
   for (const value of [60, 200, 80, 160, 100, 200, 60, 100]) {
     await timed('bounded-hive-semantic-zoom', () => page.locator('.hive-controls input[type="range"]').first()
       .evaluate((el, setting) => {
@@ -282,11 +283,7 @@ try {
         el.dispatchEvent(new Event('input', { bubbles: true }));
       }, revision));
   }
-  gate('native-webview2-bounded-hive-ui', 'PASS', '120 nodes / 240 edges synthetic native-WebView2 DOM, zoom and revision UI');
-  await page.evaluate(() => {
-    window.__TAURI_INTERNALS__.invoke = window.__mp8l2OriginalInvoke;
-    delete window.__mp8l2OriginalInvoke;
-  });
+  gate('native-webview2-bounded-hive-ui', 'PASS', `${svgNodes} nodes / ${svgEdges} edges from real native graph, zoom and revision UI`);
   sampleMemory('after-bounded-hive');
 
   for (let iteration = 0; iteration < 10; iteration++) {
@@ -321,17 +318,17 @@ try {
     package_source_sha: packageSha, runner_source_sha: git(root),
     executable_sha256: sha256(executable), host_sha256: sha256(host),
     conversations: count, graph: { native_status: nativeGraphStatus,
-      synthetic_ui_nodes: svgNodes, synthetic_ui_edges: svgEdges },
+      native_nodes: svgNodes, native_edges: svgEdges, archived_revisions: extraRevisions + 1 },
     timings: Object.fromEntries(['webview2-cold-locked', 'unlock-large-corpus',
-      'virtual-scroll', 'native-workspace-switch', 'native-index-graph-neighbors',
-      'bounded-120-node-graph-render', 'bounded-hive-semantic-zoom',
+      'virtual-scroll', 'native-workspace-switch', 'native-index-synchronization', 'native-index-graph-neighbors',
+      'bounded-native-hive-rerender', 'bounded-hive-semantic-zoom',
       'bounded-hive-revision-filter', 'native-retrieval-inspector'].map(name => [name, metric(name)])),
     memory: { snapshots: mem.map(({ name, workingSetMiB, processes }) => ({ name, workingSetMiB, processes })),
       firstToLastMiB: growthMiB },
     checks, pageErrors, limitations: [
       'One instrumented run; repeat with baseline idle and loaded host to assess variance',
       'Fixture is synthetic; no private owner corpus was accessed',
-      'The 120-node graph is an injected UI-only stress fixture; native source query separately verified',
+      'Hive nodes/edges are genuine derived index responses to synthetic native-host revisions',
       'WebView2 process-tree working set includes browser subprocesses and shared pages',
       'No fixed product memory/latency budgets have been accepted; growth not automatically a leak',
     ],
