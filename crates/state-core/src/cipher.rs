@@ -66,8 +66,26 @@ impl CipherKey {
         if active != Some(true) {
             return Err(rusqlite::Error::InvalidQuery);
         }
+        // SQLCipher's extension PRAGMA is not supported by rusqlite's
+        // pragma_update whitelist, which reports SQLite API_MISUSE (21).
+        // Execute the documented literal SQLCipher pragma, then independently
+        // verify the setting. Missing/unrecognized support MUST fail closed.
+        db.execute_batch("PRAGMA cipher_memory_security = ON;")?;
+        let memory_security: Option<bool> = db
+            .query_row("PRAGMA cipher_memory_security", [], |r| match r.get_ref(0)? {
+                rusqlite::types::ValueRef::Integer(1) => Ok(true),
+                rusqlite::types::ValueRef::Text(bytes)
+                    if bytes == b"1" || bytes.eq_ignore_ascii_case(b"on") =>
+                {
+                    Ok(true)
+                }
+                _ => Ok(false),
+            })
+            .optional()?;
+        if memory_security != Some(true) {
+            return Err(rusqlite::Error::InvalidQuery);
+        }
         db.pragma_update(None, "temp_store", "MEMORY")?;
-        db.pragma_update(None, "cipher_memory_security", "ON")?;
         self.gate
             .validate_lease(self.lease)
             .map_err(|_| rusqlite::Error::InvalidQuery)?;
