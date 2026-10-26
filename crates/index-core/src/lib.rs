@@ -37,6 +37,8 @@ const GRAPHIFY_SCHEMA: &str = include_str!("schema_v4.sql");
 
 pub mod context;
 pub mod documents;
+#[cfg(feature = "sqlcipher-preview")]
+pub mod vault_archive;
 pub mod fetch;
 pub mod graph;
 pub mod graph_generation;
