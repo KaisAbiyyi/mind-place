@@ -1135,6 +1135,7 @@ fn main() {
             vault_commands::begin_vault_setup,
             vault_commands::resume_vault_setup,
             vault_commands::unlock_vault_with_recovery,
+            vault_commands::create_vault_online_backup,
             vault_commands::confirm_vault_setup,
             vault_commands::cancel_vault_setup,
             unlock_security,
