@@ -9,6 +9,10 @@ license.workspace = true
 mind-place-archive = { path = "../archive-core" }
 serde.workspace = true
 serde_json.workspace = true
+base64.workspace = true
+getrandom = "0.4.3"
+hmac = "=0.12.1"
+sha2.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
