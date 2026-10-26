@@ -17,6 +17,8 @@ serde_json.workspace = true
 chrono.workspace = true
 thiserror.workspace = true
 zeroize = "1.9.0"
+base64.workspace = true
+tempfile.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
