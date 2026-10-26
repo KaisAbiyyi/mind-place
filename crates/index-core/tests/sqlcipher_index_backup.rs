@@ -17,7 +17,8 @@ fn derived_index_backup_contains_committed_ciphertext_and_never_overwrites() {
     let key = vault
         .derived_key(&gate, lease, b"index/sqlcipher/v1")
         .unwrap();
-    let raw = *key.as_ref();
+    let mut raw = [0u8; 32];
+    raw.copy_from_slice(key.as_ref());
     let index = IndexStore::open_encrypted(root.join("index.sqlite3"), raw, &gate, lease).unwrap();
     let prior = index.stats().unwrap();
     let dest = home.path().join("index-backup.sqlite3");
