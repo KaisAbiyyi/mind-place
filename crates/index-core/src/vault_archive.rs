@@ -405,71 +405,113 @@ impl VaultCaptureStore {
         })
     }
 
+    /// Sidebar search remains capped; the FTS reindexer instead requests a
+    /// complete cursor-paged inventory from one stable SQLCipher read snapshot.
     pub fn list(&self, query: &str) -> Result<Vec<ConversationSummary>> {
+        self.list_catalog(query, false)
+    }
+
+    pub(crate) fn list_complete_for_index(&self) -> Result<Vec<ConversationSummary>> {
+        self.list_catalog("", true)
+    }
+
+    fn list_catalog(&self, query: &str, complete: bool) -> Result<Vec<ConversationSummary>> {
         if query.len() > 1024 {
             return Err(IndexError::InvalidQuery);
         }
-        // The catalog itself is SQLCipher encrypted. Never decrypt every
-        // potentially 32 MiB raw capture merely to populate the sidebar.
         let _writer =
             VaultWriterFence::writer(&self.root).map_err(|_| IndexError::InvalidEvidence)?;
-        let db = self.connection()?;
-        let mut statement = db.prepare(
-            "SELECT c.archive_id,c.conversation_id,c.provider,c.title,c.source_url,
-                    c.captured_at,c.message_count,c.completeness,c.warnings_json,
-                    (SELECT count(*) FROM vault_captures WHERE archive_id=c.archive_id)
-             FROM vault_captures c
-             WHERE c.rowid = (
-               SELECT rowid FROM vault_captures x WHERE x.archive_id=c.archive_id
-               ORDER BY x.captured_at DESC LIMIT 1
-             )
-             ORDER BY c.captured_at DESC LIMIT 10000",
-        )?;
-        let needle = query.to_lowercase();
-        let rows = statement.query_map([], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, String>(2)?,
-                r.get::<_, String>(3)?,
-                r.get::<_, String>(4)?,
-                r.get::<_, String>(5)?,
-                r.get::<_, i64>(6)?,
-                r.get::<_, String>(7)?,
-                r.get::<_, String>(8)?,
-                r.get::<_, i64>(9)?,
-            ))
-        })?;
-        let mut results = Vec::new();
-        for row in rows {
-            let row = row?;
-            if !needle.is_empty()
-                && !row.3.to_lowercase().contains(&needle)
-                && !row.2.contains(&needle)
-                && !row.1.contains(&needle)
-            {
-                continue;
-            }
-            let warnings: Vec<String> =
-                serde_json::from_str(&row.8).map_err(|_| IndexError::InvalidEvidence)?;
-            results.push(ConversationSummary {
-                id: row.0,
-                conversation_id: row.1,
-                provider: row.2,
-                title: row.3,
-                source_url: row.4,
-                captured_at: row.5,
-                message_count: row.6 as usize,
-                completeness: row.7,
-                warnings,
-                snapshot_count: row.9 as usize,
-                conversation_date: None,
-                date_source: None,
-            });
-        }
+        let mut db = self.connection()?;
+        // One transaction prevents page drift while a concurrent capture appends
+        // or updates a conversation between keyset pages.
+        let tx = db.transaction()?;
+        let result = Self::catalog_rows(&tx, query, complete)?;
         self.gate
             .validate_lease(self.lease)
             .map_err(|_| IndexError::Revoked)?;
+        tx.commit()?;
+        Ok(result)
+    }
+
+    fn catalog_rows(
+        db: &Connection,
+        query: &str,
+        complete: bool,
+    ) -> Result<Vec<ConversationSummary>> {
+        const PAGE_SIZE: i64 = 512;
+        const SIDEBAR_LIMIT: i64 = 10_000;
+        let page_size = if complete { PAGE_SIZE } else { SIDEBAR_LIMIT };
+        let needle = query.to_lowercase();
+        let mut cursor: Option<(String, String)> = None;
+        let mut results = Vec::new();
+        loop {
+            let mut statement = db.prepare(
+                "SELECT c.archive_id,c.conversation_id,c.provider,c.title,c.source_url,
+                        c.captured_at,c.message_count,c.completeness,c.warnings_json,
+                        (SELECT count(*) FROM vault_captures WHERE archive_id=c.archive_id)
+                 FROM vault_captures c
+                 WHERE c.rowid = (
+                   SELECT rowid FROM vault_captures x WHERE x.archive_id=c.archive_id
+                   ORDER BY x.captured_at DESC,x.snapshot_id DESC LIMIT 1
+                 )
+                 AND (?1 IS NULL OR c.captured_at < ?1
+                      OR (c.captured_at = ?1 AND c.archive_id < ?2))
+                 ORDER BY c.captured_at DESC,c.archive_id DESC LIMIT ?3",
+            )?;
+            let rows = statement.query_map(
+                params![
+                    cursor.as_ref().map(|pair| pair.0.as_str()),
+                    cursor.as_ref().map(|pair| pair.1.as_str()),
+                    page_size
+                ],
+                |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, String>(2)?,
+                        r.get::<_, String>(3)?,
+                        r.get::<_, String>(4)?,
+                        r.get::<_, String>(5)?,
+                        r.get::<_, i64>(6)?,
+                        r.get::<_, String>(7)?,
+                        r.get::<_, String>(8)?,
+                        r.get::<_, i64>(9)?,
+                    ))
+                },
+            )?;
+            let mut scanned = 0i64;
+            for row in rows {
+                let row = row?;
+                scanned += 1;
+                cursor = Some((row.5.clone(), row.0.clone()));
+                if !needle.is_empty()
+                    && !row.3.to_lowercase().contains(&needle)
+                    && !row.2.contains(&needle)
+                    && !row.1.contains(&needle)
+                {
+                    continue;
+                }
+                let warnings: Vec<String> =
+                    serde_json::from_str(&row.8).map_err(|_| IndexError::InvalidEvidence)?;
+                results.push(ConversationSummary {
+                    id: row.0,
+                    conversation_id: row.1,
+                    provider: row.2,
+                    title: row.3,
+                    source_url: row.4,
+                    captured_at: row.5,
+                    message_count: row.6 as usize,
+                    completeness: row.7,
+                    warnings,
+                    snapshot_count: row.9 as usize,
+                    conversation_date: None,
+                    date_source: None,
+                });
+            }
+            if !complete || scanned < page_size {
+                break;
+            }
+        }
         Ok(results)
     }
 
@@ -507,5 +549,39 @@ impl VaultCaptureStore {
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+}
+
+#[cfg(test)]
+mod vault_catalog_pagination_tests {
+    use super::*;
+    #[test]
+    fn full_inventory_exceeds_sidebar_limit_without_dropping_old_fts_inputs() {
+        let mut db = Connection::open_in_memory().expect("synthetic in-memory catalog");
+        db.execute_batch(SCHEMA).expect("create catalog schema");
+        let tx = db.transaction().expect("begin");
+        {
+            let mut stmt = tx.prepare(
+                "INSERT INTO vault_captures(archive_id,snapshot_id,identity,provider,
+                  conversation_id,title,source_url,captured_at,message_count,completeness,
+                  warnings_json) VALUES (?1,?2,?3,'chatgpt',?4,'synthetic','',
+                  ?5,1,'complete','[]')",
+            ).expect("insert");
+            for i in 0..10_021usize {
+                let id = format!("synthetic-{i:05}");
+                let order = format!("2026-01-01T{i:05}");
+                stmt.execute(params![id, "snapshot-0", format!("identity-{i:05}"),
+                    format!("conversation-{i:05}"), order]).expect("insert synthetic row");
+            }
+        }
+        tx.commit().expect("commit");
+        let sidebar = VaultCaptureStore::catalog_rows(&db, "", false).expect("sidebar");
+        assert_eq!(sidebar.len(), 10_000);
+        let full = VaultCaptureStore::catalog_rows(&db, "", true).expect("FTS inventory");
+        assert_eq!(full.len(), 10_021);
+        assert_eq!(full.first().unwrap().id, "synthetic-10020");
+        assert_eq!(full.last().unwrap().id, "synthetic-00000");
+        let unique: std::collections::HashSet<_> = full.iter().map(|item| &item.id).collect();
+        assert_eq!(unique.len(), full.len());
     }
 }
