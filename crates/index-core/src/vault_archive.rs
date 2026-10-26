@@ -356,8 +356,8 @@ impl VaultCaptureStore {
             {
                 continue;
             }
-            let warnings: Vec<String> = serde_json::from_str(&row.8)
-                .map_err(|_| IndexError::InvalidEvidence)?;
+            let warnings: Vec<String> =
+                serde_json::from_str(&row.8).map_err(|_| IndexError::InvalidEvidence)?;
             results.push(ConversationSummary {
                 id: row.0,
                 conversation_id: row.1,
