@@ -545,7 +545,38 @@ async fn unlock_security(
     secret: String,
 ) -> Result<SecurityStatus, String> {
     if state.store.is_none() {
-        return Err("MP_VAULT_NOT_READY:encrypted runtime adapter required".into());
+        let security = state.security.clone();
+        let vault_root = state.vault_root.clone();
+        let vault = state.vault.clone();
+        let ready = state.authority_ready.clone();
+        return tauri::async_runtime::spawn_blocking(move || {
+            let secret = Zeroizing::new(secret);
+            let status = security.unlock(secret.as_bytes()).map_err(security_error)?;
+            let lease = security.require_unlocked().map_err(security_error)?;
+            let opened = (|| -> Result<Arc<VaultCaptureStore>, String> {
+                let manifest = mind_place_security::vault::VaultManifest::read(&vault_root)
+                    .map_err(security_error)?;
+                let crypto = mind_place_security::vault::CryptoVault::restore_with_dpapi(
+                    &security, lease, &manifest,
+                ).map_err(security_error)?;
+                let adapter = VaultCaptureStore::open(&vault_root, crypto, &security, lease)
+                    .map_err(|error| format!("{}:{}", error.code(), error))?;
+                Ok(Arc::new(adapter))
+            })();
+            let adapter = match opened {
+                Ok(value) => value,
+                Err(error) => {
+                    security.lock();
+                    return Err(error);
+                }
+            };
+            let mut session = vault.lock().unwrap_or_else(|error| error.into_inner());
+            *session = Some(adapter);
+            ready.store(true, Ordering::Release);
+            Ok(status)
+        })
+        .await
+        .map_err(|error| error.to_string())?;
     }
     let security = state.security.clone();
     let state_path = state.state_path.clone();
