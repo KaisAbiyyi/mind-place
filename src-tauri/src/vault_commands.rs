@@ -71,7 +71,8 @@ pub(super) async fn confirm_vault_setup(
             .map_err(|error| format!("{}:{}", error.code(), error))?;
         // Wrong code leaves the in-memory proposal intact. Successful
         // publication clears the secret by dropping PreparedFirstRunVault.
-        setup.confirm_and_provision(code.as_str(), &security, lease)
+        setup
+            .confirm_and_provision(code.as_str(), &security, lease)
             .map_err(|error| format!("{}:{}", error.code(), error))?;
         slot.take();
         // Until *all* production adapters are ported to the keyed vault,
