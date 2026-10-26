@@ -322,19 +322,29 @@ async fn get_memory_inspection(
 
 #[tauri::command]
 async fn refresh_archive_index(state: State<'_, AppState>) -> Result<IndexStats, String> {
-    let archive = legacy_archive(&state)?;
+    let vault = owner_vault(&state);
+    let archive = if vault.is_none() {
+        Some(legacy_archive(&state)?)
+    } else {
+        None
+    };
     let state_path = state.state_path.clone();
     let index_path = state.index_path.clone();
     let write_gate = state.archive_index_write_gate.clone();
     index_task(&state, move |lease, security| {
         serialized_archive_index_writer(&write_gate, &security, lease, || {
-            let authority = StateStore::open(state_path)?;
-            let index = IndexStore::open(index_path)?;
-            index.sync_with_check(&archive, &authority, || {
+            let authority = open_owner_state(&vault, &state_path)?;
+            let index = open_owner_index(&vault, &index_path)?;
+            let check = || {
                 security
                     .validate_lease(lease)
                     .map_err(|_| IndexError::Revoked)
-            })
+            };
+            match (vault.as_ref(), archive.as_ref()) {
+                (Some(vault), _) => index.sync_vault_with_check(vault, &authority, check),
+                (None, Some(archive)) => index.sync_with_check(archive, &authority, check),
+                _ => Err(IndexError::Revoked),
+            }
         })
     })
     .await
@@ -342,19 +352,29 @@ async fn refresh_archive_index(state: State<'_, AppState>) -> Result<IndexStats,
 
 #[tauri::command]
 async fn rebuild_archive_index(state: State<'_, AppState>) -> Result<IndexStats, String> {
-    let archive = legacy_archive(&state)?;
+    let vault = owner_vault(&state);
+    let archive = if vault.is_none() {
+        Some(legacy_archive(&state)?)
+    } else {
+        None
+    };
     let state_path = state.state_path.clone();
     let index_path = state.index_path.clone();
     let write_gate = state.archive_index_write_gate.clone();
     index_task(&state, move |lease, security| {
         serialized_archive_index_writer(&write_gate, &security, lease, || {
-            let authority = StateStore::open(state_path)?;
-            let index = IndexStore::open(index_path)?;
-            index.rebuild_with_check(&archive, &authority, || {
+            let authority = open_owner_state(&vault, &state_path)?;
+            let index = open_owner_index(&vault, &index_path)?;
+            let check = || {
                 security
                     .validate_lease(lease)
                     .map_err(|_| IndexError::Revoked)
-            })
+            };
+            match (vault.as_ref(), archive.as_ref()) {
+                (Some(vault), _) => index.rebuild_vault_with_check(vault, &authority, check),
+                (None, Some(archive)) => index.rebuild_with_check(archive, &authority, check),
+                _ => Err(IndexError::Revoked),
+            }
         })
     })
     .await
