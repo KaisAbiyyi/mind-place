@@ -293,7 +293,8 @@ fn allowed(relative: &Path) -> bool {
         Some(Component::Normal(first))
             if first == "state.sqlite3"
                 || first == "index.sqlite3"
-                || first == "document-index.sqlite3" =>
+                || first == "document-index.sqlite3"
+                || first == "archive-index.sqlite3" =>
         {
             components.next().is_none()
         }
