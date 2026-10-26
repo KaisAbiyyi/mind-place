@@ -35,7 +35,8 @@ use zeroize::Zeroizing;
 
 #[derive(Clone)]
 struct AppState {
-    store: ArchiveStore,
+    store: Option<ArchiveStore>,
+    archive_root: PathBuf,
     security: SecurityGate,
     state_path: PathBuf,
     index_path: PathBuf,
@@ -63,6 +64,13 @@ struct SetupInfo {
     registered_browsers: Vec<String>,
     platform: String,
     legacy_available: bool,
+}
+
+fn legacy_archive(state: &AppState) -> Result<ArchiveStore, String> {
+    state
+        .store
+        .clone()
+        .ok_or_else(|| "MP_VAULT_NOT_READY:legacy plaintext archive disabled".to_owned())
 }
 
 fn security_error(error: SecurityError) -> String {
@@ -245,7 +253,7 @@ async fn get_memory_inspection(
 
 #[tauri::command]
 async fn refresh_archive_index(state: State<'_, AppState>) -> Result<IndexStats, String> {
-    let archive = state.store.clone();
+    let archive = legacy_archive(&state)?;
     let state_path = state.state_path.clone();
     let index_path = state.index_path.clone();
     let write_gate = state.archive_index_write_gate.clone();
@@ -265,7 +273,7 @@ async fn refresh_archive_index(state: State<'_, AppState>) -> Result<IndexStats,
 
 #[tauri::command]
 async fn rebuild_archive_index(state: State<'_, AppState>) -> Result<IndexStats, String> {
-    let archive = state.store.clone();
+    let archive = legacy_archive(&state)?;
     let state_path = state.state_path.clone();
     let index_path = state.index_path.clone();
     let write_gate = state.archive_index_write_gate.clone();
@@ -399,7 +407,7 @@ async fn fetch_retrieval(
     state: State<'_, AppState>,
     request: FetchRequest,
 ) -> Result<FetchResponse, String> {
-    let archive = state.store.clone();
+    let archive = legacy_archive(&state)?;
     let index_path = state.index_path.clone();
     index_task(&state, move |lease, security| {
         IndexStore::open(index_path)?.fetch_with_check(&archive, &request, || {
@@ -416,7 +424,7 @@ async fn build_retrieval_context(
     state: State<'_, AppState>,
     request: ContextRequest,
 ) -> Result<ContextPack, String> {
-    let archive = state.store.clone();
+    let archive = legacy_archive(&state)?;
     let index_path = state.index_path.clone();
     index_task(&state, move |lease, security| {
         IndexStore::open(index_path)?.build_context_with_check(&archive, &request, || {
@@ -449,7 +457,7 @@ async fn inspect_retrieval_context(
     state: State<'_, AppState>,
     request: ContextRequest,
 ) -> Result<ContextInspection, String> {
-    let archive = state.store.clone();
+    let archive = legacy_archive(&state)?;
     let index_path = state.index_path.clone();
     index_task(&state, move |lease, security| {
         IndexStore::open(index_path)?.inspect_context_with_check(&archive, &request, || {
@@ -466,7 +474,7 @@ async fn inspect_retrieval_fetch(
     state: State<'_, AppState>,
     request: FetchRequest,
 ) -> Result<FetchInspection, String> {
-    let archive = state.store.clone();
+    let archive = legacy_archive(&state)?;
     let index_path = state.index_path.clone();
     index_task(&state, move |lease, security| {
         IndexStore::open(index_path)?.inspect_fetch_with_check(&archive, &request, || {
@@ -488,6 +496,9 @@ async fn initialize_security(
     state: State<'_, AppState>,
     secret: String,
 ) -> Result<SecurityStatus, String> {
+    if state.store.is_none() {
+        return Err("MP_VAULT_PROVISION_REQUIRED:new installs cannot initialize plaintext state".into());
+    }
     let security = state.security.clone();
     let state_path = state.state_path.clone();
     let authority_ready = state.authority_ready.clone();
@@ -512,6 +523,9 @@ async fn unlock_security(
     state: State<'_, AppState>,
     secret: String,
 ) -> Result<SecurityStatus, String> {
+    if state.store.is_none() {
+        return Err("MP_VAULT_NOT_READY:encrypted runtime adapter required".into());
+    }
     let security = state.security.clone();
     let state_path = state.state_path.clone();
     let authority_ready = state.authority_ready.clone();
@@ -727,7 +741,7 @@ async fn list_conversations(
     state: State<'_, AppState>,
     query: Option<String>,
 ) -> Result<Vec<ConversationSummary>, String> {
-    let store = state.store.clone();
+    let store = legacy_archive(&state)?;
     gated_blocking(&state, move || store.list(query.as_deref().unwrap_or(""))).await
 }
 
@@ -737,7 +751,7 @@ async fn read_conversation(
     id: String,
     snapshot_id: Option<String>,
 ) -> Result<Conversation, String> {
-    let store = state.store.clone();
+    let store = legacy_archive(&state)?;
     gated_blocking(&state, move || store.read(&id, snapshot_id.as_deref())).await
 }
 
@@ -746,7 +760,7 @@ async fn list_snapshots(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<Vec<SnapshotSummary>, String> {
-    let store = state.store.clone();
+    let store = legacy_archive(&state)?;
     gated_blocking(&state, move || store.snapshots(&id)).await
 }
 
@@ -756,7 +770,7 @@ async fn export_markdown(
     id: String,
     snapshot_id: Option<String>,
 ) -> Result<ExportResult, String> {
-    let store = state.store.clone();
+    let store = legacy_archive(&state)?;
     gated_blocking(&state, move || {
         store.export_snapshot(&id, snapshot_id.as_deref())
     })
@@ -769,13 +783,13 @@ async fn get_asset(
     id: String,
     asset_path: String,
 ) -> Result<AssetResult, String> {
-    let store = state.store.clone();
+    let store = legacy_archive(&state)?;
     gated_blocking(&state, move || store.asset(&id, &asset_path)).await
 }
 
 #[tauri::command]
 async fn import_legacy(state: State<'_, AppState>) -> Result<ImportReceipt, String> {
-    let store = state.store.clone();
+    let store = legacy_archive(&state)?;
     let source = state.legacy_path.clone();
     gated_blocking(&state, move || store.import_legacy(&source)).await
 }
@@ -788,7 +802,7 @@ async fn import_generic_text(
     format: String,
     raw: String,
 ) -> Result<GenericImportReceipt, String> {
-    let store = state.store.clone();
+    let store = legacy_archive(&state)?;
     gated_blocking(&state, move || {
         store.import_generic(&format, raw.as_bytes())
     })
@@ -810,7 +824,7 @@ fn setup_info(state: &AppState) -> SetupInfo {
         .map(str::to_owned)
         .collect();
     SetupInfo {
-        archive_path: state.store.root().display().to_string(),
+        archive_path: state.archive_root.display().to_string(),
         extension_path: state.extension_path.display().to_string(),
         host_path: state.host_path.display().to_string(),
         extension_id: mind_place_archive::extension_id(),
@@ -947,7 +961,18 @@ fn main() {
             let index_path = root.parent().unwrap_or(&root).join("index.sqlite3");
             let security = SecurityGate::open(security_path)?;
             let legacy_path = root.parent().unwrap_or(&root).join("sessions");
-            let store = ArchiveStore::open(root)?;
+            // New installations must not create legacy plaintext archive
+            // directories before an independently verified encrypted vault is
+            // provisioned. Existing users remain in their legacy profile
+            // pending an explicitly consented migration.
+            let parent = root.parent().unwrap_or(&root);
+            let legacy_exists = root.exists() || state_path.exists() || index_path.exists();
+            let vault_exists = parent.join("vault-v1.json").exists();
+            let store = if legacy_exists && !vault_exists {
+                Some(ArchiveStore::open(&root)?)
+            } else {
+                None
+            };
             let host_path = std::env::current_exe()?
                 .parent()
                 .unwrap()
@@ -963,6 +988,7 @@ fn main() {
             };
             app.manage(AppState {
                 store,
+                archive_root: root,
                 security,
                 state_path,
                 index_path,
