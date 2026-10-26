@@ -12,7 +12,7 @@ tauri-build = { version = "=2.7.2", features = [] }
 tauri = { version = "=2.12.3", features = [] }
 mind-place-archive = { path = "../crates/archive-core" }
 mind-place-security = { path = "../crates/security-core" }
-mind-place-state = { path = "../crates/state-core" }
+mind-place-state = { path = "../crates/state-core", features = ["sqlcipher-preview"] }
 mind-place-index = { path = "../crates/index-core" }
 mind-place-integration = { path = "../crates/integration-core" }
 serde.workspace = true
