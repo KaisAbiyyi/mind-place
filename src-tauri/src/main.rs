@@ -767,7 +767,8 @@ async fn approve_document_root(
     let authority_ready = state.authority_ready.clone();
     let root = tauri::async_runtime::spawn_blocking(move || {
         with_document_authority(&gate, &authority_ready, &security, lease, || {
-            let db = open_owner_state(&vault, &db_path).map_err(|e| format!("{}:{}", e.code(), e))?;
+            let db =
+                open_owner_state(&vault, &db_path).map_err(|e| format!("{}:{}", e.code(), e))?;
             db.approve_document_root(&root_id)
                 .map_err(|e| format!("{}:{}", e.code(), e))
         })
@@ -790,7 +791,8 @@ async fn revoke_document_root(state: State<'_, AppState>, root_id: String) -> Re
     let revoked_root = root_id.clone();
     tauri::async_runtime::spawn_blocking(move || {
         with_document_authority(&gate, &authority_ready, &security, lease, || {
-            let db = open_owner_state(&vault, &db_path).map_err(|e| format!("{}:{}", e.code(), e))?;
+            let db =
+                open_owner_state(&vault, &db_path).map_err(|e| format!("{}:{}", e.code(), e))?;
             db.revoke_document_root(&root_id)
                 .map_err(|e| format!("{}:{}", e.code(), e))
         })
