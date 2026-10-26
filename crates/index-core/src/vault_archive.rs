@@ -315,29 +315,67 @@ impl VaultCaptureStore {
         if query.len() > 1024 {
             return Err(IndexError::InvalidQuery);
         }
-        let ids = {
-            let _writer =
-                VaultWriterFence::writer(&self.root).map_err(|_| IndexError::InvalidEvidence)?;
-            let db = self.connection()?;
-            let mut stmt = db.prepare(
-                "SELECT archive_id FROM vault_captures
-                 GROUP BY archive_id ORDER BY MAX(captured_at) DESC LIMIT 10000",
-            )?;
-            let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
-            rows.collect::<rusqlite::Result<Vec<_>>>()?
-        };
+        // The catalog itself is SQLCipher encrypted. Never decrypt every
+        // potentially 32 MiB raw capture merely to populate the sidebar.
+        let _writer =
+            VaultWriterFence::writer(&self.root).map_err(|_| IndexError::InvalidEvidence)?;
+        let db = self.connection()?;
+        let mut statement = db.prepare(
+            "SELECT c.archive_id,c.conversation_id,c.provider,c.title,c.source_url,
+                    c.captured_at,c.message_count,c.completeness,c.warnings_json,
+                    (SELECT count(*) FROM vault_captures WHERE archive_id=c.archive_id)
+             FROM vault_captures c
+             WHERE c.rowid = (
+               SELECT rowid FROM vault_captures x WHERE x.archive_id=c.archive_id
+               ORDER BY x.captured_at DESC LIMIT 1
+             )
+             ORDER BY c.captured_at DESC LIMIT 10000",
+        )?;
         let needle = query.to_lowercase();
+        let rows = statement.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, String>(4)?,
+                r.get::<_, String>(5)?,
+                r.get::<_, i64>(6)?,
+                r.get::<_, String>(7)?,
+                r.get::<_, String>(8)?,
+                r.get::<_, i64>(9)?,
+            ))
+        })?;
         let mut results = Vec::new();
-        for id in ids {
-            let summary = self.read(&id, None)?.summary;
-            if needle.is_empty()
-                || summary.title.to_lowercase().contains(&needle)
-                || summary.provider.contains(&needle)
-                || summary.conversation_id.contains(&needle)
+        for row in rows {
+            let row = row?;
+            if !needle.is_empty()
+                && !row.3.to_lowercase().contains(&needle)
+                && !row.2.contains(&needle)
+                && !row.1.contains(&needle)
             {
-                results.push(summary);
+                continue;
             }
+            let warnings: Vec<String> = serde_json::from_str(&row.8)
+                .map_err(|_| IndexError::InvalidEvidence)?;
+            results.push(ConversationSummary {
+                id: row.0,
+                conversation_id: row.1,
+                provider: row.2,
+                title: row.3,
+                source_url: row.4,
+                captured_at: row.5,
+                message_count: row.6 as usize,
+                completeness: row.7,
+                warnings,
+                snapshot_count: row.9 as usize,
+                conversation_date: None,
+                date_source: None,
+            });
         }
+        self.gate
+            .validate_lease(self.lease)
+            .map_err(|_| IndexError::Revoked)?;
         Ok(results)
     }
 
