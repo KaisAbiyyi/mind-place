@@ -311,6 +311,36 @@ impl VaultCaptureStore {
         })
     }
 
+    pub fn list(&self, query: &str) -> Result<Vec<ConversationSummary>> {
+        if query.len() > 1024 {
+            return Err(IndexError::InvalidQuery);
+        }
+        let ids = {
+            let _writer = VaultWriterFence::writer(&self.root)
+                .map_err(|_| IndexError::InvalidEvidence)?;
+            let db = self.connection()?;
+            let mut stmt = db.prepare(
+                "SELECT archive_id FROM vault_captures
+                 GROUP BY archive_id ORDER BY MAX(captured_at) DESC LIMIT 10000",
+            )?;
+            let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        let needle = query.to_lowercase();
+        let mut results = Vec::new();
+        for id in ids {
+            let summary = self.read(&id, None)?.summary;
+            if needle.is_empty()
+                || summary.title.to_lowercase().contains(&needle)
+                || summary.provider.contains(&needle)
+                || summary.conversation_id.contains(&needle)
+            {
+                results.push(summary);
+            }
+        }
+        Ok(results)
+    }
+
     pub fn snapshots(&self, archive_id: &str) -> Result<Vec<SnapshotSummary>> {
         let _writer =
             VaultWriterFence::writer(&self.root).map_err(|_| IndexError::InvalidEvidence)?;
