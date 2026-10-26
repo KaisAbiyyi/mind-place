@@ -16,6 +16,7 @@ use mind_place_state::CipherKey;
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use sha2::{Digest, Sha256};
 use std::{
+    ops::{Deref, DerefMut},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -48,6 +49,24 @@ pub struct VaultCaptureStore {
     gate: SecurityGate,
     lease: UnlockLease,
     cipher: Arc<CipherKey>,
+}
+
+/// A read may open a writable SQLCipher pager for WAL configuration. Keep
+/// its entire lifetime inside the same writer fence as backup and capture.
+struct VaultConnection {
+    db: Connection,
+    _writer: VaultWriterFence,
+}
+impl Deref for VaultConnection {
+    type Target = Connection;
+    fn deref(&self) -> &Connection {
+        &self.db
+    }
+}
+impl DerefMut for VaultConnection {
+    fn deref_mut(&mut self) -> &mut Connection {
+        &mut self.db
+    }
 }
 
 impl VaultCaptureStore {
@@ -98,10 +117,12 @@ impl VaultCaptureStore {
         self.root.join("archive-index.sqlite3")
     }
 
-    fn connection(&self) -> Result<Connection> {
+    fn connection(&self) -> Result<VaultConnection> {
         self.gate
             .validate_lease(self.lease)
             .map_err(|_| IndexError::Revoked)?;
+        let writer =
+            VaultWriterFence::writer(&self.root).map_err(|_| IndexError::InvalidEvidence)?;
         let path = self.db_path();
         let db = Connection::open_with_flags(
             path,
@@ -113,7 +134,10 @@ impl VaultCaptureStore {
         db.busy_timeout(std::time::Duration::from_secs(5))?;
         db.pragma_update(None, "journal_mode", "WAL")?;
         db.pragma_update(None, "synchronous", "FULL")?;
-        Ok(db)
+        Ok(VaultConnection {
+            db,
+            _writer: writer,
+        })
     }
 
     fn integrity(db: &Connection) -> Result<()> {
