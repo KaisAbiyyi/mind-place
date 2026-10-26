@@ -718,8 +718,9 @@ fn lock_security(state: State<'_, AppState>) -> SecurityStatus {
 async fn list_document_roots(state: State<'_, AppState>) -> Result<Vec<DocumentRoot>, String> {
     let lease = begin_unlocked(&state)?;
     let db_path = state.state_path.clone();
+    let vault = owner_vault(&state);
     let roots = tauri::async_runtime::spawn_blocking(move || {
-        let db = StateStore::open(db_path).map_err(|e| format!("{}:{}", e.code(), e))?;
+        let db = open_owner_state(&vault, &db_path).map_err(|e| format!("{}:{}", e.code(), e))?;
         db.list_document_roots()
             .map_err(|e| format!("{}:{}", e.code(), e))
     })
@@ -740,8 +741,9 @@ async fn stage_document_root(
         return Err("MP_STATE_INVALID_VALUE:invalid directory path".into());
     }
     let db_path = state.state_path.clone();
+    let vault = owner_vault(&state);
     let root = tauri::async_runtime::spawn_blocking(move || {
-        let db = StateStore::open(db_path).map_err(|e| format!("{}:{}", e.code(), e))?;
+        let db = open_owner_state(&vault, &db_path).map_err(|e| format!("{}:{}", e.code(), e))?;
         db.register_document_root(Path::new(&path))
             .map_err(|e| format!("{}:{}", e.code(), e))
     })
@@ -759,12 +761,13 @@ async fn approve_document_root(
 ) -> Result<DocumentRoot, String> {
     let lease = begin_unlocked(&state)?;
     let db_path = state.state_path.clone();
+    let vault = owner_vault(&state);
     let gate = state.document_authority_gate.clone();
     let security = state.security.clone();
     let authority_ready = state.authority_ready.clone();
     let root = tauri::async_runtime::spawn_blocking(move || {
         with_document_authority(&gate, &authority_ready, &security, lease, || {
-            let db = StateStore::open(db_path).map_err(|e| format!("{}:{}", e.code(), e))?;
+            let db = open_owner_state(&vault, &db_path).map_err(|e| format!("{}:{}", e.code(), e))?;
             db.approve_document_root(&root_id)
                 .map_err(|e| format!("{}:{}", e.code(), e))
         })
@@ -780,13 +783,14 @@ async fn approve_document_root(
 async fn revoke_document_root(state: State<'_, AppState>, root_id: String) -> Result<(), String> {
     let lease = begin_unlocked(&state)?;
     let db_path = state.state_path.clone();
+    let vault = owner_vault(&state);
     let gate = state.document_authority_gate.clone();
     let security = state.security.clone();
     let authority_ready = state.authority_ready.clone();
     let revoked_root = root_id.clone();
     tauri::async_runtime::spawn_blocking(move || {
         with_document_authority(&gate, &authority_ready, &security, lease, || {
-            let db = StateStore::open(db_path).map_err(|e| format!("{}:{}", e.code(), e))?;
+            let db = open_owner_state(&vault, &db_path).map_err(|e| format!("{}:{}", e.code(), e))?;
             db.revoke_document_root(&root_id)
                 .map_err(|e| format!("{}:{}", e.code(), e))
         })
@@ -812,11 +816,12 @@ async fn refresh_document_root_index(
     root_id: String,
 ) -> Result<DocumentRefreshResponse, String> {
     let state_path = state.state_path.clone();
+    let vault = owner_vault(&state);
     let document_index_path = state.index_path.with_file_name("document-index.sqlite3");
     let polling_root = root_id.clone();
     let report = index_task(&state, move |lease, security| {
-        let authority = StateStore::open(state_path)?;
-        let projection = DocumentIndex::open(document_index_path)?;
+        let authority = open_owner_state(&vault, &state_path)?;
+        let projection = open_owner_document_index(&vault, &document_index_path)?;
         projection.refresh_root(&authority, &root_id, || {
             security
                 .validate_lease(lease)
@@ -855,10 +860,11 @@ async fn search_document_index(
     limit: Option<usize>,
 ) -> Result<Vec<DocumentHit>, String> {
     let state_path = state.state_path.clone();
+    let vault = owner_vault(&state);
     let document_index_path = state.index_path.with_file_name("document-index.sqlite3");
     index_task(&state, move |lease, security| {
-        let authority = StateStore::open(state_path)?;
-        let projection = DocumentIndex::open(document_index_path)?;
+        let authority = open_owner_state(&vault, &state_path)?;
+        let projection = open_owner_document_index(&vault, &document_index_path)?;
         projection.search(&authority, &query, limit.unwrap_or(20), || {
             security
                 .validate_lease(lease)
@@ -876,10 +882,11 @@ async fn preview_document_source(
     version_id: String,
 ) -> Result<DocumentPreview, String> {
     let state_path = state.state_path.clone();
+    let vault = owner_vault(&state);
     let document_index_path = state.index_path.with_file_name("document-index.sqlite3");
     index_task(&state, move |lease, security| {
-        let authority = StateStore::open(state_path)?;
-        let projection = DocumentIndex::open(document_index_path)?;
+        let authority = open_owner_state(&vault, &state_path)?;
+        let projection = open_owner_document_index(&vault, &document_index_path)?;
         projection.preview(&authority, &uri, &version_id, || {
             security
                 .validate_lease(lease)
