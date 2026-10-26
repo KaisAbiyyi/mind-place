@@ -158,6 +158,8 @@ mod tests {
         let bytes = fs::read(state.path()).unwrap();
         assert!(!bytes.starts_with(b"SQLite format 3\0"));
         assert!(StateStore::open(state.path()).is_err());
+        assert!(crate::DocumentObjectStore::open(state.clone()).is_err());
+        assert!(!vault_root.join("document-objects").exists());
         // A live state transaction in this vault participates in the shared
         // writer fence, so a portable backup cannot run concurrently.
         let connection = state.connection().unwrap();
