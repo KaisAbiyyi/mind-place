@@ -2,11 +2,7 @@
 //! Synthetic committed-WAL + AEAD object backup across encrypted state/archive.
 use mind_place_archive::Capture;
 use mind_place_index::{vault_archive::VaultCaptureStore, vault_online_backup::VaultOnlineBackup};
-use mind_place_security::{
-    vault::CryptoVault,
-    vault_backup::PortableBackup,
-    SecurityGate,
-};
+use mind_place_security::{vault::CryptoVault, vault_backup::PortableBackup, SecurityGate};
 use mind_place_state::StateStore;
 
 #[test]
@@ -18,11 +14,13 @@ fn online_snapshot_restores_cross_store_synthetic_capture_and_state() {
     let (vault, recovery, manifest) = CryptoVault::provision(&gate, lease).unwrap();
     let root = home.path().join("vault");
     manifest.persist_new(&root).unwrap();
-    let key = vault.derived_key(&gate, lease, b"state/sqlcipher/v1").unwrap();
+    let key = vault
+        .derived_key(&gate, lease, b"state/sqlcipher/v1")
+        .unwrap();
     let mut state_key = [0u8; 32];
     state_key.copy_from_slice(key.as_ref());
-    let state = StateStore::open_encrypted(root.join("state.sqlite3"), state_key, &gate, lease)
-        .unwrap();
+    let state =
+        StateStore::open_encrypted(root.join("state.sqlite3"), state_key, &gate, lease).unwrap();
     let archive = VaultCaptureStore::open(&root, vault, &gate, lease).unwrap();
     let captured: Capture = serde_json::from_value(serde_json::json!({
         "schema_version":1,
@@ -36,27 +34,33 @@ fn online_snapshot_restores_cross_store_synthetic_capture_and_state() {
         "messages":[{"id":"synthetic", "role":"user","text":"synthetic only","format":"plain",
             "attachments":[]}],
         "warnings":["synthetic observation"]
-    })).unwrap();
+    }))
+    .unwrap();
     let receipt = archive.save(captured).unwrap();
     let backup = home.path().join("portable-bundle");
     // Scope a second crypto handle to ensure the coordinator can recover
     // independently of the writer's ownership of its in-memory DEK.
-    let verified = CryptoVault::restore_with_recovery(
-        &gate, lease, &manifest, &recovery,
-    ).unwrap();
+    let verified = CryptoVault::restore_with_recovery(&gate, lease, &manifest, &recovery).unwrap();
     let saved = VaultOnlineBackup::create(&gate, lease, &verified, &root, &backup, 1).unwrap();
     assert!(saved.count >= 3);
     assert!(!backup.join("payload/state.sqlite3-wal").exists());
     assert!(!backup.join("payload/archive-index.sqlite3-wal").exists());
-    assert!(PortableBackup::create(&gate, lease, &verified, &root,
-        &home.path().join("offline-during-wal"), 2).is_err()
-        || !root.join("state.sqlite3-wal").exists());
+    assert!(
+        PortableBackup::create(
+            &gate,
+            lease,
+            &verified,
+            &root,
+            &home.path().join("offline-during-wal"),
+            2
+        )
+        .is_err()
+            || !root.join("state.sqlite3-wal").exists()
+    );
     drop(state);
     let destination = home.path().join("restored-vault");
     PortableBackup::restore(&gate, lease, &backup, &destination, &recovery).unwrap();
-    let rebuilt = CryptoVault::restore_with_recovery(
-        &gate, lease, &manifest, &recovery,
-    ).unwrap();
+    let rebuilt = CryptoVault::restore_with_recovery(&gate, lease, &manifest, &recovery).unwrap();
     let restored_archive = VaultCaptureStore::open(&destination, rebuilt, &gate, lease).unwrap();
     let loaded = restored_archive.read(&receipt.id, None).unwrap();
     assert_eq!(loaded.capture.messages[0].text, "synthetic only");
