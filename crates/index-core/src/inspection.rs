@@ -3,8 +3,7 @@
 //! in a diagnostic trace. Evidence payload is separately unlock protected.
 use crate::{
     CaptureArchiveReader, ContextPack, ContextRequest, FetchRequest, FetchResponse, IndexStore,
-    Result, RetrievalRequest,
-    RetrievalResponse,
+    Result, RetrievalRequest, RetrievalResponse,
 };
 use mind_place_archive::ArchiveStore;
 use serde::Serialize;
