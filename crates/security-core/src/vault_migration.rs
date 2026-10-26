@@ -53,7 +53,8 @@ impl LegacyMigrationPreflight {
         // app-owned root, but only explicitly whitelisted legacy sources scan.
         if canonical_source == destination
             || canonical_parent == destination
-            || canonical_parent.starts_with(&canonical_source)
+            || (canonical_parent.starts_with(&canonical_source)
+                && canonical_parent != canonical_source)
         {
             return Err(SecurityError::UnsafePath);
         }
@@ -292,7 +293,15 @@ mod tests {
             fs::read(source.join("owner-unknown.json")).unwrap(),
             b"sensitive"
         );
+        // Production stores the new encrypted-vault-v1 folder directly under
+        // the existing app-owned legacy root. This is a safe, distinct child;
+        // deeper unapproved nesting must still be refused.
         assert!(LegacyMigrationPreflight::inspect(&source, &source.join("vault")).is_err());
+        fs::remove_file(source.join("owner-unknown.json")).unwrap();
+        let nested = source.join("archive-v1/subdir/encrypted-vault-v1");
+        assert!(LegacyMigrationPreflight::inspect(&source, &nested).is_err());
+        let app_child = LegacyMigrationPreflight::inspect(&source, &source.join("vault")).unwrap();
+        app_child.verify_unchanged().unwrap();
     }
 
     #[cfg(unix)]
