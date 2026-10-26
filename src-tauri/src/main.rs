@@ -3,6 +3,7 @@
 mod document_refresh;
 mod hosted_tunnel;
 mod mcp_commands;
+mod native_capture_ipc;
 mod vault_commands;
 
 use document_refresh::DocumentRefreshRegistry;
@@ -42,6 +43,7 @@ struct AppState {
     vault_root: PathBuf,
     pending_vault: vault_commands::PendingVault,
     vault: Arc<Mutex<Option<Arc<VaultCaptureStore>>>>,
+    native_capture: Arc<Mutex<Option<native_capture_ipc::NativeCaptureIpc>>>,
     security: SecurityGate,
     state_path: PathBuf,
     index_path: PathBuf,
@@ -1094,6 +1096,7 @@ fn main() {
                 vault_root,
                 pending_vault: Arc::new(Mutex::new(None)),
                 vault: Arc::new(Mutex::new(None)),
+                native_capture: Arc::new(Mutex::new(None)),
                 security,
                 state_path,
                 index_path,
