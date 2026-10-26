@@ -139,6 +139,27 @@ async fn blocking<T: Send + 'static>(
         .map_err(|e| e.to_string())
 }
 
+async fn vaulted_blocking<T: Send + 'static>(
+    state: &AppState,
+    operation: impl FnOnce(Arc<VaultCaptureStore>) -> mind_place_index::Result<T> + Send + 'static,
+) -> Result<Option<T>, String> {
+    let adapter = state
+        .vault
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone();
+    let Some(adapter) = adapter else {
+        return Ok(None);
+    };
+    let lease = begin_unlocked(state)?;
+    let result = tauri::async_runtime::spawn_blocking(move || operation(adapter))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| format!("{}:{}", error.code(), error))?;
+    finish_unlocked(state, lease)?;
+    Ok(Some(result))
+}
+
 async fn gated_blocking<T: Send + 'static>(
     state: &AppState,
     operation: impl FnOnce() -> mind_place_archive::Result<T> + Send + 'static,
@@ -794,6 +815,10 @@ async fn list_conversations(
     state: State<'_, AppState>,
     query: Option<String>,
 ) -> Result<Vec<ConversationSummary>, String> {
+    let vault_query = query.clone().unwrap_or_default();
+    if let Some(result) = vaulted_blocking(&state, move |vault| vault.list(&vault_query)).await? {
+        return Ok(result);
+    }
     let store = legacy_archive(&state)?;
     gated_blocking(&state, move || store.list(query.as_deref().unwrap_or(""))).await
 }
@@ -804,6 +829,13 @@ async fn read_conversation(
     id: String,
     snapshot_id: Option<String>,
 ) -> Result<Conversation, String> {
+    let vault_id = id.clone();
+    let vault_snapshot = snapshot_id.clone();
+    if let Some(result) = vaulted_blocking(&state, move |vault| {
+        vault.read(&vault_id, vault_snapshot.as_deref())
+    }).await? {
+        return Ok(result);
+    }
     let store = legacy_archive(&state)?;
     gated_blocking(&state, move || store.read(&id, snapshot_id.as_deref())).await
 }
@@ -813,6 +845,10 @@ async fn list_snapshots(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<Vec<SnapshotSummary>, String> {
+    let vault_id = id.clone();
+    if let Some(result) = vaulted_blocking(&state, move |vault| vault.snapshots(&vault_id)).await? {
+        return Ok(result);
+    }
     let store = legacy_archive(&state)?;
     gated_blocking(&state, move || store.snapshots(&id)).await
 }
