@@ -2,10 +2,10 @@
 //! Only explicit owner-triggered rescans create generations; searches revalidate
 //! current authoritative heads AND live source bytes before disclosing snippets.
 use crate::{configure, safe_path, IndexError, Result};
-use mind_place_security::vault_fence::VaultWriterFence;
 use mind_place_documents::{
     extract_with_check, DocumentFormat, ExtractionError, ExtractionLimits, EXTRACTOR_REVISION,
 };
+use mind_place_security::vault_fence::VaultWriterFence;
 use mind_place_state::{
     CipherKey, DocumentObjectStore, DocumentScanner, ScanPolicy, StateError, StateStore,
     VirtualDocumentPath,
