@@ -60,6 +60,9 @@ impl NativeCaptureIpc {
             fs::set_permissions(pending.path(), fs::Permissions::from_mode(0o600))
                 .map_err(|_| "MP_VAULT_IPC_DESCRIPTOR_FAILED".to_owned())?;
         }
+        #[cfg(windows)]
+        mind_place_capture_host::ipc::secure_descriptor(pending.path())
+            .map_err(|_| "MP_VAULT_IPC_OWNER_DACL_FAILED".to_owned())?;
         serde_json::to_writer(pending.as_file_mut(), &identity)
             .map_err(|_| "MP_VAULT_IPC_DESCRIPTOR_FAILED".to_owned())?;
         pending
@@ -70,9 +73,13 @@ impl NativeCaptureIpc {
         // instance must fail closed rather than hijack capture routing from
         // another unlocked owner session. A stale post-crash descriptor also
         // requires explicit owner recovery rather than unsafe auto-takeover.
-        pending
+        let published = pending
             .persist_noclobber(dir.join("capture-ipc-v1.json"))
             .map_err(|_| "MP_VAULT_IPC_SESSION_ALREADY_PRESENT".to_owned())?;
+        drop(published);
+        #[cfg(windows)]
+        mind_place_capture_host::ipc::verify_descriptor(&dir.join("capture-ipc-v1.json"))
+            .map_err(|_| "MP_VAULT_IPC_OWNER_DACL_FAILED".to_owned())?;
 
         let stop = Arc::new(AtomicBool::new(false));
         let terminate = stop.clone();
