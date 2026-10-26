@@ -52,6 +52,10 @@ fn encrypted_archive_roundtrip_deduplicates_and_fails_closed_after_lock() {
         "This is entirely synthetic evidence."
     );
     assert_eq!(loaded.summary.snapshot_count, 1);
+    let exported = store.export_markdown(&first.id, None).unwrap();
+    assert!(exported.path.is_empty(), "vault must not silently publish plaintext exports");
+    assert!(exported.markdown.contains("This is entirely synthetic evidence."));
+    assert!(!root.join("exports").exists());
 
     let bytes = fs::read(root.join("archive-index.sqlite3")).unwrap();
     assert!(!bytes.starts_with(b"SQLite format 3\0"));
@@ -60,6 +64,7 @@ fn encrypted_archive_roundtrip_deduplicates_and_fails_closed_after_lock() {
     assert!(shards > 0);
     gate.lock();
     assert!(store.read(&first.id, None).is_err());
+    assert!(store.export_markdown(&first.id, None).is_err());
     assert!(store.save(capture("2026-10-26T03:00:02Z")).is_err());
 }
 
