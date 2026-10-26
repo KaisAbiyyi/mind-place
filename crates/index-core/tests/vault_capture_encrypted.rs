@@ -73,7 +73,7 @@ fn encrypted_archive_roundtrip_deduplicates_and_fails_closed_after_lock() {
     assert_eq!(matches[0].archive_id, first.id);
     assert!(!fs::read(root.join("index.sqlite3"))
         .unwrap()
-        .starts_with(b"SQLite format 3\\0"));
+        .starts_with(b"SQLite format 3\0"));
 
     let bytes = fs::read(root.join("archive-index.sqlite3")).unwrap();
     assert!(!bytes.starts_with(b"SQLite format 3\0"));
