@@ -1,4 +1,4 @@
-#![cfg(feature = "sqlcipher-preview")]
+#![cfg(all(feature = "sqlcipher-preview", windows))]
 //! Synthetic-only AEAD document source -> preserved object -> keyed FTS test.
 use mind_place_index::vault_archive::VaultCaptureStore;
 use mind_place_security::{vault::CryptoVault, SecurityGate};
