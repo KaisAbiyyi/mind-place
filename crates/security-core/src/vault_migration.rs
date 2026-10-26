@@ -288,7 +288,10 @@ mod tests {
         fs::remove_file(source.join("state.sqlite3-wal")).unwrap();
         fs::write(source.join("owner-unknown.json"), b"sensitive").unwrap();
         assert!(LegacyMigrationPreflight::inspect(&source, &output).is_err());
-        assert_eq!(fs::read(source.join("owner-unknown.json")).unwrap(), b"sensitive");
+        assert_eq!(
+            fs::read(source.join("owner-unknown.json")).unwrap(),
+            b"sensitive"
+        );
         assert!(LegacyMigrationPreflight::inspect(&source, &source.join("vault")).is_err());
     }
 
