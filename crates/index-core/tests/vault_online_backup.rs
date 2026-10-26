@@ -69,10 +69,12 @@ fn online_snapshot_restores_cross_store_synthetic_capture_and_state() {
     assert!(!raw.starts_with(b"SQLite format 3\0"));
 }
 
-
 #[test]
 fn online_backup_failure_injection_never_publishes_incomplete_restores() {
-    use std::{fs, path::{Path, PathBuf}};
+    use std::{
+        fs,
+        path::{Path, PathBuf},
+    };
 
     fn first_file(path: &Path) -> PathBuf {
         for entry in fs::read_dir(path).unwrap() {
@@ -89,14 +91,18 @@ fn online_backup_failure_injection_never_publishes_incomplete_restores() {
 
     let home = tempfile::tempdir().unwrap();
     let gate = SecurityGate::open(home.path().join("security.json")).unwrap();
-    gate.initialize(b"synthetic-online-failure-injection").unwrap();
+    gate.initialize(b"synthetic-online-failure-injection")
+        .unwrap();
     let lease = gate.require_unlocked().unwrap();
     let (vault, recovery, manifest) = CryptoVault::provision(&gate, lease).unwrap();
     let root = home.path().join("vault");
     manifest.persist_new(&root).unwrap();
     let mut raw = [0u8; 32];
     raw.copy_from_slice(
-        vault.derived_key(&gate, lease, b"state/sqlcipher/v1").unwrap().as_ref(),
+        vault
+            .derived_key(&gate, lease, b"state/sqlcipher/v1")
+            .unwrap()
+            .as_ref(),
     );
     let _state = StateStore::open_encrypted(root.join("state.sqlite3"), raw, &gate, lease).unwrap();
     let archive = VaultCaptureStore::open(&root, vault, &gate, lease).unwrap();
@@ -117,7 +123,11 @@ fn online_backup_failure_injection_never_publishes_incomplete_restores() {
 
     // An unknown plaintext writer cannot be silently excluded from a "complete"
     // generation. No publicly named destination may be published on failure.
-    fs::write(root.join("unclassified-new-writer.txt"), b"synthetic-not-vaulted").unwrap();
+    fs::write(
+        root.join("unclassified-new-writer.txt"),
+        b"synthetic-not-vaulted",
+    )
+    .unwrap();
     let rejected = home.path().join("rejected");
     assert!(VaultOnlineBackup::create(&gate, lease, &verified, &root, &rejected, 2).is_err());
     assert!(!rejected.exists());
