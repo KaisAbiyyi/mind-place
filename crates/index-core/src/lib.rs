@@ -1,6 +1,8 @@
 //! Rebuildable, non-authoritative archive search projection.
 //! Every durable source ID is registered in state.sqlite3, never assigned by this DB.
-use mind_place_archive::{ArchiveStore, Capture, Conversation, ConversationSummary, SnapshotSummary};
+use mind_place_archive::{
+    ArchiveStore, Capture, Conversation, ConversationSummary, SnapshotSummary,
+};
 use mind_place_security::vault_fence::VaultWriterFence;
 use mind_place_state::{CipherKey, SourceDescriptor, SourceKey, StateStore};
 use rusqlite::{
