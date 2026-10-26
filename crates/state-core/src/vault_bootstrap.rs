@@ -158,6 +158,18 @@ mod tests {
         let bytes = fs::read(state.path()).unwrap();
         assert!(!bytes.starts_with(b"SQLite format 3\0"));
         assert!(StateStore::open(state.path()).is_err());
+        // A live state transaction in this vault participates in the shared
+        // writer fence, so a portable backup cannot run concurrently.
+        let connection = state.connection().unwrap();
+        let competing = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(vault_root.join(".vault-writer.lock"))
+            .unwrap();
+        assert!(fs2::FileExt::try_lock_exclusive(&competing).is_err());
+        drop(connection);
+        fs2::FileExt::try_lock_exclusive(&competing).unwrap();
+        fs2::FileExt::unlock(&competing).unwrap();
         assert!(!code.is_empty());
     }
 
