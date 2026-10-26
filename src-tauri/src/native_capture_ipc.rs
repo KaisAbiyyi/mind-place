@@ -128,3 +128,70 @@ impl Drop for NativeCaptureIpc {
         }
     }
 }
+
+#[cfg(test)]
+mod qualification {
+    use super::*;
+    use mind_place_archive::{extension_id, Capture};
+    use mind_place_security::vault::CryptoVault;
+
+    fn synthetic_capture() -> Capture {
+        serde_json::from_value(serde_json::json!({
+            "schema_version": 1,
+            "provider": "chatgpt",
+            "conversation_id": "123e4567-e89b-12d3-a456-426614174000",
+            "source_url": "https://chatgpt.com/c/123e4567-e89b-12d3-a456-426614174000",
+            "title": "Synthetic Native IPC",
+            "captured_at": "2026-10-26T11:00:00Z",
+            "capture_method": "manual-dom",
+            "completeness": "partial",
+            "warnings": ["synthetic"],
+            "messages": [{
+                "id": "ipc-1",
+                "role": "user",
+                "text": "synthetic-only",
+                "format": "plain",
+                "attachments": []
+            }]
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn owner_local_capture_roundtrip_requires_unlocked_epoch() {
+        let home = tempfile::tempdir().unwrap();
+        let archive_root = home.path().join("archive-v1");
+        let gate = SecurityGate::open(home.path().join("security-v1.json")).unwrap();
+        gate.initialize(b"synthetic-owner-session-only").unwrap();
+        let lease = gate.require_unlocked().unwrap();
+        let (vault, _, manifest) = CryptoVault::provision(&gate, lease).unwrap();
+        let vault_root = home.path().join("encrypted-vault-v1");
+        manifest.persist_new(&vault_root).unwrap();
+        let writer = Arc::new(VaultCaptureStore::open(&vault_root, vault, &gate, lease).unwrap());
+        let ipc = NativeCaptureIpc::start(archive_root.clone(), writer.clone(), gate.clone(), lease)
+            .unwrap();
+        let origin = format!("chrome-extension://{}/", extension_id());
+        let result = mind_place_capture_host::ipc::forward_capture(
+            &archive_root,
+            &origin,
+            synthetic_capture(),
+        )
+        .unwrap();
+        assert_eq!(result["ok"], true);
+        let archive_id = result["id"].as_str().unwrap();
+        assert_eq!(
+            writer.read(archive_id, None).unwrap().capture.messages[0].text,
+            "synthetic-only"
+        );
+        assert!(!archive_root.exists());
+        gate.lock();
+        assert!(mind_place_capture_host::ipc::forward_capture(
+            &archive_root,
+            &origin,
+            synthetic_capture(),
+        )
+        .is_err());
+        drop(ipc);
+        assert!(!home.path().join("capture-ipc-v1.json").exists());
+    }
+}
