@@ -153,6 +153,42 @@ pub(super) async fn unlock_vault_with_recovery(
 }
 
 #[tauri::command]
+pub(super) async fn create_vault_online_backup(
+    state: State<'_, AppState>,
+    destination: String,
+    generation: u64,
+) -> Result<mind_place_security::vault_backup::BackupMetadata, String> {
+    if state.store.is_some() {
+        return Err("MP_VAULT_ENCRYPTED_OWNER_ONLY".into());
+    }
+    if generation == 0 {
+        return Err("MP_VAULT_INVALID_GENERATION".into());
+    }
+    let path = std::path::PathBuf::from(destination);
+    if !path.is_absolute() {
+        return Err("MP_VAULT_BACKUP_ABSOLUTE_DESTINATION_REQUIRED".into());
+    }
+    let lease = super::begin_unlocked(&state)?;
+    let adapter = state
+        .vault
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone()
+        .ok_or_else(|| "MP_VAULT_NOT_READY".to_owned())?;
+    let security = state.security.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        security.validate_lease(lease)
+            .map_err(|error| format!("{}:{}", error.code(), error))?;
+        adapter.online_backup(&path, generation)
+            .map_err(|error| format!("{}:{}", error.code(), error))
+    })
+    .await
+    .map_err(|_| "MP_VAULT_BACKUP_WORKER_FAILED".to_owned())??;
+    super::finish_unlocked(&state, lease)?;
+    Ok(result)
+}
+
+#[tauri::command]
 pub(super) fn cancel_vault_setup(state: State<'_, AppState>) -> Result<(), String> {
     state
         .pending_vault
