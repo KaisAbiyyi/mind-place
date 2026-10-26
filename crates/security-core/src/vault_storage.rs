@@ -1,6 +1,7 @@
 //! Durable immutable AEAD storage for new vaults. All temporary files contain
 //! ciphertext only. Existing plaintext archives are NEVER adopted or migrated.
 use crate::vault::{ContentKind, CryptoVault, VaultManifest};
+use crate::vault_fence::VaultWriterFence;
 use crate::{Result, SecurityError, SecurityGate, UnlockLease};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use hmac::{Hmac, Mac};
@@ -89,6 +90,9 @@ impl<'a> ImmutableVaultStorage<'a> {
         payload: &[u8],
     ) -> Result<PathBuf> {
         gate.validate_lease(lease)?;
+        // Cooperating native/desktop writers must hold the same shared fence
+        // through immutable object publication and directory sync.
+        let _writer_fence = VaultWriterFence::writer(&self.root)?;
         if payload.len() > MAX_TOTAL {
             return Err(SecurityError::InvalidConfig);
         }
