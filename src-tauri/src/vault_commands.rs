@@ -116,6 +116,8 @@ pub(super) async fn unlock_vault_with_recovery(
     let root = state.vault_root.clone();
     let holder = state.vault.clone();
     let ready = state.authority_ready.clone();
+    let native_capture = state.native_capture.clone();
+    let archive_root = state.archive_root.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let secret = Zeroizing::new(secret);
         let code = Zeroizing::new(code);
@@ -138,6 +140,22 @@ pub(super) async fn unlock_vault_with_recovery(
         })();
         match opened {
             Ok(adapter) => {
+                let receiver = match super::native_capture_ipc::NativeCaptureIpc::start(
+                    archive_root,
+                    adapter.clone(),
+                    security.clone(),
+                    lease,
+                ) {
+                    Ok(receiver) => receiver,
+                    Err(error) => {
+                        security.lock();
+                        return Err(error);
+                    }
+                };
+                security
+                    .validate_lease(lease)
+                    .map_err(|error| format!("{}:{}", error.code(), error))?;
+                *native_capture.lock().unwrap_or_else(|error| error.into_inner()) = Some(receiver);
                 *holder.lock().unwrap_or_else(|error| error.into_inner()) = Some(adapter);
                 ready.store(true, std::sync::atomic::Ordering::Release);
                 Ok(status)
