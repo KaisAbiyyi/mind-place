@@ -626,7 +626,8 @@ mod tests {
             .spawn()
             .unwrap();
         let state = super::AppState {
-            store: mind_place_archive::ArchiveStore::open(dir.path().join("archive-v1")).unwrap(),
+            store: Some(mind_place_archive::ArchiveStore::open(dir.path().join("archive-v1")).unwrap()),
+            archive_root: dir.path().join("archive-v1"),
             security: security.clone(),
             state_path,
             index_path: dir.path().join("index.sqlite3"),
