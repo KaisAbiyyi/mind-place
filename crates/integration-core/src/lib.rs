@@ -228,6 +228,7 @@ pub fn tool_catalog() -> Vec<ToolDefinition> {
 
 /// Borrowed archive choice; the vault variant is never permitted to fall back
 /// to a legacy on-disk ArchiveStore under any circumstances.
+#[derive(Clone, Copy)]
 enum ArchiveSource<'a> {
     Legacy(&'a ArchiveStore),
     #[cfg(feature = "vault-mcp")]
@@ -305,28 +306,30 @@ impl<'a> IntegrationCore<'a> {
                         .map_err(|_| IntegrationError::InvalidArguments)?;
                     let mut check = || self.check_index(lease, &mut authorize_read);
                     let fetched = match self.archive {
-                        ArchiveSource::Legacy(archive) =>
-                            self.index.fetch_with_check(archive, &request, &mut check)?,
+                        ArchiveSource::Legacy(archive) => {
+                            self.index.fetch_with_check(archive, &request, &mut check)?
+                        }
                         #[cfg(feature = "vault-mcp")]
-                        ArchiveSource::Vault(archive) =>
-                            self.index.fetch_vault_with_check(archive, &request, &mut check)?,
+                        ArchiveSource::Vault(archive) => self
+                            .index
+                            .fetch_vault_with_check(archive, &request, &mut check)?,
                     };
-                    serde_json::to_value(fetched)
-                        .map_err(|_| IntegrationError::Serialization)?
+                    serde_json::to_value(fetched).map_err(|_| IntegrationError::Serialization)?
                 }
                 ToolName::ContextBuild => {
                     let request: ContextRequest = serde_json::from_value(call.arguments.clone())
                         .map_err(|_| IntegrationError::InvalidArguments)?;
                     let mut check = || self.check_index(lease, &mut authorize_read);
                     let context = match self.archive {
-                        ArchiveSource::Legacy(archive) =>
-                            self.index.build_context_with_check(archive, &request, &mut check)?,
+                        ArchiveSource::Legacy(archive) => self
+                            .index
+                            .build_context_with_check(archive, &request, &mut check)?,
                         #[cfg(feature = "vault-mcp")]
-                        ArchiveSource::Vault(archive) =>
-                            self.index.build_context_vault_with_check(archive, &request, &mut check)?,
+                        ArchiveSource::Vault(archive) => self
+                            .index
+                            .build_context_vault_with_check(archive, &request, &mut check)?,
                     };
-                    serde_json::to_value(context)
-                        .map_err(|_| IntegrationError::Serialization)?
+                    serde_json::to_value(context).map_err(|_| IntegrationError::Serialization)?
                 }
             };
             self.check(lease, &mut authorize_read)?;

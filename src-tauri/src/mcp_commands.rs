@@ -55,7 +55,8 @@ pub(super) async fn start_local_mcp(state: State<'_, AppState>) -> Result<McpSta
             state.security.clone(),
             state.state_path.clone(),
             state.index_path.clone(),
-        ).await
+        )
+        .await
     }
     .map_err(|_| "MP_MCP_BIND:Local MCP port is unavailable".to_string())?;
     finish_unlocked(&state, lease)?;

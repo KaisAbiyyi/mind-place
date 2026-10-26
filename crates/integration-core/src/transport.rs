@@ -10,9 +10,9 @@ use hyper::service::service_fn;
 use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use mind_place_archive::ArchiveStore;
-use mind_place_index::IndexStore;
 #[cfg(feature = "vault-mcp")]
 use mind_place_index::vault_archive::VaultCaptureStore;
+use mind_place_index::IndexStore;
 use mind_place_security::SecurityGate;
 use mind_place_state::StateStore;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
@@ -211,7 +211,11 @@ async fn handle_bounded(request: Request<Incoming>, ctx: ServerContext) -> WireR
             return error(503);
         }
         let reply: McpReply = match &ctx.source {
-            ServerSource::Legacy { archive, state_path, index_path } => {
+            ServerSource::Legacy {
+                archive,
+                state_path,
+                index_path,
+            } => {
                 let state = match StateStore::open(state_path) {
                     Ok(value) => value,
                     Err(_) => return error(503),
@@ -221,8 +225,15 @@ async fn handle_bounded(request: Request<Incoming>, ctx: ServerContext) -> WireR
                     Err(_) => return error(503),
                 };
                 let core = crate::IntegrationCore::new(archive, &index, &ctx.security);
-                mcp::dispatch(&core, &state, &authorization, parsed, &version,
-                    method.as_deref(), name.as_deref())
+                mcp::dispatch(
+                    &core,
+                    &state,
+                    &authorization,
+                    parsed,
+                    &version,
+                    method.as_deref(),
+                    name.as_deref(),
+                )
             }
             #[cfg(feature = "vault-mcp")]
             ServerSource::Vault(archive) => {
@@ -235,8 +246,15 @@ async fn handle_bounded(request: Request<Incoming>, ctx: ServerContext) -> WireR
                     Err(_) => return error(503),
                 };
                 let core = crate::IntegrationCore::new_vault(archive, &index, &ctx.security);
-                mcp::dispatch(&core, &state, &authorization, parsed, &version,
-                    method.as_deref(), name.as_deref())
+                mcp::dispatch(
+                    &core,
+                    &state,
+                    &authorization,
+                    parsed,
+                    &version,
+                    method.as_deref(),
+                    name.as_deref(),
+                )
             }
         };
         if !active_for_task.load(Ordering::Acquire) || ctx.security.validate_lease(lease).is_err() {
@@ -272,7 +290,15 @@ impl LocalMcpServer {
         state_path: PathBuf,
         index_path: PathBuf,
     ) -> std::io::Result<Self> {
-        Self::start_source(ServerSource::Legacy { archive, state_path, index_path }, security).await
+        Self::start_source(
+            ServerSource::Legacy {
+                archive,
+                state_path,
+                index_path,
+            },
+            security,
+        )
+        .await
     }
 
     #[cfg(feature = "vault-mcp")]
