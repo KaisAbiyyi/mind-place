@@ -838,7 +838,9 @@ async fn read_conversation(
     let vault_snapshot = snapshot_id.clone();
     if let Some(result) = vaulted_blocking(&state, move |vault| {
         vault.read(&vault_id, vault_snapshot.as_deref())
-    }).await? {
+    })
+    .await?
+    {
         return Ok(result);
     }
     let store = legacy_archive(&state)?;
