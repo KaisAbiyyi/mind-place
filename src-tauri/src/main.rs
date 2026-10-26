@@ -939,11 +939,15 @@ async fn import_generic_text(
 }
 
 fn native_manifest_path(state: &AppState, browser: &str) -> PathBuf {
-    state
+    // Preserve existing registration paths for legacy installs. On new encrypted
+    // installs keep browser registration metadata outside the legacy archive root:
+    // creating archive-v1 here could incorrectly mark a first-run as legacy.
+    let parent = state
         .store
-        .root()
-        .join("native-host")
-        .join(format!("{browser}.json"))
+        .as_ref()
+        .map(ArchiveStore::root)
+        .unwrap_or_else(|| state.archive_root.parent().unwrap_or(&state.archive_root));
+    parent.join("native-host").join(format!("{browser}.json"))
 }
 
 fn setup_info(state: &AppState) -> SetupInfo {
