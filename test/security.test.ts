@@ -115,3 +115,75 @@ test("already-unlocked runtime skips the gate", async () => {
   assert.equal(opened, 1);
   assert.equal(root.innerHTML, "");
 });
+
+test("new installation stages recovery before any legacy runtime unlock", async () => {
+  const { dom, root } = domRoot();
+  const calls: string[] = [];
+  let opened = 0;
+  const code = "MP-RECOVERY-1-synthetic-secret.checksum";
+  const invoke: Invoke = async <T>(command: string, args?: Record<string, unknown>) => {
+    calls.push(command);
+    if (command === "get_security_status") return lockedUnconfigured as T;
+    if (command === "initialize_security") throw new Error("MP_VAULT_PROVISION_REQUIRED");
+    if (command === "begin_vault_setup") {
+      assert.equal(args?.secret, "correct horse battery staple");
+      return code as T;
+    }
+    if (command === "confirm_vault_setup") {
+      assert.equal(args?.code, code);
+      return undefined as T;
+    }
+    throw new Error(`unexpected ${command}`);
+  };
+  await mountSecurityGate({ root, invoke, onUnlocked: () => { opened += 1; } });
+  root.querySelector<HTMLInputElement>("#security-secret")!.value = "correct horse battery staple";
+  root.querySelector<HTMLInputElement>("#security-secret-confirm")!.value = "correct horse battery staple";
+  root.querySelector<HTMLFormElement>("#security-form")!.dispatchEvent(
+    new dom.window.Event("submit", { bubbles: true, cancelable: true }),
+  );
+  await delay(0);
+  assert.equal(opened, 0);
+  assert.equal(root.querySelector("#vault-code")?.textContent, code);
+  const entered = root.querySelector<HTMLInputElement>("#vault-confirm-code")!;
+  entered.value = code;
+  root.querySelector<HTMLInputElement>("#vault-saved")!.checked = true;
+  root.querySelector<HTMLFormElement>("#vault-confirm-form")!.dispatchEvent(
+    new dom.window.Event("submit", { bubbles: true, cancelable: true }),
+  );
+  await delay(0);
+  assert.equal(opened, 0);
+  assert.equal(root.querySelector("#vault-code"), null);
+  assert.match(root.textContent ?? "", /remains locked until the encrypted runtime/i);
+  assert.deepEqual(calls, [
+    "get_security_status", "initialize_security", "begin_vault_setup", "confirm_vault_setup",
+  ]);
+});
+
+test("wrong recovery code leaves the ceremony open without unlocking", async () => {
+  const { dom, root } = domRoot();
+  let opened = false;
+  const invoke: Invoke = async <T>(command: string) => {
+    if (command === "get_security_status") return lockedUnconfigured as T;
+    if (command === "initialize_security") throw new Error("MP_VAULT_PROVISION_REQUIRED");
+    if (command === "begin_vault_setup") return "synthetic-code" as T;
+    if (command === "confirm_vault_setup") throw new Error("wrong key");
+    throw new Error(`unexpected ${command}`);
+  };
+  await mountSecurityGate({ root, invoke, onUnlocked: () => { opened = true; } });
+  root.querySelector<HTMLInputElement>("#security-secret")!.value = "correct horse battery staple";
+  root.querySelector<HTMLInputElement>("#security-secret-confirm")!.value = "correct horse battery staple";
+  root.querySelector<HTMLFormElement>("#security-form")!.dispatchEvent(
+    new dom.window.Event("submit", { bubbles: true, cancelable: true }),
+  );
+  await delay(0);
+  const entered = root.querySelector<HTMLInputElement>("#vault-confirm-code")!;
+  entered.value = "incorrect";
+  root.querySelector<HTMLInputElement>("#vault-saved")!.checked = true;
+  root.querySelector<HTMLFormElement>("#vault-confirm-form")!.dispatchEvent(
+    new dom.window.Event("submit", { bubbles: true, cancelable: true }),
+  );
+  await delay(0);
+  assert.equal(opened, false);
+  assert.equal(entered.value, "");
+  assert.match(root.querySelector("#vault-error")?.textContent ?? "", /confirmation failed/i);
+});
