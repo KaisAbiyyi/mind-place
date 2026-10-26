@@ -3,6 +3,7 @@
 mod document_refresh;
 mod hosted_tunnel;
 mod mcp_commands;
+mod vault_commands;
 
 use document_refresh::DocumentRefreshRegistry;
 
@@ -37,6 +38,8 @@ use zeroize::Zeroizing;
 struct AppState {
     store: Option<ArchiveStore>,
     archive_root: PathBuf,
+    vault_root: PathBuf,
+    pending_vault: vault_commands::PendingVault,
     security: SecurityGate,
     state_path: PathBuf,
     index_path: PathBuf,
@@ -960,6 +963,7 @@ fn main() {
             let state_path = root.parent().unwrap_or(&root).join("state.sqlite3");
             let index_path = root.parent().unwrap_or(&root).join("index.sqlite3");
             let security = SecurityGate::open(security_path)?;
+            let vault_root = root.parent().unwrap_or(&root).join("encrypted-vault-v1");
             let legacy_path = root.parent().unwrap_or(&root).join("sessions");
             // New installations must not create legacy plaintext archive
             // directories before an independently verified encrypted vault is
@@ -989,6 +993,8 @@ fn main() {
             app.manage(AppState {
                 store,
                 archive_root: root,
+                vault_root,
+                pending_vault: Arc::new(Mutex::new(None)),
                 security,
                 state_path,
                 index_path,
@@ -1027,6 +1033,9 @@ fn main() {
             hosted_tunnel::start_hosted_tunnel,
             hosted_tunnel::stop_hosted_tunnel,
             initialize_security,
+            vault_commands::begin_vault_setup,
+            vault_commands::confirm_vault_setup,
+            vault_commands::cancel_vault_setup,
             unlock_security,
             lock_security,
             list_document_roots,
