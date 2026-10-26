@@ -585,7 +585,7 @@ mod tests {
         assert_eq!(receipt.count, 3);
         let restored = temp.path().join("complete-restored");
         PortableBackup::restore(&gate, lease, &backup, &restored, &recovery).unwrap();
-        for name in ["state.sqlite3", "index.sqlite3", "document-index.sqlite3"] {
+        for name in ["state.sqlite3", "index.sqlite3", "document-index.sqlite3", "archive-index.sqlite3"] {
             assert_eq!(
                 fs::read(root.join(name)).unwrap(),
                 fs::read(restored.join(name)).unwrap()
