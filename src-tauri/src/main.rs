@@ -80,6 +80,46 @@ fn legacy_archive(state: &AppState) -> Result<ArchiveStore, String> {
         .ok_or_else(|| "MP_VAULT_NOT_READY:legacy plaintext archive disabled".to_owned())
 }
 
+// The owner vault handle pins the same epoch-bound cipher keys for each
+// invocation. No legacy plaintext open is permitted for a provisioned vault.
+fn owner_vault(state: &AppState) -> Option<Arc<VaultCaptureStore>> {
+    state
+        .vault
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone()
+}
+
+fn open_owner_state(
+    vault: &Option<Arc<VaultCaptureStore>>,
+    path: &Path,
+) -> mind_place_index::Result<StateStore> {
+    match vault {
+        Some(vault) => vault.open_state_store(),
+        None => Ok(StateStore::open(path)?),
+    }
+}
+
+fn open_owner_index(
+    vault: &Option<Arc<VaultCaptureStore>>,
+    path: &Path,
+) -> mind_place_index::Result<IndexStore> {
+    match vault {
+        Some(vault) => vault.open_index_store(),
+        None => IndexStore::open(path),
+    }
+}
+
+fn open_owner_document_index(
+    vault: &Option<Arc<VaultCaptureStore>>,
+    path: &Path,
+) -> mind_place_index::Result<DocumentIndex> {
+    match vault {
+        Some(vault) => vault.open_document_index(),
+        None => DocumentIndex::open(path),
+    }
+}
+
 fn security_error(error: SecurityError) -> String {
     match error.retry_after_ms() {
         Some(retry_after_ms) => format!("{}:{retry_after_ms}:{}", error.code(), error),
@@ -246,9 +286,10 @@ async fn read_memory_authority<T: Send + 'static>(
 ) -> Result<T, String> {
     let lease = begin_unlocked(state)?;
     let state_path = state.state_path.clone();
+    let vault = owner_vault(state);
     let output = tauri::async_runtime::spawn_blocking(move || {
-        let authority = StateStore::open(state_path)?;
-        operation(authority)
+        let authority = open_owner_state(&vault, &state_path)?;
+        operation(authority).map_err(IndexError::from)
     })
     .await
     .map_err(|error| error.to_string())?
