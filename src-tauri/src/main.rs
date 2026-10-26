@@ -500,14 +500,25 @@ async fn fetch_retrieval(
     state: State<'_, AppState>,
     request: FetchRequest,
 ) -> Result<FetchResponse, String> {
-    let archive = legacy_archive(&state)?;
+    let vault = owner_vault(&state);
+    let archive = if vault.is_none() {
+        Some(legacy_archive(&state)?)
+    } else {
+        None
+    };
     let index_path = state.index_path.clone();
     index_task(&state, move |lease, security| {
-        IndexStore::open(index_path)?.fetch_with_check(&archive, &request, || {
+        let index = open_owner_index(&vault, &index_path)?;
+        let check = || {
             security
                 .validate_lease(lease)
                 .map_err(|_| IndexError::Revoked)
-        })
+        };
+        match (vault.as_ref(), archive.as_ref()) {
+            (Some(vault), _) => index.fetch_vault_with_check(vault, &request, check),
+            (None, Some(archive)) => index.fetch_with_check(archive, &request, check),
+            _ => Err(IndexError::Revoked),
+        }
     })
     .await
 }
@@ -517,14 +528,25 @@ async fn build_retrieval_context(
     state: State<'_, AppState>,
     request: ContextRequest,
 ) -> Result<ContextPack, String> {
-    let archive = legacy_archive(&state)?;
+    let vault = owner_vault(&state);
+    let archive = if vault.is_none() {
+        Some(legacy_archive(&state)?)
+    } else {
+        None
+    };
     let index_path = state.index_path.clone();
     index_task(&state, move |lease, security| {
-        IndexStore::open(index_path)?.build_context_with_check(&archive, &request, || {
+        let index = open_owner_index(&vault, &index_path)?;
+        let check = || {
             security
                 .validate_lease(lease)
                 .map_err(|_| IndexError::Revoked)
-        })
+        };
+        match (vault.as_ref(), archive.as_ref()) {
+            (Some(vault), _) => index.build_context_vault_with_check(vault, &request, check),
+            (None, Some(archive)) => index.build_context_with_check(archive, &request, check),
+            _ => Err(IndexError::Revoked),
+        }
     })
     .await
 }
@@ -535,8 +557,9 @@ async fn inspect_retrieval(
     request: RetrievalRequest,
 ) -> Result<SearchInspection, String> {
     let index_path = state.index_path.clone();
+    let vault = owner_vault(&state);
     index_task(&state, move |lease, security| {
-        IndexStore::open(index_path)?.inspect_retrieval_with_check(&request, || {
+        open_owner_index(&vault, &index_path)?.inspect_retrieval_with_check(&request, || {
             security
                 .validate_lease(lease)
                 .map_err(|_| IndexError::Revoked)
@@ -550,14 +573,25 @@ async fn inspect_retrieval_context(
     state: State<'_, AppState>,
     request: ContextRequest,
 ) -> Result<ContextInspection, String> {
-    let archive = legacy_archive(&state)?;
+    let vault = owner_vault(&state);
+    let archive = if vault.is_none() {
+        Some(legacy_archive(&state)?)
+    } else {
+        None
+    };
     let index_path = state.index_path.clone();
     index_task(&state, move |lease, security| {
-        IndexStore::open(index_path)?.inspect_context_with_check(&archive, &request, || {
+        let index = open_owner_index(&vault, &index_path)?;
+        let check = || {
             security
                 .validate_lease(lease)
                 .map_err(|_| IndexError::Revoked)
-        })
+        };
+        match (vault.as_ref(), archive.as_ref()) {
+            (Some(vault), _) => index.inspect_context_vault_with_check(vault, &request, check),
+            (None, Some(archive)) => index.inspect_context_with_check(archive, &request, check),
+            _ => Err(IndexError::Revoked),
+        }
     })
     .await
 }
@@ -567,14 +601,25 @@ async fn inspect_retrieval_fetch(
     state: State<'_, AppState>,
     request: FetchRequest,
 ) -> Result<FetchInspection, String> {
-    let archive = legacy_archive(&state)?;
+    let vault = owner_vault(&state);
+    let archive = if vault.is_none() {
+        Some(legacy_archive(&state)?)
+    } else {
+        None
+    };
     let index_path = state.index_path.clone();
     index_task(&state, move |lease, security| {
-        IndexStore::open(index_path)?.inspect_fetch_with_check(&archive, &request, || {
+        let index = open_owner_index(&vault, &index_path)?;
+        let check = || {
             security
                 .validate_lease(lease)
                 .map_err(|_| IndexError::Revoked)
-        })
+        };
+        match (vault.as_ref(), archive.as_ref()) {
+            (Some(vault), _) => index.inspect_fetch_vault_with_check(vault, &request, check),
+            (None, Some(archive)) => index.inspect_fetch_with_check(archive, &request, check),
+            _ => Err(IndexError::Revoked),
+        }
     })
     .await
 }
