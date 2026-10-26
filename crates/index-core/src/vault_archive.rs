@@ -379,6 +379,23 @@ impl VaultCaptureStore {
         Ok(results)
     }
 
+    /// Explicit owner-requested online portable backup. Never runs in the
+    /// native capture host or a remote connector; the desktop owns the lease.
+    pub fn online_backup(
+        &self,
+        destination: &Path,
+        generation: u64,
+    ) -> Result<mind_place_security::vault_backup::BackupMetadata> {
+        crate::vault_online_backup::VaultOnlineBackup::create(
+            &self.gate,
+            self.lease,
+            &self.vault,
+            &self.root,
+            destination,
+            generation,
+        )
+    }
+
     pub fn snapshots(&self, archive_id: &str) -> Result<Vec<SnapshotSummary>> {
         let _writer =
             VaultWriterFence::writer(&self.root).map_err(|_| IndexError::InvalidEvidence)?;
