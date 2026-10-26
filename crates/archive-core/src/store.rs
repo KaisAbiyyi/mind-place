@@ -221,6 +221,10 @@ fn claude_conversation_id_from_url(source: &str) -> Result<String> {
     Ok(id.to_ascii_lowercase())
 }
 
+pub fn validate_capture(c: &mut Capture) -> Result<()> {
+    validate(c)
+}
+
 fn validate(c: &mut Capture) -> Result<()> {
     if c.schema_version != 1
         || !matches!(
