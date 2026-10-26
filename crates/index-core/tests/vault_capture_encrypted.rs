@@ -53,8 +53,13 @@ fn encrypted_archive_roundtrip_deduplicates_and_fails_closed_after_lock() {
     );
     assert_eq!(loaded.summary.snapshot_count, 1);
     let exported = store.export_markdown(&first.id, None).unwrap();
-    assert!(exported.path.is_empty(), "vault must not silently publish plaintext exports");
-    assert!(exported.markdown.contains("This is entirely synthetic evidence."));
+    assert!(
+        exported.path.is_empty(),
+        "vault must not silently publish plaintext exports"
+    );
+    assert!(exported
+        .markdown
+        .contains("This is entirely synthetic evidence."));
     assert!(!root.join("exports").exists());
 
     let bytes = fs::read(root.join("archive-index.sqlite3")).unwrap();
