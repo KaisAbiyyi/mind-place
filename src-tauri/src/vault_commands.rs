@@ -122,16 +122,16 @@ pub(super) async fn unlock_vault_with_recovery(
         let status = security
             .unlock(secret.as_bytes())
             .map_err(|error| format!("{}:{}", error.code(), error))?;
-        let lease = security.require_unlocked()
+        let lease = security
+            .require_unlocked()
             .map_err(|error| format!("{}:{}", error.code(), error))?;
         let opened = (|| -> Result<Arc<VaultCaptureStore>, String> {
             let parsed = RecoverySecret::from_export_code(code.as_str())
                 .map_err(|error| format!("{}:{}", error.code(), error))?;
             let manifest = VaultManifest::read(&root)
                 .map_err(|error| format!("{}:{}", error.code(), error))?;
-            let crypto = CryptoVault::restore_with_recovery(
-                &security, lease, &manifest, &parsed,
-            ).map_err(|error| format!("{}:{}", error.code(), error))?;
+            let crypto = CryptoVault::restore_with_recovery(&security, lease, &manifest, &parsed)
+                .map_err(|error| format!("{}:{}", error.code(), error))?;
             VaultCaptureStore::open(&root, crypto, &security, lease)
                 .map(Arc::new)
                 .map_err(|error| format!("{}:{}", error.code(), error))
