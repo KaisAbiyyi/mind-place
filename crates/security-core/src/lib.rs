@@ -1,5 +1,6 @@
 pub mod vault;
 pub mod vault_backup;
+pub mod vault_fence;
 pub mod vault_migration;
 pub mod vault_storage;
 
