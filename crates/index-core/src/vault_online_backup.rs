@@ -219,8 +219,18 @@ fn guarded(path: &Path) -> Result<()> {
         if item.as_os_str().is_empty() {
             continue;
         }
-        mind_place_security::validate_path(item)
-            .map_err(|_| IndexError::UnsafePath)?;
+        if let Ok(meta) = fs::symlink_metadata(item) {
+            if meta.file_type().is_symlink() {
+                return Err(IndexError::UnsafePath);
+            }
+            #[cfg(windows)]
+            {
+                use std::os::windows::fs::MetadataExt;
+                if meta.file_attributes() & 0x400 != 0 {
+                    return Err(IndexError::UnsafePath);
+                }
+            }
+        }
     }
     Ok(())
 }
