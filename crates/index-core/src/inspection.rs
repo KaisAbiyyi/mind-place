@@ -2,7 +2,8 @@
 //! Never persist raw prompts, snippets, document text, source URLs, or PINs
 //! in a diagnostic trace. Evidence payload is separately unlock protected.
 use crate::{
-    ContextPack, ContextRequest, FetchRequest, FetchResponse, IndexStore, Result, RetrievalRequest,
+    CaptureArchiveReader, ContextPack, ContextRequest, FetchRequest, FetchResponse, IndexStore,
+    Result, RetrievalRequest,
     RetrievalResponse,
 };
 use mind_place_archive::ArchiveStore;
@@ -98,11 +99,30 @@ impl IndexStore {
         &self,
         archive: &ArchiveStore,
         request: &ContextRequest,
+        check: impl FnMut() -> Result<()>,
+    ) -> Result<ContextInspection> {
+        self.inspect_context_generic_with_check(archive, request, check)
+    }
+
+    #[cfg(feature = "sqlcipher-preview")]
+    pub fn inspect_context_vault_with_check(
+        &self,
+        archive: &crate::vault_archive::VaultCaptureStore,
+        request: &ContextRequest,
+        check: impl FnMut() -> Result<()>,
+    ) -> Result<ContextInspection> {
+        self.inspect_context_generic_with_check(archive, request, check)
+    }
+
+    fn inspect_context_generic_with_check(
+        &self,
+        archive: &impl CaptureArchiveReader,
+        request: &ContextRequest,
         mut check: impl FnMut() -> Result<()>,
     ) -> Result<ContextInspection> {
         check()?;
         let started = Instant::now();
-        let result = self.build_context_with_check(archive, request, &mut check)?;
+        let result = self.build_context_generic_with_check(archive, request, &mut check)?;
         check()?;
         let generation = self.inspect_generation()?;
         check()?;
@@ -135,11 +155,30 @@ impl IndexStore {
         &self,
         archive: &ArchiveStore,
         request: &FetchRequest,
+        check: impl FnMut() -> Result<()>,
+    ) -> Result<FetchInspection> {
+        self.inspect_fetch_generic_with_check(archive, request, check)
+    }
+
+    #[cfg(feature = "sqlcipher-preview")]
+    pub fn inspect_fetch_vault_with_check(
+        &self,
+        archive: &crate::vault_archive::VaultCaptureStore,
+        request: &FetchRequest,
+        check: impl FnMut() -> Result<()>,
+    ) -> Result<FetchInspection> {
+        self.inspect_fetch_generic_with_check(archive, request, check)
+    }
+
+    fn inspect_fetch_generic_with_check(
+        &self,
+        archive: &impl CaptureArchiveReader,
+        request: &FetchRequest,
         mut check: impl FnMut() -> Result<()>,
     ) -> Result<FetchInspection> {
         check()?;
         let started = Instant::now();
-        let result = self.fetch_with_check(archive, request, &mut check)?;
+        let result = self.fetch_generic_with_check(archive, request, &mut check)?;
         check()?;
         let generation = self.inspect_generation()?;
         check()?;
