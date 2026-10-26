@@ -1,10 +1,12 @@
 use fs2::FileExt;
+use mind_place_security::vault_fence::VaultWriterFence;
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension, TransactionBehavior};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{
     fs::{self, File, OpenOptions},
     path::{Path, PathBuf},
+    ops::{Deref, DerefMut},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 mod cipher;
@@ -107,6 +109,24 @@ pub struct StateStore {
     path: PathBuf,
     cipher_key: Option<std::sync::Arc<CipherKey>>,
 }
+
+/// Holds the encrypted vault's shared writer lease for the entire SQLite
+/// operation/transaction. No extra file lock on legacy plaintext state.
+struct FencedStateConnection {
+    db: Connection,
+    _writer: Option<VaultWriterFence>,
+}
+impl Deref for FencedStateConnection {
+    type Target = Connection;
+    fn deref(&self) -> &Connection {
+        &self.db
+    }
+}
+impl DerefMut for FencedStateConnection {
+    fn deref_mut(&mut self) -> &mut Connection {
+        &mut self.db
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Project {
     pub id: String,
@@ -202,6 +222,13 @@ impl StateStore {
         fs::create_dir_all(parent)?;
         safe_path(parent)?;
         safe_path(&path)?;
+        // A keyed vault initializer may create/migrate schema. Participate in
+        // the same cross-process writer fence as immutable objects and backups.
+        let _writer_guard = if cipher_key.is_some() && parent.join("vault-v1.json").exists() {
+            Some(VaultWriterFence::writer(parent).map_err(|_| StateError::Corrupt)?)
+        } else {
+            None
+        };
         let lock_path = parent.join(".state-schema.lock");
         safe_path(&lock_path)?;
         let lock = OpenOptions::new()
@@ -391,8 +418,14 @@ impl StateStore {
     pub fn path(&self) -> &Path {
         &self.path
     }
-    fn connection(&self) -> Result<Connection> {
+    fn connection(&self) -> Result<FencedStateConnection> {
         safe_path(&self.path)?;
+        let parent = self.path.parent().ok_or(StateError::UnsafePath)?;
+        let writer = if self.cipher_key.is_some() && parent.join("vault-v1.json").exists() {
+            Some(VaultWriterFence::writer(parent).map_err(|_| StateError::Corrupt)?)
+        } else {
+            None
+        };
         let db = Connection::open_with_flags(
             &self.path,
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
@@ -407,7 +440,10 @@ impl StateStore {
         if user_version(&db)? != SCHEMA_VERSION {
             return Err(StateError::Corrupt);
         }
-        Ok(db)
+        Ok(FencedStateConnection {
+            db,
+            _writer: writer,
+        })
     }
     /// Fresh authority snapshot for hot read-only checks. Do not configure a
     /// writable WAL connection (and its close/checkpoint work) for each poll.
