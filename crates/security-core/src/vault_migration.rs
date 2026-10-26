@@ -51,7 +51,10 @@ impl LegacyMigrationPreflight {
         // Existing sources inside the intended destination or the destination
         // itself must not be adopted. Destination may be a new child of the
         // app-owned root, but only explicitly whitelisted legacy sources scan.
-        if canonical_source == destination || canonical_parent == destination {
+        if canonical_source == destination
+            || canonical_parent == destination
+            || canonical_parent.starts_with(&canonical_source)
+        {
             return Err(SecurityError::UnsafePath);
         }
         let mut plan = Self {
@@ -94,6 +97,25 @@ impl LegacyMigrationPreflight {
     fn inventory(&self) -> Result<Vec<LegacyFileReceipt>> {
         let mut receipts = Vec::new();
         let mut accumulated = 0u64;
+        // No unknown files or WAL sidecars may be omitted from a proposed
+        // migration. Old state WAL can hold committed records not in the DB.
+        for entry in fs::read_dir(&self.source)? {
+            let entry = entry?;
+            let path = entry.path();
+            check(&path)?;
+            let name = entry.file_name();
+            let name = name.to_str().ok_or(SecurityError::InvalidConfig)?;
+            let metadata = fs::symlink_metadata(&path)?;
+            match name {
+                "state.sqlite3" if metadata.is_file() => {}
+                "archive-v1" | "document-objects" if metadata.is_dir() => {}
+                // Derived indexes are rebuildable, but an active WAL means
+                // concurrent work and must block the migration preflight.
+                "index.sqlite3" | "document-index.sqlite3" if metadata.is_file() => {}
+                "security-v1.json" if metadata.is_file() => {}
+                _ => return Err(SecurityError::InvalidConfig),
+            }
+        }
         // Derived FTS and security verifiers are excluded deliberately:
         // these must be rebuilt/reinitialized rather than accepted as keys.
         let state = self.source.join("state.sqlite3");
@@ -250,6 +272,24 @@ mod tests {
         fs::write(&state, b"SQLite format 3\0synthetic").unwrap();
         fs::create_dir(&destination).unwrap();
         assert!(LegacyMigrationPreflight::inspect(&legacy, &destination).is_err());
+    }
+
+    #[test]
+    fn unexpected_legacy_files_and_live_wal_are_never_silently_skipped() {
+        let home = tempfile::tempdir().unwrap();
+        let source = home.path().join("legacy");
+        fs::create_dir(&source).unwrap();
+        fs::write(source.join("state.sqlite3"), b"SQLite format 3\0synthetic").unwrap();
+        let output = home.path().join("new-vault");
+        let plan = LegacyMigrationPreflight::inspect(&source, &output).unwrap();
+        fs::write(source.join("state.sqlite3-wal"), b"committed rows").unwrap();
+        assert!(plan.verify_unchanged().is_err());
+        assert!(LegacyMigrationPreflight::inspect(&source, &output).is_err());
+        fs::remove_file(source.join("state.sqlite3-wal")).unwrap();
+        fs::write(source.join("owner-unknown.json"), b"sensitive").unwrap();
+        assert!(LegacyMigrationPreflight::inspect(&source, &output).is_err());
+        assert_eq!(fs::read(source.join("owner-unknown.json")).unwrap(), b"sensitive");
+        assert!(LegacyMigrationPreflight::inspect(&source, &source.join("vault")).is_err());
     }
 
     #[cfg(unix)]
