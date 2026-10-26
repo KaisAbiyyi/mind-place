@@ -7,6 +7,8 @@ on:
       - 'crates/state-core/**'
       - 'crates/index-core/**'
       - 'crates/security-core/**'
+      - 'crates/integration-core/**'
+      - 'src-tauri/**'
       - '.github/workflows/mp9b-sqlcipher-qualification.yml'
   workflow_dispatch:
 
@@ -36,5 +38,7 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Encrypted state/index and FTS regression
         run: cargo test --locked -p mind-place-state -p mind-place-index --features sqlcipher-preview -- --nocapture
+      - name: Keyed MCP synthetic authorization and revocation
+        run: cargo test --locked -p mind-place-integration --features vault-mcp --test mcp_vault -- --nocapture
       - name: Vault and backup adversarial regression
         run: cargo test --locked -p mind-place-security -- --nocapture
