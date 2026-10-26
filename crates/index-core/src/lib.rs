@@ -1,6 +1,7 @@
 //! Rebuildable, non-authoritative archive search projection.
 //! Every durable source ID is registered in state.sqlite3, never assigned by this DB.
 use mind_place_archive::{ArchiveStore, Capture};
+use mind_place_security::vault_fence::VaultWriterFence;
 use mind_place_state::{CipherKey, SourceDescriptor, SourceKey, StateStore};
 use rusqlite::{
     params, Connection, OpenFlags, OptionalExtension, Transaction, TransactionBehavior,
@@ -10,6 +11,7 @@ use sha2::{Digest, Sha256};
 use std::{
     fs,
     path::{Path, PathBuf},
+    ops::{Deref, DerefMut},
     time::Duration,
 };
 
@@ -119,6 +121,24 @@ impl IndexError {
 pub struct IndexStore {
     path: PathBuf,
     cipher_key: Option<std::sync::Arc<CipherKey>>,
+}
+
+/// Holds the shared cross-process writer lock across a whole SQLCipher
+/// projection transaction. Plaintext legacy indexes remain unchanged.
+struct FencedIndexConnection {
+    db: Connection,
+    _writer: Option<VaultWriterFence>,
+}
+impl Deref for FencedIndexConnection {
+    type Target = Connection;
+    fn deref(&self) -> &Connection {
+        &self.db
+    }
+}
+impl DerefMut for FencedIndexConnection {
+    fn deref_mut(&mut self) -> &mut Connection {
+        &mut self.db
+    }
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
@@ -245,6 +265,11 @@ impl IndexStore {
         }
         fs::create_dir_all(parent)?;
         safe_path(&path)?;
+        let _writer_guard = if cipher_key.is_some() && parent.join("vault-v1.json").exists() {
+            Some(VaultWriterFence::writer(parent).map_err(|_| IndexError::InvalidIndex)?)
+        } else {
+            None
+        };
         let existed = path.exists();
         if existed {
             let ro = Connection::open_with_flags(
@@ -308,8 +333,14 @@ impl IndexStore {
         &self.path
     }
 
-    fn connection(&self) -> Result<Connection> {
+    fn connection(&self) -> Result<FencedIndexConnection> {
         safe_path(&self.path)?;
+        let parent = self.path.parent().ok_or(IndexError::UnsafePath)?;
+        let writer = if self.cipher_key.is_some() && parent.join("vault-v1.json").exists() {
+            Some(VaultWriterFence::writer(parent).map_err(|_| IndexError::InvalidIndex)?)
+        } else {
+            None
+        };
         let db = Connection::open_with_flags(
             &self.path,
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
@@ -320,7 +351,10 @@ impl IndexStore {
         configure(&db)?;
         // Full integrity scans are done on open, not per hot search or transaction.
         verify(&db, false)?;
-        Ok(db)
+        Ok(FencedIndexConnection {
+            db,
+            _writer: writer,
+        })
     }
 
     pub fn stats(&self) -> Result<IndexStats> {
