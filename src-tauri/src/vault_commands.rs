@@ -155,7 +155,9 @@ pub(super) async fn unlock_vault_with_recovery(
                 security
                     .validate_lease(lease)
                     .map_err(|error| format!("{}:{}", error.code(), error))?;
-                *native_capture.lock().unwrap_or_else(|error| error.into_inner()) = Some(receiver);
+                *native_capture
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner()) = Some(receiver);
                 *holder.lock().unwrap_or_else(|error| error.into_inner()) = Some(adapter);
                 ready.store(true, std::sync::atomic::Ordering::Release);
                 Ok(status)
