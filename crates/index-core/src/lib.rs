@@ -10,8 +10,8 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{
     fs,
-    path::{Path, PathBuf},
     ops::{Deref, DerefMut},
+    path::{Path, PathBuf},
     time::Duration,
 };
 
