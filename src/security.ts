@@ -5,6 +5,7 @@ export interface SecurityStatus {
   locked: boolean;
   epoch: number;
   retry_after_ms: number;
+  vault_mode?: "legacy" | "encrypted";
 }
 
 export interface SecurityGateOptions {
@@ -109,8 +110,20 @@ async function presentVaultRecovery(root: HTMLElement, invoke: Invoke, code: str
 export async function mountSecurityGate({ root, invoke, onUnlocked }: SecurityGateOptions): Promise<void> {
   const status = await invoke<SecurityStatus>("get_security_status");
   if (status.configured && !status.locked) {
-    onUnlocked();
-    return;
+    if (status.vault_mode !== "encrypted") {
+      onUnlocked();
+      return;
+    }
+    // A verifier being unlocked does not imply the vault runtime is ready.
+    // On a remount, show the existing in-memory recovery code again rather
+    // than opening the legacy reader or generating a replacement key.
+    try {
+      const pendingCode = await invoke<string>("resume_vault_setup");
+      await presentVaultRecovery(root, invoke, pendingCode);
+      return;
+    } catch {
+      // The owner must re-enter the password to resume provisioning.
+    }
   }
 
   root.innerHTML = SHELL;
