@@ -121,6 +121,39 @@ impl IndexError {
     }
 }
 
+// Both plaintext legacy and AEAD/SQLCipher vault captures feed the same
+// validated, transactional FTS pipeline. This does not permit opening vault
+// contents through the legacy ArchiveStore path.
+pub(crate) trait CaptureArchiveReader {
+    fn list_captures(&self) -> Result<Vec<ConversationSummary>>;
+    fn read_capture(&self, id: &str, revision: Option<&str>) -> Result<Conversation>;
+    fn capture_snapshots(&self, id: &str) -> Result<Vec<SnapshotSummary>>;
+}
+
+impl CaptureArchiveReader for ArchiveStore {
+    fn list_captures(&self) -> Result<Vec<ConversationSummary>> {
+        Ok(ArchiveStore::list(self, "")?)
+    }
+    fn read_capture(&self, id: &str, revision: Option<&str>) -> Result<Conversation> {
+        Ok(ArchiveStore::read(self, id, revision)?)
+    }
+    fn capture_snapshots(&self, id: &str) -> Result<Vec<SnapshotSummary>> {
+        Ok(ArchiveStore::snapshots(self, id)?)
+    }
+}
+
+impl CaptureArchiveReader for vault_archive::VaultCaptureStore {
+    fn list_captures(&self) -> Result<Vec<ConversationSummary>> {
+        vault_archive::VaultCaptureStore::list(self, "")
+    }
+    fn read_capture(&self, id: &str, revision: Option<&str>) -> Result<Conversation> {
+        vault_archive::VaultCaptureStore::read(self, id, revision)
+    }
+    fn capture_snapshots(&self, id: &str) -> Result<Vec<SnapshotSummary>> {
+        vault_archive::VaultCaptureStore::snapshots(self, id)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct IndexStore {
     path: PathBuf,
@@ -440,6 +473,24 @@ impl IndexStore {
         self.index(archive, authority, false, &mut check)
     }
 
+    pub fn sync_vault_with_check(
+        &self,
+        archive: &vault_archive::VaultCaptureStore,
+        authority: &StateStore,
+        mut check: impl FnMut() -> Result<()>,
+    ) -> Result<IndexStats> {
+        self.index(archive, authority, false, &mut check)
+    }
+
+    pub fn rebuild_vault_with_check(
+        &self,
+        archive: &vault_archive::VaultCaptureStore,
+        authority: &StateStore,
+        mut check: impl FnMut() -> Result<()>,
+    ) -> Result<IndexStats> {
+        self.index(archive, authority, true, &mut check)
+    }
+
     pub fn rebuild(&self, archive: &ArchiveStore, authority: &StateStore) -> Result<IndexStats> {
         self.rebuild_with_check(archive, authority, || Ok(()))
     }
@@ -455,14 +506,14 @@ impl IndexStore {
 
     fn index(
         &self,
-        archive: &ArchiveStore,
+        archive: &impl CaptureArchiveReader,
         authority: &StateStore,
         rebuild: bool,
         check: &mut impl FnMut() -> Result<()>,
     ) -> Result<IndexStats> {
         check()?;
         // Acquire/validate the full conversation list before starting a mutation.
-        let conversations = archive.list("")?;
+        let conversations = archive.list_captures()?;
         let mut db = self.connection()?;
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if rebuild {
@@ -477,7 +528,7 @@ impl IndexStore {
         let mut inserted = 0;
         for summary in conversations {
             check()?;
-            let selected = archive.read(&summary.id, None)?;
+            let selected = archive.read_capture(&summary.id, None)?;
             let namespace =
                 namespace_for_provider(&summary.provider).ok_or(IndexError::InvalidEvidence)?;
             if selected.capture.provider != summary.provider
@@ -499,7 +550,7 @@ impl IndexStore {
                 source_kind: "conversation",
                 key: SourceKey::External(&summary.conversation_id),
             })?;
-            let snapshots = archive.snapshots(&summary.id)?;
+            let snapshots = archive.capture_snapshots(&summary.id)?;
             if !snapshots
                 .iter()
                 .any(|r| r.snapshot_id == selected.snapshot_id)
@@ -528,7 +579,7 @@ impl IndexStore {
                 let snapshot = if current == 1 {
                     selected.clone()
                 } else {
-                    archive.read(&summary.id, Some(&revision.snapshot_id))?
+                    archive.read_capture(&summary.id, Some(&revision.snapshot_id))?
                 };
                 verify_snapshot(&snapshot.capture, &revision.snapshot_id)?;
                 if snapshot.capture.conversation_id != summary.conversation_id
