@@ -96,7 +96,7 @@ async function presentVaultRecovery(root: HTMLElement, invoke: Invoke, code: str
       root.replaceChildren();
       const note = root.ownerDocument.createElement("p");
       note.setAttribute("role", "status");
-      note.textContent = "Your encrypted vault was created. Archive access remains locked until the encrypted runtime integration is available.";
+      note.textContent = "Your encrypted vault was created. Unlock it to access encrypted conversations. Browser capture remains disabled until authenticated native IPC is available.";
       root.append(note);
     } catch {
       error.textContent = "Recovery confirmation failed. Verify the code and try again.";
@@ -137,6 +137,54 @@ export async function mountSecurityGate({ root, invoke, onUnlocked }: SecurityGa
   const title = root.querySelector<HTMLElement>("#security-title");
   if (!form || !input || !confirmRow || !confirmInput || !submit || !description || !error || !title) {
     throw new Error("Mind Place security surface is incomplete.");
+  }
+
+  // Recovery unlock is owner-local; never send this code to MCP, the
+  // browser extension, logs, localStorage, or a URL.
+  if (status.configured && status.vault_mode === "encrypted") {
+    const panel = root.ownerDocument.createElement("section");
+    panel.setAttribute("aria-label", "Offline vault recovery");
+    panel.innerHTML = `
+      <button id="vault-recover-open" type="button" class="primary-button security-submit">Use offline recovery code</button>
+      <form id="vault-recover-form" autocomplete="off" hidden>
+        <label class="search-label" for="vault-recover-password">Unlock password</label>
+        <input id="vault-recover-password" class="security-input" type="password" autocomplete="off" required />
+        <label class="search-label" for="vault-recover-code">Offline recovery code</label>
+        <input id="vault-recover-code" class="security-input" type="password" autocomplete="off" required />
+        <p id="vault-recover-error" class="security-error" role="alert"></p>
+        <button type="submit" class="primary-button security-submit">Recover encrypted vault</button>
+      </form>
+    `;
+    root.querySelector<HTMLElement>(".security-card")!.append(panel);
+    const button = panel.querySelector<HTMLButtonElement>("#vault-recover-open")!;
+    const recoveryForm = panel.querySelector<HTMLFormElement>("#vault-recover-form")!;
+    const password = panel.querySelector<HTMLInputElement>("#vault-recover-password")!;
+    const recoveryCode = panel.querySelector<HTMLInputElement>("#vault-recover-code")!;
+    const recoveryError = panel.querySelector<HTMLElement>("#vault-recover-error")!;
+    button.addEventListener("click", () => {
+      recoveryForm.hidden = false;
+      button.hidden = true;
+      password.focus();
+    });
+    recoveryForm.addEventListener("submit", async event => {
+      event.preventDefault();
+      const secret = password.value;
+      const code = recoveryCode.value;
+      password.value = "";
+      recoveryCode.value = "";
+      const submitRecovery = recoveryForm.querySelector<HTMLButtonElement>("button[type=submit]")!;
+      if (submitRecovery.disabled) return;
+      submitRecovery.disabled = true;
+      try {
+        const next = await invoke<SecurityStatus>("unlock_vault_with_recovery", { secret, code });
+        if (next.locked) throw new Error("MP_LOCKED");
+        root.replaceChildren();
+        onUnlocked();
+      } catch {
+        recoveryError.textContent = "Recovery failed. Check your password and offline code.";
+        submitRecovery.disabled = false;
+      }
+    });
   }
 
   const firstRun = !status.configured;
