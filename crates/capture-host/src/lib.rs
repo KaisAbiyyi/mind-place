@@ -1,3 +1,5 @@
+pub mod ipc;
+
 use mind_place_archive::{
     extension_id, ArchiveError, ArchiveStore, Capture, Result, MAX_CAPTURE_BYTES,
 };
