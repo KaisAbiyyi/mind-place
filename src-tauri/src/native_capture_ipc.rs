@@ -175,15 +175,14 @@ mod qualification {
         let vault_root = home.path().join("encrypted-vault-v1");
         manifest.persist_new(&vault_root).unwrap();
         let writer = Arc::new(VaultCaptureStore::open(&vault_root, vault, &gate, lease).unwrap());
-        let ipc =
-            NativeCaptureIpc::start(
-                archive_root.clone(),
-                writer.clone(),
-                gate.clone(),
-                lease,
-                Arc::new(Mutex::new(())),
-            )
-            .unwrap();
+        let ipc = NativeCaptureIpc::start(
+            archive_root.clone(),
+            writer.clone(),
+            gate.clone(),
+            lease,
+            Arc::new(Mutex::new(())),
+        )
+        .unwrap();
         let origin = format!("chrome-extension://{}/", extension_id());
         let result = mind_place_capture_host::ipc::forward_capture(
             &archive_root,
