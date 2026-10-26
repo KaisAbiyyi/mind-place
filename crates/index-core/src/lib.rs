@@ -333,6 +333,65 @@ impl IndexStore {
         &self.path
     }
 
+    /// Create an encrypted, create-new SQLCipher snapshot containing committed
+    /// WAL pages. This is a single derived-index primitive ONLY: not a vault-
+    /// wide online backup or cross-DB generation cut.
+    #[cfg(feature = "sqlcipher-preview")]
+    pub fn create_encrypted_online_snapshot(&self, destination: impl AsRef<Path>) -> Result<()> {
+        use rusqlite::backup::Backup;
+        use std::fs::{File, OpenOptions};
+        use std::io::Read;
+
+        let key = self.cipher_key.as_ref().ok_or(IndexError::InvalidIndex)?;
+        let destination = destination.as_ref();
+        let parent = destination.parent().ok_or(IndexError::UnsafePath)?;
+        safe_path(parent)?;
+        safe_path(destination)?;
+        if destination == self.path || !parent.is_dir() {
+            return Err(IndexError::UnsafePath);
+        }
+        let vault_parent = self.path.parent().ok_or(IndexError::UnsafePath)?;
+        let _writer_fence = if vault_parent.join("vault-v1.json").exists() {
+            Some(VaultWriterFence::writer(vault_parent).map_err(|_| IndexError::InvalidIndex)?)
+        } else {
+            None
+        };
+        let source = Connection::open_with_flags(
+            &self.path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+        )?;
+        key.unlock(&source)?;
+        verify(&source, true)?;
+
+        // Reserve the destination before any SQLite I/O; never overwrite a
+        // preexisting backup, even on wrong-key or interrupted operations.
+        let placeholder = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(destination)?;
+        placeholder.sync_all()?;
+        drop(placeholder);
+        let mut target = Connection::open_with_flags(
+            destination,
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+        )?;
+        key.unlock(&target)?;
+        {
+            let backup = Backup::new(&source, &mut target)?;
+            backup.run_to_completion(64, Duration::from_millis(50), None)?;
+        }
+        key.unlock(&target)?;
+        verify(&target, true)?;
+        drop(target);
+        drop(source);
+        let mut first = [0u8; 16];
+        File::open(destination)?.read_exact(&mut first)?;
+        if &first == b"SQLite format 3\0" {
+            return Err(IndexError::InvalidIndex);
+        }
+        Ok(())
+    }
+
     fn connection(&self) -> Result<FencedIndexConnection> {
         safe_path(&self.path)?;
         let parent = self.path.parent().ok_or(IndexError::UnsafePath)?;
