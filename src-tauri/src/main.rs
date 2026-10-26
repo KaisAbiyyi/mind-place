@@ -899,6 +899,17 @@ async fn export_markdown(
     id: String,
     snapshot_id: Option<String>,
 ) -> Result<ExportResult, String> {
+    let vault_id = id.clone();
+    let vault_snapshot = snapshot_id.clone();
+    if let Some(result) = vaulted_blocking(&state, move |vault| {
+        vault.export_markdown(&vault_id, vault_snapshot.as_deref())
+    })
+    .await?
+    {
+        // The encrypted route only returns plaintext to this authorized
+        // owner-session response; it never writes unencrypted export files.
+        return Ok(result);
+    }
     let store = legacy_archive(&state)?;
     gated_blocking(&state, move || {
         store.export_snapshot(&id, snapshot_id.as_deref())
