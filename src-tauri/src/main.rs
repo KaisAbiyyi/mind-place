@@ -15,6 +15,7 @@ use mind_place_index::documents::{
     DocumentHit, DocumentIndex, DocumentIndexReport, DocumentPreview,
 };
 use mind_place_index::{
+    vault_archive::VaultCaptureStore,
     ContextInspection, ContextPack, ContextRequest, FetchInspection, FetchRequest, FetchResponse,
     GraphDirection, GraphKind, GraphNeighborhoodRequest, GraphNodeRef, IndexError, IndexStats,
     IndexStore, RetrievalRequest, RetrievalResponse, SearchHit, SearchInspection,
@@ -40,6 +41,7 @@ struct AppState {
     archive_root: PathBuf,
     vault_root: PathBuf,
     pending_vault: vault_commands::PendingVault,
+    vault: Arc<Mutex<Option<Arc<VaultCaptureStore>>>>,
     security: SecurityGate,
     state_path: PathBuf,
     index_path: PathBuf,
@@ -572,6 +574,7 @@ fn lock_security(state: State<'_, AppState>) -> SecurityStatus {
         &state.security,
     );
     state.document_refresh.deactivate_all();
+    state.vault.lock().unwrap_or_else(|error| error.into_inner()).take();
     // Invalidate all read leases before killing the outbound helper and local listener.
     // Revocation is best-effort while locked; all in-flight evidence is already blocked.
     let _ = hosted_tunnel::stop_and_revoke(&state);
@@ -976,8 +979,8 @@ fn main() {
         .setup(|app| {
             let root = mind_place_archive::data_root()?;
             let security_path = root.parent().unwrap_or(&root).join("security-v1.json");
-            let state_path = root.parent().unwrap_or(&root).join("state.sqlite3");
-            let index_path = root.parent().unwrap_or(&root).join("index.sqlite3");
+            let mut state_path = root.parent().unwrap_or(&root).join("state.sqlite3");
+            let mut index_path = root.parent().unwrap_or(&root).join("index.sqlite3");
             let security = SecurityGate::open(security_path)?;
             let vault_root = root.parent().unwrap_or(&root).join("encrypted-vault-v1");
             let legacy_path = root.parent().unwrap_or(&root).join("sessions");
@@ -994,6 +997,10 @@ fn main() {
             } else {
                 None
             };
+            if store.is_none() {
+                state_path = vault_root.join("state.sqlite3");
+                index_path = vault_root.join("index.sqlite3");
+            }
             let host_path = std::env::current_exe()?
                 .parent()
                 .unwrap()
@@ -1012,6 +1019,7 @@ fn main() {
                 archive_root: root,
                 vault_root,
                 pending_vault: Arc::new(Mutex::new(None)),
+                vault: Arc::new(Mutex::new(None)),
                 security,
                 state_path,
                 index_path,
