@@ -500,7 +500,9 @@ async fn initialize_security(
     secret: String,
 ) -> Result<SecurityStatus, String> {
     if state.store.is_none() {
-        return Err("MP_VAULT_PROVISION_REQUIRED:new installs cannot initialize plaintext state".into());
+        return Err(
+            "MP_VAULT_PROVISION_REQUIRED:new installs cannot initialize plaintext state".into(),
+        );
     }
     let security = state.security.clone();
     let state_path = state.state_path.clone();
