@@ -6,8 +6,7 @@ use mind_place_index::vault_archive::VaultCaptureStore;
 use mind_place_security::{SecurityGate, UnlockLease};
 use std::{
     collections::HashSet,
-    fs,
-    io,
+    fs, io,
     net::TcpListener,
     path::PathBuf,
     sync::{
@@ -32,20 +31,23 @@ impl NativeCaptureIpc {
         security: SecurityGate,
         lease: UnlockLease,
     ) -> Result<Self, String> {
-        security.validate_lease(lease)
+        security
+            .validate_lease(lease)
             .map_err(|_| "MP_VAULT_IPC_LOCKED".to_owned())?;
         let listener = TcpListener::bind(("127.0.0.1", 0))
             .map_err(|_| "MP_VAULT_IPC_BIND_FAILED".to_owned())?;
-        let port = listener.local_addr()
+        let port = listener
+            .local_addr()
             .map_err(|_| "MP_VAULT_IPC_BIND_FAILED".to_owned())?
             .port();
-        listener.set_nonblocking(true)
+        listener
+            .set_nonblocking(true)
             .map_err(|_| "MP_VAULT_IPC_BIND_FAILED".to_owned())?;
         let mut token = [0u8; 32];
-        getrandom::fill(&mut token)
-            .map_err(|_| "MP_VAULT_IPC_ENTROPY_FAILED".to_owned())?;
+        getrandom::fill(&mut token).map_err(|_| "MP_VAULT_IPC_ENTROPY_FAILED".to_owned())?;
         let identity = SessionDescriptor::new(port, &token);
-        let dir = archive_root.parent()
+        let dir = archive_root
+            .parent()
             .ok_or_else(|| "MP_VAULT_IPC_ROOT_UNAVAILABLE".to_owned())?;
         // The session descriptor contains an ephemeral auth capability, NOT
         // the vault DEK. It lives only in the user's application-data root.
@@ -59,9 +61,12 @@ impl NativeCaptureIpc {
         }
         serde_json::to_writer(pending.as_file_mut(), &identity)
             .map_err(|_| "MP_VAULT_IPC_DESCRIPTOR_FAILED".to_owned())?;
-        pending.as_file_mut().sync_all()
+        pending
+            .as_file_mut()
+            .sync_all()
             .map_err(|_| "MP_VAULT_IPC_DESCRIPTOR_FAILED".to_owned())?;
-        pending.persist(dir.join("capture-ipc-v1.json"))
+        pending
+            .persist(dir.join("capture-ipc-v1.json"))
             .map_err(|_| "MP_VAULT_IPC_DESCRIPTOR_FAILED".to_owned())?;
 
         let stop = Arc::new(AtomicBool::new(false));
@@ -84,9 +89,9 @@ impl NativeCaptureIpc {
                         })();
                         // Never expose verification, key or filesystem details
                         // through browser native messaging error responses.
-                        let response = result.unwrap_or_else(|_| {
-                            serde_json::json!({"ok":false,"error":"MP_VAULT_CAPTURE_DENIED"})
-                        });
+                        let response = result.unwrap_or_else(
+                            |_| serde_json::json!({"ok":false,"error":"MP_VAULT_CAPTURE_DENIED"}),
+                        );
                         let _ = write_json(&mut stream, &response);
                     }
                     Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
