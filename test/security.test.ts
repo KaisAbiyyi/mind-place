@@ -153,7 +153,7 @@ test("new installation stages recovery before any legacy runtime unlock", async 
   await delay(0);
   assert.equal(opened, 0);
   assert.equal(root.querySelector("#vault-code"), null);
-  assert.match(root.textContent ?? "", /remains locked until the encrypted runtime/i);
+  assert.match(root.textContent ?? "", /Unlock it to access encrypted conversations/i);
   assert.deepEqual(calls, [
     "get_security_status", "initialize_security", "begin_vault_setup", "confirm_vault_setup",
   ]);
