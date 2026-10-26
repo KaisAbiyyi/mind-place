@@ -76,9 +76,9 @@ pub fn serve_one(input: impl Read, output: impl Write, root: &Path, origin: &str
                 // authenticated IPC channel in MP-9B yet; fail closed instead
                 // of silently creating raw evidence beside a new vault.
                 if !root.is_dir()
-                    || root
-                        .parent()
-                        .is_some_and(|parent| parent.join("encrypted-vault-v1/vault-v1.json").exists())
+                    || root.parent().is_some_and(|parent| {
+                        parent.join("encrypted-vault-v1/vault-v1.json").exists()
+                    })
                 {
                     return Err(ArchiveError::Invalid(
                         "MP_VAULT_IPC_REQUIRED:encrypted capture owner session unavailable".into(),
