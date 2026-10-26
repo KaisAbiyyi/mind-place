@@ -118,6 +118,7 @@ pub(super) async fn unlock_vault_with_recovery(
     let ready = state.authority_ready.clone();
     let native_capture = state.native_capture.clone();
     let archive_root = state.archive_root.clone();
+    let commit_gate = state.document_authority_gate.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let secret = Zeroizing::new(secret);
         let code = Zeroizing::new(code);
@@ -145,6 +146,7 @@ pub(super) async fn unlock_vault_with_recovery(
                     adapter.clone(),
                     security.clone(),
                     lease,
+                    commit_gate,
                 ) {
                     Ok(receiver) => receiver,
                     Err(error) => {
