@@ -1,0 +1,288 @@
+//! Owner-session encrypted capture writer/reader. No legacy raw archive files.
+//! This adapter is independent from production routing until authenticated
+//! native-host IPC and derived search indexing are fully ported and qualified.
+use crate::{IndexError, Result};
+use mind_place_archive::{
+    validate_capture, Capture, Conversation, ConversationSummary, SaveReceipt, SnapshotSummary,
+    MAX_CAPTURE_BYTES,
+};
+use mind_place_security::{
+    vault::{ContentKind, CryptoVault},
+    vault_fence::VaultWriterFence,
+    vault_storage::ImmutableVaultStorage,
+    SecurityGate, UnlockLease,
+};
+use mind_place_state::CipherKey;
+use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
+use sha2::{Digest, Sha256};
+use std::{path::{Path, PathBuf}, sync::Arc};
+use zeroize::Zeroize;
+
+const APPLICATION_ID: i64 = 0x4d505641; // MPVA (never legacy MPIX).
+const SCHEMA_VERSION: i64 = 1;
+const SCHEMA: &str = "
+CREATE TABLE vault_captures(
+    archive_id TEXT NOT NULL,
+    snapshot_id TEXT NOT NULL,
+    identity TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    conversation_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    source_url TEXT NOT NULL,
+    captured_at TEXT NOT NULL,
+    message_count INTEGER NOT NULL,
+    completeness TEXT NOT NULL,
+    warnings_json TEXT NOT NULL,
+    PRIMARY KEY(archive_id,snapshot_id),
+    UNIQUE(identity)
+);
+CREATE INDEX vault_capture_recent ON vault_captures(archive_id,captured_at DESC);
+";
+
+pub struct VaultCaptureStore {
+    root: PathBuf,
+    vault: CryptoVault,
+    gate: SecurityGate,
+    lease: UnlockLease,
+    cipher: Arc<CipherKey>,
+}
+
+impl VaultCaptureStore {
+    pub fn open(
+        root: impl AsRef<Path>,
+        vault: CryptoVault,
+        gate: &SecurityGate,
+        lease: UnlockLease,
+    ) -> Result<Self> {
+        gate.validate_lease(lease).map_err(|_| IndexError::Revoked)?;
+        let root = root.as_ref().to_owned();
+        ImmutableVaultStorage::new(&root, &vault, gate, lease)
+            .map_err(|_| IndexError::InvalidEvidence)?;
+        let derived = vault
+            .derived_key(gate, lease, b"archive-index/sqlcipher/v1")
+            .map_err(|_| IndexError::Revoked)?;
+        let mut raw = [0u8; 32];
+        raw.copy_from_slice(derived.as_ref());
+        let cipher = CipherKey::new(raw, gate, lease);
+        raw.zeroize();
+        let store = Self {
+            root,
+            vault,
+            gate: gate.clone(),
+            lease,
+            cipher,
+        };
+        {
+            let _fence = VaultWriterFence::writer(&store.root)
+                .map_err(|_| IndexError::InvalidEvidence)?;
+            let db = store.connection()?;
+            let current: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+            let app: i64 = db.query_row("PRAGMA application_id", [], |r| r.get(0))?;
+            if current == 0 && app == 0 {
+                db.execute_batch(SCHEMA)?;
+                db.pragma_update(None, "application_id", APPLICATION_ID)?;
+                db.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+            } else if current != SCHEMA_VERSION || app != APPLICATION_ID {
+                return Err(IndexError::InvalidIndex);
+            }
+            Self::integrity(&db)?;
+        }
+        Ok(store)
+    }
+
+    fn db_path(&self) -> PathBuf {
+        self.root.join("archive-index.sqlite3")
+    }
+
+    fn connection(&self) -> Result<Connection> {
+        self.gate
+            .validate_lease(self.lease)
+            .map_err(|_| IndexError::Revoked)?;
+        let path = self.db_path();
+        let db = Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_WRITE
+                | OpenFlags::SQLITE_OPEN_CREATE
+                | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+        )?;
+        self.cipher.unlock(&db)?;
+        db.busy_timeout(std::time::Duration::from_secs(5))?;
+        db.pragma_update(None, "journal_mode", "WAL")?;
+        db.pragma_update(None, "synchronous", "FULL")?;
+        Ok(db)
+    }
+
+    fn integrity(db: &Connection) -> Result<()> {
+        let _: i64 = db.query_row("SELECT count(*) FROM vault_captures", [], |r| r.get(0))?;
+        Ok(())
+    }
+
+    fn storage(&self) -> Result<ImmutableVaultStorage<'_>> {
+        ImmutableVaultStorage::new(&self.root, &self.vault, &self.gate, self.lease)
+            .map_err(|_| IndexError::InvalidEvidence)
+    }
+
+    fn identity(archive_id: &str, snapshot_id: &str) -> String {
+        format!("capture/{archive_id}/{snapshot_id}")
+    }
+
+    pub fn save(&self, mut capture: Capture) -> Result<SaveReceipt> {
+        self.gate
+            .validate_lease(self.lease)
+            .map_err(|_| IndexError::Revoked)?;
+        validate_capture(&mut capture)?;
+        if capture.provider == "generic" || capture.capture_method == "legacy-import" {
+            return Err(IndexError::InvalidEvidence);
+        }
+        let id = format!(
+            "{:x}",
+            Sha256::digest(format!("{}:{}", capture.provider, capture.conversation_id).as_bytes())
+        );
+        // Observation timestamps do not mint a new immutable revision.
+        let mut normalized = capture.clone();
+        normalized.captured_at.clear();
+        let snapshot_id = format!("{:x}", Sha256::digest(serde_json::to_vec(&normalized)
+            .map_err(|_| IndexError::InvalidEvidence)?));
+        let identity = Self::identity(&id, &snapshot_id);
+        let _writer = VaultWriterFence::writer(&self.root)
+            .map_err(|_| IndexError::InvalidEvidence)?;
+        let mut db = self.connection()?;
+        if db.query_row(
+            "SELECT 1 FROM vault_captures WHERE archive_id=?1 AND snapshot_id=?2",
+            params![id, snapshot_id],
+            |row| row.get::<_, i64>(0),
+        ).optional()?.is_some() {
+            return Ok(SaveReceipt {
+                ok: true,
+                id,
+                snapshot_id,
+                message_count: capture.messages.len(),
+                unchanged: true,
+                completeness: capture.completeness,
+                warnings: capture.warnings,
+            });
+        }
+        let payload = serde_json::to_vec(&capture).map_err(|_| IndexError::InvalidEvidence)?;
+        if payload.len() > MAX_CAPTURE_BYTES {
+            return Err(IndexError::InvalidEvidence);
+        }
+        self.storage()?.write_immutable(
+            &self.gate,
+            self.lease,
+            ContentKind::Archive,
+            identity.as_bytes(),
+            &payload,
+        ).map_err(|_| IndexError::InvalidEvidence)?;
+        let tx = db.transaction()?;
+        tx.execute(
+            "INSERT INTO vault_captures(
+                archive_id,snapshot_id,identity,provider,conversation_id,title,source_url,
+                captured_at,message_count,completeness,warnings_json
+             ) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+            params![
+                id, snapshot_id, identity, capture.provider, capture.conversation_id,
+                capture.title, capture.source_url, capture.captured_at,
+                capture.messages.len() as i64, capture.completeness,
+                serde_json::to_string(&capture.warnings).map_err(|_| IndexError::InvalidEvidence)?
+            ],
+        )?;
+        self.gate.validate_lease(self.lease).map_err(|_| IndexError::Revoked)?;
+        tx.commit()?;
+        Ok(SaveReceipt {
+            ok: true,
+            id,
+            snapshot_id,
+            message_count: capture.messages.len(),
+            unchanged: false,
+            completeness: capture.completeness,
+            warnings: capture.warnings,
+        })
+    }
+
+    pub fn read(&self, archive_id: &str, revision: Option<&str>) -> Result<Conversation> {
+        let _writer = VaultWriterFence::writer(&self.root)
+            .map_err(|_| IndexError::InvalidEvidence)?;
+        let db = self.connection()?;
+        let mut statement = db.prepare(
+            "SELECT snapshot_id,identity,provider,conversation_id,title,source_url,
+                    captured_at,message_count,completeness,warnings_json
+             FROM vault_captures
+             WHERE archive_id=?1 AND (?2 IS NULL OR snapshot_id=?2)
+             ORDER BY captured_at DESC LIMIT 1",
+        )?;
+        let row = statement.query_row(params![archive_id, revision], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, String>(4)?,
+                r.get::<_, String>(5)?,
+                r.get::<_, String>(6)?,
+                r.get::<_, i64>(7)?,
+                r.get::<_, String>(8)?,
+                r.get::<_, String>(9)?,
+            ))
+        }).optional()?.ok_or(IndexError::InvalidEvidence)?;
+        let snapshot_count: i64 = db.query_row(
+            "SELECT count(*) FROM vault_captures WHERE archive_id=?1",
+            [archive_id], |r| r.get(0))?;
+        let bytes = self.storage()?.read(
+            &self.gate, self.lease, ContentKind::Archive, row.1.as_bytes()
+        ).map_err(|_| IndexError::InvalidEvidence)?;
+        let mut capture: Capture =
+            serde_json::from_slice(bytes.as_slice()).map_err(|_| IndexError::InvalidEvidence)?;
+        validate_capture(&mut capture)?;
+        if capture.provider != row.2
+            || capture.conversation_id != row.3
+            || capture.title != row.4
+            || capture.source_url != row.5
+            || capture.captured_at != row.6
+            || capture.messages.len() as i64 != row.7
+            || capture.completeness != row.8
+            || Self::identity(archive_id, &row.0) != row.1
+        {
+            return Err(IndexError::InvalidEvidence);
+        }
+        self.gate.validate_lease(self.lease).map_err(|_| IndexError::Revoked)?;
+        let warnings: Vec<String> =
+            serde_json::from_str(&row.9).map_err(|_| IndexError::InvalidEvidence)?;
+        if capture.warnings != warnings {
+            return Err(IndexError::InvalidEvidence);
+        }
+        let summary = ConversationSummary {
+            id: archive_id.to_owned(),
+            conversation_id: row.3,
+            provider: row.2,
+            title: row.4,
+            source_url: row.5,
+            conversation_date: capture.conversation_created_at.clone(),
+            date_source: capture.conversation_created_at.as_ref().map(|_| "provider".to_owned()),
+            captured_at: row.6,
+            message_count: capture.messages.len(),
+            snapshot_count: snapshot_count as usize,
+            completeness: capture.completeness.clone(),
+            warnings,
+        };
+        Ok(Conversation { summary, capture, snapshot_id: row.0 })
+    }
+
+    pub fn snapshots(&self, archive_id: &str) -> Result<Vec<SnapshotSummary>> {
+        let _writer = VaultWriterFence::writer(&self.root)
+            .map_err(|_| IndexError::InvalidEvidence)?;
+        let db = self.connection()?;
+        let mut statement = db.prepare(
+            "SELECT snapshot_id,captured_at,message_count,completeness
+             FROM vault_captures WHERE archive_id=?1 ORDER BY captured_at DESC"
+        )?;
+        let rows = statement.query_map([archive_id], |row| {
+            Ok(SnapshotSummary {
+                snapshot_id: row.get(0)?,
+                captured_at: row.get(1)?,
+                message_count: row.get::<_, i64>(2)? as usize,
+                completeness: row.get(3)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+}
