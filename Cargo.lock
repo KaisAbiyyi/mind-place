@@ -1962,7 +1962,9 @@ checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
 name = "mind-place"
 version = "0.2.5"
 dependencies = [
+ "getrandom 0.4.3",
  "mind-place-archive",
+ "mind-place-capture-host",
  "mind-place-index",
  "mind-place-integration",
  "mind-place-security",
@@ -1996,9 +1998,13 @@ dependencies = [
 name = "mind-place-capture-host"
 version = "0.2.5"
 dependencies = [
+ "base64 0.22.1",
+ "getrandom 0.4.3",
+ "hmac",
  "mind-place-archive",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
 ]
 
