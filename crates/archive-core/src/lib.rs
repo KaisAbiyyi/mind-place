@@ -5,7 +5,7 @@ mod generic;
 mod legacy;
 mod store;
 pub use generic::{GenericImportReceipt, MAX_GENERIC_IMPORT_BYTES};
-pub use store::{conversation_id_from_url, markdown, MAX_CAPTURE_BYTES};
+pub use store::{conversation_id_from_url, markdown, validate_capture, MAX_CAPTURE_BYTES};
 
 pub const NATIVE_HOST_NAME: &str = "com.mindplace.capture";
 
