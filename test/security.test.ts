@@ -187,3 +187,21 @@ test("wrong recovery code leaves the ceremony open without unlocking", async () 
   assert.equal(entered.value, "");
   assert.match(root.querySelector("#vault-error")?.textContent ?? "", /confirmation failed/i);
 });
+
+test("already-unlocked encrypted verifier resumes recovery, never the legacy reader", async () => {
+  const { root } = domRoot();
+  let opened = 0;
+  const calls: string[] = [];
+  const invoke: Invoke = async <T>(command: string) => {
+    calls.push(command);
+    if (command === "get_security_status") {
+      return { configured: true, locked: false, epoch: 7, retry_after_ms: 0, vault_mode: "encrypted" } as T;
+    }
+    if (command === "resume_vault_setup") return "synthetic-offline-code" as T;
+    throw new Error(`unexpected ${command}`);
+  };
+  await mountSecurityGate({ root, invoke, onUnlocked: () => { opened += 1; } });
+  assert.deepEqual(calls, ["get_security_status", "resume_vault_setup"]);
+  assert.equal(opened, 0);
+  assert.equal(root.querySelector("#vault-code")?.textContent, "synthetic-offline-code");
+});
