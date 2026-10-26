@@ -2018,6 +2018,7 @@ name = "mind-place-index"
 version = "0.2.5"
 dependencies = [
  "chrono",
+ "zeroize",
  "mind-place-archive",
  "mind-place-documents",
  "mind-place-security",
