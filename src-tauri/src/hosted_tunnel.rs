@@ -626,7 +626,9 @@ mod tests {
             .spawn()
             .unwrap();
         let state = super::AppState {
-            store: Some(mind_place_archive::ArchiveStore::open(dir.path().join("archive-v1")).unwrap()),
+            store: Some(
+                mind_place_archive::ArchiveStore::open(dir.path().join("archive-v1")).unwrap(),
+            ),
             archive_root: dir.path().join("archive-v1"),
             vault_root: dir.path().join("encrypted-vault-v1"),
             pending_vault: std::sync::Arc::new(std::sync::Mutex::new(None)),
