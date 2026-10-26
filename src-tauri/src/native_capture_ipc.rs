@@ -11,7 +11,7 @@ use std::{
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc,
+        Arc, Mutex,
     },
     thread::{self, JoinHandle},
     time::Duration,
@@ -30,6 +30,7 @@ impl NativeCaptureIpc {
         writer: Arc<VaultCaptureStore>,
         security: SecurityGate,
         lease: UnlockLease,
+        commit_gate: Arc<Mutex<()>>,
     ) -> Result<Self, String> {
         security
             .validate_lease(lease)
@@ -82,6 +83,12 @@ impl NativeCaptureIpc {
                             security.validate_lease(lease).map_err(|_| ())?;
                             let signed = read_frame(&mut stream).map_err(|_| ())?;
                             let capture = signed.authenticate(&token, &mut seen).map_err(|_| ())?;
+                            // Lock and owner-state grants acquire this same
+                            // gate, so no IPC capture can commit *after* lock
+                            // returns. Queued requests fail epoch validation.
+                            let _owner_commit = commit_gate
+                                .lock()
+                                .unwrap_or_else(|error| error.into_inner());
                             security.validate_lease(lease).map_err(|_| ())?;
                             let receipt = writer.save(capture).map_err(|_| ())?;
                             security.validate_lease(lease).map_err(|_| ())?;
@@ -169,8 +176,14 @@ mod qualification {
         manifest.persist_new(&vault_root).unwrap();
         let writer = Arc::new(VaultCaptureStore::open(&vault_root, vault, &gate, lease).unwrap());
         let ipc =
-            NativeCaptureIpc::start(archive_root.clone(), writer.clone(), gate.clone(), lease)
-                .unwrap();
+            NativeCaptureIpc::start(
+                archive_root.clone(),
+                writer.clone(),
+                gate.clone(),
+                lease,
+                Arc::new(Mutex::new(())),
+            )
+            .unwrap();
         let origin = format!("chrome-extension://{}/", extension_id());
         let result = mind_place_capture_host::ipc::forward_capture(
             &archive_root,
