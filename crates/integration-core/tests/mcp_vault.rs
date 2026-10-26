@@ -34,11 +34,14 @@ fn vaulted_mcp_read_is_keyed_authorized_and_revoked_on_lock() {
             "format": "plain",
             "attachments": []
         }]
-    })).unwrap();
+    }))
+    .unwrap();
     archive.save(capture).unwrap();
     let authority = archive.open_state_store().unwrap();
     let index = archive.open_index_store().unwrap();
-    index.sync_vault_with_check(&archive, &authority, || Ok(())).unwrap();
+    index
+        .sync_vault_with_check(&archive, &authority, || Ok(()))
+        .unwrap();
     let grant = ClientAuthority::new(&authority, &security)
         .issue("Synthetic MCP client", &[ClientCapability::Read])
         .unwrap();
@@ -57,21 +60,56 @@ fn vaulted_mcp_read_is_keyed_authorized_and_revoked_on_lock() {
             }
         }
     });
-    let reply = mcp::dispatch(&core, &authority, credential, request.clone(),
-        mcp::MODERN, Some("tools/call"), Some("memory_search"));
-    assert_eq!(reply.status, 200, "vault search must authorize a live grant");
+    let reply = mcp::dispatch(
+        &core,
+        &authority,
+        credential,
+        request.clone(),
+        mcp::MODERN,
+        Some("tools/call"),
+        Some("memory_search"),
+    );
+    assert_eq!(
+        reply.status, 200,
+        "vault search must authorize a live grant"
+    );
     assert!(reply.body.unwrap().to_string().contains("Synthetic MCP"));
-    assert!(!std::fs::read(root.join("state.sqlite3")).unwrap().starts_with(b"SQLite format 3\0"));
-    let unauthorized = mcp::dispatch(&core, &authority, "mpc_v1_invalid",
-        request.clone(), mcp::MODERN, Some("tools/call"), Some("memory_search"));
+    assert!(!std::fs::read(root.join("state.sqlite3"))
+        .unwrap()
+        .starts_with(b"SQLite format 3\0"));
+    let unauthorized = mcp::dispatch(
+        &core,
+        &authority,
+        "mpc_v1_invalid",
+        request.clone(),
+        mcp::MODERN,
+        Some("tools/call"),
+        Some("memory_search"),
+    );
     assert_eq!(unauthorized.status, 401);
-    ClientAuthority::new(&authority, &security).revoke(&grant.client.id).unwrap();
-    let revoked = mcp::dispatch(&core, &authority, credential, request.clone(),
-        mcp::MODERN, Some("tools/call"), Some("memory_search"));
+    ClientAuthority::new(&authority, &security)
+        .revoke(&grant.client.id)
+        .unwrap();
+    let revoked = mcp::dispatch(
+        &core,
+        &authority,
+        credential,
+        request.clone(),
+        mcp::MODERN,
+        Some("tools/call"),
+        Some("memory_search"),
+    );
     assert_eq!(revoked.status, 401);
     security.lock();
-    let locked = mcp::dispatch(&core, &authority, credential, request,
-        mcp::MODERN, Some("tools/call"), Some("memory_search"));
+    let locked = mcp::dispatch(
+        &core,
+        &authority,
+        credential,
+        request,
+        mcp::MODERN,
+        Some("tools/call"),
+        Some("memory_search"),
+    );
     assert_ne!(locked.status, 200);
     assert!(archive.open_state_store().is_err());
 }
