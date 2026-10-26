@@ -174,7 +174,10 @@ impl DocumentIndex {
         }
         let mut index = Self::open_encrypted(path, raw_key, gate, lease)?;
         index.vault_documents = Some(VaultDocumentBinding {
-            root: root.to_owned(), vault, gate: gate.clone(), lease,
+            root: root.to_owned(),
+            vault,
+            gate: gate.clone(),
+            lease,
         });
         Ok(index)
     }
@@ -182,8 +185,11 @@ impl DocumentIndex {
     fn objects(&self, state: &StateStore) -> Result<DocumentObjectStore> {
         match &self.vault_documents {
             Some(binding) => Ok(DocumentObjectStore::open_encrypted(
-                state.clone(), &binding.root, binding.vault.clone(),
-                &binding.gate, binding.lease,
+                state.clone(),
+                &binding.root,
+                binding.vault.clone(),
+                &binding.gate,
+                binding.lease,
             )?),
             None => Ok(DocumentObjectStore::open(state.clone())?),
         }
@@ -193,8 +199,12 @@ impl DocumentIndex {
         let policy = ScanPolicy::default();
         match &self.vault_documents {
             Some(binding) => Ok(DocumentScanner::new_encrypted(
-                state.clone(), policy, &binding.root, binding.vault.clone(),
-                &binding.gate, binding.lease,
+                state.clone(),
+                policy,
+                &binding.root,
+                binding.vault.clone(),
+                &binding.gate,
+                binding.lease,
             )?),
             None => Ok(DocumentScanner::new(state.clone(), policy)?),
         }

@@ -10,8 +10,8 @@ use crate::{
     DocumentMetadata, DocumentObjectStore, Result, StateError, StateStore, VirtualDocumentPath,
 };
 use mind_place_security::{vault::CryptoVault, SecurityGate, UnlockLease};
-use std::sync::Arc;
 use serde::Serialize;
+use std::sync::Arc;
 use std::{
     collections::{BTreeMap, BTreeSet},
     io,

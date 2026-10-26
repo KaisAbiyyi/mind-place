@@ -9,16 +9,16 @@ use mind_place_security::{
     vault_storage::ImmutableVaultStorage,
     SecurityGate, UnlockLease,
 };
-use std::sync::Arc;
-use zeroize::Zeroizing;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::sync::Arc;
 use std::{
     fs::{self, File},
     io::{Read, Write},
     path::{Path, PathBuf},
 };
+use zeroize::Zeroizing;
 
 pub const MAX_DOCUMENT_OBJECT_BYTES: u64 = 64 * 1024 * 1024;
 const BUFFER_BYTES: usize = 64 * 1024;
@@ -224,11 +224,19 @@ impl DocumentObjectStore {
         match &self.vault {
             None => Ok(None),
             Some(context) => {
-                context.gate.validate_lease(context.lease)
+                context
+                    .gate
+                    .validate_lease(context.lease)
                     .map_err(|_| StateError::DocumentDenied)?;
-                Ok(Some(ImmutableVaultStorage::new(
-                    &context.root, &context.vault, &context.gate, context.lease,
-                ).map_err(|_| StateError::ObjectCorrupt)?))
+                Ok(Some(
+                    ImmutableVaultStorage::new(
+                        &context.root,
+                        &context.vault,
+                        &context.gate,
+                        context.lease,
+                    )
+                    .map_err(|_| StateError::ObjectCorrupt)?,
+                ))
             }
         }
     }
@@ -276,9 +284,14 @@ impl DocumentObjectStore {
             guard()?;
             let context = self.vault.as_ref().ok_or(StateError::ObjectCorrupt)?;
             let identity = format!("document/{hash}");
-            let bytes = storage.read(
-                &context.gate, context.lease, ContentKind::DocumentObject, identity.as_bytes(),
-            ).map_err(|_| StateError::ObjectCorrupt)?;
+            let bytes = storage
+                .read(
+                    &context.gate,
+                    context.lease,
+                    ContentKind::DocumentObject,
+                    identity.as_bytes(),
+                )
+                .map_err(|_| StateError::ObjectCorrupt)?;
             if bytes.len() as u64 != size
                 || format!("{:x}", Sha256::digest(bytes.as_slice())) != hash
             {
@@ -385,10 +398,15 @@ impl DocumentObjectStore {
             }
             // Authenticated immutable ciphertext is published within the vault
             // writer fence, before committing the keyed state metadata.
-            storage.write_immutable(
-                &context.gate, context.lease, ContentKind::DocumentObject,
-                identity.as_bytes(), vault_plaintext.as_slice(),
-            ).map_err(|_| StateError::ObjectCorrupt)?;
+            storage
+                .write_immutable(
+                    &context.gate,
+                    context.lease,
+                    ContentKind::DocumentObject,
+                    identity.as_bytes(),
+                    vault_plaintext.as_slice(),
+                )
+                .map_err(|_| StateError::ObjectCorrupt)?;
             // The encryption adapter never infers object reuse from an
             // untrusted filesystem pathname.
             false
