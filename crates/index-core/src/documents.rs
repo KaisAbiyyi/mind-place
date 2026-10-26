@@ -2,6 +2,7 @@
 //! Only explicit owner-triggered rescans create generations; searches revalidate
 //! current authoritative heads AND live source bytes before disclosing snippets.
 use crate::{configure, safe_path, IndexError, Result};
+use mind_place_security::vault_fence::VaultWriterFence;
 use mind_place_documents::{
     extract_with_check, DocumentFormat, ExtractionError, ExtractionLimits, EXTRACTOR_REVISION,
 };
@@ -14,6 +15,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{
     fs,
+    ops::{Deref, DerefMut},
     path::{Path, PathBuf},
 };
 
@@ -35,6 +37,22 @@ CREATE TABLE document_meta(root_id TEXT PRIMARY KEY, generation INTEGER NOT NULL
 pub struct DocumentIndex {
     path: PathBuf,
     cipher_key: Option<std::sync::Arc<CipherKey>>,
+}
+
+struct FencedDocumentConnection {
+    db: Connection,
+    _writer: Option<VaultWriterFence>,
+}
+impl Deref for FencedDocumentConnection {
+    type Target = Connection;
+    fn deref(&self) -> &Connection {
+        &self.db
+    }
+}
+impl DerefMut for FencedDocumentConnection {
+    fn deref_mut(&mut self) -> &mut Connection {
+        &mut self.db
+    }
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
@@ -139,6 +157,11 @@ impl DocumentIndex {
         }
         fs::create_dir_all(parent)?;
         safe_path(&path)?;
+        let _writer_guard = if cipher_key.is_some() && parent.join("vault-v1.json").exists() {
+            Some(VaultWriterFence::writer(parent).map_err(|_| IndexError::InvalidIndex)?)
+        } else {
+            None
+        };
         let existed = path.exists();
         let mut legacy_v1 = false;
         if existed {
@@ -196,8 +219,14 @@ impl DocumentIndex {
         Ok(Self { path, cipher_key })
     }
 
-    fn connection(&self) -> Result<Connection> {
+    fn connection(&self) -> Result<FencedDocumentConnection> {
         safe_path(&self.path)?;
+        let parent = self.path.parent().ok_or(IndexError::UnsafePath)?;
+        let writer = if self.cipher_key.is_some() && parent.join("vault-v1.json").exists() {
+            Some(VaultWriterFence::writer(parent).map_err(|_| IndexError::InvalidIndex)?)
+        } else {
+            None
+        };
         let ro = Connection::open_with_flags(
             &self.path,
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
@@ -216,7 +245,10 @@ impl DocumentIndex {
         }
         configure(&db)?;
         verify_document_database(&db, false)?;
-        Ok(db)
+        Ok(FencedDocumentConnection {
+            db,
+            _writer: writer,
+        })
     }
 
     /// All-or-nothing generation for one explicitly approved root.
