@@ -68,7 +68,7 @@ impl PreparedFirstRunVault {
     /// code, stale lease, existing target, or legacy root cannot publish a vault.
     /// On a crash, encrypted-only partial staging remains for explicit recovery.
     pub fn confirm_and_provision(
-        self,
+        &self,
         entered_code: &str,
         gate: &SecurityGate,
         lease: UnlockLease,
