@@ -5,7 +5,9 @@ use crate::{configure, safe_path, IndexError, Result};
 use mind_place_documents::{
     extract_with_check, DocumentFormat, ExtractionError, ExtractionLimits, EXTRACTOR_REVISION,
 };
-use mind_place_security::vault_fence::VaultWriterFence;
+use mind_place_security::{
+    vault::CryptoVault, vault_fence::VaultWriterFence, SecurityGate, UnlockLease,
+};
 use mind_place_state::{
     CipherKey, DocumentObjectStore, DocumentScanner, ScanPolicy, StateError, StateStore,
     VirtualDocumentPath,
@@ -17,6 +19,7 @@ use std::{
     fs,
     ops::{Deref, DerefMut},
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 const APPLICATION_ID: i64 = 0x4D504446; // MPDF; never confused with conversation index.
@@ -37,6 +40,19 @@ CREATE TABLE document_meta(root_id TEXT PRIMARY KEY, generation INTEGER NOT NULL
 pub struct DocumentIndex {
     path: PathBuf,
     cipher_key: Option<std::sync::Arc<CipherKey>>,
+    vault_documents: Option<VaultDocumentBinding>,
+}
+#[derive(Clone)]
+struct VaultDocumentBinding {
+    root: PathBuf,
+    vault: Arc<CryptoVault>,
+    gate: SecurityGate,
+    lease: UnlockLease,
+}
+impl std::fmt::Debug for VaultDocumentBinding {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("VaultDocumentBinding([redacted])")
+    }
 }
 
 struct FencedDocumentConnection {
@@ -144,6 +160,46 @@ impl DocumentIndex {
     ) -> Result<Self> {
         Self::open_internal(path, Some(CipherKey::new(raw_key, gate, lease)))
     }
+    pub fn open_encrypted_with_objects(
+        path: impl AsRef<Path>,
+        raw_key: [u8; 32],
+        gate: &SecurityGate,
+        lease: UnlockLease,
+        vault: Arc<CryptoVault>,
+        root: impl AsRef<Path>,
+    ) -> Result<Self> {
+        let root = root.as_ref();
+        if path.as_ref().parent() != Some(root) {
+            return Err(IndexError::UnsafePath);
+        }
+        let mut index = Self::open_encrypted(path, raw_key, gate, lease)?;
+        index.vault_documents = Some(VaultDocumentBinding {
+            root: root.to_owned(), vault, gate: gate.clone(), lease,
+        });
+        Ok(index)
+    }
+
+    fn objects(&self, state: &StateStore) -> Result<DocumentObjectStore> {
+        match &self.vault_documents {
+            Some(binding) => Ok(DocumentObjectStore::open_encrypted(
+                state.clone(), &binding.root, binding.vault.clone(),
+                &binding.gate, binding.lease,
+            )?),
+            None => Ok(DocumentObjectStore::open(state.clone())?),
+        }
+    }
+
+    fn scanner(&self, state: &StateStore) -> Result<DocumentScanner> {
+        let policy = ScanPolicy::default();
+        match &self.vault_documents {
+            Some(binding) => Ok(DocumentScanner::new_encrypted(
+                state.clone(), policy, &binding.root, binding.vault.clone(),
+                &binding.gate, binding.lease,
+            )?),
+            None => Ok(DocumentScanner::new(state.clone(), policy)?),
+        }
+    }
+
     fn open_internal(
         path: impl AsRef<Path>,
         cipher_key: Option<std::sync::Arc<CipherKey>>,
@@ -216,7 +272,11 @@ impl DocumentIndex {
             tx.commit()?;
         }
         verify_document_database(&db, false)?;
-        Ok(Self { path, cipher_key })
+        Ok(Self {
+            path,
+            cipher_key,
+            vault_documents: None,
+        })
     }
 
     fn connection(&self) -> Result<FencedDocumentConnection> {
@@ -260,7 +320,7 @@ impl DocumentIndex {
         mut check: impl FnMut() -> Result<()>,
     ) -> Result<DocumentIndexReport> {
         check()?;
-        let mut scanner = DocumentScanner::new(state.clone(), ScanPolicy::default())?;
+        let mut scanner = self.scanner(state)?;
         let scan = scanner.rescan(root_id, || lease(&mut check))?;
         if !scan.complete {
             return Err(IndexError::InvalidEvidence);
@@ -268,7 +328,7 @@ impl DocumentIndex {
         let uris = scanner
             .current_uris(root_id, || lease(&mut check))?
             .ok_or(IndexError::InvalidEvidence)?;
-        let objects = DocumentObjectStore::open(state.clone())?;
+        let objects = self.objects(state)?;
         let mut db = self.connection()?;
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute("DELETE FROM document_fts WHERE root_id=?1", [root_id])?;
@@ -413,7 +473,7 @@ impl DocumentIndex {
         let candidates: Vec<_> = rows.collect::<std::result::Result<_, _>>()?;
         drop(statement);
         drop(db);
-        let objects = DocumentObjectStore::open(state.clone())?;
+        let objects = self.objects(state)?;
         let mut hits = Vec::new();
         // Bound verification effort even if 100 candidates match.
         let mut verified_bytes = 0usize;
@@ -519,7 +579,7 @@ impl DocumentIndex {
         const MAX_PREVIEW_CHARS: usize = 4096;
         check()?;
         let path = VirtualDocumentPath::parse(uri)?;
-        let objects = DocumentObjectStore::open(state.clone())?;
+        let objects = self.objects(state)?;
         let head = objects
             .current_version(uri, || lease(&mut check))?
             .ok_or(IndexError::Revoked)?;

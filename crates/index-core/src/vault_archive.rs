@@ -45,7 +45,7 @@ CREATE INDEX vault_capture_recent ON vault_captures(archive_id,captured_at DESC)
 
 pub struct VaultCaptureStore {
     root: PathBuf,
-    vault: CryptoVault,
+    vault: Arc<CryptoVault>,
     gate: SecurityGate,
     lease: UnlockLease,
     cipher: Arc<CipherKey>,
@@ -79,6 +79,7 @@ impl VaultCaptureStore {
         gate.validate_lease(lease)
             .map_err(|_| IndexError::Revoked)?;
         let root = root.as_ref().to_owned();
+        let vault = Arc::new(vault);
         ImmutableVaultStorage::new(&root, &vault, gate, lease)
             .map_err(|_| IndexError::InvalidEvidence)?;
         let derived = vault
@@ -147,11 +148,13 @@ impl VaultCaptureStore {
     }
 
     pub fn open_document_index(&self) -> Result<DocumentIndex> {
-        DocumentIndex::open_encrypted(
+        DocumentIndex::open_encrypted_with_objects(
             self.root.join("document-index.sqlite3"),
             self.derived_sqlcipher_key(b"document-index/sqlcipher/v1")?,
             &self.gate,
             self.lease,
+            self.vault.clone(),
+            &self.root,
         )
     }
 
