@@ -2,11 +2,9 @@
 //! This adapter is independent from production routing until authenticated
 //! native-host IPC and derived search indexing are fully ported and qualified.
 use crate::{documents::DocumentIndex, IndexError, IndexStore, Result};
-use mind_place_state::StateStore;
 use mind_place_archive::{
-    markdown, validate_capture, Capture, Conversation, ConversationSummary, ExportResult, SaveReceipt,
-    SnapshotSummary,
-    MAX_CAPTURE_BYTES,
+    markdown, validate_capture, Capture, Conversation, ConversationSummary, ExportResult,
+    SaveReceipt, SnapshotSummary, MAX_CAPTURE_BYTES,
 };
 use mind_place_security::{
     vault::{ContentKind, CryptoVault},
@@ -14,7 +12,7 @@ use mind_place_security::{
     vault_storage::ImmutableVaultStorage,
     SecurityGate, UnlockLease,
 };
-use mind_place_state::CipherKey;
+use mind_place_state::{CipherKey, StateStore};
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use sha2::{Digest, Sha256};
 use std::{
@@ -383,7 +381,11 @@ impl VaultCaptureStore {
     /// save it using the desktop UI; never silently create a plaintext file.
     /// Captures referencing media that was not stored in the vault cannot be
     /// represented by a complete self-contained Markdown export.
-    pub fn export_markdown(&self, archive_id: &str, revision: Option<&str>) -> Result<ExportResult> {
+    pub fn export_markdown(
+        &self,
+        archive_id: &str,
+        revision: Option<&str>,
+    ) -> Result<ExportResult> {
         let conversation = self.read(archive_id, revision)?;
         if conversation.capture.messages.iter().any(|message| {
             message
