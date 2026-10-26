@@ -1,14 +1,15 @@
 #![cfg(feature = "sqlcipher-preview")]
 //! Synthetic MP-9B SQLCipher index online snapshot qualification.
 use mind_place_index::IndexStore;
-use mind_place_security::{SecurityGate, vault::CryptoVault};
+use mind_place_security::{vault::CryptoVault, SecurityGate};
 use std::fs;
 
 #[test]
 fn derived_index_backup_contains_committed_ciphertext_and_never_overwrites() {
     let home = tempfile::tempdir().unwrap();
     let gate = SecurityGate::open(home.path().join("security.json")).unwrap();
-    gate.initialize(b"synthetic-index-qualification-secret").unwrap();
+    gate.initialize(b"synthetic-index-qualification-secret")
+        .unwrap();
     let lease = gate.require_unlocked().unwrap();
     let (vault, _, manifest) = CryptoVault::provision(&gate, lease).unwrap();
     let root = home.path().join("vault");
