@@ -574,6 +574,7 @@ async fn unlock_security(
         let ready = state.authority_ready.clone();
         let native_capture = state.native_capture.clone();
         let archive_root = state.archive_root.clone();
+        let commit_gate = state.document_authority_gate.clone();
         return tauri::async_runtime::spawn_blocking(move || {
             let secret = Zeroizing::new(secret);
             let status = security.unlock(secret.as_bytes()).map_err(security_error)?;
@@ -604,6 +605,7 @@ async fn unlock_security(
                 adapter.clone(),
                 security.clone(),
                 lease,
+                commit_gate,
             ) {
                 Ok(receiver) => receiver,
                 Err(error) => {
