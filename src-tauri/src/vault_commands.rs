@@ -177,9 +177,11 @@ pub(super) async fn create_vault_online_backup(
         .ok_or_else(|| "MP_VAULT_NOT_READY".to_owned())?;
     let security = state.security.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        security.validate_lease(lease)
+        security
+            .validate_lease(lease)
             .map_err(|error| format!("{}:{}", error.code(), error))?;
-        adapter.online_backup(&path, generation)
+        adapter
+            .online_backup(&path, generation)
             .map_err(|error| format!("{}:{}", error.code(), error))
     })
     .await
