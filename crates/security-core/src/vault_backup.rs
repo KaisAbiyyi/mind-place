@@ -350,7 +350,12 @@ fn inventory(root: &Path) -> Result<Vec<PathBuf>> {
             "vault-v1.json" if meta.is_file() => {}
             ".state-schema.lock" if meta.is_file() && meta.len() == 0 => {}
             WRITER_LOCK_NAME if meta.is_file() && meta.len() == 0 => {}
-            "state.sqlite3" | "index.sqlite3" | "document-index.sqlite3" | "archive-index.sqlite3" if meta.is_file() => {
+            "state.sqlite3"
+            | "index.sqlite3"
+            | "document-index.sqlite3"
+            | "archive-index.sqlite3"
+                if meta.is_file() =>
+            {
                 for suffix in ["-wal", "-shm", "-journal"] {
                     if root.join(format!("{name}{suffix}")).exists() {
                         return Err(SecurityError::InvalidConfig);
