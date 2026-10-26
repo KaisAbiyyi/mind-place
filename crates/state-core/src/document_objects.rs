@@ -150,6 +150,13 @@ impl DocumentObjectStore {
         Self::with_limit(state, MAX_DOCUMENT_OBJECT_BYTES)
     }
     pub fn with_limit(state: StateStore, limit: u64) -> Result<Self> {
+        // This legacy object store writes raw source bytes into
+        // document-objects/v1/sha256. An encrypted SQLCipher authority must
+        // never authorize that cleartext path. The production adapter must
+        // use ImmutableVaultStorage before enabling encrypted documents.
+        if state.cipher_key.is_some() {
+            return Err(StateError::ObjectCorrupt);
+        }
         if limit == 0 || limit > MAX_DOCUMENT_OBJECT_BYTES {
             return Err(StateError::DocumentLimit);
         }
