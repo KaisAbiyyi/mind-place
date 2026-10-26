@@ -147,7 +147,14 @@ impl CaptureArchiveReader for ArchiveStore {
 #[cfg(feature = "sqlcipher-preview")]
 impl CaptureArchiveReader for vault_archive::VaultCaptureStore {
     fn list_captures(&self) -> Result<Vec<ConversationSummary>> {
-        vault_archive::VaultCaptureStore::list(self, "")
+        let captures = vault_archive::VaultCaptureStore::list(self, "")?;
+        // Sidebar listing is intentionally bounded at 10,000. Never treat a
+        // potentially truncated listing as a complete source inventory:
+        // deleting older FTS generations would otherwise silently erase hits.
+        if captures.len() >= 10_000 {
+            return Err(IndexError::InvalidEvidence);
+        }
+        Ok(captures)
     }
     fn read_capture(&self, id: &str, revision: Option<&str>) -> Result<Conversation> {
         vault_archive::VaultCaptureStore::read(self, id, revision)
