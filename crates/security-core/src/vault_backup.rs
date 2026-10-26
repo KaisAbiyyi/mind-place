@@ -2,6 +2,7 @@
 //! retention, deletion, root reauthorization or legacy migration).
 //! Source state must have already been quiesced and checkpointed by caller.
 use crate::vault::{ContentKind, CryptoVault, VaultManifest};
+use crate::vault_fence::{VaultWriterFence, WRITER_LOCK_NAME};
 use crate::{Result, SecurityError, SecurityGate, UnlockLease};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
@@ -55,6 +56,10 @@ impl PortableBackup {
         gate.validate_lease(lease)?;
         safe(vault_root)?;
         safe(destination)?;
+        // Hold an exclusive cross-process writer fence throughout inventory,
+        // copy, source recheck and backup publication. Only writers using
+        // VaultWriterFence participate; product-wide coordination is pending.
+        let _snapshot_fence = VaultWriterFence::snapshot(vault_root)?;
         if destination.starts_with(vault_root) || vault_root.starts_with(destination) {
             return Err(SecurityError::UnsafePath);
         }
@@ -342,6 +347,7 @@ fn inventory(root: &Path) -> Result<Vec<PathBuf>> {
         match name {
             "vault-v1.json" if meta.is_file() => {}
             ".state-schema.lock" if meta.is_file() && meta.len() == 0 => {}
+            WRITER_LOCK_NAME if meta.is_file() && meta.len() == 0 => {}
             "state.sqlite3" | "index.sqlite3" | "document-index.sqlite3" if meta.is_file() => {
                 for suffix in ["-wal", "-shm", "-journal"] {
                     if root.join(format!("{name}{suffix}")).exists() {
