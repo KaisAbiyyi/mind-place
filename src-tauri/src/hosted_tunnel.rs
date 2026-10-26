@@ -252,9 +252,10 @@ fn launch_client(
 }
 
 fn revoke_ephemeral(state: &AppState, client_id: &str) -> Result<(), String> {
-    if StateStore::open(&state.state_path)
-        .and_then(|store| store.revoke_client(client_id))
-        .is_err()
+    if super::open_owner_state(&super::owner_vault(state), &state.state_path)
+        .ok()
+        .and_then(|store| store.revoke_client(client_id).ok())
+        .is_none()
     {
         // The persisted grant is not known to be revoked. Lock the entire
         // reader authority instead of leaving a still-valid hosted token.
@@ -370,7 +371,7 @@ pub(super) fn start_hosted_tunnel(
     {
         return Err("MP_TUNNEL_LOCAL:Start local MCP before starting the tunnel".into());
     }
-    let authority = StateStore::open(&state.state_path)
+    let authority = super::open_owner_state(&super::owner_vault(&state), &state.state_path)
         .map_err(|_| "MP_TUNNEL_AUTHORITY:Cannot open authority".to_string())?;
     let issued = ClientAuthority::new(&authority, &state.security)
         .issue(CLIENT_NAME, &[ClientCapability::Read])

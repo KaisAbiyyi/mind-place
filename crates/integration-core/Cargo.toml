@@ -5,6 +5,9 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[features]
+vault-mcp = ["mind-place-index/sqlcipher-preview", "mind-place-state/sqlcipher-preview"]
+
 [dependencies]
 mind-place-archive = { path = "../archive-core" }
 mind-place-index = { path = "../index-core" }
