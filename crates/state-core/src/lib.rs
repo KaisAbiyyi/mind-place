@@ -5,8 +5,8 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{
     fs::{self, File, OpenOptions},
-    path::{Path, PathBuf},
     ops::{Deref, DerefMut},
+    path::{Path, PathBuf},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 mod cipher;
