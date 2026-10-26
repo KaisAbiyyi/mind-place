@@ -2,6 +2,9 @@
 //! This does not enable legacy archive, native capture or plaintext fallback.
 //! No remote MCP endpoints call these commands.
 use super::AppState;
+use mind_place_index::vault_archive::VaultCaptureStore;
+use mind_place_security::vault::{CryptoVault, RecoverySecret, VaultManifest};
+use mind_place_security::SecurityStatus;
 use mind_place_state::vault_bootstrap::PreparedFirstRunVault;
 use std::sync::{Arc, Mutex};
 use tauri::State;
@@ -98,6 +101,55 @@ pub(super) async fn confirm_vault_setup(
     })
     .await
     .map_err(|_| "MP_VAULT_SETUP_WORKER_FAILED".to_owned())?
+}
+
+#[tauri::command]
+pub(super) async fn unlock_vault_with_recovery(
+    state: State<'_, AppState>,
+    secret: String,
+    code: String,
+) -> Result<SecurityStatus, String> {
+    if state.store.is_some() {
+        return Err("MP_VAULT_LEGACY_MIGRATION_REQUIRED".into());
+    }
+    let security = state.security.clone();
+    let root = state.vault_root.clone();
+    let holder = state.vault.clone();
+    let ready = state.authority_ready.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let secret = Zeroizing::new(secret);
+        let code = Zeroizing::new(code);
+        let status = security
+            .unlock(secret.as_bytes())
+            .map_err(|error| format!("{}:{}", error.code(), error))?;
+        let lease = security.require_unlocked()
+            .map_err(|error| format!("{}:{}", error.code(), error))?;
+        let opened = (|| -> Result<Arc<VaultCaptureStore>, String> {
+            let parsed = RecoverySecret::from_export_code(code.as_str())
+                .map_err(|error| format!("{}:{}", error.code(), error))?;
+            let manifest = VaultManifest::read(&root)
+                .map_err(|error| format!("{}:{}", error.code(), error))?;
+            let crypto = CryptoVault::restore_with_recovery(
+                &security, lease, &manifest, &parsed,
+            ).map_err(|error| format!("{}:{}", error.code(), error))?;
+            VaultCaptureStore::open(&root, crypto, &security, lease)
+                .map(Arc::new)
+                .map_err(|error| format!("{}:{}", error.code(), error))
+        })();
+        match opened {
+            Ok(adapter) => {
+                *holder.lock().unwrap_or_else(|error| error.into_inner()) = Some(adapter);
+                ready.store(true, std::sync::atomic::Ordering::Release);
+                Ok(status)
+            }
+            Err(error) => {
+                security.lock();
+                Err(error)
+            }
+        }
+    })
+    .await
+    .map_err(|_| "MP_VAULT_RECOVERY_WORKER_FAILED".to_owned())?
 }
 
 #[tauri::command]
