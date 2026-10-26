@@ -401,6 +401,7 @@ async fn read_archive_hive(
     }
     let hops = max_hops.unwrap_or(2).min(3);
     let index_path = state.index_path.clone();
+    let vault = owner_vault(&state);
     index_task(&state, move |lease, security| {
         let query = GraphNeighborhoodRequest {
             scope: "archive:chatgpt".into(),
@@ -410,7 +411,7 @@ async fn read_archive_hive(
             max_nodes: 120,
             max_edges: 240,
         };
-        let graph = IndexStore::open(index_path)?.graph_neighbors_with_check(&query, || {
+        let graph = open_owner_index(&vault, &index_path)?.graph_neighbors_with_check(&query, || {
             security
                 .validate_lease(lease)
                 .map_err(|_| IndexError::Revoked)
@@ -458,7 +459,8 @@ async fn read_archive_hive(
 #[tauri::command]
 async fn get_archive_index_stats(state: State<'_, AppState>) -> Result<IndexStats, String> {
     let index_path = state.index_path.clone();
-    index_task(&state, move |_, _| IndexStore::open(index_path)?.stats()).await
+    let vault = owner_vault(&state);
+    index_task(&state, move |_, _| open_owner_index(&vault, &index_path)?.stats()).await
 }
 
 #[tauri::command]
@@ -469,8 +471,9 @@ async fn search_archive_index(
     limit: Option<usize>,
 ) -> Result<Vec<SearchHit>, String> {
     let index_path = state.index_path.clone();
+    let vault = owner_vault(&state);
     index_task(&state, move |_, _| {
-        IndexStore::open(index_path)?.search(
+        open_owner_index(&vault, &index_path)?.search(
             &query,
             include_history.unwrap_or(false),
             limit.unwrap_or(20),
@@ -485,8 +488,9 @@ async fn search_retrieval(
     request: RetrievalRequest,
 ) -> Result<RetrievalResponse, String> {
     let index_path = state.index_path.clone();
+    let vault = owner_vault(&state);
     index_task(&state, move |_, _| {
-        IndexStore::open(index_path)?.retrieve(&request)
+        open_owner_index(&vault, &index_path)?.retrieve(&request)
     })
     .await
 }
