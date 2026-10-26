@@ -66,9 +66,13 @@ impl NativeCaptureIpc {
             .as_file_mut()
             .sync_all()
             .map_err(|_| "MP_VAULT_IPC_DESCRIPTOR_FAILED".to_owned())?;
+        // Never replace an existing session capability. A second desktop
+        // instance must fail closed rather than hijack capture routing from
+        // another unlocked owner session. A stale post-crash descriptor also
+        // requires explicit owner recovery rather than unsafe auto-takeover.
         pending
-            .persist(dir.join("capture-ipc-v1.json"))
-            .map_err(|_| "MP_VAULT_IPC_DESCRIPTOR_FAILED".to_owned())?;
+            .persist_noclobber(dir.join("capture-ipc-v1.json"))
+            .map_err(|_| "MP_VAULT_IPC_SESSION_ALREADY_PRESENT".to_owned())?;
 
         let stop = Arc::new(AtomicBool::new(false));
         let terminate = stop.clone();
@@ -197,6 +201,21 @@ mod qualification {
             "synthetic-only"
         );
         assert!(!archive_root.exists());
+        // An overlapping owner desktop must never overwrite the active token.
+        // It cannot silently change which vault receives browser captures.
+        let original = fs::read(home.path().join("capture-ipc-v1.json")).unwrap();
+        assert!(NativeCaptureIpc::start(
+            archive_root.clone(),
+            writer.clone(),
+            gate.clone(),
+            lease,
+            Arc::new(Mutex::new(())),
+        )
+        .is_err());
+        assert_eq!(
+            fs::read(home.path().join("capture-ipc-v1.json")).unwrap(),
+            original
+        );
         gate.lock();
         assert!(mind_place_capture_host::ipc::forward_capture(
             &archive_root,
