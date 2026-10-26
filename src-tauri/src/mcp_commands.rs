@@ -1,5 +1,5 @@
 //! Trusted desktop owner controls; never exposed through MCP.
-use super::{begin_unlocked, finish_unlocked, AppState};
+use super::{begin_unlocked, finish_unlocked, legacy_archive, AppState};
 use mind_place_integration::{transport::LocalMcpServer, ClientAuthority};
 use mind_place_state::{ClientCapability, ClientRecord, StateStore};
 use serde::Serialize;
@@ -48,7 +48,7 @@ pub(super) async fn start_local_mcp(state: State<'_, AppState>) -> Result<McpSta
         });
     }
     let server = LocalMcpServer::start(
-        state.store.clone(),
+        legacy_archive(&state)?,
         state.security.clone(),
         state.state_path.clone(),
         state.index_path.clone(),
