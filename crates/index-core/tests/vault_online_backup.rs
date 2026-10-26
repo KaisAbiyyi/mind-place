@@ -137,7 +137,8 @@ fn online_backup_failure_injection_never_publishes_incomplete_restores() {
     VaultOnlineBackup::create(&gate, lease, &verified, &root, &backup, 3).unwrap();
     let object = first_file(&backup.join("payload/archive"));
     let mut bytes = fs::read(&object).unwrap();
-    bytes[bytes.len() - 1] ^= 0x80; // Synthetic ciphertext corruption after publication.
+    let last = bytes.len() - 1;
+    bytes[last] ^= 0x80; // Synthetic ciphertext corruption after publication.
     fs::write(&object, bytes).unwrap();
     let destination = home.path().join("must-not-publish");
     assert!(PortableBackup::restore(&gate, lease, &backup, &destination, &recovery).is_err());
