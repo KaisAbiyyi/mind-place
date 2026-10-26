@@ -615,7 +615,9 @@ async fn unlock_security(
                 drop(receiver);
                 return Err(security_error(error));
             }
-            *native_capture.lock().unwrap_or_else(|error| error.into_inner()) = Some(receiver);
+            *native_capture
+                .lock()
+                .unwrap_or_else(|error| error.into_inner()) = Some(receiver);
             let mut session = vault.lock().unwrap_or_else(|error| error.into_inner());
             *session = Some(adapter);
             ready.store(true, Ordering::Release);
