@@ -54,6 +54,22 @@ pub(super) async fn begin_vault_setup(
 }
 
 #[tauri::command]
+pub(super) fn resume_vault_setup(state: State<'_, AppState>) -> Result<String, String> {
+    state
+        .security
+        .require_unlocked()
+        .map_err(|error| format!("{}:{}", error.code(), error))?;
+    let guard = state
+        .pending_vault
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let prepared = guard
+        .as_ref()
+        .ok_or_else(|| "MP_VAULT_CEREMONY_NOT_STARTED".to_owned())?;
+    Ok(prepared.recovery_code().as_str().to_owned())
+}
+
+#[tauri::command]
 pub(super) async fn confirm_vault_setup(
     state: State<'_, AppState>,
     code: String,
