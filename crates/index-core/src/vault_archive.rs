@@ -1,7 +1,8 @@
 //! Owner-session encrypted capture writer/reader. No legacy raw archive files.
 //! This adapter is independent from production routing until authenticated
 //! native-host IPC and derived search indexing are fully ported and qualified.
-use crate::{IndexError, Result};
+use crate::{documents::DocumentIndex, IndexError, IndexStore, Result};
+use mind_place_state::StateStore;
 use mind_place_archive::{
     markdown, validate_capture, Capture, Conversation, ConversationSummary, ExportResult, SaveReceipt,
     SnapshotSummary,
@@ -112,6 +113,48 @@ impl VaultCaptureStore {
             Self::integrity(&db)?;
         }
         Ok(store)
+    }
+
+    /// All desktop readers/writers must use vault-derived keys. A legacy
+    /// StateStore/IndexStore open on a vault path is never an allowed fallback.
+    fn derived_sqlcipher_key(&self, domain: &[u8]) -> Result<[u8; 32]> {
+        self.gate
+            .validate_lease(self.lease)
+            .map_err(|_| IndexError::Revoked)?;
+        let key = self
+            .vault
+            .derived_key(&self.gate, self.lease, domain)
+            .map_err(|_| IndexError::Revoked)?;
+        let mut raw = [0u8; 32];
+        raw.copy_from_slice(key.as_ref());
+        Ok(raw)
+    }
+
+    pub fn open_state_store(&self) -> Result<StateStore> {
+        Ok(StateStore::open_encrypted(
+            self.root.join("state.sqlite3"),
+            self.derived_sqlcipher_key(b"state/sqlcipher/v1")?,
+            &self.gate,
+            self.lease,
+        )?)
+    }
+
+    pub fn open_index_store(&self) -> Result<IndexStore> {
+        IndexStore::open_encrypted(
+            self.root.join("index.sqlite3"),
+            self.derived_sqlcipher_key(b"index/sqlcipher/v1")?,
+            &self.gate,
+            self.lease,
+        )
+    }
+
+    pub fn open_document_index(&self) -> Result<DocumentIndex> {
+        DocumentIndex::open_encrypted(
+            self.root.join("document-index.sqlite3"),
+            self.derived_sqlcipher_key(b"document-index/sqlcipher/v1")?,
+            &self.gate,
+            self.lease,
+        )
     }
 
     fn db_path(&self) -> PathBuf {
