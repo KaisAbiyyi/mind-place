@@ -119,9 +119,14 @@ impl SignedCapture {
             return Err(invalid("IPC authentication size invalid"));
         }
         let expected = sign(key, &nonce, &self.origin, &self.capture)?;
-        let mut verifier = Hmac::<Sha256>::new_from_slice(key)
-            .map_err(|_| invalid("IPC verifier unavailable"))?;
-        verifier.update(&serde_json::to_vec(&(VERSION, nonce.as_slice(), self.origin.as_str(), &self.capture))?);
+        let mut verifier =
+            Hmac::<Sha256>::new_from_slice(key).map_err(|_| invalid("IPC verifier unavailable"))?;
+        verifier.update(&serde_json::to_vec(&(
+            VERSION,
+            nonce.as_slice(),
+            self.origin.as_str(),
+            &self.capture,
+        ))?);
         verifier
             .verify_slice(&proof)
             .map_err(|_| invalid("IPC authentication rejected"))?;
@@ -216,7 +221,8 @@ mod tests {
         assert!(SignedCapture::authenticate(copy, &key, &mut seen).is_err());
         let forged = SignedCapture::prepare(&[8u8; 32], &origin, fixture()).unwrap();
         assert!(forged.authenticate(&key, &mut seen).is_err());
-        let bad_origin = SignedCapture::prepare(&key, "chrome-extension://evil/", fixture()).unwrap();
+        let bad_origin =
+            SignedCapture::prepare(&key, "chrome-extension://evil/", fixture()).unwrap();
         assert!(bad_origin.authenticate(&key, &mut seen).is_err());
     }
 }
