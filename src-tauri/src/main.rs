@@ -15,10 +15,10 @@ use mind_place_index::documents::{
     DocumentHit, DocumentIndex, DocumentIndexReport, DocumentPreview,
 };
 use mind_place_index::{
-    vault_archive::VaultCaptureStore,
-    ContextInspection, ContextPack, ContextRequest, FetchInspection, FetchRequest, FetchResponse,
-    GraphDirection, GraphKind, GraphNeighborhoodRequest, GraphNodeRef, IndexError, IndexStats,
-    IndexStore, RetrievalRequest, RetrievalResponse, SearchHit, SearchInspection,
+    vault_archive::VaultCaptureStore, ContextInspection, ContextPack, ContextRequest,
+    FetchInspection, FetchRequest, FetchResponse, GraphDirection, GraphKind,
+    GraphNeighborhoodRequest, GraphNodeRef, IndexError, IndexStats, IndexStore, RetrievalRequest,
+    RetrievalResponse, SearchHit, SearchInspection,
 };
 use mind_place_integration::transport::LocalMcpServer;
 use mind_place_security::{SecurityError, SecurityGate, SecurityStatus, UnlockLease};
@@ -579,7 +579,8 @@ async fn unlock_security(
                     .map_err(security_error)?;
                 let crypto = mind_place_security::vault::CryptoVault::restore_with_dpapi(
                     &security, lease, &manifest,
-                ).map_err(security_error)?;
+                )
+                .map_err(security_error)?;
                 let adapter = VaultCaptureStore::open(&vault_root, crypto, &security, lease)
                     .map_err(|error| format!("{}:{}", error.code(), error))?;
                 Ok(Arc::new(adapter))
@@ -626,7 +627,11 @@ fn lock_security(state: State<'_, AppState>) -> SecurityStatus {
         &state.security,
     );
     state.document_refresh.deactivate_all();
-    state.vault.lock().unwrap_or_else(|error| error.into_inner()).take();
+    state
+        .vault
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .take();
     // Invalidate all read leases before killing the outbound helper and local listener.
     // Revocation is best-effort while locked; all in-flight evidence is already blocked.
     let _ = hosted_tunnel::stop_and_revoke(&state);
