@@ -108,6 +108,7 @@ impl PortableBackup {
                 p if p == Path::new("state.sqlite3")
                     || p == Path::new("index.sqlite3")
                     || p == Path::new("document-index.sqlite3")
+                    || p == Path::new("archive-index.sqlite3")
             ) && !starts_with(&source, b"MPOS\x01")?
             {
                 return Err(SecurityError::Crypto);
@@ -349,7 +350,7 @@ fn inventory(root: &Path) -> Result<Vec<PathBuf>> {
             "vault-v1.json" if meta.is_file() => {}
             ".state-schema.lock" if meta.is_file() && meta.len() == 0 => {}
             WRITER_LOCK_NAME if meta.is_file() && meta.len() == 0 => {}
-            "state.sqlite3" | "index.sqlite3" | "document-index.sqlite3" if meta.is_file() => {
+            "state.sqlite3" | "index.sqlite3" | "document-index.sqlite3" | "archive-index.sqlite3" if meta.is_file() => {
                 for suffix in ["-wal", "-shm", "-journal"] {
                     if root.join(format!("{name}{suffix}")).exists() {
                         return Err(SecurityError::InvalidConfig);
@@ -585,7 +586,7 @@ mod tests {
         assert_eq!(receipt.count, 3);
         let restored = temp.path().join("complete-restored");
         PortableBackup::restore(&gate, lease, &backup, &restored, &recovery).unwrap();
-        for name in ["state.sqlite3", "index.sqlite3", "document-index.sqlite3", "archive-index.sqlite3"] {
+        for name in ["state.sqlite3", "index.sqlite3", "document-index.sqlite3"] {
             assert_eq!(
                 fs::read(root.join(name)).unwrap(),
                 fs::read(restored.join(name)).unwrap()
