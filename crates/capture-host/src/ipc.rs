@@ -13,6 +13,20 @@ use std::{
     time::Duration,
 };
 
+#[cfg(windows)]
+#[path = "ipc_acl.rs"]
+mod acl;
+
+#[cfg(windows)]
+pub fn secure_descriptor(path: &Path) -> Result<()> {
+    acl::protect(path).map_err(|_| invalid("IPC owner DACL cannot be enforced"))
+}
+
+#[cfg(windows)]
+pub fn verify_descriptor(path: &Path) -> Result<()> {
+    acl::verify(path).map_err(|_| invalid("IPC owner DACL not verifiable"))
+}
+
 const VERSION: u32 = 1;
 const MAX_FRAME: usize = MAX_CAPTURE_BYTES + 8192;
 const MAX_NONCES: usize = 200_000;
@@ -59,6 +73,8 @@ impl SessionDescriptor {
                 return Err(invalid("IPC session descriptor is a reparse point"));
             }
         }
+        #[cfg(windows)]
+        verify_descriptor(&path)?;
         let bytes = fs::read(&path)?;
         let descriptor: Self = serde_json::from_slice(&bytes)?;
         descriptor.key()?;
