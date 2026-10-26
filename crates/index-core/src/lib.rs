@@ -37,8 +37,6 @@ const GRAPHIFY_SCHEMA: &str = include_str!("schema_v4.sql");
 
 pub mod context;
 pub mod documents;
-#[cfg(feature = "sqlcipher-preview")]
-pub mod vault_archive;
 pub mod fetch;
 pub mod graph;
 pub mod graph_generation;
@@ -46,6 +44,8 @@ pub mod graph_maintenance;
 pub mod graph_query;
 pub mod graphify;
 pub mod inspection;
+#[cfg(feature = "sqlcipher-preview")]
+pub mod vault_archive;
 pub use context::{
     ContextBudget, ContextExcerpt, ContextGroup, ContextPack, ContextPreset, ContextRequest,
 };
