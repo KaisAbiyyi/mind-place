@@ -2,8 +2,7 @@
 //! A pack is a bounded projection, never a new authority or a memory truth claim.
 use crate::{
     CaptureArchiveReader, FetchBudget, FetchCursor, FetchGranularity, FetchRequest, IndexError,
-    IndexStore, QueryTerm,
-    Result, RetrievalFilters, RetrievalHit, RetrievalRequest,
+    IndexStore, QueryTerm, Result, RetrievalFilters, RetrievalHit, RetrievalRequest,
 };
 use chrono::DateTime;
 use mind_place_archive::ArchiveStore;
