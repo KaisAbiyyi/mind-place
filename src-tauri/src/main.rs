@@ -489,9 +489,23 @@ async fn inspect_retrieval_fetch(
     .await
 }
 
+#[derive(Serialize)]
+struct DesktopSecurityStatus {
+    #[serde(flatten)]
+    status: SecurityStatus,
+    vault_mode: &'static str,
+}
+
 #[tauri::command]
-fn get_security_status(state: State<'_, AppState>) -> SecurityStatus {
-    state.security.status()
+fn get_security_status(state: State<'_, AppState>) -> DesktopSecurityStatus {
+    DesktopSecurityStatus {
+        status: state.security.status(),
+        vault_mode: if state.store.is_some() {
+            "legacy"
+        } else {
+            "encrypted"
+        },
+    }
 }
 
 #[tauri::command]
@@ -1037,6 +1051,7 @@ fn main() {
             hosted_tunnel::stop_hosted_tunnel,
             initialize_security,
             vault_commands::begin_vault_setup,
+            vault_commands::resume_vault_setup,
             vault_commands::confirm_vault_setup,
             vault_commands::cancel_vault_setup,
             unlock_security,
