@@ -62,6 +62,19 @@ fn encrypted_archive_roundtrip_deduplicates_and_fails_closed_after_lock() {
         .contains("This is entirely synthetic evidence."));
     assert!(!root.join("exports").exists());
 
+    let authority = store.open_state_store().unwrap();
+    let index = store.open_index_store().unwrap();
+    let indexed = index
+        .sync_vault_with_check(&store, &authority, || Ok(()))
+        .unwrap();
+    assert!(indexed.chunks > 0, "encrypted capture must become searchable");
+    let matches = index.search("entirely", false, 20).unwrap();
+    assert!(!matches.is_empty());
+    assert_eq!(matches[0].archive_id, first.id);
+    assert!(!fs::read(root.join("index.sqlite3"))
+        .unwrap()
+        .starts_with(b"SQLite format 3\\0"));
+
     let bytes = fs::read(root.join("archive-index.sqlite3")).unwrap();
     assert!(!bytes.starts_with(b"SQLite format 3\0"));
     let archives = root.join("archive");
@@ -70,6 +83,7 @@ fn encrypted_archive_roundtrip_deduplicates_and_fails_closed_after_lock() {
     gate.lock();
     assert!(store.read(&first.id, None).is_err());
     assert!(store.export_markdown(&first.id, None).is_err());
+    assert!(index.search("entirely", false, 20).is_err());
     assert!(store.save(capture("2026-10-26T03:00:02Z")).is_err());
 }
 
