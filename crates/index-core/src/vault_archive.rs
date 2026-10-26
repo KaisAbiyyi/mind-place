@@ -3,7 +3,8 @@
 //! native-host IPC and derived search indexing are fully ported and qualified.
 use crate::{IndexError, Result};
 use mind_place_archive::{
-    validate_capture, Capture, Conversation, ConversationSummary, SaveReceipt, SnapshotSummary,
+    markdown, validate_capture, Capture, Conversation, ConversationSummary, ExportResult, SaveReceipt,
+    SnapshotSummary,
     MAX_CAPTURE_BYTES,
 };
 use mind_place_security::{
@@ -332,6 +333,30 @@ impl VaultCaptureStore {
             summary,
             capture,
             snapshot_id: row.0,
+        })
+    }
+
+    /// A vault export stays in owner memory. The caller can explicitly copy or
+    /// save it using the desktop UI; never silently create a plaintext file.
+    /// Captures referencing media that was not stored in the vault cannot be
+    /// represented by a complete self-contained Markdown export.
+    pub fn export_markdown(&self, archive_id: &str, revision: Option<&str>) -> Result<ExportResult> {
+        let conversation = self.read(archive_id, revision)?;
+        if conversation.capture.messages.iter().any(|message| {
+            message
+                .attachments
+                .iter()
+                .any(|attachment| attachment.asset_path.is_some())
+        }) {
+            return Err(IndexError::InvalidEvidence);
+        }
+        let rendered = markdown(&conversation.capture);
+        self.gate
+            .validate_lease(self.lease)
+            .map_err(|_| IndexError::Revoked)?;
+        Ok(ExportResult {
+            path: String::new(),
+            markdown: rendered,
         })
     }
 
