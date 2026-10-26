@@ -1,6 +1,6 @@
 //! Rebuildable, non-authoritative archive search projection.
 //! Every durable source ID is registered in state.sqlite3, never assigned by this DB.
-use mind_place_archive::{ArchiveStore, Capture};
+use mind_place_archive::{ArchiveStore, Capture, Conversation, ConversationSummary, SnapshotSummary};
 use mind_place_security::vault_fence::VaultWriterFence;
 use mind_place_state::{CipherKey, SourceDescriptor, SourceKey, StateStore};
 use rusqlite::{
@@ -142,6 +142,7 @@ impl CaptureArchiveReader for ArchiveStore {
     }
 }
 
+#[cfg(feature = "sqlcipher-preview")]
 impl CaptureArchiveReader for vault_archive::VaultCaptureStore {
     fn list_captures(&self) -> Result<Vec<ConversationSummary>> {
         vault_archive::VaultCaptureStore::list(self, "")
@@ -473,6 +474,7 @@ impl IndexStore {
         self.index(archive, authority, false, &mut check)
     }
 
+    #[cfg(feature = "sqlcipher-preview")]
     pub fn sync_vault_with_check(
         &self,
         archive: &vault_archive::VaultCaptureStore,
@@ -482,6 +484,7 @@ impl IndexStore {
         self.index(archive, authority, false, &mut check)
     }
 
+    #[cfg(feature = "sqlcipher-preview")]
     pub fn rebuild_vault_with_check(
         &self,
         archive: &vault_archive::VaultCaptureStore,
