@@ -411,11 +411,12 @@ async fn read_archive_hive(
             max_nodes: 120,
             max_edges: 240,
         };
-        let graph = open_owner_index(&vault, &index_path)?.graph_neighbors_with_check(&query, || {
-            security
-                .validate_lease(lease)
-                .map_err(|_| IndexError::Revoked)
-        })?;
+        let graph =
+            open_owner_index(&vault, &index_path)?.graph_neighbors_with_check(&query, || {
+                security
+                    .validate_lease(lease)
+                    .map_err(|_| IndexError::Revoked)
+            })?;
         let nodes = graph
             .nodes
             .iter()
@@ -460,7 +461,10 @@ async fn read_archive_hive(
 async fn get_archive_index_stats(state: State<'_, AppState>) -> Result<IndexStats, String> {
     let index_path = state.index_path.clone();
     let vault = owner_vault(&state);
-    index_task(&state, move |_, _| open_owner_index(&vault, &index_path)?.stats()).await
+    index_task(&state, move |_, _| {
+        open_owner_index(&vault, &index_path)?.stats()
+    })
+    .await
 }
 
 #[tauri::command]
