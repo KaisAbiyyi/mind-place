@@ -3,23 +3,23 @@
 //! non-NTFS filesystems or if the OS cannot attest the published descriptor.
 use std::{
     ffi::c_void,
-    io,
-    iter,
+    io, iter,
     mem::size_of,
-    os::windows::{ffi::OsStrExt, io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle}},
+    os::windows::{
+        ffi::OsStrExt,
+        io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle},
+    },
     path::Path,
 };
 use windows_sys::Win32::{
     Foundation::LocalFree,
     Security::{
         Authorization::{
-            ConvertSecurityDescriptorToStringSecurityDescriptorW,
-            ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
-            SDDL_REVISION_1,
+            ConvertSecurityDescriptorToStringSecurityDescriptorW, ConvertSidToStringSidW,
+            ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
         },
-        DACL_SECURITY_INFORMATION, GetFileSecurityW, GetTokenInformation,
-        PROTECTED_DACL_SECURITY_INFORMATION, SetFileSecurityW, TOKEN_QUERY, TOKEN_USER,
-        TokenUser,
+        GetFileSecurityW, GetTokenInformation, SetFileSecurityW, TokenUser,
+        DACL_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, TOKEN_QUERY, TOKEN_USER,
     },
     System::Threading::{GetCurrentProcess, OpenProcessToken},
 };
@@ -34,7 +34,10 @@ impl Drop for LocalAllocation {
 }
 
 fn wide(path: &Path) -> Vec<u16> {
-    path.as_os_str().encode_wide().chain(iter::once(0)).collect()
+    path.as_os_str()
+        .encode_wide()
+        .chain(iter::once(0))
+        .collect()
 }
 
 fn current_sid() -> io::Result<String> {
@@ -63,7 +66,8 @@ fn current_sid() -> io::Result<String> {
             buffer.as_mut_ptr().cast(),
             required,
             &mut required,
-        ) == 0 {
+        ) == 0
+        {
             return Err(io::Error::last_os_error());
         }
         let token_user = &*buffer.as_ptr().cast::<TOKEN_USER>();
@@ -92,7 +96,8 @@ fn set_dacl(path: &Path, sddl: &str) -> io::Result<()> {
             SDDL_REVISION_1,
             &mut descriptor,
             std::ptr::null_mut(),
-        ) == 0 {
+        ) == 0
+        {
             return Err(io::Error::last_os_error());
         }
         let owned = LocalAllocation(descriptor);
@@ -130,7 +135,8 @@ fn get_dacl(path: &Path) -> io::Result<String> {
             data.as_mut_ptr().cast(),
             required,
             &mut required,
-        ) == 0 {
+        ) == 0
+        {
             return Err(io::Error::last_os_error());
         }
         let mut sddl = std::ptr::null_mut();
@@ -140,7 +146,8 @@ fn get_dacl(path: &Path) -> io::Result<String> {
             DACL_SECURITY_INFORMATION,
             &mut sddl,
             std::ptr::null_mut(),
-        ) == 0 {
+        ) == 0
+        {
             return Err(io::Error::last_os_error());
         }
         let owned = LocalAllocation(sddl.cast());
@@ -170,7 +177,10 @@ pub(super) fn verify(path: &Path) -> io::Result<()> {
     let sddl = get_dacl(path)?;
     let current = current_sid()?;
     if !sddl.starts_with("D:P") {
-        return Err(io::Error::new(io::ErrorKind::PermissionDenied, "IPC DACL inheritance"));
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "IPC DACL inheritance",
+        ));
     }
     let mut principals = Vec::new();
     for entry in sddl.split('(').skip(1) {
@@ -178,18 +188,30 @@ pub(super) fn verify(path: &Path) -> io::Result<()> {
             .strip_suffix(')')
             .ok_or_else(|| io::Error::new(io::ErrorKind::PermissionDenied, "IPC DACL shape"))?;
         let fields: Vec<_> = entry.split(';').collect();
-        if fields.len() != 6 || fields[0] != "A" || !fields[1].is_empty()
+        if fields.len() != 6
+            || fields[0] != "A"
+            || !fields[1].is_empty()
             || !matches!(fields[2], "FA" | "0x1f01ff")
-            || !fields[3].is_empty() || !fields[4].is_empty()
+            || !fields[3].is_empty()
+            || !fields[4].is_empty()
         {
-            return Err(io::Error::new(io::ErrorKind::PermissionDenied, "IPC DACL ACE"));
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "IPC DACL ACE",
+            ));
         }
         principals.push(fields[5]);
     }
     let owner = principals.iter().filter(|&&sid| sid == current).count();
-    let system = principals.iter().filter(|&&sid| sid == "SY" || sid == "S-1-5-18").count();
+    let system = principals
+        .iter()
+        .filter(|&&sid| sid == "SY" || sid == "S-1-5-18")
+        .count();
     if principals.len() != 2 || owner != 1 || system != 1 {
-        return Err(io::Error::new(io::ErrorKind::PermissionDenied, "IPC DACL principals"));
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "IPC DACL principals",
+        ));
     }
     Ok(())
 }
