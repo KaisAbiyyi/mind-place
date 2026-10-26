@@ -561,17 +561,25 @@ mod vault_catalog_pagination_tests {
         db.execute_batch(SCHEMA).expect("create catalog schema");
         let tx = db.transaction().expect("begin");
         {
-            let mut stmt = tx.prepare(
-                "INSERT INTO vault_captures(archive_id,snapshot_id,identity,provider,
+            let mut stmt = tx
+                .prepare(
+                    "INSERT INTO vault_captures(archive_id,snapshot_id,identity,provider,
                   conversation_id,title,source_url,captured_at,message_count,completeness,
                   warnings_json) VALUES (?1,?2,?3,'chatgpt',?4,'synthetic','',
                   ?5,1,'complete','[]')",
-            ).expect("insert");
+                )
+                .expect("insert");
             for i in 0..10_021usize {
                 let id = format!("synthetic-{i:05}");
                 let order = format!("2026-01-01T{i:05}");
-                stmt.execute(params![id, "snapshot-0", format!("identity-{i:05}"),
-                    format!("conversation-{i:05}"), order]).expect("insert synthetic row");
+                stmt.execute(params![
+                    id,
+                    "snapshot-0",
+                    format!("identity-{i:05}"),
+                    format!("conversation-{i:05}"),
+                    order
+                ])
+                .expect("insert synthetic row");
             }
         }
         tx.commit().expect("commit");
