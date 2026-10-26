@@ -1,7 +1,7 @@
 //! MP-9B cooperative online vault snapshot.
- //! Holds one exclusive cross-process writer fence while capturing all keyed
- //! SQLite WAL-visible pages and every immutable encrypted object. This is
- //! NOT a substitute for auditing every future writer and testing native IPC.
+//! Holds one exclusive cross-process writer fence while capturing all keyed
+//! SQLite WAL-visible pages and every immutable encrypted object. This is
+//! NOT a substitute for auditing every future writer and testing native IPC.
 use crate::{IndexError, Result};
 use mind_place_security::{
     vault::{CryptoVault, VaultManifest},
@@ -39,8 +39,10 @@ impl VaultOnlineBackup {
         destination: &Path,
         generation: u64,
     ) -> Result<BackupMetadata> {
-        gate.validate_lease(lease).map_err(|_| IndexError::Revoked)?;
-        if destination.starts_with(source) || source.starts_with(destination)
+        gate.validate_lease(lease)
+            .map_err(|_| IndexError::Revoked)?;
+        if destination.starts_with(source)
+            || source.starts_with(destination)
             || destination.exists()
         {
             return Err(IndexError::UnsafePath);
@@ -49,28 +51,28 @@ impl VaultOnlineBackup {
         if !parent.is_dir() {
             return Err(IndexError::UnsafePath);
         }
-        let manifest = VaultManifest::read(source)
-            .map_err(|_| IndexError::InvalidEvidence)?;
-        if manifest.vault_id_b64 != base64::Engine::encode(
-            &base64::engine::general_purpose::STANDARD, vault.id()
-        ) {
+        let manifest = VaultManifest::read(source).map_err(|_| IndexError::InvalidEvidence)?;
+        if manifest.vault_id_b64
+            != base64::Engine::encode(&base64::engine::general_purpose::STANDARD, vault.id())
+        {
             return Err(IndexError::InvalidEvidence);
         }
         // All supported encrypted state/index/immutable object writers take
         // shared lock; no source write can advance during this snapshot cut.
-        let _fence = VaultWriterFence::snapshot(source)
-            .map_err(|_| IndexError::InvalidEvidence)?;
+        let _fence = VaultWriterFence::snapshot(source).map_err(|_| IndexError::InvalidEvidence)?;
         let scratch_parent = tempfile::Builder::new()
             .prefix(".mp9b-encrypted-online-")
             .tempdir_in(parent)?;
         let scratch = scratch_parent.path().join("vault");
-        manifest.persist_new(&scratch)
+        manifest
+            .persist_new(&scratch)
             .map_err(|_| IndexError::InvalidEvidence)?;
 
         let mut have_state = false;
         let mut count = 0usize;
         for entry in fs::read_dir(source)? {
-            gate.validate_lease(lease).map_err(|_| IndexError::Revoked)?;
+            gate.validate_lease(lease)
+                .map_err(|_| IndexError::Revoked)?;
             let entry = entry?;
             let path = entry.path();
             guarded(&path)?;
@@ -79,22 +81,24 @@ impl VaultOnlineBackup {
             let meta = fs::symlink_metadata(&path)?;
             if DB_DOMAINS.iter().any(|(n, _)| *n == name) && meta.is_file() {
                 let domain = DB_DOMAINS.iter().find(|(n, _)| *n == name).unwrap().1;
-                snapshot_sqlcipher(
-                    gate, lease, vault, domain, &path, &scratch.join(name),
-                )?;
+                snapshot_sqlcipher(gate, lease, vault, domain, &path, &scratch.join(name))?;
                 if name == "state.sqlite3" {
                     have_state = true;
                 }
             } else if ["archive", "document-objects", "backups"].contains(&name) && meta.is_dir() {
                 copy_ciphertext_tree(&path, &scratch.join(name), 0, &mut count)?;
             } else if ["vault-v1.json", ".state-schema.lock", ".vault-writer.lock"].contains(&name)
-                && meta.is_file() && (name == "vault-v1.json" || meta.len() == 0)
+                && meta.is_file()
+                && (name == "vault-v1.json" || meta.len() == 0)
             {
                 // New manifest already persisted. Lock and schema sentinels
                 // have no authoritative content to capture.
             } else if DB_DOMAINS.iter().any(|(n, _)| {
-                ["-wal", "-shm", "-journal"].iter().any(|suffix| name == format!("{n}{suffix}"))
-            }) && meta.is_file() {
+                ["-wal", "-shm", "-journal"]
+                    .iter()
+                    .any(|suffix| name == format!("{n}{suffix}"))
+            }) && meta.is_file()
+            {
                 // SQLCipher Online Backup includes committed WAL content.
                 // Neither WAL nor SHM may be copied as independent files.
             } else {
@@ -104,13 +108,15 @@ impl VaultOnlineBackup {
         if !have_state {
             return Err(IndexError::InvalidEvidence);
         }
-        gate.validate_lease(lease).map_err(|_| IndexError::Revoked)?;
+        gate.validate_lease(lease)
+            .map_err(|_| IndexError::Revoked)?;
         // Package a fully quiesced scratch root. Existing portable restore
         // authenticates the manifest and verifies each file digest.
-        let metadata = PortableBackup::create(
-            gate, lease, vault, &scratch, destination, generation,
-        ).map_err(|_| IndexError::InvalidEvidence)?;
-        gate.validate_lease(lease).map_err(|_| IndexError::Revoked)?;
+        let metadata =
+            PortableBackup::create(gate, lease, vault, &scratch, destination, generation)
+                .map_err(|_| IndexError::InvalidEvidence)?;
+        gate.validate_lease(lease)
+            .map_err(|_| IndexError::Revoked)?;
         Ok(metadata)
     }
 }
@@ -125,7 +131,8 @@ fn snapshot_sqlcipher(
 ) -> Result<()> {
     guarded(source)?;
     guarded(destination)?;
-    let derived = vault.derived_key(gate, lease, domain)
+    let derived = vault
+        .derived_key(gate, lease, domain)
         .map_err(|_| IndexError::Revoked)?;
     let mut raw = [0u8; 32];
     raw.copy_from_slice(derived.as_ref());
@@ -166,12 +173,7 @@ fn snapshot_sqlcipher(
     Ok(())
 }
 
-fn copy_ciphertext_tree(
-    root: &Path,
-    target: &Path,
-    depth: usize,
-    count: &mut usize,
-) -> Result<()> {
+fn copy_ciphertext_tree(root: &Path, target: &Path, depth: usize, count: &mut usize) -> Result<()> {
     if depth > 12 || *count > 100_000 {
         return Err(IndexError::InvalidEvidence);
     }
