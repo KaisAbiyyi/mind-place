@@ -23,14 +23,16 @@ fn capture(at: &str) -> Capture {
             "format": "plain",
             "attachments": []
         }]
-    })).unwrap()
+    }))
+    .unwrap()
 }
 
 #[test]
 fn encrypted_archive_roundtrip_deduplicates_and_fails_closed_after_lock() {
     let home = tempfile::tempdir().unwrap();
     let gate = SecurityGate::open(home.path().join("security.json")).unwrap();
-    gate.initialize(b"synthetic-encrypted-archive-secret").unwrap();
+    gate.initialize(b"synthetic-encrypted-archive-secret")
+        .unwrap();
     let lease = gate.require_unlocked().unwrap();
     let (vault, _, manifest) = CryptoVault::provision(&gate, lease).unwrap();
     let root = home.path().join("vault");
@@ -45,7 +47,10 @@ fn encrypted_archive_roundtrip_deduplicates_and_fails_closed_after_lock() {
     assert_eq!(first.snapshot_id, second.snapshot_id);
     assert_eq!(store.snapshots(&first.id).unwrap().len(), 1);
     let loaded = store.read(&first.id, Some(&first.snapshot_id)).unwrap();
-    assert_eq!(loaded.capture.messages[0].text, "This is entirely synthetic evidence.");
+    assert_eq!(
+        loaded.capture.messages[0].text,
+        "This is entirely synthetic evidence."
+    );
     assert_eq!(loaded.summary.snapshot_count, 1);
 
     let bytes = fs::read(root.join("archive-index.sqlite3")).unwrap();
@@ -62,7 +67,8 @@ fn encrypted_archive_roundtrip_deduplicates_and_fails_closed_after_lock() {
 fn unmarked_vault_cannot_create_encrypted_capture_index() {
     let home = tempfile::tempdir().unwrap();
     let gate = SecurityGate::open(home.path().join("security.json")).unwrap();
-    gate.initialize(b"synthetic-encrypted-archive-secret").unwrap();
+    gate.initialize(b"synthetic-encrypted-archive-secret")
+        .unwrap();
     let lease = gate.require_unlocked().unwrap();
     let (vault, _, _) = CryptoVault::provision(&gate, lease).unwrap();
     let root = home.path().join("vault");
