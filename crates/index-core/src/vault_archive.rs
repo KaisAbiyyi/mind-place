@@ -316,8 +316,8 @@ impl VaultCaptureStore {
             return Err(IndexError::InvalidQuery);
         }
         let ids = {
-            let _writer = VaultWriterFence::writer(&self.root)
-                .map_err(|_| IndexError::InvalidEvidence)?;
+            let _writer =
+                VaultWriterFence::writer(&self.root).map_err(|_| IndexError::InvalidEvidence)?;
             let db = self.connection()?;
             let mut stmt = db.prepare(
                 "SELECT archive_id FROM vault_captures
