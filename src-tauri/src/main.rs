@@ -572,6 +572,8 @@ async fn unlock_security(
         let vault_root = state.vault_root.clone();
         let vault = state.vault.clone();
         let ready = state.authority_ready.clone();
+        let native_capture = state.native_capture.clone();
+        let archive_root = state.archive_root.clone();
         return tauri::async_runtime::spawn_blocking(move || {
             let secret = Zeroizing::new(secret);
             let status = security.unlock(secret.as_bytes()).map_err(security_error)?;
@@ -594,6 +596,26 @@ async fn unlock_security(
                     return Err(error);
                 }
             };
+            // The desktop alone owns the DEK. The native browser host sends
+            // short-lived HMAC-authenticated captures to this owner session.
+            // A listener startup failure cannot unlock the capture surface.
+            let receiver = match native_capture_ipc::NativeCaptureIpc::start(
+                archive_root,
+                adapter.clone(),
+                security.clone(),
+                lease,
+            ) {
+                Ok(receiver) => receiver,
+                Err(error) => {
+                    security.lock();
+                    return Err(error);
+                }
+            };
+            if let Err(error) = security.validate_lease(lease) {
+                drop(receiver);
+                return Err(security_error(error));
+            }
+            *native_capture.lock().unwrap_or_else(|error| error.into_inner()) = Some(receiver);
             let mut session = vault.lock().unwrap_or_else(|error| error.into_inner());
             *session = Some(adapter);
             ready.store(true, Ordering::Release);
@@ -631,6 +653,11 @@ fn lock_security(state: State<'_, AppState>) -> SecurityStatus {
     state.document_refresh.deactivate_all();
     state
         .vault
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .take();
+    state
+        .native_capture
         .lock()
         .unwrap_or_else(|error| error.into_inner())
         .take();
