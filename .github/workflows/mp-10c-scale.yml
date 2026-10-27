@@ -1,32 +1,59 @@
+# MP-CI-100K-01: fast PR smoke + fail-closed source-bound 100K proof reuse.
+# A skipped full job NEVER asserts a new 100K PASS for the current commit.
 name: MP-10C cloud document scale qualification
+
 on:
   pull_request:
-    paths:
-      - '.github/workflows/mp-10c-scale.yml'
-      - 'crates/index-core/tests/document_scale_qualification.rs'
-      - 'crates/index-core/src/documents.rs'
-      - 'crates/state-core/src/document_scanner.rs'
-      - 'crates/document-core/**'
   workflow_dispatch:
+    inputs:
+      qualification:
+        description: Full qualification intent (never consult prior receipts)
+        type: choice
+        required: true
+        default: manual
+        options: [manual, final]
+  push:
+    tags: ['v*']
+
 permissions:
   contents: read
+  actions: read
+
 concurrency:
   group: mp10c-scale-${{ github.ref }}
   cancel-in-progress: false
+
 jobs:
-  document-scale:
-    name: Windows approved documents / ${{ matrix.files }} files
+  effective-input-gate:
+    name: Source fingerprint / acceptance decision (NOT 100K PASS)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      run-heavy: ${{ steps.decision.outputs.run-heavy }}
+      fingerprint: ${{ steps.decision.outputs.fingerprint }}
+      qualified-run: ${{ steps.decision.outputs.qualified-run }}
+      qualified-artifact: ${{ steps.decision.outputs.qualified-artifact }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Python gate decision and receipt regression tests
+        run: python3 -m unittest discover -s scripts/tests -p 'test_mp10c_ci_gate.py' -v
+      - name: Decide from verified same-PR prior receipt
+        id: decision
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || '0' }}
+          QUALIFICATION_MODE: ${{ inputs.qualification || 'auto' }}
+        run: python3 scripts/mp10c_ci_gate.py decide --output "$GITHUB_OUTPUT"
+
+  document-smoke:
+    name: Windows approved documents / 100 files
     runs-on: windows-latest
-    timeout-minutes: 360
-    strategy:
-      fail-fast: false
-      matrix:
-        files: [100, 100000]
+    timeout-minutes: 90
     env:
       CARGO_INCREMENTAL: 0
       CARGO_BUILD_JOBS: 2
-      MP_10C_FILES: ${{ matrix.files }}
-      MP_10C_RECEIPT: ${{ github.workspace }}/qualification/mp10c-${{ matrix.files }}.json
+      MP_10C_FILES: '100'
+      MP_10C_RECEIPT: ${{ github.workspace }}/qualification/mp10c-100.json
     steps:
       - uses: actions/checkout@v5
       - name: Pinned Rust 1.90
@@ -56,11 +83,68 @@ jobs:
             throw "MP-10C receipt did not meet exact-tier qualification"
           }
           Write-Output "MP-10C exact-tier receipt validated: $expected files, $($receipt.extracted_chunks) chunks"
-      - name: Upload receipt
-        if: always()
+      - name: Upload smoke receipt
+        if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: mp10c-document-${{ matrix.files }}
-          path: qualification/mp10c-${{ matrix.files }}.json
+          name: mp10c-document-100
+          path: qualification/mp10c-100.json
+          if-no-files-found: error
+          retention-days: 30
+
+  document-scale:
+    name: Windows approved documents / 100000 files
+    needs: effective-input-gate
+    if: needs.effective-input-gate.outputs.run-heavy == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 360
+    env:
+      CARGO_INCREMENTAL: 0
+      CARGO_BUILD_JOBS: 2
+      MP_10C_FILES: '100000'
+      MP_10C_RECEIPT: ${{ github.workspace }}/qualification/mp10c-100000.json
+      EXPECTED_FINGERPRINT: ${{ needs.effective-input-gate.outputs.fingerprint }}
+      PR_NUMBER: ${{ github.event.pull_request.number || '0' }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Pinned Rust 1.90
+        shell: pwsh
+        run: |
+          rustup toolchain install 1.90.0 --profile minimal --component rustfmt --no-self-update
+          rustup default 1.90.0
+      - name: Check Rust format
+        run: cargo fmt --all -- --check
+      - name: Qualify real authorized document scale
+        run: cargo test --release -p mind-place-index --test document_scale_qualification qualifies_document_scale -- --ignored --exact --nocapture
+      - name: Validate exact-tier receipt
+        shell: pwsh
+        run: |
+          if (!(Test-Path -LiteralPath $env:MP_10C_RECEIPT)) { throw "Missing MP-10C receipt" }
+          $receipt = Get-Content -LiteralPath $env:MP_10C_RECEIPT -Raw | ConvertFrom-Json
+          $expected = [int]$env:MP_10C_FILES
+          $roots = [int][math]::Ceiling($expected / 10000)
+          if ($receipt.target_files -ne $expected -or
+              $receipt.indexed_files -ne $expected -or
+              $receipt.extracted_chunks -ne ($expected * 10) -or
+              $receipt.approved_roots -ne $roots -or
+              $receipt.production_files_per_root_cap -ne 10000 -or
+              $receipt.sqlite_and_fts_integrity -ne "pass" -or
+              $receipt.raw_bytes_unchanged -ne $true -or
+              $receipt.fixture_sha256 -notmatch '^[0-9a-f]{64}$') {
+            throw "MP-10C receipt did not meet exact-tier qualification"
+          }
+          Write-Output "MP-10C exact-tier receipt validated: $expected files, $($receipt.extracted_chunks) chunks"
+      - name: Mint source-bound 100K provenance
+        shell: pwsh
+        run: |
+          python scripts/mp10c_ci_gate.py attest --receipt "$env:MP_10C_RECEIPT" --output qualification/mp10c-provenance.json
+      - name: Upload qualified receipt and provenance
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mp10c-qualified-100000
+          path: |
+            qualification/mp10c-100000.json
+            qualification/mp10c-provenance.json
           if-no-files-found: error
           retention-days: 30
