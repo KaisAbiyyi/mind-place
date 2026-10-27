@@ -219,8 +219,8 @@ impl VaultCaptureStore {
             .validate_lease(self.lease)
             .map_err(|_| IndexError::Revoked)?;
         validate_capture(&mut capture)?;
-        if capture.provider == "generic"
-            || (capture.capture_method == "legacy-import" && !migration)
+        if !migration
+            && (capture.provider == "generic" || capture.capture_method == "legacy-import")
         {
             return Err(IndexError::InvalidEvidence);
         }

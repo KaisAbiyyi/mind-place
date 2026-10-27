@@ -73,6 +73,11 @@ impl LegacyMigrationPreflight {
         Ok(plan)
     }
 
+    /// Original caller-selected root; never serialize into remote interfaces.
+    pub fn source_root(&self) -> &Path {
+        &self.source
+    }
+
     pub fn file_count(&self) -> usize {
         self.files.len()
     }
