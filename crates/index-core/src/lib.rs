@@ -49,9 +49,9 @@ pub mod inspection;
 #[cfg(feature = "sqlcipher-preview")]
 pub mod vault_archive;
 #[cfg(feature = "sqlcipher-preview")]
-pub mod vault_online_backup;
-#[cfg(feature = "sqlcipher-preview")]
 pub mod vault_legacy_migration;
+#[cfg(feature = "sqlcipher-preview")]
+pub mod vault_online_backup;
 pub use context::{
     ContextBudget, ContextExcerpt, ContextGroup, ContextPack, ContextPreset, ContextRequest,
 };

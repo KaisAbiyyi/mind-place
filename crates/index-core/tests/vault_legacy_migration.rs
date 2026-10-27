@@ -56,8 +56,7 @@ fn encrypted_migration_preserves_synthetic_captures_state_and_raw_document_bytes
     let lease = gate.require_unlocked().unwrap();
     let (_, recovery, manifest) = CryptoVault::provision(&gate, lease).unwrap();
     let consent =
-        ExplicitMigrationConsent::from_owner_typed_confirmation("ENCRYPT MY LEGACY VAULT")
-            .unwrap();
+        ExplicitMigrationConsent::from_owner_typed_confirmation("ENCRYPT MY LEGACY VAULT").unwrap();
     let dest = home.path().join("encrypted-vault");
     let plan = LegacyMigrationPreflight::inspect(&source, &dest).unwrap();
     plan.begin_owner_consented(&consent, &gate, lease).unwrap();
@@ -74,15 +73,15 @@ fn encrypted_migration_preserves_synthetic_captures_state_and_raw_document_bytes
     assert!(!fs::read(dest.join("state.sqlite3"))
         .unwrap()
         .starts_with(b"SQLite format 3\0"));
-    let recovered = CryptoVault::restore_with_recovery(&gate, lease, &manifest, &recovery)
-        .unwrap();
+    let recovered = CryptoVault::restore_with_recovery(&gate, lease, &manifest, &recovery).unwrap();
     let reader = VaultCaptureStore::open(&dest, recovered, &gate, lease).unwrap();
-    let read = reader.read(&original_receipt.id, Some(&original_receipt.snapshot_id))
+    let read = reader
+        .read(&original_receipt.id, Some(&original_receipt.snapshot_id))
         .unwrap();
-    assert_eq!(read.capture.messages[0].text, "local synthetic fixture only");
     assert_eq!(
-        fs::read(directory.join(&hash)).unwrap(),
-        document
+        read.capture.messages[0].text,
+        "local synthetic fixture only"
     );
+    assert_eq!(fs::read(directory.join(&hash)).unwrap(), document);
     assert!(plan.rollback_to_legacy(&consent, &gate, lease).is_err());
 }

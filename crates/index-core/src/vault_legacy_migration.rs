@@ -81,7 +81,10 @@ impl LegacyEncryptedConversion<'_> {
             return Ok(());
         }
         let bytes = serde_json::to_vec(self.manifest).map_err(|_| SecurityError::Crypto)?;
-        let mut file = OpenOptions::new().create_new(true).write(true).open(marker)?;
+        let mut file = OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(marker)?;
         file.write_all(&bytes)?;
         file.sync_all()?;
         Ok(())
@@ -103,7 +106,8 @@ impl LegacyEncryptedConversion<'_> {
         let db = Connection::open_with_flags(
             file,
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
-        ).map_err(|_| SecurityError::Crypto)?;
+        )
+        .map_err(|_| SecurityError::Crypto)?;
         let app: i64 = sql(db.query_row("PRAGMA application_id", [], |row| row.get(0)))?;
         let version: i64 = sql(db.query_row("PRAGMA user_version", [], |row| row.get(0)))?;
         if app != APPLICATION_ID || version != SCHEMA_VERSION {
@@ -117,7 +121,8 @@ impl LegacyEncryptedConversion<'_> {
         let file = stage.join("state.sqlite3");
         safe_regular(&file)?;
         let db = sql(Connection::open_with_flags(
-            file, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+            file,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
         ))?;
         self.key()?.unlock(&db).map_err(|_| SecurityError::Crypto)?;
         let app: i64 = sql(db.query_row("PRAGMA application_id", [], |row| row.get(0)))?;
@@ -137,10 +142,14 @@ impl LegacyEncryptedConversion<'_> {
             return Ok(());
         }
         let mut dest = sql(Connection::open_with_flags(
-            &target, OpenFlags::SQLITE_OPEN_READ_WRITE |
-                OpenFlags::SQLITE_OPEN_CREATE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+            &target,
+            OpenFlags::SQLITE_OPEN_READ_WRITE
+                | OpenFlags::SQLITE_OPEN_CREATE
+                | OpenFlags::SQLITE_OPEN_NOFOLLOW,
         ))?;
-        self.key()?.unlock(&dest).map_err(|_| SecurityError::Crypto)?;
+        self.key()?
+            .unlock(&dest)
+            .map_err(|_| SecurityError::Crypto)?;
         {
             let backup = sql(Backup::new(&original, &mut dest))?;
             sql(backup.run_to_completion(128, Duration::from_millis(50), None))?;
@@ -158,9 +167,9 @@ impl LegacyEncryptedConversion<'_> {
     fn verify_state(&self, source: &Path, stage: &Path) -> SecResult<()> {
         let original = self.source_state(source)?;
         let migrated = self.encrypted_state(stage)?;
-        let mut query = sql(original.prepare(
-            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
-        ))?;
+        let mut query = sql(
+            original.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+        )?;
         let names = sql(query.query_map([], |row| row.get::<_, String>(0)))?;
         for name in names {
             let name = sql(name)?;
@@ -187,7 +196,8 @@ impl LegacyEncryptedConversion<'_> {
             let mut capture = parsed_capture(&path)?;
             validate_capture(&mut capture).map_err(|_| SecurityError::Crypto)?;
             self.check_generic_source(source, &capture)?;
-            let receipt = adapter.import_legacy_consented(self.consent, capture)
+            let receipt = adapter
+                .import_legacy_consented(self.consent, capture)
                 .map_err(|_| SecurityError::Crypto)?;
             if receipt.id != archive_id || receipt.snapshot_id != snapshot_id {
                 return Err(SecurityError::Crypto);
@@ -206,7 +216,8 @@ impl LegacyEncryptedConversion<'_> {
         for (archive_id, snapshot_id, path) in archive_snapshots(&root)? {
             let mut expected = parsed_capture(&path)?;
             validate_capture(&mut expected).map_err(|_| SecurityError::Crypto)?;
-            let actual = adapter.read(&archive_id, Some(&snapshot_id))
+            let actual = adapter
+                .read(&archive_id, Some(&snapshot_id))
                 .map_err(|_| SecurityError::Crypto)?;
             if actual.capture != expected {
                 return Err(SecurityError::Crypto);
@@ -223,7 +234,9 @@ impl LegacyEncryptedConversion<'_> {
         if !hex64(expected) {
             return Err(SecurityError::Crypto);
         }
-        let path = source.join("archive-v1/imports/generic").join(format!("{expected}.raw"));
+        let path = source
+            .join("archive-v1/imports/generic")
+            .join(format!("{expected}.raw"));
         let bytes = bounded_file(&path)?;
         if format!("{:x}", Sha256::digest(&bytes)) != expected {
             return Err(SecurityError::Crypto);
@@ -240,10 +253,16 @@ impl LegacyEncryptedConversion<'_> {
         let storage = ImmutableVaultStorage::new(stage, &vault, self.gate, self.lease)?;
         for path in all_regular_files(&original)? {
             let bytes = bounded_file(&path)?;
-            let relative = path.strip_prefix(source).map_err(|_| SecurityError::UnsafePath)?;
+            let relative = path
+                .strip_prefix(source)
+                .map_err(|_| SecurityError::UnsafePath)?;
             let identity = raw_identity(relative)?;
             storage.write_immutable(
-                self.gate, self.lease, ContentKind::Archive, identity.as_bytes(), &bytes,
+                self.gate,
+                self.lease,
+                ContentKind::Archive,
+                identity.as_bytes(),
+                &bytes,
             )?;
         }
         Ok(())
@@ -258,10 +277,15 @@ impl LegacyEncryptedConversion<'_> {
         let storage = ImmutableVaultStorage::new(stage, &vault, self.gate, self.lease)?;
         for path in all_regular_files(&original)? {
             let bytes = bounded_file(&path)?;
-            let relative = path.strip_prefix(source).map_err(|_| SecurityError::UnsafePath)?;
+            let relative = path
+                .strip_prefix(source)
+                .map_err(|_| SecurityError::UnsafePath)?;
             let identity = raw_identity(relative)?;
             let restored = storage.read(
-                self.gate, self.lease, ContentKind::Archive, identity.as_bytes(),
+                self.gate,
+                self.lease,
+                ContentKind::Archive,
+                identity.as_bytes(),
             )?;
             if restored.as_slice() != bytes.as_slice() {
                 return Err(SecurityError::Crypto);
@@ -286,7 +310,9 @@ impl LegacyEncryptedConversion<'_> {
         let vault = self.crypto()?;
         let storage = ImmutableVaultStorage::new(stage, &vault, self.gate, self.lease)?;
         for path in all_regular_files(&original)? {
-            let relative = path.strip_prefix(&original).map_err(|_| SecurityError::UnsafePath)?;
+            let relative = path
+                .strip_prefix(&original)
+                .map_err(|_| SecurityError::UnsafePath)?;
             let parts: Vec<_> = relative.components().collect();
             if parts.len() != 4
                 || parts[0].as_os_str().to_str() != Some("v1")
@@ -294,8 +320,14 @@ impl LegacyEncryptedConversion<'_> {
             {
                 return Err(SecurityError::InvalidConfig);
             }
-            let prefix = parts[2].as_os_str().to_str().ok_or(SecurityError::InvalidConfig)?;
-            let hash = parts[3].as_os_str().to_str().ok_or(SecurityError::InvalidConfig)?;
+            let prefix = parts[2]
+                .as_os_str()
+                .to_str()
+                .ok_or(SecurityError::InvalidConfig)?;
+            let hash = parts[3]
+                .as_os_str()
+                .to_str()
+                .ok_or(SecurityError::InvalidConfig)?;
             if !hex64(hash) || prefix != &hash[..2] {
                 return Err(SecurityError::Crypto);
             }
@@ -306,15 +338,21 @@ impl LegacyEncryptedConversion<'_> {
             let identity = format!("document/{hash}");
             if verifying {
                 let read = storage.read(
-                    self.gate, self.lease, ContentKind::DocumentObject, identity.as_bytes(),
+                    self.gate,
+                    self.lease,
+                    ContentKind::DocumentObject,
+                    identity.as_bytes(),
                 )?;
                 if read.as_slice() != bytes.as_slice() {
                     return Err(SecurityError::Crypto);
                 }
             } else {
                 storage.write_immutable(
-                    self.gate, self.lease, ContentKind::DocumentObject,
-                    identity.as_bytes(), &bytes,
+                    self.gate,
+                    self.lease,
+                    ContentKind::DocumentObject,
+                    identity.as_bytes(),
+                    &bytes,
                 )?;
             }
         }
@@ -397,7 +435,9 @@ fn raw_identity(relative: &Path) -> SecResult<String> {
     Ok(format!("legacy-file/v1/{}", name.replace('\\', "/")))
 }
 fn hex64(s: &str) -> bool {
-    s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+    s.len() == 64
+        && s.bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
 }
 fn parsed_capture(path: &Path) -> SecResult<Capture> {
     let bytes = bounded_file(path)?;
@@ -413,7 +453,9 @@ fn archive_snapshots(root: &Path) -> SecResult<Vec<(String, String, PathBuf)>> {
         if !fs::symlink_metadata(&dir)?.is_dir() {
             return Err(SecurityError::UnsafePath);
         }
-        let id = dir.file_name().and_then(|x| x.to_str())
+        let id = dir
+            .file_name()
+            .and_then(|x| x.to_str())
             .ok_or(SecurityError::InvalidConfig)?;
         if !hex64(id) {
             return Err(SecurityError::InvalidConfig);
@@ -425,11 +467,11 @@ fn archive_snapshots(root: &Path) -> SecResult<Vec<(String, String, PathBuf)>> {
         for file in fs::read_dir(captures)? {
             let path = file?.path();
             safe_regular(&path)?;
-            let snapshot = path.file_stem().and_then(|x| x.to_str())
+            let snapshot = path
+                .file_stem()
+                .and_then(|x| x.to_str())
                 .ok_or(SecurityError::InvalidConfig)?;
-            if path.extension().and_then(|x| x.to_str()) != Some("jsonl")
-                || !hex64(snapshot)
-            {
+            if path.extension().and_then(|x| x.to_str()) != Some("jsonl") || !hex64(snapshot) {
                 return Err(SecurityError::InvalidConfig);
             }
             result.push((id.to_owned(), snapshot.to_owned(), path));
