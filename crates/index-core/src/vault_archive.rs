@@ -199,12 +199,29 @@ impl VaultCaptureStore {
         format!("capture/{archive_id}/{snapshot_id}")
     }
 
-    pub fn save(&self, mut capture: Capture) -> Result<SaveReceipt> {
+    pub fn save(&self, capture: Capture) -> Result<SaveReceipt> {
+        self.save_internal(capture, false)
+    }
+
+    /// Only an explicit owner-consented offline migration may carry legacy
+    /// import provenance into the encrypted archive. Ordinary native capture
+    /// remains unable to impersonate that source type or a generic import.
+    pub fn import_legacy_consented(
+        &self,
+        _consent: &mind_place_security::vault_migration::ExplicitMigrationConsent,
+        capture: Capture,
+    ) -> Result<SaveReceipt> {
+        self.save_internal(capture, true)
+    }
+
+    fn save_internal(&self, mut capture: Capture, migration: bool) -> Result<SaveReceipt> {
         self.gate
             .validate_lease(self.lease)
             .map_err(|_| IndexError::Revoked)?;
         validate_capture(&mut capture)?;
-        if capture.provider == "generic" || capture.capture_method == "legacy-import" {
+        if capture.provider == "generic"
+            || (capture.capture_method == "legacy-import" && !migration)
+        {
             return Err(IndexError::InvalidEvidence);
         }
         let id = format!(
