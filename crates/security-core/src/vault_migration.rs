@@ -516,6 +516,135 @@ mod tests {
         app_child.verify_unchanged().unwrap();
     }
 
+    fn synthetic_journal_fixture() -> (
+        tempfile::TempDir,
+        LegacyMigrationPreflight,
+        SecurityGate,
+        UnlockLease,
+    ) {
+        let home = tempfile::tempdir().unwrap();
+        let source = home.path().join("legacy");
+        fs::create_dir(&source).unwrap();
+        fs::write(source.join("state.sqlite3"), b"SQLite format 3\0synthetic-data").unwrap();
+        let dest = home.path().join("new-vault");
+        let plan = LegacyMigrationPreflight::inspect(&source, &dest).unwrap();
+        let gate = SecurityGate::open(home.path().join("gate.json")).unwrap();
+        gate.initialize(b"synthetic-confirmed-migration-secret").unwrap();
+        let lease = gate.require_unlocked().unwrap();
+        (home, plan, gate, lease)
+    }
+
+    fn fake_encrypted_conversion(_source: &Path, staging: &Path) -> Result<()> {
+        fs::write(staging.join("vault-v1.json"), b"synthetic-marker-only")?;
+        fs::write(staging.join("state.sqlite3"), b"synthetic-encrypted-header")?;
+        Ok(())
+    }
+
+    fn fake_crypto_verify(staging: &Path) -> Result<()> {
+        if fs::read(staging.join("state.sqlite3"))? != b"synthetic-encrypted-header" {
+            return Err(SecurityError::Crypto);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn consented_journal_recovers_interrupted_conversion_without_mutating_source() {
+        let (_home, plan, gate, lease) = synthetic_journal_fixture();
+        let source_before = fs::read(plan.source.join("state.sqlite3")).unwrap();
+        assert!(ExplicitMigrationConsent::from_owner_typed_confirmation("skip").is_err());
+        let consent = ExplicitMigrationConsent::from_owner_typed_confirmation(
+            "ENCRYPT MY LEGACY VAULT",
+        )
+        .unwrap();
+        plan.begin_owner_consented(&consent, &gate, lease).unwrap();
+        let err = plan.execute_or_resume(
+            &consent,
+            &gate,
+            lease,
+            |source, stage| {
+                fake_encrypted_conversion(source, stage)?;
+                Err(SecurityError::Crypto)
+            },
+            fake_crypto_verify,
+        );
+        assert!(err.is_err());
+        assert!(!plan.destination.exists());
+        assert!(plan.staging_path().exists());
+        // Simulate a completely new process constructing its own plan.
+        let recovered = LegacyMigrationPreflight::inspect(&plan.source, &plan.destination).unwrap();
+        recovered
+            .execute_or_resume(
+                &consent,
+                &gate,
+                lease,
+                fake_encrypted_conversion,
+                fake_crypto_verify,
+            )
+            .unwrap();
+        assert_eq!(
+            fs::read(recovered.source.join("state.sqlite3")).unwrap(),
+            source_before
+        );
+        assert!(recovered.destination.join("vault-v1.json").is_file());
+        assert!(!recovered.staging_path().exists());
+    }
+
+    #[test]
+    fn migration_journal_rejects_source_tamper_revocation_and_rollback_is_non_destructive() {
+        let (_home, plan, gate, lease) = synthetic_journal_fixture();
+        let consent = ExplicitMigrationConsent::from_owner_typed_confirmation(
+            "ENCRYPT MY LEGACY VAULT",
+        )
+        .unwrap();
+        plan.begin_owner_consented(&consent, &gate, lease).unwrap();
+        fs::write(plan.source.join("state.sqlite3"), b"SQLite format 3\0changed").unwrap();
+        assert!(plan
+            .execute_or_resume(
+                &consent,
+                &gate,
+                lease,
+                fake_encrypted_conversion,
+                fake_crypto_verify,
+            )
+            .is_err());
+        fs::write(
+            plan.source.join("state.sqlite3"),
+            b"SQLite format 3\0synthetic-data",
+        )
+        .unwrap();
+        plan.execute_or_resume(
+            &consent,
+            &gate,
+            lease,
+            |source, stage| {
+                fake_encrypted_conversion(source, stage)?;
+                Err(SecurityError::Crypto)
+            },
+            fake_crypto_verify,
+        )
+        .unwrap_err();
+        plan.rollback_to_legacy(&consent, &gate, lease).unwrap();
+        assert!(!plan.destination.exists());
+        assert!(plan
+            .destination
+            .with_extension("mp9b-migration-rollback")
+            .exists());
+        assert!(fs::read(plan.source.join("state.sqlite3"))
+            .unwrap()
+            .starts_with(b"SQLite format 3\0"));
+        assert!(plan
+            .execute_or_resume(
+                &consent,
+                &gate,
+                lease,
+                fake_encrypted_conversion,
+                fake_crypto_verify,
+            )
+            .is_err());
+        gate.lock();
+        assert!(plan.rollback_to_legacy(&consent, &gate, lease).is_err());
+    }
+
     #[cfg(unix)]
     #[test]
     fn symlinked_archive_is_never_inventoried() {
