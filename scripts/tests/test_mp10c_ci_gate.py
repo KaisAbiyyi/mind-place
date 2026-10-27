@@ -202,9 +202,6 @@ class PriorProofTests(unittest.TestCase):
         self.assertIsNone(self.check())
 
     def test_reject_other_pr_attempt_stale_source_or_invalid_raw(self):
-        self.assertIsNone(gate.validated_candidate(
-            dict(self.run, run_attempt=2), token="dummy", repo=self.repo, pr=self.pr,
-            desired=self.fp)) if False else None
         with self.assertRaises(ValueError):
             gate.validate_proof(self.proof, self.raw, run=dict(self.run, run_attempt=2),
                                 artifact=self.artifact, pr=self.pr, repo=self.repo, desired=self.fp)
