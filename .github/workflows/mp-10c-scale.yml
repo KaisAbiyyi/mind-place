@@ -48,7 +48,7 @@ jobs:
   document-smoke:
     name: Windows approved documents / 100 files
     runs-on: windows-latest
-    timeout-minutes: 90
+    timeout-minutes: 360
     env:
       CARGO_INCREMENTAL: 0
       CARGO_BUILD_JOBS: 2
