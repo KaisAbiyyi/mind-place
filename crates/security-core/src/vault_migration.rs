@@ -226,7 +226,6 @@ fn collect_file(
     Ok(())
 }
 
-
 const JOURNAL_VERSION: u32 = 1;
 const CONSENT_WORDS: &str = "ENCRYPT MY LEGACY VAULT";
 
@@ -279,11 +278,14 @@ impl LegacyMigrationPreflight {
         if file.metadata()?.len() > 4096 {
             return Err(SecurityError::InvalidConfig);
         }
-        let journal: DurableMigrationJournal = serde_json::from_reader(file)
-            .map_err(|_| SecurityError::InvalidConfig)?;
+        let journal: DurableMigrationJournal =
+            serde_json::from_reader(file).map_err(|_| SecurityError::InvalidConfig)?;
         if journal.version != JOURNAL_VERSION
             || journal.inventory_hash != self.digest_inventory()?
-            || !matches!(journal.phase.as_str(), "prepared" | "converted" | "published" | "rolled-back")
+            || !matches!(
+                journal.phase.as_str(),
+                "prepared" | "converted" | "published" | "rolled-back"
+            )
         {
             return Err(SecurityError::Crypto);
         }
@@ -525,11 +527,16 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let source = home.path().join("legacy");
         fs::create_dir(&source).unwrap();
-        fs::write(source.join("state.sqlite3"), b"SQLite format 3\0synthetic-data").unwrap();
+        fs::write(
+            source.join("state.sqlite3"),
+            b"SQLite format 3\0synthetic-data",
+        )
+        .unwrap();
         let dest = home.path().join("new-vault");
         let plan = LegacyMigrationPreflight::inspect(&source, &dest).unwrap();
         let gate = SecurityGate::open(home.path().join("gate.json")).unwrap();
-        gate.initialize(b"synthetic-confirmed-migration-secret").unwrap();
+        gate.initialize(b"synthetic-confirmed-migration-secret")
+            .unwrap();
         let lease = gate.require_unlocked().unwrap();
         (home, plan, gate, lease)
     }
@@ -552,10 +559,9 @@ mod tests {
         let (_home, plan, gate, lease) = synthetic_journal_fixture();
         let source_before = fs::read(plan.source.join("state.sqlite3")).unwrap();
         assert!(ExplicitMigrationConsent::from_owner_typed_confirmation("skip").is_err());
-        let consent = ExplicitMigrationConsent::from_owner_typed_confirmation(
-            "ENCRYPT MY LEGACY VAULT",
-        )
-        .unwrap();
+        let consent =
+            ExplicitMigrationConsent::from_owner_typed_confirmation("ENCRYPT MY LEGACY VAULT")
+                .unwrap();
         plan.begin_owner_consented(&consent, &gate, lease).unwrap();
         let err = plan.execute_or_resume(
             &consent,
@@ -592,12 +598,15 @@ mod tests {
     #[test]
     fn migration_journal_rejects_source_tamper_revocation_and_rollback_is_non_destructive() {
         let (_home, plan, gate, lease) = synthetic_journal_fixture();
-        let consent = ExplicitMigrationConsent::from_owner_typed_confirmation(
-            "ENCRYPT MY LEGACY VAULT",
+        let consent =
+            ExplicitMigrationConsent::from_owner_typed_confirmation("ENCRYPT MY LEGACY VAULT")
+                .unwrap();
+        plan.begin_owner_consented(&consent, &gate, lease).unwrap();
+        fs::write(
+            plan.source.join("state.sqlite3"),
+            b"SQLite format 3\0changed",
         )
         .unwrap();
-        plan.begin_owner_consented(&consent, &gate, lease).unwrap();
-        fs::write(plan.source.join("state.sqlite3"), b"SQLite format 3\0changed").unwrap();
         assert!(plan
             .execute_or_resume(
                 &consent,
