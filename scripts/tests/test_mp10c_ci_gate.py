@@ -212,6 +212,19 @@ class PriorProofTests(unittest.TestCase):
             gate.validate_proof(self.proof, b"{}", run=self.run, artifact=self.artifact,
                                 pr=self.pr, repo=self.repo, desired=self.fp)
 
+
+    def test_pr_run_head_differs_from_synthetic_merge_checkout(self):
+        # GitHub Actions pull_request runs record branch HEAD but checkout
+        # executes the merge ref. Both must be preserved, not equated.
+        self.proof["checkout_sha"] = "b" * 40
+        self.proof["source_sha"] = "a" * 40
+        gate.validate_proof(self.proof, self.raw, run=self.run, artifact=self.artifact,
+                            pr=self.pr, repo=self.repo, desired=self.fp)
+        self.proof["source_sha"] = "b" * 40
+        with self.assertRaises(ValueError):
+            gate.validate_proof(self.proof, self.raw, run=self.run, artifact=self.artifact,
+                                pr=self.pr, repo=self.repo, desired=self.fp)
+
     def test_only_same_pr_can_reuse(self):
         self.run["pull_requests"] = [{"number": 127}]
         self.assertIsNone(self.check())
