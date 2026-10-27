@@ -300,9 +300,9 @@ impl LegacyMigrationPreflight {
         tmp.write_all(&serde_json::to_vec(journal).map_err(|_| SecurityError::InvalidConfig)?)?;
         tmp.as_file().sync_all()?;
         if replace {
-            tmp.persist(path).map_err(|e| e.error)?;
+            tmp.persist(&path).map_err(|e| e.error)?;
         } else {
-            tmp.persist_noclobber(path).map_err(|e| e.error)?;
+            tmp.persist_noclobber(&path).map_err(|e| e.error)?;
         }
         #[cfg(unix)]
         File::open(parent)?.sync_all()?;
