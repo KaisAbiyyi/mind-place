@@ -91,9 +91,13 @@ jobs:
   document-scale:
     name: Windows approved documents / 100000 files
     needs: effective-input-gate
-    if: needs.effective-input-gate.outputs.run-heavy == 'true'
+    # Never schedule multi-hour indexing on each Draft development commit.
+    # Promote PR out of Draft only after frozen cheap CI; full is still mandatory.
+    if: needs.effective-input-gate.outputs.run-heavy == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     runs-on: windows-latest
     timeout-minutes: 360
+    outputs:
+      tier-passed: ${{ steps.full-receipt.outputs.tier-passed }}
     concurrency:
       group: mp10c-100k-${{ github.event.pull_request.number || github.ref }}
       cancel-in-progress: false
@@ -129,6 +133,7 @@ jobs:
         if: steps.recheck.outputs.run-heavy == 'true'
         run: cargo test --release -p mind-place-index --test document_scale_qualification qualifies_document_scale -- --ignored --exact --nocapture
       - name: Validate exact-tier receipt
+        id: full-receipt
         if: steps.recheck.outputs.run-heavy == 'true'
         shell: pwsh
         run: |
@@ -147,13 +152,36 @@ jobs:
             throw "MP-10C receipt did not meet exact-tier qualification"
           }
           Write-Output "MP-10C exact-tier receipt validated: $expected files, $($receipt.extracted_chunks) chunks"
+          "tier-passed=true" >> $env:GITHUB_OUTPUT
+      - name: Upload validated raw 100K receipt
+        if: success() && steps.full-receipt.outputs.tier-passed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mp10c-raw-100000
+          path: qualification/mp10c-100000.json
+          if-no-files-found: error
+          retention-days: 30
+
+  provenance:
+    name: Source-bound 100K provenance (no indexing)
+    needs: [effective-input-gate, document-scale]
+    if: needs.document-scale.outputs.tier-passed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      EXPECTED_FINGERPRINT: ${{ needs.effective-input-gate.outputs.fingerprint }}
+      PR_NUMBER: ${{ github.event.pull_request.number || '0' }}
+      PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Download validated raw 100K receipt
+        uses: actions/download-artifact@v4
+        with:
+          name: mp10c-raw-100000
+          path: qualification
       - name: Mint source-bound 100K provenance
-        if: steps.recheck.outputs.run-heavy == 'true'
-        shell: pwsh
-        run: |
-          python scripts/mp10c_ci_gate.py attest --receipt "$env:MP_10C_RECEIPT" --output qualification/mp10c-provenance.json
+        run: python3 scripts/mp10c_ci_gate.py attest --receipt qualification/mp10c-100000.json --output qualification/mp10c-provenance.json
       - name: Upload qualified receipt and provenance
-        if: success() && steps.recheck.outputs.run-heavy == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: mp10c-qualified-100000
@@ -162,3 +190,13 @@ jobs:
             qualification/mp10c-provenance.json
           if-no-files-found: error
           retention-days: 30
+
+  draft-qualification-pending:
+    name: Draft requires final 100K qualification (NOT PASS)
+    needs: effective-input-gate
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft == true && needs.effective-input-gate.outputs.run-heavy == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "::error::100K receipt missing for effective source inputs. Freeze source, complete cheap CI, and mark PR ready only when explicitly qualifying."
+          exit 1
