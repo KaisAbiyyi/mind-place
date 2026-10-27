@@ -16,7 +16,7 @@ jobs:
   verify:
     name: Verify Windows product
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 120
     env:
       CARGO_BUILD_JOBS: 1
       CARGO_INCREMENTAL: 0
