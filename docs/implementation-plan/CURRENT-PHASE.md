@@ -2,11 +2,17 @@
 
 This file is the small execution-order pointer for cloud agents. Strategy lives in `../BIG-IMPLEMENTATION-PLAN.md`; detailed design notes live beside this file. If older phase labels conflict with this file, follow this file for the current execution order.
 
-## Current execution gate — 2026-10-23
+## Current execution gate ï¿½ 2026-10-23
 
 **MP-4L2: native document qualification recovery**, [PR #42](https://github.com/KaisAbiyyi/mind-place/pull/42). The optimized Windows real-corpus gate passes 10/10 with no skips on product SHA `60233a0`; [implementation receipt](../implementation-summary/2026-10-23-mp-4l2-native-parser-recovery.md) and [machine-readable evidence](../qualification/2026-10-23-mp-4l2-release.json). Final-head CI and reviewed merge are required for integration acceptance. This local bounded repair was explicitly owner-authorized.
 
 **Immediate successor: MP-4U**, owner folder add/search/revoke workflow acceptance after #42 integration. Phases 5/6/7 remain gated by that owner decision. Historical phase labels below do not move execution back to Phase 3; live task status is maintained in the Notion execution board.
+
+## Phase 8 owner clarification â€” functionality continues while UI is provisional (2026-10-24)
+
+MP-8L1 owner testing shows an operational archive and visible content, but the current sidebar list compresses at Windows scaling 150% and 175%. The owner explicitly accepts this **known temporary UX limitation**. It must be documented but **must not hold other eligible functionality, Cloud/backend, Phase 9 security, or performance work**. The optional CSS patch [#116](https://github.com/KaisAbiyyi/mind-place/pull/116) and full UI overhaul are separately prioritized, without altering the functional dependency DAG.
+
+MP-8L1 [#101](https://github.com/KaisAbiyyi/mind-place/issues/101) remains REVIEW/PARTIAL until actual required native packaged/app upgrade, unlock/privacy, real archive/search and persistence gates are proven. Never claim unrun tests PASS. Source preview fix [#114](https://github.com/KaisAbiyyi/mind-place/pull/114) passed focused Windows and synthetic native testing. The broader navigation redesign is research-only Backlog [MP-UXR-01 / #117](https://github.com/KaisAbiyyi/mind-place/issues/117): fixed icon activity rail with expandable contextual child panes, subject to owner review and performance/accessibility measurement. UX research is not a predecessor to technical functionality.
 
 ## Baseline
 
