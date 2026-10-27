@@ -16,7 +16,8 @@ use windows_sys::Win32::{
     Security::{
         Authorization::{
             ConvertSecurityDescriptorToStringSecurityDescriptorW, ConvertSidToStringSidW,
-            ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
+            ConvertStringSecurityDescriptorToSecurityDescriptorW, ConvertStringSidToSidW,
+            SDDL_REVISION_1,
         },
         GetFileSecurityW, GetTokenInformation, SetFileSecurityW, TokenUser,
         DACL_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, TOKEN_QUERY, TOKEN_USER,
@@ -162,6 +163,40 @@ fn get_dacl(path: &Path) -> io::Result<String> {
     }
 }
 
+/// Resolve the SDDL well-known SID aliases (for example SY or LA) into
+/// canonical numeric SIDs before comparing to the current token user.
+/// Windows may return alias or numeric spellings for the same SID.
+fn canonical_sid(sddl_sid: &str) -> io::Result<String> {
+    let encoded = sddl_sid
+        .encode_utf16()
+        .chain(iter::once(0))
+        .collect::<Vec<_>>();
+    unsafe {
+        let mut raw = std::ptr::null_mut();
+        if ConvertStringSidToSidW(encoded.as_ptr(), &mut raw) == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "IPC DACL unrecognized principal",
+            ));
+        }
+        let _sid = LocalAllocation(raw);
+        let mut numeric = std::ptr::null_mut();
+        if ConvertSidToStringSidW(raw, &mut numeric) == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let _numeric = LocalAllocation(numeric.cast());
+        let len = (0..256).take_while(|&index| *numeric.add(index) != 0).count();
+        if len == 256 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "IPC DACL SID too long",
+            ));
+        }
+        String::from_utf16(std::slice::from_raw_parts(numeric, len))
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "IPC DACL invalid SID"))
+    }
+}
+
 /// Protect a descriptor *before* rename/publication. Both the owner SID and
 /// LocalSystem need full control; inherited/everyone/group grants are excluded.
 pub(super) fn protect(path: &Path) -> io::Result<()> {
@@ -200,13 +235,10 @@ pub(super) fn verify(path: &Path) -> io::Result<()> {
                 "IPC DACL ACE",
             ));
         }
-        principals.push(fields[5]);
+        principals.push(canonical_sid(fields[5])?);
     }
-    let owner = principals.iter().filter(|&&sid| sid == current).count();
-    let system = principals
-        .iter()
-        .filter(|&&sid| sid == "SY" || sid == "S-1-5-18")
-        .count();
+    let owner = principals.iter().filter(|sid| *sid == &current).count();
+    let system = principals.iter().filter(|sid| sid.as_str() == "S-1-5-18").count();
     if principals.len() != 2 || owner != 1 || system != 1 {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
@@ -228,6 +260,15 @@ mod tests {
         protect(&path).unwrap();
         verify(&path).unwrap();
         set_dacl(&path, "D:P(A;;FA;;;WD)").unwrap();
+        assert!(verify(&path).is_err());
+        // A duplicate owner ACE is also unacceptable, even when it grants no
+        // broader principal access: this guard requires exactly two ACEs.
+        let owner = current_sid().unwrap();
+        set_dacl(
+            &path,
+            &format!("D:P(A;;FA;;;SY)(A;;FA;;;{owner})(A;;FA;;;{owner})"),
+        )
+        .unwrap();
         assert!(verify(&path).is_err());
         // Restore private permissions before the tempfile is disposed.
         protect(&path).unwrap();
