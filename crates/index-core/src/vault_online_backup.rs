@@ -130,7 +130,8 @@ impl VaultOnlineBackup {
         destination: &Path,
         recovery: &mind_place_security::vault::RecoverySecret,
     ) -> Result<BackupMetadata> {
-        gate.validate_lease(lease).map_err(|_| IndexError::Revoked)?;
+        gate.validate_lease(lease)
+            .map_err(|_| IndexError::Revoked)?;
         if destination.exists()
             || backup_root.starts_with(destination)
             || destination.starts_with(backup_root)
@@ -169,14 +170,16 @@ impl VaultOnlineBackup {
             if &header == b"SQLite format 3\0" {
                 return Err(IndexError::InvalidEvidence);
             }
-            let key_bytes = vault.derived_key(gate, lease, domain)
+            let key_bytes = vault
+                .derived_key(gate, lease, domain)
                 .map_err(|_| IndexError::Revoked)?;
             let mut raw = [0u8; 32];
             raw.copy_from_slice(key_bytes.as_ref());
             let key = CipherKey::new(raw, gate, lease);
             raw.zeroize();
             let db = Connection::open_with_flags(
-                &path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+                &path,
+                OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
             )?;
             key.unlock(&db)?;
             let health: String = db.query_row("PRAGMA quick_check(1)", [], |r| r.get(0))?;
@@ -187,7 +190,8 @@ impl VaultOnlineBackup {
         if !found_state {
             return Err(IndexError::InvalidEvidence);
         }
-        gate.validate_lease(lease).map_err(|_| IndexError::Revoked)?;
+        gate.validate_lease(lease)
+            .map_err(|_| IndexError::Revoked)?;
         // All SQLite handles above have closed before Windows directory rename.
         fs::rename(&staged, destination)?;
         #[cfg(unix)]
