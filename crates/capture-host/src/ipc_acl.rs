@@ -185,7 +185,9 @@ fn canonical_sid(sddl_sid: &str) -> io::Result<String> {
             return Err(io::Error::last_os_error());
         }
         let _numeric = LocalAllocation(numeric.cast());
-        let len = (0..256).take_while(|&index| *numeric.add(index) != 0).count();
+        let len = (0..256)
+            .take_while(|&index| *numeric.add(index) != 0)
+            .count();
         if len == 256 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -238,7 +240,10 @@ pub(super) fn verify(path: &Path) -> io::Result<()> {
         principals.push(canonical_sid(fields[5])?);
     }
     let owner = principals.iter().filter(|sid| *sid == &current).count();
-    let system = principals.iter().filter(|sid| sid.as_str() == "S-1-5-18").count();
+    let system = principals
+        .iter()
+        .filter(|sid| sid.as_str() == "S-1-5-18")
+        .count();
     if principals.len() != 2 || owner != 1 || system != 1 {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
