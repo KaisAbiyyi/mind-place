@@ -1,11 +1,12 @@
 //! MP-9B legacy migration preflight: read-only evidence and change detection.
 //! Never copy, encrypt, relocate, delete, or rewrite owner data here.
 //! Approval, isolated conversion and atomic rollback are separate gates.
-use crate::{validate_path, Result, SecurityError};
+use crate::{validate_path, Result, SecurityError, SecurityGate, UnlockLease};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     fs::{self, File},
-    io::Read,
+    io::{Read, Write},
     path::{Path, PathBuf},
 };
 
@@ -223,6 +224,217 @@ fn collect_file(
         sha256: format!("{:x}", sha.finalize()),
     });
     Ok(())
+}
+
+
+const JOURNAL_VERSION: u32 = 1;
+const CONSENT_WORDS: &str = "ENCRYPT MY LEGACY VAULT";
+
+/// UI must obtain explicit typed consent for the owner's data.
+pub struct ExplicitMigrationConsent(());
+impl ExplicitMigrationConsent {
+    pub fn from_owner_typed_confirmation(input: &str) -> Result<Self> {
+        if input != CONSENT_WORDS {
+            return Err(SecurityError::InvalidCredentials);
+        }
+        Ok(Self(()))
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DurableMigrationJournal {
+    version: u32,
+    inventory_hash: String,
+    phase: String,
+}
+
+impl LegacyMigrationPreflight {
+    fn digest_inventory(&self) -> Result<String> {
+        let mut h = Sha256::new();
+        h.update(b"mp9b-legacy-source-inventory-v1\0");
+        for r in &self.files {
+            let relative = r.relative.to_str().ok_or(SecurityError::InvalidConfig)?;
+            h.update(relative.as_bytes());
+            h.update([0]);
+            h.update(r.bytes.to_be_bytes());
+            h.update(r.sha256.as_bytes());
+            h.update([0]);
+        }
+        Ok(format!("{:x}", h.finalize()))
+    }
+
+    fn journal_path(&self) -> PathBuf {
+        self.destination.with_extension("mp9b-migration-journal")
+    }
+
+    fn staging_path(&self) -> PathBuf {
+        self.destination.with_extension("mp9b-migration-staging")
+    }
+
+    fn read_journal(&self) -> Result<DurableMigrationJournal> {
+        let path = self.journal_path();
+        check(&path)?;
+        let file = File::open(path)?;
+        if file.metadata()?.len() > 4096 {
+            return Err(SecurityError::InvalidConfig);
+        }
+        let journal: DurableMigrationJournal = serde_json::from_reader(file)
+            .map_err(|_| SecurityError::InvalidConfig)?;
+        if journal.version != JOURNAL_VERSION
+            || journal.inventory_hash != self.digest_inventory()?
+            || !matches!(journal.phase.as_str(), "prepared" | "converted" | "published" | "rolled-back")
+        {
+            return Err(SecurityError::Crypto);
+        }
+        Ok(journal)
+    }
+
+    fn write_journal(&self, journal: &DurableMigrationJournal, replace: bool) -> Result<()> {
+        let path = self.journal_path();
+        check(&path)?;
+        let parent = path.parent().ok_or(SecurityError::UnsafePath)?;
+        let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
+        tmp.write_all(&serde_json::to_vec(journal).map_err(|_| SecurityError::InvalidConfig)?)?;
+        tmp.as_file().sync_all()?;
+        if replace {
+            tmp.persist(path).map_err(|e| e.error)?;
+        } else {
+            tmp.persist_noclobber(path).map_err(|e| e.error)?;
+        }
+        #[cfg(unix)]
+        File::open(parent)?.sync_all()?;
+        Ok(())
+    }
+
+    /// Begin a durable operation without changing even one legacy byte.
+    pub fn begin_owner_consented(
+        &self,
+        _consent: &ExplicitMigrationConsent,
+        gate: &SecurityGate,
+        lease: UnlockLease,
+    ) -> Result<()> {
+        gate.validate_lease(lease)?;
+        // Journal and staging must live OUTSIDE the legacy inventory.
+        if self.destination.parent() == Some(self.source.as_path()) {
+            return Err(SecurityError::UnsafePath);
+        }
+        self.verify_unchanged()?;
+        check(&self.staging_path())?;
+        if self.staging_path().exists() || self.journal_path().exists() {
+            return Err(SecurityError::AlreadyConfigured);
+        }
+        self.write_journal(
+            &DurableMigrationJournal {
+                version: JOURNAL_VERSION,
+                inventory_hash: self.digest_inventory()?,
+                phase: "prepared".into(),
+            },
+            false,
+        )
+    }
+
+    /// Converter must encrypt all authoritative domains and be resumable.
+    /// Verifier must independently decrypt/read back identity and integrity;
+    /// a failure leaves the durable journal/staging for explicit recovery.
+    pub fn execute_or_resume(
+        &self,
+        _consent: &ExplicitMigrationConsent,
+        gate: &SecurityGate,
+        lease: UnlockLease,
+        mut convert: impl FnMut(&Path, &Path) -> Result<()>,
+        mut verify: impl FnMut(&Path) -> Result<()>,
+    ) -> Result<()> {
+        gate.validate_lease(lease)?;
+        let mut journal = self.read_journal()?;
+        if journal.phase == "rolled-back" {
+            return Err(SecurityError::InvalidConfig);
+        }
+        let staging = self.staging_path();
+        check(&staging)?;
+        if self.destination.exists() {
+            if journal.phase != "converted" && journal.phase != "published" {
+                return Err(SecurityError::Crypto);
+            }
+            verify(&self.destination)?;
+            self.verify_source_only()?;
+            journal.phase = "published".into();
+            self.write_journal(&journal, true)?;
+            return Ok(());
+        }
+        self.verify_unchanged()?;
+        if journal.phase == "published" {
+            return Err(SecurityError::Crypto);
+        }
+        if journal.phase == "prepared" {
+            if !staging.exists() {
+                fs::create_dir(&staging)?;
+            }
+            check(&staging)?;
+            convert(&self.source, &staging)?;
+            gate.validate_lease(lease)?;
+            self.verify_unchanged()?;
+            journal.phase = "converted".into();
+            self.write_journal(&journal, true)?;
+        }
+        if !staging.is_dir() {
+            return Err(SecurityError::Crypto);
+        }
+        verify(&staging)?;
+        gate.validate_lease(lease)?;
+        self.verify_unchanged()?;
+        if !staging.join("vault-v1.json").is_file() {
+            return Err(SecurityError::Crypto);
+        }
+        let mut first = [0u8; 16];
+        File::open(staging.join("state.sqlite3"))?.read_exact(&mut first)?;
+        if &first == b"SQLite format 3\0" {
+            return Err(SecurityError::Crypto);
+        }
+        fs::rename(&staging, &self.destination)?;
+        #[cfg(unix)]
+        File::open(self.destination.parent().ok_or(SecurityError::UnsafePath)?)?.sync_all()?;
+        journal.phase = "published".into();
+        self.write_journal(&journal, true)?;
+        Ok(())
+    }
+
+    fn verify_source_only(&self) -> Result<()> {
+        if self.inventory()? != self.files {
+            return Err(SecurityError::Crypto);
+        }
+        Ok(())
+    }
+
+    /// No plaintext deletion: quarantine encrypted staging for owner disposition.
+    pub fn rollback_to_legacy(
+        &self,
+        _consent: &ExplicitMigrationConsent,
+        gate: &SecurityGate,
+        lease: UnlockLease,
+    ) -> Result<()> {
+        gate.validate_lease(lease)?;
+        let mut journal = self.read_journal()?;
+        if journal.phase == "published" || self.destination.exists() {
+            return Err(SecurityError::AlreadyConfigured);
+        }
+        self.verify_unchanged()?;
+        let staging = self.staging_path();
+        check(&staging)?;
+        if staging.exists() {
+            if !staging.is_dir() {
+                return Err(SecurityError::UnsafePath);
+            }
+            let quarantined = self.destination.with_extension("mp9b-migration-rollback");
+            check(&quarantined)?;
+            if quarantined.exists() {
+                return Err(SecurityError::AlreadyConfigured);
+            }
+            fs::rename(staging, quarantined)?;
+        }
+        journal.phase = "rolled-back".into();
+        self.write_journal(&journal, true)
+    }
 }
 
 #[cfg(test)]
