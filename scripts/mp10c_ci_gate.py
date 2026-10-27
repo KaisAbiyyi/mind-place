@@ -105,8 +105,9 @@ def validate_proof(proof: dict, raw_bytes: bytes, *, run: dict, artifact: dict,
         raise ValueError("Provenance does not belong to successful run attempt")
     if proof.get("repo") != repo or proof.get("pr_number") != pr or proof.get("event") != "pull_request":
         raise ValueError("Proof belongs to another repository, PR, or event")
-    if proof.get("checkout_sha") != run.get("head_sha"):
-        raise ValueError("Checkout SHA != GitHub's qualified run")
+    # PR run metadata records branch HEAD; checkout tests a synthetic merge.
+    if proof.get("source_sha") != run.get("head_sha"):
+        raise ValueError("PR branch HEAD SHA != GitHub qualified run")
     if proof.get("tier") != 100000 or proof.get("qualified") is not True:
         raise ValueError("Proof does not attest completed full tier")
     if proof.get("input_fingerprint") != desired or not HEX64.fullmatch(desired):
@@ -121,9 +122,11 @@ def validate_proof(proof: dict, raw_bytes: bytes, *, run: dict, artifact: dict,
 
 
 def make_proof(*, receipt: bytes, source: str, run_id: int, attempt: int,
-               pr: int, repo: str, event: str, effective: str) -> dict:
+               pr: int, repo: str, event: str, effective: str,
+               head_sha: str | None = None) -> dict:
     require_raw_receipt(json.loads(receipt))
-    if not HEX40.fullmatch(source) or not HEX64.fullmatch(effective):
+    head_sha = head_sha or source
+    if not HEX40.fullmatch(source) or not HEX40.fullmatch(head_sha) or not HEX64.fullmatch(effective):
         raise ValueError("Invalid source binding")
     if not all(type(x) is int and x > 0 for x in (run_id, attempt)):
         raise ValueError("Missing workflow identity")
@@ -132,7 +135,8 @@ def make_proof(*, receipt: bytes, source: str, run_id: int, attempt: int,
     return {
         "schema": SCHEMA, "tier": 100000, "qualified": True,
         "repo": repo, "event": event, "pr_number": pr,
-        "checkout_sha": source, "input_fingerprint": effective,
+        "checkout_sha": source, "source_sha": head_sha,
+        "input_fingerprint": effective,
         "run_id": run_id, "run_attempt": attempt,
         "raw_receipt_sha256": hashlib.sha256(receipt).hexdigest(),
     }
@@ -210,7 +214,7 @@ def validated_candidate(run: dict, *, token: str, repo: str, pr: int, desired: s
             validate_proof(proof, receipt, run=run, artifact=item,
                            pr=pr, repo=repo, desired=desired)
             return {"run_id": run_id, "artifact_id": item["id"],
-                    "qualified_sha": proof["checkout_sha"], "artifact_digest": archive_digest,
+                    "qualified_sha": proof["source_sha"], "artifact_digest": archive_digest,
                     "proof": proof, "run_url": run["html_url"]}
         except (KeyError, ValueError, TypeError, OSError, zipfile.BadZipFile, json.JSONDecodeError):
             continue
@@ -275,7 +279,12 @@ def main() -> int:
             pr=int(os.environ.get("PR_NUMBER") or 0),
             repo=os.environ["GITHUB_REPOSITORY"],
             event=os.environ["GITHUB_EVENT_NAME"],
-            effective=fp)
+            effective=fp, head_sha=os.environ["PR_HEAD_SHA"])
+        if os.environ["GITHUB_EVENT_NAME"] == "pull_request":
+            parents = subprocess.check_output(
+                ["git", "rev-list", "--parents", "-n", "1", "HEAD"], text=True).split()
+            if len(parents) != 3 or parents[2] != proof["source_sha"]:
+                raise ValueError("PR checkout merge does not match branch source SHA")
         expected = os.environ.get("EXPECTED_FINGERPRINT")
         if expected != fp:
             raise ValueError("Checkout/input TOCTOU mismatch: gate and full job differ")
@@ -308,15 +317,15 @@ def main() -> int:
     if summary:
         lines = [
             "## MP-10C 100K input gate",
-            f"- Effective input fingerprint: \`{fp}\`",
+            f"- Effective input fingerprint: `{fp}`",
             f"- Full 100K test on this run: **{'REQUIRED' if run_full else 'NOT RUN'}**",
             f"- Decision: {reason}",
         ]
         if previous and not run_full:
             lines.extend([
-                f"- Previously qualified checkout SHA: \`{previous['qualified_sha']}\`",
+                f"- Previously qualified checkout SHA: `{previous['qualified_sha']}`",
                 f"- Prior successful Windows 100K run: {previous['run_url']}",
-                f"- Artifact ID: \`{previous['artifact_id']}\`; SHA256: \`{previous['artifact_digest']}\`",
+                f"- Artifact ID: `{previous['artifact_id']}`; SHA256: `{previous['artifact_digest']}`",
                 "- **This head is not newly 100K-qualified.** The proof covers identical effective inputs only.",
             ])
         Path(summary).open("a", encoding="utf-8").write("\n".join(lines) + "\n")
