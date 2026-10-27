@@ -25,6 +25,8 @@ SCHEMA = "mind-place-mp10c-qualification/v1"
 ARTIFACT = "mp10c-qualified-100000"
 WORKFLOW = "mp-10c-scale.yml"
 FULL_JOB = "Windows approved documents / 100000 files"
+PROOF_JOB = "Source-bound 100K provenance (no indexing)"
+RAW_ARTIFACT = "mp10c-raw-100000"
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 
@@ -121,6 +123,27 @@ def validate_proof(proof: dict, raw_bytes: bytes, *, run: dict, artifact: dict,
         raise ValueError("Artifact belongs to different workflow run")
 
 
+def check_merge_source(*, repo_root: str = ".", expected_source: str) -> None:
+    """Read the actual merge commit object; works even at a shallow boundary.
+
+    'git rev-list --parents' intentionally hides shallow-boundary parents.
+    cat-file exposes the signed-by-Git object content, independent of ancestry
+    traversal. Reject an absent, non-merge, or differently parented checkout.
+    """
+    if not HEX40.fullmatch(expected_source):
+        raise ValueError("Invalid expected PR source SHA")
+    head = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=repo_root, text=True).strip()
+    data = subprocess.check_output(
+        ["git", "cat-file", "-p", head], cwd=repo_root, text=True)
+    headers = data.split("\n\n", 1)[0].splitlines()
+    parents = [line[7:] for line in headers if line.startswith("parent ")]
+    if len(parents) != 2 or any(not HEX40.fullmatch(p) for p in parents):
+        raise ValueError("Expected a two-parent PR checkout merge")
+    if parents[0] == parents[1] or parents[1] != expected_source:
+        raise ValueError("PR checkout merge does not match branch source SHA")
+
+
 def make_proof(*, receipt: bytes, source: str, run_id: int, attempt: int,
                pr: int, repo: str, event: str, effective: str,
                head_sha: str | None = None) -> dict:
@@ -184,15 +207,37 @@ def validated_candidate(run: dict, *, token: str, repo: str, pr: int, desired: s
     jobs = api_json(api + "/jobs?per_page=100", token).get("jobs", [])
     # A completed workflow containing only a previously-skipped heavyweight
     # job is NOT an authoritative qualification, even when overall run green.
-    proven = [j for j in jobs if j.get("name") == FULL_JOB
-              and j.get("conclusion") == "success"
-              and all(any(s.get("name") == step and s.get("conclusion") == "success"
-                          for s in j.get("steps", [])) for step in (
-                  "Qualify real authorized document scale", "Validate exact-tier receipt",
-                  "Mint source-bound 100K provenance"))]
-    if len(proven) != 1:
+    def succeeded(job: dict, required_steps: tuple[str, ...]) -> bool:
+        return job.get("conclusion") == "success" and all(
+            any(s.get("name") == name and s.get("conclusion") == "success"
+                for s in job.get("steps", [])) for name in required_steps)
+
+    full = [j for j in jobs if j.get("name") == FULL_JOB and succeeded(j, (
+        "Qualify real authorized document scale", "Validate exact-tier receipt",
+        "Upload validated raw 100K receipt"))]
+    attested = [j for j in jobs if j.get("name") == PROOF_JOB and succeeded(j, (
+        "Mint source-bound 100K provenance", "Upload qualified receipt and provenance"))]
+    if len(full) != 1 or len(attested) != 1:
         return None
     artifacts = api_json(api + "/artifacts?per_page=100", token).get("artifacts", [])
+    raw_artifacts = [a for a in artifacts if a.get("name") == RAW_ARTIFACT
+                     and a.get("expired") is False
+                     and a.get("workflow_run", {}).get("id") == run_id]
+    if len(raw_artifacts) != 1:
+        return None
+    raw_item = raw_artifacts[0]
+    raw_zip = artifact_bytes(raw_item["archive_download_url"], token)
+    raw_digest = raw_item.get("digest", "")
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", raw_digest or "") or (
+            hashlib.sha256(raw_zip).hexdigest() != raw_digest.removeprefix("sha256:")):
+        return None
+    with zipfile.ZipFile(io.BytesIO(raw_zip)) as z:
+        if set(z.namelist()) != {"mp10c-100000.json"}:
+            return None
+        if z.getinfo("mp10c-100000.json").file_size > 65536:
+            return None
+        verified_raw = z.read("mp10c-100000.json")
+    require_raw_receipt(json.loads(verified_raw))
     for item in artifacts:
         if item.get("name") != ARTIFACT or item.get("expired") is not False:
             continue
@@ -211,6 +256,8 @@ def validated_candidate(run: dict, *, token: str, repo: str, pr: int, desired: s
                     continue
                 proof = json.loads(z.read("mp10c-provenance.json"))
                 receipt = z.read("mp10c-100000.json")
+            if receipt != verified_raw:
+                continue
             validate_proof(proof, receipt, run=run, artifact=item,
                            pr=pr, repo=repo, desired=desired)
             return {"run_id": run_id, "artifact_id": item["id"],
@@ -281,10 +328,7 @@ def main() -> int:
             event=os.environ["GITHUB_EVENT_NAME"],
             effective=fp, head_sha=os.environ["PR_HEAD_SHA"])
         if os.environ["GITHUB_EVENT_NAME"] == "pull_request":
-            parents = subprocess.check_output(
-                ["git", "rev-list", "--parents", "-n", "1", "HEAD"], text=True).split()
-            if len(parents) != 3 or parents[2] != proof["source_sha"]:
-                raise ValueError("PR checkout merge does not match branch source SHA")
+            check_merge_source(expected_source=proof["source_sha"])
         expected = os.environ.get("EXPECTED_FINGERPRINT")
         if expected != fp:
             raise ValueError("Checkout/input TOCTOU mismatch: gate and full job differ")
