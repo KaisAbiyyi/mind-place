@@ -119,6 +119,81 @@ impl VaultOnlineBackup {
             .map_err(|_| IndexError::Revoked)?;
         Ok(metadata)
     }
+
+    /// Owner-authorized new-destination restore: authenticate the portable
+    /// snapshot, then verify the keyed SQLCipher databases *before* publishing.
+    /// A failed validation leaves only an explicitly named partial root.
+    pub fn restore(
+        gate: &SecurityGate,
+        lease: UnlockLease,
+        backup_root: &Path,
+        destination: &Path,
+        recovery: &mind_place_security::vault::RecoverySecret,
+    ) -> Result<BackupMetadata> {
+        gate.validate_lease(lease).map_err(|_| IndexError::Revoked)?;
+        if destination.exists()
+            || backup_root.starts_with(destination)
+            || destination.starts_with(backup_root)
+        {
+            return Err(IndexError::UnsafePath);
+        }
+        let parent = destination.parent().ok_or(IndexError::UnsafePath)?;
+        guarded(parent)?;
+        if !parent.is_dir() {
+            return Err(IndexError::UnsafePath);
+        }
+        let staged = destination.with_extension("mp9b-verified-restore-partial");
+        guarded(&staged)?;
+        if staged.exists() {
+            return Err(IndexError::InvalidEvidence);
+        }
+        // Portable restore already enforces authenticated manifest, full file
+        // inventory, ciphertext hashes, and a non-overwriting staged write.
+        let meta = PortableBackup::restore(gate, lease, backup_root, &staged, recovery)
+            .map_err(|_| IndexError::InvalidEvidence)?;
+        let manifest = VaultManifest::read(&staged).map_err(|_| IndexError::InvalidEvidence)?;
+        let vault = CryptoVault::restore_with_recovery(gate, lease, &manifest, recovery)
+            .map_err(|_| IndexError::InvalidEvidence)?;
+        let mut found_state = false;
+        for (filename, domain) in DB_DOMAINS {
+            let path = staged.join(filename);
+            if !path.exists() {
+                continue;
+            }
+            if filename == "state.sqlite3" {
+                found_state = true;
+            }
+            guarded(&path)?;
+            let mut header = [0u8; 16];
+            File::open(&path)?.read_exact(&mut header)?;
+            if &header == b"SQLite format 3\0" {
+                return Err(IndexError::InvalidEvidence);
+            }
+            let key_bytes = vault.derived_key(gate, lease, domain)
+                .map_err(|_| IndexError::Revoked)?;
+            let mut raw = [0u8; 32];
+            raw.copy_from_slice(key_bytes.as_ref());
+            let key = CipherKey::new(raw, gate, lease);
+            raw.zeroize();
+            let db = Connection::open_with_flags(
+                &path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+            )?;
+            key.unlock(&db)?;
+            let health: String = db.query_row("PRAGMA quick_check(1)", [], |r| r.get(0))?;
+            if health != "ok" {
+                return Err(IndexError::InvalidEvidence);
+            }
+        }
+        if !found_state {
+            return Err(IndexError::InvalidEvidence);
+        }
+        gate.validate_lease(lease).map_err(|_| IndexError::Revoked)?;
+        // All SQLite handles above have closed before Windows directory rename.
+        fs::rename(&staged, destination)?;
+        #[cfg(unix)]
+        File::open(parent)?.sync_all()?;
+        Ok(meta)
+    }
 }
 
 fn snapshot_sqlcipher(

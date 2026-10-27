@@ -59,7 +59,9 @@ fn online_snapshot_restores_cross_store_synthetic_capture_and_state() {
     );
     drop(state);
     let destination = home.path().join("restored-vault");
-    PortableBackup::restore(&gate, lease, &backup, &destination, &recovery).unwrap();
+    VaultOnlineBackup::restore(&gate, lease, &backup, &destination, &recovery).unwrap();
+    // An existing published recovery never gets overwritten or adopted.
+    assert!(VaultOnlineBackup::restore(&gate, lease, &backup, &destination, &recovery).is_err());
     let rebuilt = CryptoVault::restore_with_recovery(&gate, lease, &manifest, &recovery).unwrap();
     let restored_archive = VaultCaptureStore::open(&destination, rebuilt, &gate, lease).unwrap();
     let loaded = restored_archive.read(&receipt.id, None).unwrap();
@@ -141,7 +143,7 @@ fn online_backup_failure_injection_never_publishes_incomplete_restores() {
     bytes[last] ^= 0x80; // Synthetic ciphertext corruption after publication.
     fs::write(&object, bytes).unwrap();
     let destination = home.path().join("must-not-publish");
-    assert!(PortableBackup::restore(&gate, lease, &backup, &destination, &recovery).is_err());
+    assert!(VaultOnlineBackup::restore(&gate, lease, &backup, &destination, &recovery).is_err());
     assert!(!destination.exists());
     assert!(root.join("state.sqlite3").is_file());
 }
