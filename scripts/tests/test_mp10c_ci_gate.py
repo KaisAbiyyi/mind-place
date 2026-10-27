@@ -73,7 +73,7 @@ class FingerprintTests(unittest.TestCase):
         ):
             with self.subTest(path=path):
                 before = self.fp()
-                self.write(path, self.root.joinpath(path).read_text() + "!")
+                self.write(path, (self.root.joinpath(path).read_text() if self.root.joinpath(path).exists() else "") + "!")
                 self.assertNotEqual(before, self.fp())
 
     def test_deletion_of_dependency_forces(self):
