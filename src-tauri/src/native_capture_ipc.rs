@@ -175,6 +175,46 @@ mod qualification {
         .unwrap()
     }
 
+    /// Real process boundary (not a thread/mock): the native-host equivalent
+    /// is launched as a second test process on hosted Windows and Ubuntu.
+    /// A same-owner process is intentionally authorized only while unlocked;
+    /// a wrong extension origin and revoked epoch must both fail closed.
+    #[test]
+    fn separate_process_capture_probe() {
+        let Some(root) = std::env::var_os("MP9B_SYNTHETIC_IPC_ROOT") else {
+            return;
+        };
+        let mode = std::env::var("MP9B_SYNTHETIC_IPC_MODE").unwrap();
+        let origin = if mode == "wrong-origin" {
+            "chrome-extension://invalid/"
+                .to_owned()
+        } else {
+            format!("chrome-extension://{}/", extension_id())
+        };
+        let result = mind_place_capture_host::ipc::forward_capture(
+            std::path::Path::new(&root),
+            &origin,
+            synthetic_capture(),
+        );
+        assert_eq!(result.is_ok(), mode == "allowed");
+    }
+
+    fn run_process_probe(root: &std::path::Path, mode: &str) {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .arg("--exact")
+            .arg("native_capture_ipc::qualification::separate_process_capture_probe")
+            .arg("--nocapture")
+            .env("MP9B_SYNTHETIC_IPC_ROOT", root)
+            .env("MP9B_SYNTHETIC_IPC_MODE", mode)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "hostile IPC child probe failed: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+
     #[test]
     fn owner_local_capture_roundtrip_requires_unlocked_epoch() {
         let home = tempfile::tempdir().unwrap();
@@ -208,6 +248,8 @@ mod qualification {
             "synthetic-only"
         );
         assert!(!archive_root.exists());
+        run_process_probe(&archive_root, "allowed");
+        run_process_probe(&archive_root, "wrong-origin");
         // An overlapping owner desktop must never overwrite the active token.
         // It cannot silently change which vault receives browser captures.
         let original = fs::read(home.path().join("capture-ipc-v1.json")).unwrap();
@@ -224,6 +266,7 @@ mod qualification {
             original
         );
         gate.lock();
+        run_process_probe(&archive_root, "locked");
         assert!(mind_place_capture_host::ipc::forward_capture(
             &archive_root,
             &origin,
