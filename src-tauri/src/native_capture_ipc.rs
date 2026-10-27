@@ -186,8 +186,7 @@ mod qualification {
         };
         let mode = std::env::var("MP9B_SYNTHETIC_IPC_MODE").unwrap();
         let origin = if mode == "wrong-origin" {
-            "chrome-extension://invalid/"
-                .to_owned()
+            "chrome-extension://invalid/".to_owned()
         } else {
             format!("chrome-extension://{}/", extension_id())
         };
