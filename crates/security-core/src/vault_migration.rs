@@ -115,6 +115,7 @@ impl LegacyMigrationPreflight {
                 // concurrent work and must block the migration preflight.
                 "index.sqlite3" | "document-index.sqlite3" if metadata.is_file() => {}
                 "security-v1.json" if metadata.is_file() => {}
+                ".state-schema.lock" if metadata.is_file() && metadata.len() == 0 => {}
                 _ => return Err(SecurityError::InvalidConfig),
             }
         }
@@ -512,6 +513,11 @@ mod tests {
         // deeper unapproved nesting must still be refused.
         assert!(LegacyMigrationPreflight::inspect(&source, &source.join("vault")).is_err());
         fs::remove_file(source.join("owner-unknown.json")).unwrap();
+        fs::write(source.join(".state-schema.lock"), b"").unwrap();
+        assert!(LegacyMigrationPreflight::inspect(&source, &output).is_ok());
+        fs::write(source.join(".state-schema.lock"), b"active-writer").unwrap();
+        assert!(LegacyMigrationPreflight::inspect(&source, &output).is_err());
+        fs::write(source.join(".state-schema.lock"), b"").unwrap();
         let nested = source.join("archive-v1/subdir/encrypted-vault-v1");
         assert!(LegacyMigrationPreflight::inspect(&source, &nested).is_err());
         let app_child = LegacyMigrationPreflight::inspect(&source, &source.join("vault")).unwrap();
