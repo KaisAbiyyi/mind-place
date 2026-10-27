@@ -90,6 +90,33 @@ class FingerprintTests(unittest.TestCase):
         self.assertEqual(before, self.fp())
 
 
+class ShallowMergeTests(unittest.TestCase):
+    def test_real_depth_one_checkout_retains_parent_object_headers(self):
+        """Real shallow clone reproduces the failed rev-list behavior; no mocks."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root, clone = Path(tmp)/"origin", Path(tmp)/"clone"
+            root.mkdir()
+            git(root, "init", "-q")
+            git(root, "config", "user.name", "CI Fixture")
+            git(root, "config", "user.email", "ci-fixture@example.invalid")
+            git(root, "commit", "--allow-empty", "-q", "-m", "base")
+            base = git(root, "rev-parse", "HEAD").decode().strip()
+            git(root, "checkout", "-q", "-b", "source")
+            git(root, "commit", "--allow-empty", "-q", "-m", "branch")
+            source = git(root, "rev-parse", "HEAD").decode().strip()
+            git(root, "checkout", "-q", "-b", "synthetic", base)
+            git(root, "merge", "-q", "--no-ff", "-m", "PR checkout merge", "source")
+            subprocess.check_call(["git", "clone", "-q", "--depth=1", "--branch",
+                                   "synthetic", root.resolve().as_uri(), str(clone)])
+            self.assertEqual(len(git(clone, "rev-list", "--parents", "-n", "1",
+                                     "HEAD").split()), 1)
+            gate.check_merge_source(repo_root=str(clone), expected_source=source)
+            with self.assertRaises(ValueError):
+                gate.check_merge_source(repo_root=str(clone), expected_source=base)
+            with self.assertRaises(ValueError):
+                gate.check_merge_source(repo_root=str(clone), expected_source="0"*40)
+
+
 class DecisionTests(unittest.TestCase):
     def test_unrelated_push_reuses_verified_acceptance(self):
         self.assertEqual(gate.decision("pull_request", "auto", {"run_id": 1})[0], False)
@@ -149,24 +176,44 @@ class PriorProofTests(unittest.TestCase):
             "digest": "sha256:" + hashlib.sha256(self.archive).hexdigest(),
             "workflow_run": {"id": 77}
         }
-        self.jobs = {"jobs": [{
-            "name": gate.FULL_JOB, "conclusion": "success",
-            "steps": [{"name": n, "conclusion": "success"} for n in (
-                "Qualify real authorized document scale", "Validate exact-tier receipt",
-                "Mint source-bound 100K provenance")]
-        }]}
+        raw_stream = io.BytesIO()
+        with zipfile.ZipFile(raw_stream, "w") as z:
+            z.writestr("mp10c-100000.json", self.raw)
+        self.raw_archive = raw_stream.getvalue()
+        self.raw_artifact = {
+            "id": 13, "name": gate.RAW_ARTIFACT, "expired": False,
+            "archive_download_url": "https://api.github.com/raw.zip",
+            "digest": "sha256:" + hashlib.sha256(self.raw_archive).hexdigest(),
+            "workflow_run": {"id": 77}
+        }
+        self.jobs = {"jobs": [
+            {"name": gate.FULL_JOB, "conclusion": "success",
+             "steps": [{"name": n, "conclusion": "success"} for n in (
+                 "Qualify real authorized document scale", "Validate exact-tier receipt",
+                 "Upload validated raw 100K receipt")]},
+            {"name": gate.PROOF_JOB, "conclusion": "success",
+             "steps": [{"name": n, "conclusion": "success"} for n in (
+                 "Mint source-bound 100K provenance",
+                 "Upload qualified receipt and provenance")]}
+        ]}
 
     def check(self):
         def fake_api(url, _token):
             if "/jobs?" in url:
                 return self.jobs
             if "/artifacts?" in url:
-                return {"artifacts": [self.artifact]}
+                return {"artifacts": [self.artifact, self.raw_artifact]}
             if "/runs?" in url:
                 return {"workflow_runs": [self.run]}
             raise AssertionError(url)
+        def fake_artifact(url, _token):
+            if url == self.artifact["archive_download_url"]:
+                return self.archive
+            if url == self.raw_artifact["archive_download_url"]:
+                return self.raw_archive
+            raise AssertionError(url)
         with patch.object(gate, "api_json", side_effect=fake_api), patch.object(
-            gate, "artifact_bytes", return_value=self.archive):
+            gate, "artifact_bytes", side_effect=fake_artifact):
             return gate.find_accepted(token="dummy", repo=self.repo, pr=self.pr, desired=self.fp)
 
     def test_valid_previous_receipt_and_successful_full_job(self):
@@ -180,6 +227,23 @@ class PriorProofTests(unittest.TestCase):
         self.fp = "f" * 64
         self.assertIsNone(self.check())  # changed effective input since qualification
         self.fp = changed
+
+    def test_reject_missing_corrupted_or_foreign_raw_artifact(self):
+        self.raw_artifact["expired"] = True
+        self.assertIsNone(self.check())
+        self.raw_artifact["expired"] = False
+        self.raw_artifact["digest"] = "sha256:" + "0"*64
+        self.assertIsNone(self.check())
+        self.raw_artifact["digest"] = "sha256:" + hashlib.sha256(self.raw_archive).hexdigest()
+        self.raw_artifact["workflow_run"]["id"] = 999
+        self.assertIsNone(self.check())
+
+    def test_attestation_must_succeed_separately_from_indexing(self):
+        self.jobs["jobs"][1]["conclusion"] = "failure"
+        self.assertIsNone(self.check())
+        self.jobs["jobs"][1]["conclusion"] = "success"
+        self.jobs["jobs"][1]["steps"][0]["conclusion"] = "failure"
+        self.assertIsNone(self.check())
 
     def test_reject_missing_expired_or_tampered_artifact(self):
         self.artifact["expired"] = True
