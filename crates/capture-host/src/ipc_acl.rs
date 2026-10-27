@@ -266,12 +266,14 @@ mod tests {
         verify(&path).unwrap();
         set_dacl(&path, "D:P(A;;FA;;;WD)").unwrap();
         assert!(verify(&path).is_err());
-        // A duplicate owner ACE is also unacceptable, even when it grants no
-        // broader principal access: this guard requires exactly two ACEs.
+        // Explicit BUILTIN\\Users grants must be refused, even when the
+        // descriptor also carries the legitimate owner and SYSTEM ACEs.
+        // Windows may coalesce duplicate ACEs, so do not assert that an
+        // unobservable duplicated owner ACE survives OS normalization.
         let owner = current_sid().unwrap();
         set_dacl(
             &path,
-            &format!("D:P(A;;FA;;;SY)(A;;FA;;;{owner})(A;;FA;;;{owner})"),
+            &format!("D:P(A;;FA;;;SY)(A;;FA;;;{owner})(A;;FA;;;BU)"),
         )
         .unwrap();
         assert!(verify(&path).is_err());
