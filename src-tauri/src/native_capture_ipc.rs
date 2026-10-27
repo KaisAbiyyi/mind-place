@@ -207,10 +207,14 @@ mod qualification {
             .env("MP9B_SYNTHETIC_IPC_MODE", mode)
             .output()
             .unwrap();
+        let transcript = String::from_utf8_lossy(&output.stdout);
+        // A mistyped --exact filter exits successfully after running *zero*
+        // tests. Require the child probe itself to execute before accepting it.
         assert!(
-            output.status.success(),
-            "hostile IPC child probe failed: {}",
-            String::from_utf8_lossy(&output.stdout)
+            output.status.success()
+                && transcript.contains("separate_process_capture_probe ... ok")
+                && transcript.contains("1 passed; 0 failed"),
+            "hostile IPC child probe missing or failed: {transcript}"
         );
     }
 
