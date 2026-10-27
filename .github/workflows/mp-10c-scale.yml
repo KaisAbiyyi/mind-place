@@ -19,10 +19,6 @@ permissions:
   contents: read
   actions: read
 
-concurrency:
-  group: mp10c-scale-${{ github.ref }}
-  cancel-in-progress: false
-
 jobs:
   effective-input-gate:
     name: Source fingerprint / acceptance decision (NOT 100K PASS)
@@ -98,6 +94,9 @@ jobs:
     if: needs.effective-input-gate.outputs.run-heavy == 'true'
     runs-on: windows-latest
     timeout-minutes: 360
+    concurrency:
+      group: mp10c-100k-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: false
     env:
       CARGO_INCREMENTAL: 0
       CARGO_BUILD_JOBS: 2
@@ -107,16 +106,29 @@ jobs:
       PR_NUMBER: ${{ github.event.pull_request.number || '0' }}
     steps:
       - uses: actions/checkout@v5
+      # A newer unrelated push may have queued while the previous full tier ran.
+      # Re-evaluate after acquiring the only full-test slot, not hours before.
+      - name: Recheck previous proof after 100K slot acquired
+        id: recheck
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          QUALIFICATION_MODE: ${{ inputs.qualification || 'auto' }}
+        run: python scripts/mp10c_ci_gate.py decide --output "$env:GITHUB_OUTPUT"
       - name: Pinned Rust 1.90
+        if: steps.recheck.outputs.run-heavy == 'true'
         shell: pwsh
         run: |
           rustup toolchain install 1.90.0 --profile minimal --component rustfmt --no-self-update
           rustup default 1.90.0
       - name: Check Rust format
+        if: steps.recheck.outputs.run-heavy == 'true'
         run: cargo fmt --all -- --check
       - name: Qualify real authorized document scale
+        if: steps.recheck.outputs.run-heavy == 'true'
         run: cargo test --release -p mind-place-index --test document_scale_qualification qualifies_document_scale -- --ignored --exact --nocapture
       - name: Validate exact-tier receipt
+        if: steps.recheck.outputs.run-heavy == 'true'
         shell: pwsh
         run: |
           if (!(Test-Path -LiteralPath $env:MP_10C_RECEIPT)) { throw "Missing MP-10C receipt" }
@@ -135,11 +147,12 @@ jobs:
           }
           Write-Output "MP-10C exact-tier receipt validated: $expected files, $($receipt.extracted_chunks) chunks"
       - name: Mint source-bound 100K provenance
+        if: steps.recheck.outputs.run-heavy == 'true'
         shell: pwsh
         run: |
           python scripts/mp10c_ci_gate.py attest --receipt "$env:MP_10C_RECEIPT" --output qualification/mp10c-provenance.json
       - name: Upload qualified receipt and provenance
-        if: success()
+        if: success() && steps.recheck.outputs.run-heavy == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: mp10c-qualified-100000
