@@ -458,9 +458,15 @@ def decision(event: str, mode: str, previous: dict | None) -> tuple[bool, str]:
 def require_prerequisites(runs: list[dict], source: str, *, vault: bool, fetch_jobs) -> None:
     # A workflow can be green while its native job was skipped on a Draft PR.
     # Inspect the exact run attempt's required jobs AND their critical steps.
+    product_steps = ("Test", "Test hosted tunnel desktop boundaries", "Build desktop app")
+    if vault:
+        product_steps += ("Qualify native capture encrypted IPC and revoked owner epoch",)
     required = {
         ".github/workflows/ci.yml": {
-            "Verify Windows product": ("Test", "Test hosted tunnel desktop boundaries", "Build desktop app")
+            "Fast Rust compile and vault feedback": (
+                "Rust format", "Compile production core crates",
+                "Compile available SQLCipher and vault features", "Focused security tests"),
+            "Verify Windows product": product_steps
         }
     }
     if vault:

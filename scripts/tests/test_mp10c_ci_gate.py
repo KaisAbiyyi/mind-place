@@ -175,13 +175,16 @@ class DecisionTests(unittest.TestCase):
         def job(name, steps, *, conclusion="success"):
             return {"name": name, "status": "completed", "conclusion": conclusion,
                     "steps": [{"name": s, "conclusion": "success"} for s in steps]}
-        product = job("Verify Windows product", ("Test", "Test hosted tunnel desktop boundaries", "Build desktop app"))
+        product = job("Verify Windows product", ("Test", "Test hosted tunnel desktop boundaries", "Build desktop app", "Qualify native capture encrypted IPC and revoked owner epoch"))
+        rust = job("Fast Rust compile and vault feedback", (
+            "Rust format", "Compile production core crates",
+            "Compile available SQLCipher and vault features", "Focused security tests"))
         sql_steps = ("Encrypted state/index and FTS regression",
                      "Keyed MCP synthetic authorization and revocation",
                      "Vault and backup adversarial regression")
         sql_ubuntu = job("SQLCipher / ubuntu-24.04", sql_steps)
         sql_windows = job("SQLCipher / windows-2022", sql_steps)
-        jobs = {1: [product], 2: [sql_ubuntu, sql_windows]}
+        jobs = {1: [product, rust], 2: [sql_ubuntu, sql_windows]}
         def fetch(run):
             return {"jobs": jobs[run["id"]], "total_count": len(jobs[run["id"]])}
         gate.require_prerequisites(passed, source, vault=True, fetch_jobs=fetch)
@@ -197,7 +200,7 @@ class DecisionTests(unittest.TestCase):
             with self.subTest(replacement=replacement), self.assertRaises(ValueError):
                 jobs[1] = [replacement]
                 gate.require_prerequisites(passed, source, vault=False, fetch_jobs=fetch)
-        jobs[1] = [product]
+        jobs[1] = [product, rust]
         for replacement in (dict(sql_windows, conclusion="skipped"),
                             dict(sql_windows, steps=[]),
                             dict(sql_windows, name="SQLCipher / macos-15")):
@@ -205,6 +208,23 @@ class DecisionTests(unittest.TestCase):
                 jobs[2] = [sql_ubuntu, replacement]
                 gate.require_prerequisites(passed, source, vault=True, fetch_jobs=fetch)
         jobs[2] = [sql_ubuntu, sql_windows]
+        for bad_rust in (
+            dict(rust, conclusion="skipped"),
+            dict(rust, steps=[{"name": "Compile production core crates", "conclusion": "skipped"}]),
+        ):
+            with self.assertRaises(ValueError):
+                jobs[1] = [product, bad_rust]
+                gate.require_prerequisites(passed, source, vault=False, fetch_jobs=fetch)
+        jobs[1] = [product, rust]
+        ipc = job("Verify Windows product", (
+            "Test", "Test hosted tunnel desktop boundaries", "Build desktop app",
+            "Qualify native capture encrypted IPC and revoked owner epoch"))
+        jobs[1] = [ipc, rust]
+        gate.require_prerequisites(passed, source, vault=True, fetch_jobs=fetch)
+        jobs[1] = [job("Verify Windows product", ("Test", "Test hosted tunnel desktop boundaries", "Build desktop app")), rust]
+        with self.assertRaises(ValueError):
+            gate.require_prerequisites(passed, source, vault=True, fetch_jobs=fetch)
+        jobs[1] = [product, rust]
         with self.assertRaises(ValueError):
             gate.require_prerequisites(passed, source, vault=True,
                                        fetch_jobs=lambda r: {"jobs": jobs[r["id"]], "total_count": 101})
@@ -511,10 +531,17 @@ class PrerequisiteCoordinationTests(unittest.TestCase):
         run = {"id": 2, "run_attempt": 1, "path": ".github/workflows/ci.yml",
                "head_sha": sha, "status": "in_progress", "conclusion": None}
         def jobs(_):
-            return {"total_count": 1, "jobs": [{"name": "Verify Windows product",
-                "status": "completed", "conclusion": "success", "steps": [
-                {"name": n, "conclusion": "success"} for n in
-                ("Test", "Test hosted tunnel desktop boundaries", "Build desktop app")]}]}
+            return {"total_count": 2, "jobs": [
+                {"name": "Verify Windows product",
+                 "status": "completed", "conclusion": "success", "steps": [
+                    {"name": n, "conclusion": "success"} for n in
+                    ("Test", "Test hosted tunnel desktop boundaries", "Build desktop app")]},
+                {"name": "Fast Rust compile and vault feedback",
+                 "status": "completed", "conclusion": "success", "steps": [
+                    {"name": n, "conclusion": "success"} for n in
+                    ("Rust format", "Compile production core crates",
+                     "Compile available SQLCipher and vault features", "Focused security tests")]}
+            ]}
         self.assertEqual(coordinator.classify([run], sha, False, jobs)[0], "pending")
         success = dict(run, status="completed", conclusion="success")
         self.assertEqual(coordinator.classify([success], sha, False, jobs)[0], "ready")
