@@ -175,7 +175,7 @@ class DecisionTests(unittest.TestCase):
         def job(name, steps, *, conclusion="success"):
             return {"name": name, "status": "completed", "conclusion": conclusion,
                     "steps": [{"name": s, "conclusion": "success"} for s in steps]}
-        product = job("Verify Windows product", ("Test", "Test hosted tunnel desktop boundaries", "Build desktop app"))
+        product = job("Verify Windows product", ("Test", "Test hosted tunnel desktop boundaries", "Build desktop app", "Qualify native capture encrypted IPC and revoked owner epoch"))
         rust = job("Fast Rust compile and vault feedback", (
             "Rust format", "Compile production core crates",
             "Compile available SQLCipher and vault features", "Focused security tests"))
@@ -221,9 +221,10 @@ class DecisionTests(unittest.TestCase):
             "Qualify native capture encrypted IPC and revoked owner epoch"))
         jobs[1] = [ipc, rust]
         gate.require_prerequisites(passed, source, vault=True, fetch_jobs=fetch)
-        jobs[1] = [product, rust]
+        jobs[1] = [job("Verify Windows product", ("Test", "Test hosted tunnel desktop boundaries", "Build desktop app")), rust]
         with self.assertRaises(ValueError):
             gate.require_prerequisites(passed, source, vault=True, fetch_jobs=fetch)
+        jobs[1] = [product, rust]
         with self.assertRaises(ValueError):
             gate.require_prerequisites(passed, source, vault=True,
                                        fetch_jobs=lambda r: {"jobs": jobs[r["id"]], "total_count": 101})
