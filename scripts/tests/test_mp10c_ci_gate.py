@@ -2,6 +2,7 @@
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -145,33 +146,112 @@ class DecisionTests(unittest.TestCase):
     def test_attestation_does_not_accept_forged_raw_receipt(self):
         raw = json.dumps(raw_receipt()).encode()
         p = gate.make_proof(receipt=raw, source="a"*40, run_id=2, attempt=1,
-                            pr=128, repo="owner/repo", event="pull_request", effective="d"*64)
+                            pr=128, repo="owner/repo", event="pull_request", effective="d"*64,
+                            head_ref="qualification")
         self.assertTrue(p["qualified"])
         with self.assertRaises(ValueError):
             gate.make_proof(receipt=b"{}", source="a"*40, run_id=2, attempt=1,
                             pr=128, repo="owner/repo", event="pull_request", effective="d"*64)
 
+    def test_full_run_waits_for_exact_source_cheap_ci(self):
+        source = "a"*40
+        passed = [{"path": path, "head_sha": source, "status": "completed", "conclusion": "success"}
+                  for path in (".github/workflows/ci.yml", ".github/workflows/mp9b-sqlcipher-qualification.yml")]
+        gate.require_prerequisites(passed, source, vault=True)
+        for bad in ([], passed[:1], [dict(r, head_sha="b"*40) for r in passed],
+                    [dict(r, conclusion="failure") for r in passed]):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                gate.require_prerequisites(bad, source, vault=True)
 
+
+class DispatchTargetTests(unittest.TestCase):
+    def setUp(self):
+        self.pull = {"number": 127, "state": "open",
+                     "head": {"sha": "a"*40, "ref": "feature/target", "repo": {"full_name": "owner/repo"}},
+                     "base": {"repo": {"full_name": "owner/repo"}}}
+
+    def resolve(self, number="127", sha="a"*40, ref="refs/heads/feature/target"):
+        with patch.object(gate, "api_json", return_value=self.pull):
+            return gate.resolve_target(event="workflow_dispatch", payload={"inputs": {"pr_number": number}},
+                                        repo="owner/repo", sha=sha, ref=ref, token="synthetic")
+
+    def test_open_pr_exact_head_branch_is_required(self):
+        self.assertEqual(self.resolve(), {"pr": 127, "head": "a"*40, "branch": "feature/target"})
+        for number in ("", "0", "-1", "127\n", 127):
+            with self.subTest(number=number), self.assertRaises(ValueError):
+                self.resolve(number=number)
+        for sha, ref in (("b"*40, "refs/heads/feature/target"), ("a"*40, "refs/heads/main")):
+            with self.subTest(sha=sha, ref=ref), self.assertRaises(ValueError):
+                self.resolve(sha=sha, ref=ref)
+
+    def test_foreign_or_closed_pr_is_never_adopted(self):
+        self.pull["head"]["repo"]["full_name"] = "foreign/repo"
+        with self.assertRaises(ValueError):
+            self.resolve()
+        self.pull["head"]["repo"]["full_name"] = "owner/repo"
+        self.pull["state"] = "closed"
+        with self.assertRaises(ValueError):
+            self.resolve()
+
+
+class AttestationCliTests(unittest.TestCase):
+    def test_real_cli_binds_dispatch_and_preserves_scale_attempt_without_indexing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            git(root, "init", "-q")
+            git(root, "config", "user.name", "Synthetic CI fixture")
+            git(root, "config", "user.email", "synthetic@example.invalid")
+            (root / "Cargo.lock").write_text("synthetic dependencies")
+            git(root, "add", ".")
+            git(root, "commit", "-qm", "synthetic source")
+            source = git(root, "rev-parse", "HEAD").decode().strip()
+            fp = gate.fingerprint(str(root))
+            receipt, event, output = root/"raw.json", root/"event.json", root/"proof.json"
+            receipt.write_text(json.dumps(raw_receipt()))
+            event.write_text(json.dumps({"inputs": {"pr_number": "127"}}))
+            env = dict(os.environ, GITHUB_EVENT_NAME="workflow_dispatch", GITHUB_REPOSITORY="owner/repo",
+                       GITHUB_SHA=source, GITHUB_REF="refs/heads/qualification", GITHUB_EVENT_PATH=str(event),
+                       GITHUB_RUN_ID="77", GITHUB_RUN_ATTEMPT="2", SCALE_RUN_ATTEMPT="1", PR_NUMBER="127",
+                       PR_HEAD_SHA=source, PR_HEAD_REF="qualification", EXPECTED_FINGERPRINT=fp)
+            command = [sys.executable, str(Path(gate.__file__).resolve()), "attest", "--receipt", str(receipt), "--output", str(output)]
+            good = subprocess.run(command, cwd=root, env=env, capture_output=True, text=True)
+            self.assertEqual(good.returncode, 0, good.stderr)
+            proof = json.loads(output.read_bytes())
+            self.assertEqual((proof["event"], proof["pr_number"], proof["source_sha"], proof["checkout_sha"]),
+                             ("workflow_dispatch", 127, source, source))
+            self.assertEqual((proof["run_attempt"], proof["scale_run_attempt"]), (2, 1))
+            for change in ({"PR_NUMBER": "0"}, {"PR_HEAD_SHA": "0"*40},
+                           {"PR_HEAD_REF": "main"}, {"EXPECTED_FINGERPRINT": "0"*64}):
+                with self.subTest(change=change):
+                    output.unlink()
+                    failed = subprocess.run(command, cwd=root, env=dict(env, **change), capture_output=True)
+                    self.assertNotEqual(failed.returncode, 0)
+                    self.assertFalse(output.exists())
+                    # Restore a successful output for the next independent case.
+                    self.assertEqual(subprocess.run(command, cwd=root, env=env, capture_output=True).returncode, 0)
 class PriorProofTests(unittest.TestCase):
     def setUp(self):
-        self.repo, self.pr, self.fp = "owner/repo", 128, "d"*64
+        self.repo, self.pr = "owner/repo", 128
+        self.tree = [{"type": "blob", "mode": "100644", "sha": "e"*40, "path": "Cargo.lock"}]
+        self.fp = gate.fingerprint_entries([(b"100644", b"e"*40, b"Cargo.lock")])
         self.raw = json.dumps(raw_receipt(), sort_keys=True).encode()
         self.run = {
             "id": 77, "run_attempt": 1, "head_sha": "a"*40, "event": "pull_request",
+            "head_branch": "qualification",
             "path": ".github/workflows/mp-10c-scale.yml",
             "status": "completed", "conclusion": "success",
             "pull_requests": [{"number": 128}], "html_url": "https://github.com/owner/repo/actions/runs/77",
         }
         self.proof = gate.make_proof(
-            receipt=self.raw, source="a"*40, run_id=77, attempt=1, pr=self.pr,
-            repo=self.repo, event="pull_request", effective=self.fp)
+            receipt=self.raw, source="b"*40, head_sha="a"*40, run_id=77, attempt=1, pr=self.pr,
+            repo=self.repo, event="pull_request", effective=self.fp, head_ref="qualification")
         stream = io.BytesIO()
         with zipfile.ZipFile(stream, "w") as z:
             z.writestr("mp10c-provenance.json", json.dumps(self.proof))
             z.writestr("mp10c-100000.json", self.raw)
         self.archive = stream.getvalue()
         self.artifact = {
-            "id": 12, "name": gate.ARTIFACT, "expired": False,
+            "id": 12, "name": gate.artifact_name(gate.ARTIFACT, 1), "expired": False,
             "archive_download_url": "https://api.github.com/artifact.zip",
             "digest": "sha256:" + hashlib.sha256(self.archive).hexdigest(),
             "workflow_run": {"id": 77}
@@ -181,7 +261,7 @@ class PriorProofTests(unittest.TestCase):
             z.writestr("mp10c-100000.json", self.raw)
         self.raw_archive = raw_stream.getvalue()
         self.raw_artifact = {
-            "id": 13, "name": gate.RAW_ARTIFACT, "expired": False,
+            "id": 13, "name": gate.artifact_name(gate.RAW_ARTIFACT, 1), "expired": False,
             "archive_download_url": "https://api.github.com/raw.zip",
             "digest": "sha256:" + hashlib.sha256(self.raw_archive).hexdigest(),
             "workflow_run": {"id": 77}
@@ -197,6 +277,14 @@ class PriorProofTests(unittest.TestCase):
                  "Upload qualified receipt and provenance")]}
         ]}
 
+    def repack(self):
+        stream = io.BytesIO()
+        with zipfile.ZipFile(stream, "w") as z:
+            z.writestr("mp10c-provenance.json", json.dumps(self.proof))
+            z.writestr("mp10c-100000.json", self.raw)
+        self.archive = stream.getvalue()
+        self.artifact["digest"] = "sha256:" + hashlib.sha256(self.archive).hexdigest()
+
     def check(self):
         def fake_api(url, _token):
             if "/jobs?" in url:
@@ -205,6 +293,15 @@ class PriorProofTests(unittest.TestCase):
                 return {"artifacts": [self.artifact, self.raw_artifact]}
             if "/runs?" in url:
                 return {"workflow_runs": [self.run]}
+            if "/git/commits/" in url:
+                return {"sha": self.proof["checkout_sha"], "parents": [{"sha": "c"*40}, {"sha": "a"*40}],
+                        "tree": {"sha": "f"*40}}
+            if "/git/trees/" in url:
+                return {"sha": "f"*40, "truncated": False, "tree": self.tree}
+            if "/pulls/128" in url:
+                return {"number": self.pr, "head": {"sha": "a"*40, "ref": "qualification",
+                                                       "repo": {"full_name": self.repo}},
+                        "base": {"repo": {"full_name": self.repo}}}
             raise AssertionError(url)
         def fake_artifact(url, _token):
             if url == self.artifact["archive_download_url"]:
@@ -292,6 +389,37 @@ class PriorProofTests(unittest.TestCase):
     def test_only_same_pr_can_reuse(self):
         self.run["pull_requests"] = [{"number": 127}]
         self.assertIsNone(self.check())
+
+    def test_dispatch_proof_is_reusable_for_its_bound_pr(self):
+        self.run["event"] = "workflow_dispatch"
+        self.proof["event"] = "workflow_dispatch"
+        self.proof["checkout_sha"] = self.proof["source_sha"]
+        gate.validate_proof(self.proof, self.raw, run=self.run, artifact=self.artifact,
+                            pr=self.pr, repo=self.repo, desired=self.fp)
+        self.run["pull_requests"] = []
+        self.repack()
+        self.assertIsNotNone(self.check())
+
+    def test_recompute_github_tree_rejects_a_forged_fingerprint(self):
+        self.tree[0]["sha"] = "0"*40
+        self.assertIsNone(self.check())
+
+    def test_failed_attestation_retry_preserves_original_scale_attempt(self):
+        self.run["run_attempt"] = 2
+        self.proof["run_attempt"] = 2
+        self.artifact["name"] = gate.artifact_name(gate.ARTIFACT, 2)
+        self.repack()
+        self.assertIsNotNone(self.check())
+        self.raw_artifact["name"] = gate.artifact_name(gate.RAW_ARTIFACT, 2)
+        self.assertIsNone(self.check())
+
+    def test_event_mismatch_and_unbound_dispatch_are_rejected(self):
+        for event, pr in (("workflow_dispatch", self.pr), ("pull_request", 0)):
+            with self.subTest(event=event, pr=pr):
+                with self.assertRaises(ValueError):
+                    gate.validate_proof(dict(self.proof, event=event, pr_number=pr), self.raw,
+                                        run=self.run, artifact=self.artifact,
+                                        pr=pr, repo=self.repo, desired=self.fp)
 
     def test_failed_api_lookup_must_not_grant_proof(self):
         with patch.object(gate, "api_json", side_effect=OSError("unavailable")):
