@@ -2,6 +2,7 @@ name: Phase 1E storage qualification
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
     paths:
       - '.github/workflows/storage-qualification.yml'
       - 'crates/archive-core/**'
@@ -19,6 +20,9 @@ concurrency:
 jobs:
   windows-storage:
     name: Windows / ${{ matrix.chunks }} message chunks
+    # The expensive 10K/100K/1M native qualification belongs to final
+    # acceptance, not every development commit on a draft PR.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: windows-latest
     timeout-minutes: 90
     strategy:
