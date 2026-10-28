@@ -462,3 +462,54 @@ class PriorProofTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class PrerequisiteCoordinationTests(unittest.TestCase):
+    def test_pending_success_failure_skipped_and_missing(self):
+        import mp10c_prerequisite_wait as coordinator
+        sha = "a" * 40
+        run = {"id": 2, "run_attempt": 1, "path": ".github/workflows/ci.yml",
+               "head_sha": sha, "status": "in_progress", "conclusion": None}
+        def jobs(_):
+            return {"total_count": 1, "jobs": [{"name": "Verify Windows product",
+                "status": "completed", "conclusion": "success", "steps": [
+                {"name": n, "conclusion": "success"} for n in
+                ("Test", "Test hosted tunnel desktop boundaries", "Build desktop app")]}]}
+        self.assertEqual(coordinator.classify([run], sha, False, jobs)[0], "pending")
+        success = dict(run, status="completed", conclusion="success")
+        self.assertEqual(coordinator.classify([success], sha, False, jobs)[0], "ready")
+        for conclusion in ("failure", "cancelled", "skipped"):
+            self.assertEqual(coordinator.classify([dict(success, conclusion=conclusion)],
+                             sha, False, jobs)[0], "failed")
+        self.assertEqual(coordinator.classify([], sha, False, jobs)[0], "pending")
+        self.assertEqual(coordinator.classify([dict(run, head_sha="b"*40)], sha,
+                         False, jobs)[0], "pending")
+        self.assertEqual(coordinator.classify([success], sha, False,
+                         lambda _: {"total_count": 0, "jobs": []})[0], "failed")
+
+    def test_waits_then_passes_without_premature_failure_or_loop(self):
+        import mp10c_prerequisite_wait as coordinator
+        result = iter([("pending", "running"), ("pending", "queued"), ("ready", "good")])
+        calls = []
+        coordinator.wait("owner/repo", "a"*40, 127, "test", False,
+                         timeout=60, poll=10, clock=lambda: len(calls)*10,
+                         sleep=lambda n: calls.append(n),
+                         inspect=lambda *_: next(result))
+        self.assertEqual(calls, [10, 10])
+        for state in ("failed",):
+            with self.assertRaises(ValueError):
+                coordinator.wait("owner/repo", "a"*40, 127, "test", False,
+                                 inspect=lambda *_: (state, "native failed"))
+        with self.assertRaises(TimeoutError):
+            coordinator.wait("owner/repo", "a"*40, 127, "test", False,
+                             timeout=0, inspect=lambda *_: ("pending", "missing"))
+
+    def test_superseded_sha_and_api_outage_are_never_accepted(self):
+        import mp10c_prerequisite_wait as coordinator
+        with patch.object(gate, "api_json", return_value={"state": "open",
+                "head": {"sha": "b"*40, "repo": {"full_name": "owner/repo"}}}):
+            self.assertEqual(coordinator.snapshot("owner/repo", "a"*40, 127,
+                                                  "token", False)[0], "failed")
+        with self.assertRaises(TimeoutError):
+            coordinator.wait("owner/repo", "a"*40, 127, "token", False,
+                             timeout=0,
+                             inspect=lambda *_: (_ for _ in ()).throw(OSError("api offline")))

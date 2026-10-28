@@ -468,6 +468,13 @@ def main() -> int:
         if not HEX40.fullmatch(source):
             raise ValueError("Invalid prerequisite source")
         token = os.environ["GH_TOKEN"]
+        pr = int(os.environ.get("PR_NUMBER") or "0")
+        if pr:
+            pull = api_json(f"https://api.github.com/repos/{repo}/pulls/{pr}", token)
+            if (pull.get("state") != "open"
+                    or pull.get("head", {}).get("sha") != source
+                    or pull.get("head", {}).get("repo", {}).get("full_name") != repo):
+                raise ValueError("Frozen PR head was superseded before expensive indexing")
         runs = api_json(f"https://api.github.com/repos/{repo}/actions/runs?head_sha={source}&per_page=100",
                         token).get("workflow_runs", [])
         def fetch_prerequisite_jobs(run):

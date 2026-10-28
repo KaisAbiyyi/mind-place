@@ -99,12 +99,33 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  prerequisite-coordination:
+    name: Wait for exact-source native prerequisites (Ubuntu, NOT 100K)
+    needs: [effective-input-gate, document-smoke]
+    if: needs.effective-input-gate.outputs.run-heavy == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 85
+    concurrency:
+      group: mp10c-native-wait-${{ needs.effective-input-gate.outputs.pr-number || github.ref }}
+      cancel-in-progress: true
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PR_NUMBER: ${{ needs.effective-input-gate.outputs.pr-number }}
+      PR_HEAD_SHA: ${{ needs.effective-input-gate.outputs.source-sha }}
+      EXPECTED_FINGERPRINT: ${{ needs.effective-input-gate.outputs.fingerprint }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.effective-input-gate.outputs.checkout-sha }}
+      - name: Bounded native prerequisite coordination
+        run: python3 scripts/mp10c_prerequisite_wait.py --timeout-seconds 4800
+
   document-scale:
     name: Windows approved documents / 100000 files
-    needs: [effective-input-gate, document-smoke]
+    needs: [effective-input-gate, document-smoke, prerequisite-coordination]
     # Never schedule multi-hour indexing on each Draft development commit.
     # Promote PR out of Draft only after frozen cheap CI; full is still mandatory.
-    if: needs.effective-input-gate.outputs.run-heavy == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+    if: needs.effective-input-gate.outputs.run-heavy == 'true' && needs.prerequisite-coordination.result == 'success' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     runs-on: windows-latest
     timeout-minutes: 360
     outputs:

@@ -39,12 +39,40 @@ jobs:
           echo '### Development checks only' >> "$GITHUB_STEP_SUMMARY"
           echo 'Full Windows product, security/native and storage qualification are PENDING for this Draft PR. A skipped native job does not certify acceptance. Switch to Ready for Review after freezing the candidate, or dispatch final qualification explicitly.' >> "$GITHUB_STEP_SUMMARY"
 
+  rust-fast:
+    name: Fast Rust compile and vault feedback
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      CARGO_INCREMENTAL: 0
+      CARGO_BUILD_JOBS: 2
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install pinned Rust 1.90
+        run: |
+          rustup toolchain install 1.90.0 --profile minimal --component rustfmt --no-self-update
+          rustup default 1.90.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: mind-place-fast-rust-190
+      - name: Rust format
+        run: cargo fmt --all -- --check
+      - name: Compile production core crates
+        run: cargo check --locked -p mind-place-security -p mind-place-state -p mind-place-index -p mind-place-integration
+      - name: Compile SQLCipher feature boundary
+        run: cargo check --locked -p mind-place-state -p mind-place-index --features sqlcipher-preview
+      - name: Compile vault MCP feature boundary
+        run: cargo check --locked -p mind-place-integration --features vault-mcp
+      - name: Focused security tests
+        run: cargo test --locked -p mind-place-security --lib
+
   verify:
     name: Verify Windows product
     # Drafts receive fast feedback above. Run the full native/security suite
     # when the PR becomes reviewable, on subsequent ready-PR pushes, on main,
     # or by explicit dispatch. This job remains the Windows acceptance signal.
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    needs: rust-fast
     runs-on: windows-latest
     timeout-minutes: 90
     concurrency:
