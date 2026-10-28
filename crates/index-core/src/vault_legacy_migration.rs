@@ -142,11 +142,15 @@ impl LegacyEncryptedConversion<'_> {
     fn copy_state(&self, source: &Path, stage: &Path) -> SecResult<()> {
         let original = self.source_state(source)?;
         let target = stage.join("state.sqlite3");
+        let partial = stage.join(".state.sqlite3.migration-partial");
         if target.exists() {
             self.verify_state(source, stage)?;
+            if partial.exists() {
+                safe_regular(&partial)?;
+                fs::remove_file(&partial)?;
+            }
             return Ok(());
         }
-        let partial = stage.join(".state.sqlite3.migration-partial");
         if partial.exists() {
             safe_regular(&partial)?;
             fs::remove_file(&partial)?;
@@ -181,7 +185,12 @@ impl LegacyEncryptedConversion<'_> {
             return Err(SecurityError::Crypto);
         }
         File::open(&partial)?.sync_all()?;
-        fs::rename(&partial, &target)?;
+        // Linking is atomic and refuses an existing target on both Unix and
+        // Windows; a restart after linking verifies the target before cleanup.
+        fs::hard_link(&partial, &target)?;
+        fs::remove_file(&partial)?;
+        #[cfg(unix)]
+        File::open(stage)?.sync_all()?;
         self.verify_state(source, stage)
     }
 
@@ -202,7 +211,21 @@ impl LegacyEncryptedConversion<'_> {
             let escaped = name.replace('"', "\"\"");
             let column_query = format!("SELECT * FROM \"{escaped}\" LIMIT 0");
             let columns = sql(original.prepare(&column_query))?;
-            let order = columns.column_names().map(|name| {
+            let names: Vec<String> = columns.column_names().map(str::to_owned).collect();
+            let without_rowid: i64 = sql(original.query_row(
+                "SELECT wr FROM pragma_table_list WHERE schema = 'main' AND name = ?1",
+                [&name],
+                |row| row.get(0),
+            ))?;
+            if without_rowid == 0 {
+                let rowid = ["_rowid_", "rowid", "oid"]
+                    .into_iter()
+                    .find(|alias| !names.iter().any(|name| name.eq_ignore_ascii_case(alias)))
+                    .ok_or(SecurityError::Crypto)?;
+                let statement = format!("SELECT {rowid}, * FROM \"{escaped}\" ORDER BY {rowid}");
+                compare_rows(&original, &migrated, &statement)?;
+            }
+            let order = names.iter().map(|name| {
                 let column = format!("\"{}\"", name.replace('"', "\"\""));
                 format!("typeof({column}), CASE WHEN typeof({column}) = 'real' THEN printf('%!.26g', {column}) ELSE hex(CAST({column} AS BLOB)) END COLLATE BINARY")
             }).collect::<Vec<_>>().join(", ");
@@ -576,10 +599,26 @@ mod tests {
         .unwrap();
         converter.copy_state(&source, &stage).unwrap();
         assert!(!stage.join(".state.sqlite3.migration-partial").exists());
+        fs::hard_link(
+            stage.join("state.sqlite3"),
+            stage.join(".state.sqlite3.migration-partial"),
+        )
+        .unwrap();
+        converter.copy_state(&source, &stage).unwrap();
+        assert!(!stage.join(".state.sqlite3.migration-partial").exists());
         let db = Connection::open(stage.join("state.sqlite3")).unwrap();
         converter.key().unwrap().unlock(&db).unwrap();
         db.execute("UPDATE synthetic_evidence SET value = 'altered'", [])
             .unwrap();
+        drop(db);
+        assert!(converter.verify_state(&source, &stage).is_err());
+        let db = Connection::open(stage.join("state.sqlite3")).unwrap();
+        converter.key().unwrap().unlock(&db).unwrap();
+        db.execute(
+            "UPDATE synthetic_evidence SET value = 'original', rowid = 900",
+            [],
+        )
+        .unwrap();
         drop(db);
         assert!(converter.verify_state(&source, &stage).is_err());
     }
