@@ -11,13 +11,12 @@ use mind_place_security::{
     Result as SecResult, SecurityError, SecurityGate, UnlockLease,
 };
 use mind_place_state::{CipherKey, APPLICATION_ID, SCHEMA_VERSION};
-use rusqlite::{backup::Backup, Connection, OpenFlags};
+use rusqlite::{Connection, OpenFlags};
 use sha2::{Digest, Sha256};
 use std::{
     fs::{self, File, OpenOptions},
     io::{Read, Write},
     path::{Path, PathBuf},
-    time::Duration,
 };
 use zeroize::Zeroize;
 
@@ -103,11 +102,17 @@ impl LegacyEncryptedConversion<'_> {
     fn source_state(&self, source: &Path) -> SecResult<Connection> {
         let file = source.join("state.sqlite3");
         safe_regular(&file)?;
+        let mut uri = url::Url::from_file_path(fs::canonicalize(file)?)
+            .map_err(|_| SecurityError::UnsafePath)?;
+        uri.set_query(Some("mode=ro&immutable=1"));
         let db = Connection::open_with_flags(
-            file,
-            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+            uri.as_str(),
+            OpenFlags::SQLITE_OPEN_READ_ONLY
+                | OpenFlags::SQLITE_OPEN_NOFOLLOW
+                | OpenFlags::SQLITE_OPEN_URI,
         )
         .map_err(|_| SecurityError::Crypto)?;
+        sql(db.execute_batch("PRAGMA temp_store = MEMORY"))?;
         let app: i64 = sql(db.query_row("PRAGMA application_id", [], |row| row.get(0)))?;
         let version: i64 = sql(db.query_row("PRAGMA user_version", [], |row| row.get(0)))?;
         if app != APPLICATION_ID || version != SCHEMA_VERSION {
@@ -141,32 +146,53 @@ impl LegacyEncryptedConversion<'_> {
             self.verify_state(source, stage)?;
             return Ok(());
         }
-        let mut dest = sql(Connection::open_with_flags(
-            &target,
+        let partial = stage.join(".state.sqlite3.migration-partial");
+        if partial.exists() {
+            safe_regular(&partial)?;
+            fs::remove_file(&partial)?;
+        }
+        OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&partial)?;
+        let dest = sql(Connection::open_with_flags(
+            &partial,
             OpenFlags::SQLITE_OPEN_READ_WRITE
-                | OpenFlags::SQLITE_OPEN_CREATE
-                | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+                | OpenFlags::SQLITE_OPEN_NOFOLLOW
+                | OpenFlags::SQLITE_OPEN_URI,
         ))?;
         self.key()?
             .unlock(&dest)
             .map_err(|_| SecurityError::Crypto)?;
-        {
-            let backup = sql(Backup::new(&original, &mut dest))?;
-            sql(backup.run_to_completion(128, Duration::from_millis(50), None))?;
-        }
+        let source_path = fs::canonicalize(source.join("state.sqlite3"))?;
+        let mut source_uri =
+            url::Url::from_file_path(source_path).map_err(|_| SecurityError::UnsafePath)?;
+        source_uri.set_query(Some("mode=ro&immutable=1"));
+        sql(dest.execute("ATTACH DATABASE ?1 AS legacy KEY ''", [source_uri.as_str()]))?;
+        sql(dest.query_row("SELECT sqlcipher_export('main', 'legacy')", [], |_| Ok(())))?;
+        let app: i64 = sql(original.query_row("PRAGMA application_id", [], |r| r.get(0)))?;
+        let version: i64 = sql(original.query_row("PRAGMA user_version", [], |r| r.get(0)))?;
+        sql(dest.execute_batch(&format!("PRAGMA main.application_id = {app}; PRAGMA main.user_version = {version}; DETACH DATABASE legacy;")))?;
         sqlite_healthy(&dest)?;
         drop(dest);
         let mut header = [0u8; 16];
-        File::open(&target)?.read_exact(&mut header)?;
+        File::open(&partial)?.read_exact(&mut header)?;
         if &header == b"SQLite format 3\0" {
             return Err(SecurityError::Crypto);
         }
+        File::open(&partial)?.sync_all()?;
+        fs::rename(&partial, &target)?;
         self.verify_state(source, stage)
     }
 
     fn verify_state(&self, source: &Path, stage: &Path) -> SecResult<()> {
         let original = self.source_state(source)?;
         let migrated = self.encrypted_state(stage)?;
+        compare_rows(
+            &original,
+            &migrated,
+            "SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name",
+        )?;
         let mut query = sql(
             original.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
         )?;
@@ -174,12 +200,17 @@ impl LegacyEncryptedConversion<'_> {
         for name in names {
             let name = sql(name)?;
             let escaped = name.replace('"', "\"\"");
-            let statement = format!("SELECT count(*) FROM \"{escaped}\"");
-            let left: i64 = sql(original.query_row(&statement, [], |row| row.get(0)))?;
-            let right: i64 = sql(migrated.query_row(&statement, [], |row| row.get(0)))?;
-            if left != right {
+            let column_query = format!("SELECT * FROM \"{escaped}\" LIMIT 0");
+            let columns = sql(original.prepare(&column_query))?;
+            let order = columns.column_names().map(|name| {
+                let column = format!("\"{}\"", name.replace('"', "\"\""));
+                format!("typeof({column}), CASE WHEN typeof({column}) = 'real' THEN printf('%!.26g', {column}) ELSE hex(CAST({column} AS BLOB)) END COLLATE BINARY")
+            }).collect::<Vec<_>>().join(", ");
+            if order.is_empty() {
                 return Err(SecurityError::Crypto);
             }
+            let statement = format!("SELECT * FROM \"{escaped}\" ORDER BY {order}");
+            compare_rows(&original, &migrated, &statement)?;
         }
         Ok(())
     }
@@ -360,6 +391,32 @@ impl LegacyEncryptedConversion<'_> {
     }
 }
 
+fn compare_rows(left: &Connection, right: &Connection, statement: &str) -> SecResult<()> {
+    let mut a = sql(left.prepare(statement))?;
+    let mut b = sql(right.prepare(statement))?;
+    let count = a.column_count();
+    if count != b.column_count() {
+        return Err(SecurityError::Crypto);
+    }
+    let mut a_rows = sql(a.query([]))?;
+    let mut b_rows = sql(b.query([]))?;
+    loop {
+        match (sql(a_rows.next())?, sql(b_rows.next())?) {
+            (None, None) => return Ok(()),
+            (Some(a_row), Some(b_row)) => {
+                for i in 0..count {
+                    if sql(a_row.get::<_, rusqlite::types::Value>(i))?
+                        != sql(b_row.get::<_, rusqlite::types::Value>(i))?
+                    {
+                        return Err(SecurityError::Crypto);
+                    }
+                }
+            }
+            _ => return Err(SecurityError::Crypto),
+        }
+    }
+}
+
 fn sql<T>(result: rusqlite::Result<T>) -> SecResult<T> {
     result.map_err(|_| SecurityError::Crypto)
 }
@@ -479,4 +536,51 @@ fn archive_snapshots(root: &Path) -> SecResult<Vec<(String, String, PathBuf)>> {
     }
     result.sort();
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mind_place_state::StateStore;
+
+    #[test]
+    fn rejects_changed_state_value_with_same_row_count() {
+        let home = tempfile::tempdir().unwrap();
+        let source = home.path().join("legacy");
+        let stage = home.path().join("stage");
+        fs::create_dir(&source).unwrap();
+        fs::create_dir(&stage).unwrap();
+        drop(StateStore::open(source.join("state.sqlite3")).unwrap());
+        let db = Connection::open(source.join("state.sqlite3")).unwrap();
+        db.execute_batch("CREATE TABLE synthetic_evidence (value TEXT); INSERT INTO synthetic_evidence VALUES ('original');").unwrap();
+        drop(db);
+        let gate = SecurityGate::open(home.path().join("security.json")).unwrap();
+        gate.initialize(b"synthetic owner migration password")
+            .unwrap();
+        let lease = gate.require_unlocked().unwrap();
+        let (_, recovery, manifest) = CryptoVault::provision(&gate, lease).unwrap();
+        let consent =
+            ExplicitMigrationConsent::from_owner_typed_confirmation("ENCRYPT MY LEGACY VAULT")
+                .unwrap();
+        let converter = LegacyEncryptedConversion {
+            gate: &gate,
+            lease,
+            consent: &consent,
+            manifest: &manifest,
+            recovery: &recovery,
+        };
+        fs::write(
+            stage.join(".state.sqlite3.migration-partial"),
+            b"interrupted synthetic copy",
+        )
+        .unwrap();
+        converter.copy_state(&source, &stage).unwrap();
+        assert!(!stage.join(".state.sqlite3.migration-partial").exists());
+        let db = Connection::open(stage.join("state.sqlite3")).unwrap();
+        converter.key().unwrap().unlock(&db).unwrap();
+        db.execute("UPDATE synthetic_evidence SET value = 'altered'", [])
+            .unwrap();
+        drop(db);
+        assert!(converter.verify_state(&source, &stage).is_err());
+    }
 }
