@@ -6,7 +6,7 @@ use crate::vault_archive::VaultCaptureStore;
 use mind_place_archive::{validate_capture, Capture, MAX_CAPTURE_BYTES};
 use mind_place_security::{
     vault::{ContentKind, CryptoVault, RecoverySecret, VaultManifest},
-    vault_migration::{ExplicitMigrationConsent, LegacyMigrationPreflight},
+    vault_migration::{ExplicitMigrationConsent, LegacyMigrationPreflight, MigrationCheckpoint},
     vault_storage::ImmutableVaultStorage,
     Result as SecResult, SecurityError, SecurityGate, UnlockLease,
 };
@@ -22,6 +22,15 @@ use zeroize::Zeroize;
 
 const MAX_RAW_LEGACY_BLOB: u64 = 64 * 1024 * 1024;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LegacyConversionCheckpoint {
+    StateCopied,
+    ArchiveImported,
+    RawArchivePreserved,
+    DocumentObjectsPreserved,
+    Journal(MigrationCheckpoint),
+}
+
 pub struct LegacyEncryptedConversion<'a> {
     pub gate: &'a SecurityGate,
     pub lease: UnlockLease,
@@ -35,28 +44,71 @@ impl LegacyEncryptedConversion<'_> {
         CryptoVault::restore_with_recovery(self.gate, self.lease, self.manifest, self.recovery)
     }
 
-    /// Requires a separately created durable journal via begin_owner_consented.
-    /// Both conversion and verifier run on isolated staging, not live owner data.
-    pub fn execute_or_resume(&self, preflight: &LegacyMigrationPreflight) -> SecResult<()> {
-        self.gate.validate_lease(self.lease)?;
-        self.crypto()?;
-        let source = preflight.source_root();
-        preflight.execute_or_resume(
+    pub fn begin_owner_consented(&self, preflight: &LegacyMigrationPreflight) -> SecResult<()> {
+        preflight.begin_owner_consented(self.consent, self.gate, self.lease, &self.crypto()?)
+    }
+
+    pub fn resume_owner_consented(
+        &self,
+        source: &Path,
+        destination: &Path,
+    ) -> SecResult<LegacyMigrationPreflight> {
+        LegacyMigrationPreflight::resume_owner_consented(
+            source,
+            destination,
             self.consent,
             self.gate,
             self.lease,
-            |source, stage| self.convert(source, stage),
-            |stage| self.verify(source, stage),
+            &self.crypto()?,
         )
     }
 
-    fn convert(&self, source: &Path, stage: &Path) -> SecResult<()> {
+    pub fn rollback_to_legacy(&self, preflight: &LegacyMigrationPreflight) -> SecResult<()> {
+        preflight.rollback_to_legacy(self.consent, self.gate, self.lease, &self.crypto()?)
+    }
+
+    /// Requires a separately created durable journal via begin_owner_consented.
+    /// Both conversion and verifier run on isolated staging, not live owner data.
+    pub fn execute_or_resume(&self, preflight: &LegacyMigrationPreflight) -> SecResult<()> {
+        self.execute_or_resume_with_checkpoint(preflight, |_| Ok(()))
+    }
+
+    pub fn execute_or_resume_with_checkpoint(
+        &self,
+        preflight: &LegacyMigrationPreflight,
+        checkpoint: impl FnMut(LegacyConversionCheckpoint) -> SecResult<()>,
+    ) -> SecResult<()> {
+        self.gate.validate_lease(self.lease)?;
+        let vault = self.crypto()?;
+        let checkpoint = std::cell::RefCell::new(checkpoint);
+        let source = preflight.source_root();
+        preflight.execute_or_resume_with_checkpoint(
+            self.consent,
+            self.gate,
+            self.lease,
+            &vault,
+            |source, stage| self.convert(source, stage, &mut *checkpoint.borrow_mut()),
+            |stage| self.verify(source, stage),
+            |phase| checkpoint.borrow_mut()(LegacyConversionCheckpoint::Journal(phase)),
+        )
+    }
+
+    fn convert(
+        &self,
+        source: &Path,
+        stage: &Path,
+        checkpoint: &mut impl FnMut(LegacyConversionCheckpoint) -> SecResult<()>,
+    ) -> SecResult<()> {
         self.gate.validate_lease(self.lease)?;
         self.ensure_manifest(stage)?;
         self.copy_state(source, stage)?;
+        checkpoint(LegacyConversionCheckpoint::StateCopied)?;
         self.import_archives(source, stage)?;
+        checkpoint(LegacyConversionCheckpoint::ArchiveImported)?;
         self.preserve_raw_archive(source, stage)?;
+        checkpoint(LegacyConversionCheckpoint::RawArchivePreserved)?;
         self.preserve_documents(source, stage)?;
+        checkpoint(LegacyConversionCheckpoint::DocumentObjectsPreserved)?;
         self.gate.validate_lease(self.lease)
     }
 
@@ -67,14 +119,95 @@ impl LegacyEncryptedConversion<'_> {
         self.verify_archives(source, stage)?;
         self.verify_raw_archive(source, stage)?;
         self.verify_documents(source, stage)?;
+        self.verify_layout(source, stage)?;
         self.gate.validate_lease(self.lease)
+    }
+
+    fn verify_layout(&self, source: &Path, stage: &Path) -> SecResult<()> {
+        use std::collections::BTreeSet;
+        let vault = self.crypto()?;
+        let mut expected = BTreeSet::from([
+            PathBuf::from("vault-v1.json"),
+            PathBuf::from("state.sqlite3"),
+        ]);
+        let mut object = |kind: ContentKind, identity: &str, category: &str| -> SecResult<()> {
+            let name = vault.storage_name(self.gate, self.lease, kind, identity.as_bytes())?;
+            expected.insert(PathBuf::from(category).join(&name[..2]).join(name));
+            Ok(())
+        };
+        let archive = source.join("archive-v1");
+        if archive.exists() {
+            for path in all_regular_files(&archive)? {
+                object(
+                    ContentKind::Archive,
+                    &raw_identity(
+                        path.strip_prefix(source)
+                            .map_err(|_| SecurityError::UnsafePath)?,
+                    )?,
+                    "archive",
+                )?;
+            }
+        }
+        let captures = archive.join("conversations");
+        if captures.exists() {
+            for (id, snapshot, _) in archive_snapshots(&captures)? {
+                object(
+                    ContentKind::Archive,
+                    &format!("capture/{id}/{snapshot}"),
+                    "archive",
+                )?;
+            }
+        }
+        let documents = source.join("document-objects");
+        if documents.exists() {
+            for path in all_regular_files(&documents)? {
+                let hash = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .ok_or(SecurityError::InvalidConfig)?;
+                object(
+                    ContentKind::DocumentObject,
+                    &format!("document/{hash}"),
+                    "document-objects",
+                )?;
+            }
+        }
+        if captures.exists() {
+            expected.insert(PathBuf::from("archive-index.sqlite3"));
+        }
+        for sentinel in [".vault-writer.lock", ".state-schema.lock"] {
+            let path = stage.join(sentinel);
+            if path.exists() {
+                safe_regular(&path)?;
+                if fs::metadata(path)?.len() != 0 {
+                    return Err(SecurityError::Crypto);
+                }
+                expected.insert(PathBuf::from(sentinel));
+            }
+        }
+        let actual: BTreeSet<_> = all_regular_files(stage)?
+            .into_iter()
+            .map(|path| {
+                path.strip_prefix(stage)
+                    .map(Path::to_owned)
+                    .map_err(|_| SecurityError::UnsafePath)
+            })
+            .collect::<SecResult<_>>()?;
+        // Never certify or publish orphan temporary/partial/plaintext bytes.
+        // Unknown staging data is retained for explicit rollback/disposition.
+        if actual != expected {
+            return Err(SecurityError::Crypto);
+        }
+        Ok(())
     }
 
     fn ensure_manifest(&self, stage: &Path) -> SecResult<()> {
         let marker = stage.join("vault-v1.json");
         if marker.exists() {
             let actual = VaultManifest::read(stage)?;
-            if actual.vault_id_b64 != self.manifest.vault_id_b64 {
+            if serde_json::to_vec(&actual).map_err(|_| SecurityError::Crypto)?
+                != serde_json::to_vec(self.manifest).map_err(|_| SecurityError::Crypto)?
+            {
                 return Err(SecurityError::Crypto);
             }
             return Ok(());

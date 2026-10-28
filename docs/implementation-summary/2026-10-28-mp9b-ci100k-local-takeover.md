@@ -1,0 +1,57 @@
+# MP-9B + MP-CI-100K-01 authorized local takeover
+
+Date: 2026-10-28 (Asia/Jakarta). Status: **IN PROGRESS / PARTIAL / DRAFT / DO NOT MERGE**.
+
+Single execution owner: Codex local Windows, instance `codex-local-20261028-01a18146`. Owner-directed transfer supersedes the former execution owner in issue [126](https://github.com/KaisAbiyyi/mind-place/issues/126#issuecomment-6462618046) and [128](https://github.com/KaisAbiyyi/mind-place/issues/128#issuecomment-6462618767). Locks remain `crypto-migration` and `ci-document-scale-workflow`; no other agents were dispatched.
+
+## Baseline and preservation
+
+- PR #127 begins at `255db9633eebcf534d2fd01e7ce46bc65c8f2d73`; PR #129 at `d59f7fbfbeed3aee938b57539d234fd9423360c8`.
+- Both latest remote heads, open PRs, authorization and strict reviews were read before editing. GitHub remains the durable source. Both PRs remain Draft; no merge/release is authorized.
+- Managed task worktrees isolate both branches. Original `D:/projects/mind-place` remains on its original branch with its preexisting `Cargo.lock` change; its hash and status are recorded in the local evidence directory.
+- Only synthetic fixtures are used. No real archive, vault, recovery key, account credential or production secret is read or migrated.
+
+## Implemented and verified
+
+### Windows migration flush
+
+The exact reported unit regression was reproduced with Rust **1.90.0**, MSVC and vendored SQLCipher/OpenSSL on local Windows. Temporary test-only instrumentation identified `migration.state.sync_all` returning OS error **5**. A separate minimal native reproduction demonstrated that a read-only handle fails while a read-write handle succeeds. This matches the [Windows FlushFileBuffers write-access contract](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-flushfilebuffers).
+
+The converter now checks SQLCipher connection close, reopens the staged ciphertext with read/write access **without truncation**, reads its header, flushes it and closes that handle before hard-link publication and partial-file removal. The regression also exercises interrupted partial cleanup, completed-link cleanup, changed values with unchanged row count and changed row identities.
+
+| Check | Result |
+| --- | --- |
+| Exact Windows regression before repair | FAIL, reproduced OS error 5 at `sync_all` |
+| Exact Windows regression after repair | PASS, 1 test |
+| Real SQLCipher/AEAD migration integration | PASS, 1 test (original coverage; additional crash/domain coverage pending) |
+| Original CI-gate baseline | PASS, 20 synthetic Python tests |
+| Dispatch acceptance regressions | Confirmed RED: dispatch proof rejected; PR zero accepted |
+| Hosted exact final-head Windows/Ubuntu CI | NOT RUN on the unfinished takeover candidate |
+| Fresh final 100K/1M qualification | NOT RUN; expensive execution remains gated |
+
+Local evidence and build tooling live under `D:/projects/mind-place-takeover-evidence-20261028/`. The first SQLCipher compile failed before test execution because native Perl was missing; an isolated, SHA256-verified portable Strawberry Perl and pinned Rust toolchain resolved the build prerequisite. No dependency or encryption requirement was weakened.
+
+### Authenticated restart and real migration qualification
+
+- Journal v2 is AEAD authenticated in a separate `migration-journal/v2` domain and bound to the canonical source/destination path pair, source inventory and verified encrypted-output inventory. Prior unauthenticated pre-release journals are refused; no automatic adoption/upgrade of arbitrary journals is attempted.
+- `resume_owner_consented` reconstructs a fresh plan only after journal authentication. An existing destination must match the authorized published output hash and phase; unrelated destinations, wrong vaults, relocated/tampered journals and simultaneous staging/published ambiguity are rejected. Ordinary `inspect` still rejects an existing destination.
+- A cross-process operation lock serializes begin/resume/rollback. Windows publication uses write-through rename; Linux uses atomic no-replace `renameat2` plus parent sync. Journal replacement is distinct from never-overwriting vault-directory publication.
+- Real converter progress boundaries support interruption without exposing data/key material. Actual child processes exit abruptly after state, captures, raw archive, document objects, conversion, verification and publication-before-journal. Fresh processes recover all seven boundaries and repeat execution idempotently before runtime activation.
+- Qualification preserves stable registered source identity, noncontiguous SQL row IDs, NULL/BLOB/REAL values, two capture revisions and metadata, inline-image attachment bytes, all raw archive records, the full manifest, and a document spanning multiple AEAD chunks. Source bytes are compared before/after.
+- Additional real-converter tests reject changed SQL values with equal row count, ciphertext corruption, source mutation and orphan partial/plaintext staging. Unknown staging bytes are never certified; explicit rollback quarantines staging without deleting source. A new RED test exposed mutation after the verification callback; a final output-hash check closes that publication gap.
+
+Local verification: **8/8 migration security tests PASS**, **3/3 real-converter test entries PASS** (one is the child probe; the parent verifies seven actual crash exits), full `mind-place-state` + `mind-place-index` SQLCipher suite PASS, repository contract/typecheck PASS, **186/186 web tests PASS**. The ignored 100K test was not run by these suites. Initial repair checkpoint `7a38b731cc7307cbc239e6b3ecf41a0a696c23ad` independently passed [hosted Windows/Ubuntu SQLCipher](https://github.com/KaisAbiyyi/mind-place/actions/runs/40648850426) and [storage qualification](https://github.com/KaisAbiyyi/mind-place/actions/runs/40648850458); its Windows Product CI is still in progress at this checkpoint. These prior-head receipts do not qualify subsequent source changes.
+
+CI-only checkpoint on PR #129: `0958ee0` adds PR-bound dispatch, independent tree/fingerprint verification, original scale-attempt preservation and distinct Draft/final checks. **28 Python tests + actionlint PASS** locally; hosted CI pending. Historical run #40499159529's live artifact list contains only the 100-file receipt, so no raw full-tier proof can be recovered.
+
+## Remaining execution ledger
+
+1. Migration journal/converter core is implemented and locally qualified as above; explicit production owner UI/runtime migration integration remains unfinished and must not be confused with the core primitive. Never auto-migrate at startup or activate an incomplete destination.
+2. Audit all encrypted writer paths, coordinated snapshot boundaries and restored-vault consistency under concurrent writes and injected failures.
+3. IPC descriptor/ACL/session/replay/revocation verification. Same-owner processes cannot prove hostile different-account Windows access denial; retain unavailable account/owner gates explicitly.
+4. Finish PR-bound manual/final CI provenance, original scale-attempt preservation, neutral Draft development reporting plus enforced final acceptance, and shared CI ownership/integration.
+5. Full required baseline, hosted exact-head Windows/Ubuntu evidence, freeze integrated source before full scale, push both existing branches, self-review and synchronize issue/PR/Notion evidence. Independent approval and owner-installed acceptance remain separate.
+
+## Integration ruling
+
+The four shared CI implementation files are owned by PR #129. Integrate its validated commits into PR #127 without rewriting published history, then use a stacked PR base so the security diff does not independently own the CI implementation. A single frozen **combined** #127 candidate is the full-scale target. An infrastructure review may reference that integration receipt, but a different fingerprint or another PR must never be relabeled a fresh same-source 100K PASS. No historical missing raw artifact is fabricated or reconstructed from log text.

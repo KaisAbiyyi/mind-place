@@ -59,7 +59,6 @@ fn encrypted_migration_preserves_synthetic_captures_state_and_raw_document_bytes
         ExplicitMigrationConsent::from_owner_typed_confirmation("ENCRYPT MY LEGACY VAULT").unwrap();
     let dest = home.path().join("encrypted-vault");
     let plan = LegacyMigrationPreflight::inspect(&source, &dest).unwrap();
-    plan.begin_owner_consented(&consent, &gate, lease).unwrap();
     let converter = LegacyEncryptedConversion {
         gate: &gate,
         lease,
@@ -67,6 +66,7 @@ fn encrypted_migration_preserves_synthetic_captures_state_and_raw_document_bytes
         manifest: &manifest,
         recovery: &recovery,
     };
+    converter.begin_owner_consented(&plan).unwrap();
     converter.execute_or_resume(&plan).unwrap();
 
     assert_eq!(fs::read(source.join("state.sqlite3")).unwrap(), legacy_sql);
@@ -83,5 +83,5 @@ fn encrypted_migration_preserves_synthetic_captures_state_and_raw_document_bytes
         "local synthetic fixture only"
     );
     assert_eq!(fs::read(directory.join(&hash)).unwrap(), document);
-    assert!(plan.rollback_to_legacy(&consent, &gate, lease).is_err());
+    assert!(converter.rollback_to_legacy(&plan).is_err());
 }

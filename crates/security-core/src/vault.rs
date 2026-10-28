@@ -90,6 +90,7 @@ pub enum ContentKind {
     Archive,
     DocumentObject,
     Backup,
+    MigrationJournal,
 }
 impl ContentKind {
     pub(crate) fn label(self) -> &'static [u8] {
@@ -97,6 +98,7 @@ impl ContentKind {
             Self::Archive => b"archive",
             Self::DocumentObject => b"document-object",
             Self::Backup => b"portable-backup",
+            Self::MigrationJournal => b"migration-journal/v2",
         }
     }
 }

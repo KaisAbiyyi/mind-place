@@ -76,6 +76,9 @@ impl<'a> ImmutableVaultStorage<'a> {
             ContentKind::Archive => "archive",
             ContentKind::DocumentObject => "document-objects",
             ContentKind::Backup => "backups",
+            // Mutable migration journals have their own path-bound atomic
+            // protocol; never admit them to the immutable object namespace.
+            ContentKind::MigrationJournal => return Err(SecurityError::InvalidConfig),
         };
         let name = self.vault.storage_name(gate, lease, kind, identity)?;
         Ok(self.root.join(category).join(&name[..2]).join(name))

@@ -1,14 +1,20 @@
-//! MP-9B legacy migration preflight: read-only evidence and change detection.
-//! Never copy, encrypt, relocate, delete, or rewrite owner data here.
-//! Approval, isolated conversion and atomic rollback are separate gates.
+//! MP-9B read-only preflight and authenticated owner-consented migration journal.
+//! Conversion uses isolated staging; legacy source bytes are never rewritten.
+//! Existing destinations require authenticated resume, never ordinary adoption.
+use crate::vault::{ContentKind, CryptoVault};
 use crate::{validate_path, Result, SecurityError, SecurityGate, UnlockLease};
+use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
-    fs::{self, File},
+    fs::{self, File, OpenOptions},
     io::{Read, Write},
     path::{Path, PathBuf},
 };
+use zeroize::Zeroizing;
+
+#[path = "vault_migration_fs.rs"]
+mod durable;
 
 const MAX_FILES: usize = 100_000;
 const MAX_SINGLE_FILE: u64 = 8 * 1024 * 1024 * 1024;
@@ -32,15 +38,47 @@ pub struct LegacyMigrationPreflight {
 }
 
 impl LegacyMigrationPreflight {
+    /// Reconstruct an explicitly authorized migration after a process restart.
+    /// Existing destinations are admitted only through the bound journal.
+    pub fn resume_owner_consented(
+        source: &Path,
+        destination: &Path,
+        _consent: &ExplicitMigrationConsent,
+        gate: &SecurityGate,
+        lease: UnlockLease,
+        vault: &CryptoVault,
+    ) -> Result<Self> {
+        gate.validate_lease(lease)?;
+        let plan = Self::inspect_paths(source, destination, true)?;
+        let _operation = plan.operation_lock()?;
+        let journal = plan.read_journal(gate, lease, vault)?;
+        if plan.destination.exists() {
+            if !matches!(journal.phase.as_str(), "converted" | "published")
+                || plan.staging_path().exists()
+                || journal.output_hash.as_deref()
+                    != Some(plan.output_digest(&plan.destination)?.as_str())
+            {
+                return Err(SecurityError::Crypto);
+            }
+        } else if journal.phase == "published" || journal.phase == "rolled-back" {
+            return Err(SecurityError::InvalidConfig);
+        }
+        Ok(plan)
+    }
+
     /// The caller selects an app-owned, pre-approved legacy root. The
     /// destination must be a distinct, non-existent directory.
     pub fn inspect(source: &Path, destination: &Path) -> Result<Self> {
+        Self::inspect_paths(source, destination, false)
+    }
+
+    fn inspect_paths(source: &Path, destination: &Path, recovering: bool) -> Result<Self> {
         if !source.is_absolute() || !destination.is_absolute() {
             return Err(SecurityError::UnsafePath);
         }
         check(source)?;
         check(destination)?;
-        if destination.exists() {
+        if destination.exists() && !recovering {
             return Err(SecurityError::AlreadyConfigured);
         }
         let canonical_source = source.canonicalize()?;
@@ -49,6 +87,8 @@ impl LegacyMigrationPreflight {
         }
         let destination_parent = destination.parent().ok_or(SecurityError::UnsafePath)?;
         let canonical_parent = destination_parent.canonicalize()?;
+        let destination =
+            canonical_parent.join(destination.file_name().ok_or(SecurityError::UnsafePath)?);
         // Existing sources inside the intended destination or the destination
         // itself must not be adopted. Destination may be a new child of the
         // app-owned root, but only explicitly whitelisted legacy sources scan.
@@ -61,7 +101,7 @@ impl LegacyMigrationPreflight {
         }
         let mut plan = Self {
             source: canonical_source,
-            destination: destination.to_owned(),
+            destination,
             files: Vec::new(),
             total_bytes: 0,
         };
@@ -232,7 +272,7 @@ fn collect_file(
     Ok(())
 }
 
-const JOURNAL_VERSION: u32 = 1;
+const JOURNAL_VERSION: u32 = 2;
 const CONSENT_WORDS: &str = "ENCRYPT MY LEGACY VAULT";
 
 /// UI must obtain explicit typed consent for the owner's data.
@@ -252,6 +292,16 @@ struct DurableMigrationJournal {
     version: u32,
     inventory_hash: String,
     phase: String,
+    output_hash: Option<String>,
+}
+
+/// Safe interruption/progress boundaries. Returning an error preserves a
+/// resumable journal/staging; observers never receive corpus contents or keys.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MigrationCheckpoint {
+    ConversionComplete,
+    Verified,
+    Published,
 }
 
 impl LegacyMigrationPreflight {
@@ -277,15 +327,78 @@ impl LegacyMigrationPreflight {
         self.destination.with_extension("mp9b-migration-staging")
     }
 
-    fn read_journal(&self) -> Result<DurableMigrationJournal> {
+    fn journal_identity(&self) -> Result<Vec<u8>> {
+        // Canonical path pair is authenticated but never stored in cleartext.
+        let paths = serde_json::to_vec(&(&self.source, &self.destination))
+            .map_err(|_| SecurityError::InvalidConfig)?;
+        Ok(Sha256::digest(paths).to_vec())
+    }
+
+    fn operation_lock(&self) -> Result<File> {
+        if self.destination.parent() == Some(self.source.as_path()) {
+            return Err(SecurityError::UnsafePath);
+        }
+        let path = self.destination.with_extension("mp9b-migration-lock");
+        check(&path)?;
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&path)?;
+        if !file.metadata()?.is_file() || file.metadata()?.len() != 0 {
+            return Err(SecurityError::InvalidConfig);
+        }
+        FileExt::try_lock_exclusive(&file)?;
+        Ok(file)
+    }
+
+    fn output_digest(&self, directory: &Path) -> Result<String> {
+        check(directory)?;
+        if !directory.is_dir() {
+            return Err(SecurityError::UnsafePath);
+        }
+        let mut files = Vec::new();
+        scan(directory, directory, 0, &mut files, &mut 0)?;
+        files.sort_by(|a, b| a.relative.cmp(&b.relative));
+        let mut digest = Sha256::new();
+        digest.update(b"mp9b-migration-output-v2\0");
+        for file in files {
+            let path = file.relative.to_str().ok_or(SecurityError::InvalidConfig)?;
+            digest.update((path.len() as u64).to_be_bytes());
+            digest.update(path.as_bytes());
+            digest.update(file.bytes.to_be_bytes());
+            digest.update(file.sha256.as_bytes());
+        }
+        Ok(format!("{:x}", digest.finalize()))
+    }
+
+    fn read_journal(
+        &self,
+        gate: &SecurityGate,
+        lease: UnlockLease,
+        vault: &CryptoVault,
+    ) -> Result<DurableMigrationJournal> {
         let path = self.journal_path();
         check(&path)?;
         let file = File::open(path)?;
         if file.metadata()?.len() > 4096 {
             return Err(SecurityError::InvalidConfig);
         }
+        let mut bytes = Vec::new();
+        file.take(4097).read_to_end(&mut bytes)?;
+        if bytes.len() > 4096 {
+            return Err(SecurityError::InvalidConfig);
+        }
+        let clear = vault.unseal(
+            gate,
+            lease,
+            ContentKind::MigrationJournal,
+            &self.journal_identity()?,
+            &bytes,
+        )?;
         let journal: DurableMigrationJournal =
-            serde_json::from_reader(file).map_err(|_| SecurityError::InvalidConfig)?;
+            serde_json::from_slice(&clear).map_err(|_| SecurityError::InvalidConfig)?;
         if journal.version != JOURNAL_VERSION
             || journal.inventory_hash != self.digest_inventory()?
             || !matches!(
@@ -295,23 +408,45 @@ impl LegacyMigrationPreflight {
         {
             return Err(SecurityError::Crypto);
         }
+        if (journal.phase == "prepared" && journal.output_hash.is_some())
+            || (matches!(journal.phase.as_str(), "converted" | "published")
+                && !journal.output_hash.as_ref().is_some_and(|h| {
+                    h.len() == 64
+                        && h.bytes()
+                            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+                }))
+        {
+            return Err(SecurityError::Crypto);
+        }
         Ok(journal)
     }
 
-    fn write_journal(&self, journal: &DurableMigrationJournal, replace: bool) -> Result<()> {
+    fn write_journal(
+        &self,
+        journal: &DurableMigrationJournal,
+        replace: bool,
+        gate: &SecurityGate,
+        lease: UnlockLease,
+        vault: &CryptoVault,
+    ) -> Result<()> {
         let path = self.journal_path();
         check(&path)?;
         let parent = path.parent().ok_or(SecurityError::UnsafePath)?;
         let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
-        tmp.write_all(&serde_json::to_vec(journal).map_err(|_| SecurityError::InvalidConfig)?)?;
+        let clear =
+            Zeroizing::new(serde_json::to_vec(journal).map_err(|_| SecurityError::InvalidConfig)?);
+        let sealed = vault.seal(
+            gate,
+            lease,
+            ContentKind::MigrationJournal,
+            &self.journal_identity()?,
+            &clear,
+        )?;
+        tmp.write_all(&sealed)?;
         tmp.as_file().sync_all()?;
-        if replace {
-            tmp.persist(&path).map_err(|e| e.error)?;
-        } else {
-            tmp.persist_noclobber(&path).map_err(|e| e.error)?;
-        }
-        #[cfg(unix)]
-        File::open(parent)?.sync_all()?;
+        // Close every file handle before the Windows durable rename.
+        let tmp = tmp.into_temp_path();
+        durable::rename(&tmp, &path, replace)?;
         Ok(())
     }
 
@@ -321,8 +456,10 @@ impl LegacyMigrationPreflight {
         _consent: &ExplicitMigrationConsent,
         gate: &SecurityGate,
         lease: UnlockLease,
+        vault: &CryptoVault,
     ) -> Result<()> {
         gate.validate_lease(lease)?;
+        let _operation = self.operation_lock()?;
         // Journal and staging must live OUTSIDE the legacy inventory.
         if self.destination.parent() == Some(self.source.as_path()) {
             return Err(SecurityError::UnsafePath);
@@ -337,8 +474,12 @@ impl LegacyMigrationPreflight {
                 version: JOURNAL_VERSION,
                 inventory_hash: self.digest_inventory()?,
                 phase: "prepared".into(),
+                output_hash: None,
             },
             false,
+            gate,
+            lease,
+            vault,
         )
     }
 
@@ -350,24 +491,58 @@ impl LegacyMigrationPreflight {
         _consent: &ExplicitMigrationConsent,
         gate: &SecurityGate,
         lease: UnlockLease,
+        vault: &CryptoVault,
+        convert: impl FnMut(&Path, &Path) -> Result<()>,
+        verify: impl FnMut(&Path) -> Result<()>,
+    ) -> Result<()> {
+        self.execute_or_resume_with_checkpoint(
+            _consent,
+            gate,
+            lease,
+            vault,
+            convert,
+            verify,
+            |_| Ok(()),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn execute_or_resume_with_checkpoint(
+        &self,
+        _consent: &ExplicitMigrationConsent,
+        gate: &SecurityGate,
+        lease: UnlockLease,
+        vault: &CryptoVault,
         mut convert: impl FnMut(&Path, &Path) -> Result<()>,
         mut verify: impl FnMut(&Path) -> Result<()>,
+        mut checkpoint: impl FnMut(MigrationCheckpoint) -> Result<()>,
     ) -> Result<()> {
         gate.validate_lease(lease)?;
-        let mut journal = self.read_journal()?;
+        let _operation = self.operation_lock()?;
+        let mut journal = self.read_journal(gate, lease, vault)?;
         if journal.phase == "rolled-back" {
             return Err(SecurityError::InvalidConfig);
         }
         let staging = self.staging_path();
         check(&staging)?;
         if self.destination.exists() {
-            if journal.phase != "converted" && journal.phase != "published" {
+            if (journal.phase != "converted" && journal.phase != "published")
+                || staging.exists()
+                || journal.output_hash.as_deref()
+                    != Some(self.output_digest(&self.destination)?.as_str())
+            {
                 return Err(SecurityError::Crypto);
             }
             verify(&self.destination)?;
             self.verify_source_only()?;
+            gate.validate_lease(lease)?;
+            if journal.output_hash.as_deref()
+                != Some(self.output_digest(&self.destination)?.as_str())
+            {
+                return Err(SecurityError::Crypto);
+            }
             journal.phase = "published".into();
-            self.write_journal(&journal, true)?;
+            self.write_journal(&journal, true, gate, lease, vault)?;
             return Ok(());
         }
         self.verify_unchanged()?;
@@ -382,10 +557,14 @@ impl LegacyMigrationPreflight {
             convert(&self.source, &staging)?;
             gate.validate_lease(lease)?;
             self.verify_unchanged()?;
-            journal.phase = "converted".into();
-            self.write_journal(&journal, true)?;
+            checkpoint(MigrationCheckpoint::ConversionComplete)?;
         }
         if !staging.is_dir() {
+            return Err(SecurityError::Crypto);
+        }
+        if journal.phase == "converted"
+            && journal.output_hash.as_deref() != Some(self.output_digest(&staging)?.as_str())
+        {
             return Err(SecurityError::Crypto);
         }
         verify(&staging)?;
@@ -399,11 +578,24 @@ impl LegacyMigrationPreflight {
         if &first == b"SQLite format 3\0" {
             return Err(SecurityError::Crypto);
         }
-        fs::rename(&staging, &self.destination)?;
-        #[cfg(unix)]
-        File::open(self.destination.parent().ok_or(SecurityError::UnsafePath)?)?.sync_all()?;
+        if journal.phase == "prepared" {
+            journal.output_hash = Some(self.output_digest(&staging)?);
+            journal.phase = "converted".into();
+            self.write_journal(&journal, true, gate, lease, vault)?;
+        } else if journal.output_hash.as_deref() != Some(self.output_digest(&staging)?.as_str()) {
+            return Err(SecurityError::Crypto);
+        }
+        checkpoint(MigrationCheckpoint::Verified)?;
+        gate.validate_lease(lease)?;
+        self.verify_unchanged()?;
+        if journal.output_hash.as_deref() != Some(self.output_digest(&staging)?.as_str()) {
+            return Err(SecurityError::Crypto);
+        }
+        durable::rename(&staging, &self.destination, false)?;
+        checkpoint(MigrationCheckpoint::Published)?;
+        self.verify_source_only()?;
         journal.phase = "published".into();
-        self.write_journal(&journal, true)?;
+        self.write_journal(&journal, true, gate, lease, vault)?;
         Ok(())
     }
 
@@ -420,9 +612,11 @@ impl LegacyMigrationPreflight {
         _consent: &ExplicitMigrationConsent,
         gate: &SecurityGate,
         lease: UnlockLease,
+        vault: &CryptoVault,
     ) -> Result<()> {
         gate.validate_lease(lease)?;
-        let mut journal = self.read_journal()?;
+        let _operation = self.operation_lock()?;
+        let mut journal = self.read_journal(gate, lease, vault)?;
         if journal.phase == "published" || self.destination.exists() {
             return Err(SecurityError::AlreadyConfigured);
         }
@@ -438,10 +632,10 @@ impl LegacyMigrationPreflight {
             if quarantined.exists() {
                 return Err(SecurityError::AlreadyConfigured);
             }
-            fs::rename(staging, quarantined)?;
+            durable::rename(&staging, &quarantined, false)?;
         }
         journal.phase = "rolled-back".into();
-        self.write_journal(&journal, true)
+        self.write_journal(&journal, true, gate, lease, vault)
     }
 }
 
@@ -534,6 +728,7 @@ mod tests {
         LegacyMigrationPreflight,
         SecurityGate,
         UnlockLease,
+        CryptoVault,
     ) {
         let home = tempfile::tempdir().unwrap();
         let source = home.path().join("legacy");
@@ -549,7 +744,8 @@ mod tests {
         gate.initialize(b"synthetic-confirmed-migration-secret")
             .unwrap();
         let lease = gate.require_unlocked().unwrap();
-        (home, plan, gate, lease)
+        let (vault, _, _) = CryptoVault::provision(&gate, lease).unwrap();
+        (home, plan, gate, lease, vault)
     }
 
     fn fake_encrypted_conversion(_source: &Path, staging: &Path) -> Result<()> {
@@ -567,17 +763,19 @@ mod tests {
 
     #[test]
     fn consented_journal_recovers_interrupted_conversion_without_mutating_source() {
-        let (_home, plan, gate, lease) = synthetic_journal_fixture();
+        let (_home, plan, gate, lease, vault) = synthetic_journal_fixture();
         let source_before = fs::read(plan.source.join("state.sqlite3")).unwrap();
         assert!(ExplicitMigrationConsent::from_owner_typed_confirmation("skip").is_err());
         let consent =
             ExplicitMigrationConsent::from_owner_typed_confirmation("ENCRYPT MY LEGACY VAULT")
                 .unwrap();
-        plan.begin_owner_consented(&consent, &gate, lease).unwrap();
+        plan.begin_owner_consented(&consent, &gate, lease, &vault)
+            .unwrap();
         let err = plan.execute_or_resume(
             &consent,
             &gate,
             lease,
+            &vault,
             |source, stage| {
                 fake_encrypted_conversion(source, stage)?;
                 Err(SecurityError::Crypto)
@@ -594,6 +792,7 @@ mod tests {
                 &consent,
                 &gate,
                 lease,
+                &vault,
                 fake_encrypted_conversion,
                 fake_crypto_verify,
             )
@@ -608,11 +807,12 @@ mod tests {
 
     #[test]
     fn migration_journal_rejects_source_tamper_revocation_and_rollback_is_non_destructive() {
-        let (_home, plan, gate, lease) = synthetic_journal_fixture();
+        let (_home, plan, gate, lease, vault) = synthetic_journal_fixture();
         let consent =
             ExplicitMigrationConsent::from_owner_typed_confirmation("ENCRYPT MY LEGACY VAULT")
                 .unwrap();
-        plan.begin_owner_consented(&consent, &gate, lease).unwrap();
+        plan.begin_owner_consented(&consent, &gate, lease, &vault)
+            .unwrap();
         fs::write(
             plan.source.join("state.sqlite3"),
             b"SQLite format 3\0changed",
@@ -623,6 +823,7 @@ mod tests {
                 &consent,
                 &gate,
                 lease,
+                &vault,
                 fake_encrypted_conversion,
                 fake_crypto_verify,
             )
@@ -636,6 +837,7 @@ mod tests {
             &consent,
             &gate,
             lease,
+            &vault,
             |source, stage| {
                 fake_encrypted_conversion(source, stage)?;
                 Err(SecurityError::Crypto)
@@ -643,7 +845,8 @@ mod tests {
             fake_crypto_verify,
         )
         .unwrap_err();
-        plan.rollback_to_legacy(&consent, &gate, lease).unwrap();
+        plan.rollback_to_legacy(&consent, &gate, lease, &vault)
+            .unwrap();
         assert!(!plan.destination.exists());
         assert!(plan
             .destination
@@ -657,12 +860,155 @@ mod tests {
                 &consent,
                 &gate,
                 lease,
+                &vault,
                 fake_encrypted_conversion,
                 fake_crypto_verify,
             )
             .is_err());
         gate.lock();
-        assert!(plan.rollback_to_legacy(&consent, &gate, lease).is_err());
+        assert!(plan
+            .rollback_to_legacy(&consent, &gate, lease, &vault)
+            .is_err());
+    }
+
+    #[test]
+    fn post_publish_restart_uses_authenticated_recovery_entry_point() {
+        let (_home, plan, gate, lease, vault) = synthetic_journal_fixture();
+        let consent =
+            ExplicitMigrationConsent::from_owner_typed_confirmation(CONSENT_WORDS).unwrap();
+        plan.begin_owner_consented(&consent, &gate, lease, &vault)
+            .unwrap();
+        plan.execute_or_resume(
+            &consent,
+            &gate,
+            lease,
+            &vault,
+            fake_encrypted_conversion,
+            fake_crypto_verify,
+        )
+        .unwrap();
+        // Persist the last pre-publication journal, simulating a restart after
+        // rename and before the final journal transition.
+        let mut journal = plan.read_journal(&gate, lease, &vault).unwrap();
+        journal.phase = "converted".into();
+        plan.write_journal(&journal, true, &gate, lease, &vault)
+            .unwrap();
+        let source = plan.source.clone();
+        let destination = plan.destination.clone();
+        drop(plan);
+        assert!(LegacyMigrationPreflight::inspect(&source, &destination).is_err());
+        let recovered = LegacyMigrationPreflight::resume_owner_consented(
+            &source,
+            &destination,
+            &consent,
+            &gate,
+            lease,
+            &vault,
+        )
+        .unwrap();
+        recovered
+            .execute_or_resume(
+                &consent,
+                &gate,
+                lease,
+                &vault,
+                fake_encrypted_conversion,
+                fake_crypto_verify,
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn recovery_rejects_wrong_vault_relocated_journal_and_ciphertext_tamper() {
+        let (home, plan, gate, lease, vault) = synthetic_journal_fixture();
+        let consent =
+            ExplicitMigrationConsent::from_owner_typed_confirmation(CONSENT_WORDS).unwrap();
+        plan.begin_owner_consented(&consent, &gate, lease, &vault)
+            .unwrap();
+        let bytes = fs::read(plan.journal_path()).unwrap();
+        assert!(!bytes
+            .windows(b"inventory_hash".len())
+            .any(|w| w == b"inventory_hash"));
+        let (foreign, _, _) = CryptoVault::provision(&gate, lease).unwrap();
+        assert!(LegacyMigrationPreflight::resume_owner_consented(
+            &plan.source,
+            &plan.destination,
+            &consent,
+            &gate,
+            lease,
+            &foreign
+        )
+        .is_err());
+        let other =
+            LegacyMigrationPreflight::inspect(&plan.source, &home.path().join("unrelated-target"))
+                .unwrap();
+        fs::write(other.journal_path(), &bytes).unwrap();
+        assert!(LegacyMigrationPreflight::resume_owner_consented(
+            &other.source,
+            &other.destination,
+            &consent,
+            &gate,
+            lease,
+            &vault
+        )
+        .is_err());
+        let mut tampered = bytes.clone();
+        let last = tampered.len() - 1;
+        tampered[last] ^= 1;
+        fs::write(plan.journal_path(), tampered).unwrap();
+        assert!(LegacyMigrationPreflight::resume_owner_consented(
+            &plan.source,
+            &plan.destination,
+            &consent,
+            &gate,
+            lease,
+            &vault
+        )
+        .is_err());
+        fs::write(plan.journal_path(), bytes).unwrap();
+        fs::create_dir(&plan.destination).unwrap();
+        fs::write(plan.destination.join("unrelated-owner-file"), b"keep").unwrap();
+        assert!(LegacyMigrationPreflight::resume_owner_consented(
+            &plan.source,
+            &plan.destination,
+            &consent,
+            &gate,
+            lease,
+            &vault
+        )
+        .is_err());
+        assert_eq!(
+            fs::read(plan.destination.join("unrelated-owner-file")).unwrap(),
+            b"keep"
+        );
+    }
+
+    #[test]
+    fn changed_staging_after_verification_is_not_published() {
+        let (_home, plan, gate, lease, vault) = synthetic_journal_fixture();
+        let consent =
+            ExplicitMigrationConsent::from_owner_typed_confirmation(CONSENT_WORDS).unwrap();
+        plan.begin_owner_consented(&consent, &gate, lease, &vault)
+            .unwrap();
+        let result = plan.execute_or_resume_with_checkpoint(
+            &consent,
+            &gate,
+            lease,
+            &vault,
+            fake_encrypted_conversion,
+            fake_crypto_verify,
+            |phase| {
+                if phase == MigrationCheckpoint::Verified {
+                    fs::write(
+                        plan.staging_path().join("state.sqlite3"),
+                        b"tampered encrypted output",
+                    )?;
+                }
+                Ok(())
+            },
+        );
+        assert!(result.is_err());
+        assert!(!plan.destination.exists());
     }
 
     #[cfg(unix)]
