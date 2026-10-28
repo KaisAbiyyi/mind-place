@@ -40,7 +40,7 @@ class FingerprintTests(unittest.TestCase):
         git(self.root, "init", "-q")
         self.write("crates/index-core/src/documents.rs", "original")
         self.write("Cargo.lock", "dependency-A")
-        self.write(".github/workflows/mp-10c-scale.yml", "jobs:\\n  document-smoke:\\n    runs-on: windows-latest\\n    steps:\\n      - run: cargo test smoke\\n  document-scale:\\n    runs-on: windows-latest\\n    steps:\\n      - run: cargo test full\\n  provenance:\\n    runs-on: ubuntu-latest\\n")
+        self.write(".github/workflows/mp-10c-scale.yml", "jobs:\n  document-smoke:\n    runs-on: windows-latest\n    steps:\n      - run: cargo test smoke\n  document-scale:\n    runs-on: windows-latest\n    steps:\n      - run: cargo test full\n  provenance:\n    runs-on: ubuntu-latest\n")
         self.write(".github/workflows/ci.yml", "timeout 30")
         self.write("docs/history.md", "docs")
         git(self.root, "add", ".")
@@ -83,7 +83,7 @@ class FingerprintTests(unittest.TestCase):
         self.write("scripts/mp10c_prerequisite_wait.py", "bounded wait")
         text = self.root.joinpath(".github/workflows/mp-10c-scale.yml").read_text()
         self.write(".github/workflows/mp-10c-scale.yml", text.replace(
-            "  document-scale:", "  coordinator:\\n    runs-on: ubuntu-latest\\n  document-scale:"))
+            "  document-scale:", "  coordinator:\n    runs-on: ubuntu-latest\n  document-scale:"))
         self.assertEqual(before, self.fp())
         self.write(".github/workflows/mp-10c-scale.yml",
                    self.root.joinpath(".github/workflows/mp-10c-scale.yml").read_text().replace(
@@ -279,7 +279,7 @@ class PriorProofTests(unittest.TestCase):
     def setUp(self):
         self.repo, self.pr = "owner/repo", 128
         self.tree = [{"type": "blob", "mode": "100644", "sha": "e"*40, "path": "Cargo.lock"}]
-        self.scale_bytes = b"jobs:\\n  document-smoke:\\n    runs-on: windows-latest\\n    steps:\\n      - run: cargo test smoke\\n  document-scale:\\n    runs-on: windows-latest\\n    steps:\\n      - run: cargo test full\\n  provenance:\\n    runs-on: ubuntu-latest\\n"
+        self.scale_bytes = b"jobs:\n  document-smoke:\n    runs-on: windows-latest\n    steps:\n      - run: cargo test smoke\n  document-scale:\n    runs-on: windows-latest\n    steps:\n      - run: cargo test full\n  provenance:\n    runs-on: ubuntu-latest\n"
         self.scale_sha = hashlib.sha1(b"blob " + str(len(self.scale_bytes)).encode() + b"\\0" + self.scale_bytes).hexdigest()
         self.tree.append({"type": "blob", "mode": "100644", "sha": self.scale_sha,
                           "path": ".github/workflows/mp-10c-scale.yml"})

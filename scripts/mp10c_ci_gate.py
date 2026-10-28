@@ -362,7 +362,7 @@ def verify_source_tree(proof: dict, run: dict, *, repo: str, pr: int, desired: s
     if blob.get("sha") != source_scale or blob.get("encoding") != "base64" or blob.get("size", 0) > 65536:
         raise ValueError("Invalid GitHub-hosted workflow blob")
     scale_bytes = base64.b64decode(blob["content"], validate=False)
-    if hashlib.sha1(b"blob " + str(len(scale_bytes)).encode() + b"\\0" + scale_bytes).hexdigest() != source_scale:
+    if hashlib.sha1(b"blob " + str(len(scale_bytes)).encode() + b"\0" + scale_bytes).hexdigest() != source_scale:
         raise ValueError("Workflow blob differs from its Git object identity")
     policy = proof.get("fingerprint_policy", "legacy/v1")
     original = fingerprint_entries(entries, legacy=(policy == "legacy/v1"),
