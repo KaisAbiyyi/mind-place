@@ -90,7 +90,7 @@ impl LegacyEncryptedConversion<'_> {
         Ok(())
     }
 
-    fn key(&self) -> SecResult<CipherKey> {
+    fn key(&self) -> SecResult<std::sync::Arc<CipherKey>> {
         let vault = self.crypto()?;
         let derived = vault.derived_key(self.gate, self.lease, b"state/sqlcipher/v1")?;
         let mut raw = [0u8; 32];
