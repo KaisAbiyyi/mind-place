@@ -8,6 +8,7 @@ new full-scale PASS. No owner files are accessed.
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import io
 import json
@@ -22,6 +23,7 @@ import urllib.request
 import zipfile
 
 SCHEMA = "mind-place-mp10c-qualification/v2"
+WORKLOAD_POLICY = "mp10c-workload/v2"  # Verified native scale semantics + production inputs.
 ARTIFACT = "mp10c-qualified-100000"
 WORKFLOW = "mp-10c-scale.yml"
 FULL_JOB = "Windows approved documents / 100000 files"
@@ -31,30 +33,55 @@ HEX64 = re.compile(r"^[0-9a-f]{64}$")
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 
 
-def excluded(path: str) -> bool:
-    # Deliberately conservative. ALL tracked project files are dependencies
-    # unless explicitly proven inert to the Windows Rust scale qualification.
-    # Never exclude crates, Rust workspace/dependency/toolchain, test fixtures,
-    # security/authority code, build scripts, .cargo config or this gate.
-    return (
-        path.startswith("docs/")
-        or path in {"README.md", "LICENSE", "LICENSE.md", "CHANGELOG.md"}
-        or path.startswith(".github/ISSUE_TEMPLATE/")
-        or path.startswith(".github/DISCUSSION_TEMPLATE/")
-        or path in {".github/PULL_REQUEST_TEMPLATE.md", ".github/workflows/ci.yml"}
-        or (path.startswith(".github/workflows/") and path != ".github/workflows/mp-10c-scale.yml")
-    )
+def excluded(path: str, *, legacy: bool = False) -> bool:
+    """Non-workload paths are policy inputs, not excuses to trust old evidence.
+
+    Legacy v1 included the validator, gate tests and the entire scale workflow.
+    v2 instead separately commits to immutable scale runner/test job semantics.
+    """
+    common = (path.startswith("docs/")
+              or path in {"README.md", "LICENSE", "LICENSE.md", "CHANGELOG.md"}
+              or path.startswith(".github/ISSUE_TEMPLATE/")
+              or path.startswith(".github/DISCUSSION_TEMPLATE/")
+              or path in {".github/PULL_REQUEST_TEMPLATE.md", ".github/workflows/ci.yml"}
+              or (path.startswith(".github/workflows/") and
+                  path != ".github/workflows/mp-10c-scale.yml"))
+    return common or (not legacy and path in {
+        "scripts/mp10c_ci_gate.py", "scripts/tests/test_mp10c_ci_gate.py",
+        "scripts/mp10c_prerequisite_wait.py", ".github/workflows/mp-10c-scale.yml"})
+
+
+def scale_workflow_signature(contents: bytes) -> bytes:
+    """Hash the actual Windows smoke + full job execution contract.
+
+    Cross-workflow orchestration and scheduling are deliberately out of scope,
+    but Windows runner, timeouts, build flags, test commands, receipt acceptance,
+    artifact upload, and critical step guards remain bound. Unparseable YAML
+    shape fails closed; changes inside either executed job force reindexing.
+    """
+    source = contents.decode("utf-8")
+    digest = hashlib.sha256(b"mp10c-windows-scale-steps/v1\0")
+    for name in ("document-smoke", "document-scale"):
+        begin = re.search(r"(?m)^  " + re.escape(name) + r":\s*$", source)
+        if not begin:
+            raise ValueError("Scale workflow missing required Windows tier: " + name)
+        next_job = re.search(r"(?m)^  [a-z][a-z0-9-]*:\s*$", source[begin.end():])
+        body = source[begin.end(): begin.end() + next_job.start() if next_job else len(source)]
+        runner = re.search(r"(?m)^    runs-on: windows-latest\s*$", body)
+        if not runner:
+            raise ValueError("Scale workflow runner contract changed: " + name)
+        contract = body[runner.start():].rstrip()
+        if not re.search(r"(?m)^    steps:\s*$", contract):
+            raise ValueError("Missing Windows scale steps: " + name)
+        digest.update(name.encode() + b"\0" + contract.encode() + b"\0")
+    return digest.digest()
 
 
 def fingerprint(root: str = ".") -> str:
-    """Hash all effective tracked file mode/blob tuples, including deletions.
-
-    git index is the checkout's canonical tree; this also includes gitlinks,
-    symlink mode, Cargo.lock and the runner/test workflow. Excluded paths are
-    narrowly documented non-inputs, not an allowlist of possible dependencies.
-    """
+    """Hash Git's staged tree, not mutable working-directory file contents."""
     records = subprocess.check_output(["git", "ls-files", "--stage", "-z"], cwd=root)
     entries = []
+    scale_sha = None
     for record in records.split(b"\0"):
         if not record:
             continue
@@ -63,11 +90,17 @@ def fingerprint(root: str = ".") -> str:
         if stage != b"0":
             raise ValueError("Unmerged index: refusing fingerprint")
         entries.append((mode, oid, path_bytes))
-    return fingerprint_entries(entries)
+        if path_bytes == b".github/workflows/mp-10c-scale.yml":
+            scale_sha = oid
+    scale = (subprocess.check_output(["git", "cat-file", "blob", scale_sha], cwd=root)
+             if scale_sha else None)
+    return fingerprint_entries(entries, scale_workflow=scale)
 
 
-def fingerprint_entries(entries: list[tuple[bytes, bytes, bytes]]) -> str:
-    digest = hashlib.sha256(b"mp10c-effective-inputs/v1\0")
+def fingerprint_entries(entries: list[tuple[bytes, bytes, bytes]], *,
+                        legacy: bool = False, scale_workflow: bytes | None = None) -> str:
+    digest = hashlib.sha256(
+        b"mp10c-effective-inputs/v1\0" if legacy else b"mp10c-workload-inputs/v2\0")
     included = 0
     seen = set()
     for mode, oid, path_bytes in sorted(entries, key=lambda item: item[2]):
@@ -76,12 +109,14 @@ def fingerprint_entries(entries: list[tuple[bytes, bytes, bytes]]) -> str:
         seen.add(path_bytes)
         if not HEX40.fullmatch(oid.decode("ascii")):
             raise ValueError("Invalid effective tree object")
-        if excluded(path_bytes.decode("utf-8", errors="surrogateescape")):
+        if excluded(path_bytes.decode("utf-8", errors="surrogateescape"), legacy=legacy):
             continue
         digest.update(mode + b"\0" + oid + b"\0" + path_bytes + b"\0")
         included += 1
     if not included:
-        raise ValueError("Empty effective-input set: refusing fingerprint")
+        raise ValueError("Empty workload set: refusing fingerprint")
+    if not legacy and scale_workflow is not None:
+        digest.update(b"mp10c-scale-execution-contract\0" + scale_workflow_signature(scale_workflow))
     return digest.hexdigest()
 
 
@@ -112,6 +147,9 @@ def validate_proof(proof: dict, raw_bytes: bytes, *, run: dict, artifact: dict,
                    pr: int, repo: str, desired: str) -> None:
     if not isinstance(proof, dict) or proof.get("schema") != SCHEMA:
         raise ValueError("Missing/invalid provenance schema")
+    policy = proof.get("fingerprint_policy", "legacy/v1")
+    if policy not in {"legacy/v1", WORKLOAD_POLICY}:
+        raise ValueError("Unknown/untrusted fingerprint policy")
     source = proof.get("checkout_sha")
     if not isinstance(source, str) or not HEX40.fullmatch(source):
         raise ValueError("Invalid qualified checkout SHA")
@@ -136,8 +174,11 @@ def validate_proof(proof: dict, raw_bytes: bytes, *, run: dict, artifact: dict,
         raise ValueError("Invalid original full-scale attempt")
     if proof.get("tier") != 100000 or proof.get("qualified") is not True:
         raise ValueError("Proof does not attest completed full tier")
-    if proof.get("input_fingerprint") != desired or not HEX64.fullmatch(desired):
-        raise ValueError("Relevant effective sources changed")
+    if (not HEX64.fullmatch(desired)
+            or not isinstance(proof.get("input_fingerprint"), str)
+            or not HEX64.fullmatch(proof["input_fingerprint"])
+            or (policy == WORKLOAD_POLICY and proof["input_fingerprint"] != desired)):
+        raise ValueError("Relevant workload policy/source mismatch")
     if proof.get("raw_receipt_sha256") != hashlib.sha256(raw_bytes).hexdigest():
         raise ValueError("Raw acceptance receipt does not match provenance hash")
     require_raw_receipt(json.loads(raw_bytes))
@@ -190,7 +231,7 @@ def make_proof(*, receipt: bytes, source: str, run_id: int, attempt: int,
         "repo": repo, "event": event, "pr_number": pr,
         "checkout_sha": source, "source_sha": head_sha,
         "source_ref": head_ref, "scale_run_attempt": scale_attempt,
-        "input_fingerprint": effective,
+        "input_fingerprint": effective, "fingerprint_policy": WORKLOAD_POLICY,
         "run_id": run_id, "run_attempt": attempt,
         "raw_receipt_sha256": hashlib.sha256(receipt).hexdigest(),
     }
@@ -313,8 +354,23 @@ def verify_source_tree(proof: dict, run: dict, *, repo: str, pr: int, desired: s
         raise ValueError("Incomplete qualified source tree")
     entries = [(e["mode"].encode("ascii"), e["sha"].encode("ascii"), e["path"].encode("utf-8"))
                for e in tree["tree"] if e["type"] in {"blob", "commit"}]
-    if fingerprint_entries(entries) != desired:
-        raise ValueError("Qualified GitHub tree does not match effective inputs")
+    source_scale = next((e["sha"] for e in tree["tree"]
+                         if e["type"] == "blob" and e["path"] == ".github/workflows/mp-10c-scale.yml"), None)
+    if not source_scale or not HEX40.fullmatch(source_scale):
+        raise ValueError("Qualified workflow missing from source tree")
+    blob = api_json(base + "/git/blobs/" + source_scale, token)
+    if blob.get("sha") != source_scale or blob.get("encoding") != "base64" or blob.get("size", 0) > 65536:
+        raise ValueError("Invalid GitHub-hosted workflow blob")
+    scale_bytes = base64.b64decode(blob["content"], validate=False)
+    if hashlib.sha1(b"blob " + str(len(scale_bytes)).encode() + b"\\0" + scale_bytes).hexdigest() != source_scale:
+        raise ValueError("Workflow blob differs from its Git object identity")
+    policy = proof.get("fingerprint_policy", "legacy/v1")
+    original = fingerprint_entries(entries, legacy=(policy == "legacy/v1"),
+                                   scale_workflow=scale_bytes if policy != "legacy/v1" else None)
+    if original != proof["input_fingerprint"]:
+        raise ValueError("Original attested fingerprint does not match GitHub tree")
+    if fingerprint_entries(entries, scale_workflow=scale_bytes) != desired:
+        raise ValueError("Qualified production workload/Windows execution semantics changed")
 
 
 def validated_candidate(run: dict, *, token: str, repo: str, pr: int, desired: str,

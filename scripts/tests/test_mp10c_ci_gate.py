@@ -40,7 +40,7 @@ class FingerprintTests(unittest.TestCase):
         git(self.root, "init", "-q")
         self.write("crates/index-core/src/documents.rs", "original")
         self.write("Cargo.lock", "dependency-A")
-        self.write(".github/workflows/mp-10c-scale.yml", "workflow-original")
+        self.write(".github/workflows/mp-10c-scale.yml", "jobs:\\n  document-smoke:\\n    runs-on: windows-latest\\n    steps:\\n      - run: cargo test smoke\\n  document-scale:\\n    runs-on: windows-latest\\n    steps:\\n      - run: cargo test full\\n  provenance:\\n    runs-on: ubuntu-latest\\n")
         self.write(".github/workflows/ci.yml", "timeout 30")
         self.write("docs/history.md", "docs")
         git(self.root, "add", ".")
@@ -69,13 +69,26 @@ class FingerprintTests(unittest.TestCase):
             "crates/state-core/src/cipher.rs",
             "crates/index-core/tests/document_scale_qualification.rs",
             "Cargo.lock", "Cargo.toml", ".cargo/config.toml",
-            ".github/workflows/mp-10c-scale.yml",
-            "scripts/mp10c_ci_gate.py", "rust-toolchain.toml",
+            "rust-toolchain.toml",
         ):
             with self.subTest(path=path):
                 before = self.fp()
                 self.write(path, (self.root.joinpath(path).read_text() if self.root.joinpath(path).exists() else "") + "!")
                 self.assertNotEqual(before, self.fp())
+
+    def test_validator_only_and_coordination_only_edits_do_not_reindex(self):
+        before = self.fp()
+        self.write("scripts/mp10c_ci_gate.py", "new strict parser")
+        self.write("scripts/tests/test_mp10c_ci_gate.py", "new tests")
+        self.write("scripts/mp10c_prerequisite_wait.py", "bounded wait")
+        text = self.root.joinpath(".github/workflows/mp-10c-scale.yml").read_text()
+        self.write(".github/workflows/mp-10c-scale.yml", text.replace(
+            "  document-scale:", "  coordinator:\\n    runs-on: ubuntu-latest\\n  document-scale:"))
+        self.assertEqual(before, self.fp())
+        self.write(".github/workflows/mp-10c-scale.yml",
+                   self.root.joinpath(".github/workflows/mp-10c-scale.yml").read_text().replace(
+                       "cargo test full", "cargo test different"))
+        self.assertNotEqual(before, self.fp())
 
     def test_deletion_of_dependency_forces(self):
         before = self.fp()
@@ -266,7 +279,11 @@ class PriorProofTests(unittest.TestCase):
     def setUp(self):
         self.repo, self.pr = "owner/repo", 128
         self.tree = [{"type": "blob", "mode": "100644", "sha": "e"*40, "path": "Cargo.lock"}]
-        self.fp = gate.fingerprint_entries([(b"100644", b"e"*40, b"Cargo.lock")])
+        self.scale_bytes = b"jobs:\\n  document-smoke:\\n    runs-on: windows-latest\\n    steps:\\n      - run: cargo test smoke\\n  document-scale:\\n    runs-on: windows-latest\\n    steps:\\n      - run: cargo test full\\n  provenance:\\n    runs-on: ubuntu-latest\\n"
+        self.scale_sha = hashlib.sha1(b"blob " + str(len(self.scale_bytes)).encode() + b"\\0" + self.scale_bytes).hexdigest()
+        self.tree.append({"type": "blob", "mode": "100644", "sha": self.scale_sha,
+                          "path": ".github/workflows/mp-10c-scale.yml"})
+        self.fp = gate.fingerprint_entries([(x["mode"].encode(), x["sha"].encode(), x["path"].encode()) for x in self.tree], scale_workflow=self.scale_bytes)
         self.raw = json.dumps(raw_receipt(), sort_keys=True).encode()
         self.run = {
             "id": 77, "run_attempt": 1, "head_sha": "a"*40, "event": "pull_request",
@@ -331,6 +348,9 @@ class PriorProofTests(unittest.TestCase):
                         "tree": {"sha": "f"*40}}
             if "/git/trees/" in url:
                 return {"sha": "f"*40, "truncated": False, "tree": self.tree}
+            if "/git/blobs/" in url:
+                return {"sha": self.scale_sha, "encoding": "base64", "size": len(self.scale_bytes),
+                        "content": __import__("base64").b64encode(self.scale_bytes).decode()}
             if "/pulls/128" in url:
                 return {"number": self.pr, "head": {"sha": "a"*40, "ref": "qualification",
                                                        "repo": {"full_name": self.repo}},
@@ -350,6 +370,27 @@ class PriorProofTests(unittest.TestCase):
         result = self.check()
         self.assertEqual(result["run_id"], 77)
         self.assertEqual(result["artifact_id"], 12)
+
+
+    def test_legacy_authenticated_proof_can_revalidate_without_reindex(self):
+        entries = [(x["mode"].encode(), x["sha"].encode(), x["path"].encode()) for x in self.tree]
+        self.proof.pop("fingerprint_policy", None)
+        self.proof["input_fingerprint"] = gate.fingerprint_entries(entries, legacy=True)
+        self.repack()
+        self.assertIsNotNone(self.check())  # Legacy proof bound to original v1 Git tree.
+        self.scale_bytes = self.scale_bytes.replace(b"cargo test full", b"cargo test changed")
+        self.scale_sha = hashlib.sha1(b"blob " + str(len(self.scale_bytes)).encode() + b"\\0" + self.scale_bytes).hexdigest()
+        self.tree[-1]["sha"] = self.scale_sha
+        self.assertIsNone(self.check())  # Changed scale semantics refuse proof reuse.
+
+    def test_stricter_parser_rejects_legacy_evidence_when_raw_invalid(self):
+        entries = [(x["mode"].encode(), x["sha"].encode(), x["path"].encode()) for x in self.tree]
+        self.proof.pop("fingerprint_policy", None)
+        self.proof["input_fingerprint"] = gate.fingerprint_entries(entries, legacy=True)
+        self.raw = b'{"schema": "invalid"}'
+        self.proof["raw_receipt_sha256"] = hashlib.sha256(self.raw).hexdigest()
+        self.repack()
+        self.assertIsNone(self.check())
 
     def test_mixed_pr_history_fingerprint_not_latest_commit(self):
         self.assertIsNotNone(self.check())  # same inputs, independent of unrelated SHA
