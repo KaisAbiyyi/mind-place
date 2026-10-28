@@ -399,14 +399,45 @@ def decision(event: str, mode: str, previous: dict | None) -> tuple[bool, str]:
     return False, "Identical effective inputs; prior full qualification reused (NOT a new PASS)"
 
 
-def require_prerequisites(runs: list[dict], source: str, *, vault: bool) -> None:
-    required = {".github/workflows/ci.yml"}
+def require_prerequisites(runs: list[dict], source: str, *, vault: bool, fetch_jobs) -> None:
+    # A workflow can be green while its native job was skipped on a Draft PR.
+    # Inspect the exact run attempt's required jobs AND their critical steps.
+    required = {
+        ".github/workflows/ci.yml": {
+            "Verify Windows product": ("Test", "Test hosted tunnel desktop boundaries", "Build desktop app")
+        }
+    }
     if vault:
-        required.add(".github/workflows/mp9b-sqlcipher-qualification.yml")
-    passed = {r.get("path") for r in runs if r.get("head_sha") == source
-              and r.get("status") == "completed" and r.get("conclusion") == "success"}
-    if not required.issubset(passed):
-        raise ValueError("Frozen source needs successful Windows Product CI and applicable Windows/Ubuntu SQLCipher CI before 100K")
+        required[".github/workflows/mp9b-sqlcipher-qualification.yml"] = {
+            "SQLCipher / ubuntu-24.04": ("Encrypted state/index and FTS regression",
+                                          "Keyed MCP synthetic authorization and revocation",
+                                          "Vault and backup adversarial regression"),
+            "SQLCipher / windows-2022": ("Encrypted state/index and FTS regression",
+                                         "Keyed MCP synthetic authorization and revocation",
+                                         "Vault and backup adversarial regression"),
+        }
+    for path, expected_jobs in required.items():
+        verified = False
+        for run in runs:
+            if (run.get("path") != path or run.get("head_sha") != source
+                    or run.get("status") != "completed" or run.get("conclusion") != "success"
+                    or type(run.get("id")) is not int or run["id"] <= 0
+                    or type(run.get("run_attempt")) is not int or run["run_attempt"] <= 0):
+                continue
+            response = fetch_jobs(run)
+            jobs = response.get("jobs", [])
+            if (not isinstance(jobs, list) or type(response.get("total_count")) is not int
+                    or response["total_count"] != len(jobs)):
+                continue  # incomplete/paginated evidence is not acceptance
+            if all(sum(job.get("name") == name and job.get("status") == "completed"
+                       and job.get("conclusion") == "success" and all(
+                           sum(step.get("name") == step_name and step.get("conclusion") == "success"
+                               for step in job.get("steps", [])) == 1 for step_name in steps)
+                       for job in jobs) == 1 for name, steps in expected_jobs.items()):
+                verified = True
+                break
+        if not verified:
+            raise ValueError("Frozen source lacks a successful native Windows Product or SQLCipher job/step prerequisite")
 
 
 def write_output(path: str, values: dict[str, str]) -> None:
@@ -436,9 +467,15 @@ def main() -> int:
         source = os.environ["PR_HEAD_SHA"]
         if not HEX40.fullmatch(source):
             raise ValueError("Invalid prerequisite source")
+        token = os.environ["GH_TOKEN"]
         runs = api_json(f"https://api.github.com/repos/{repo}/actions/runs?head_sha={source}&per_page=100",
-                        os.environ["GH_TOKEN"]).get("workflow_runs", [])
-        require_prerequisites(runs, source, vault=Path(".github/workflows/mp9b-sqlcipher-qualification.yml").is_file())
+                        token).get("workflow_runs", [])
+        def fetch_prerequisite_jobs(run):
+            return api_json(f"https://api.github.com/repos/{repo}/actions/runs/{run['id']}"
+                            f"/attempts/{run['run_attempt']}/jobs?per_page=100", token)
+        require_prerequisites(runs, source,
+                              vault=Path(".github/workflows/mp9b-sqlcipher-qualification.yml").is_file(),
+                              fetch_jobs=fetch_prerequisite_jobs)
         print("Frozen source cheap CI prerequisites verified; full qualification may start")
         return 0
     if args.command == "accept":
