@@ -2,9 +2,10 @@
 //!
 //! Writers must hold a shared lock through ciphertext publication. A portable
 //! snapshot takes the exclusive lock for its entire inventory/copy/verify/publish
-//! cycle. This does NOT fence plaintext legacy runtime, background SQLCipher
-//! index writers, or a native host until those integrations adopt this API.
-//! Those unported paths remain release blockers.
+//! cycle. Encrypted state/index connections, immutable storage, capture commit
+//! and complete approved-root document generations participate. MCP/IPC use
+//! those adapters. Plaintext legacy runtime is outside this protocol; migration
+//! requires explicit offline owner maintenance. Future writers must join it.
 use crate::{Result, SecurityError};
 use fs2::FileExt;
 use std::{

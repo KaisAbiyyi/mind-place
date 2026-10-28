@@ -63,6 +63,9 @@ impl NativeCaptureIpc {
         #[cfg(windows)]
         mind_place_capture_host::ipc::secure_descriptor(pending.path())
             .map_err(|_| "MP_VAULT_IPC_OWNER_DACL_FAILED".to_owned())?;
+        #[cfg(windows)]
+        mind_place_capture_host::ipc::verify_descriptor_file(pending.as_file())
+            .map_err(|_| "MP_VAULT_IPC_OWNER_DACL_FAILED".to_owned())?;
         serde_json::to_writer(pending.as_file_mut(), &identity)
             .map_err(|_| "MP_VAULT_IPC_DESCRIPTOR_FAILED".to_owned())?;
         pending
@@ -77,9 +80,11 @@ impl NativeCaptureIpc {
             .persist_noclobber(dir.join("capture-ipc-v1.json"))
             .map_err(|_| "MP_VAULT_IPC_SESSION_ALREADY_PRESENT".to_owned())?;
         drop(published);
-        #[cfg(windows)]
-        mind_place_capture_host::ipc::verify_descriptor(&dir.join("capture-ipc-v1.json"))
+        let published_identity = SessionDescriptor::read(&archive_root)
             .map_err(|_| "MP_VAULT_IPC_OWNER_DACL_FAILED".to_owned())?;
+        if published_identity != identity {
+            return Err("MP_VAULT_IPC_PUBLISHED_IDENTITY_CHANGED".to_owned());
+        }
 
         let stop = Arc::new(AtomicBool::new(false));
         let terminate = stop.clone();
@@ -134,14 +139,25 @@ impl Drop for NativeCaptureIpc {
         if let Some(worker) = self.thread.take() {
             let _ = worker.join();
         }
-        // Do not unlink another instance's newer session descriptor.
-        if let Ok(current) = SessionDescriptor::read(&self.archive_root) {
-            if current.port == self.identity.port
-                && current.session_token == self.identity.session_token
-            {
-                if let Some(parent) = self.archive_root.parent() {
-                    let _ = fs::remove_file(parent.join("capture-ipc-v1.json"));
+        // A pinned native reader can briefly deny Windows DeleteFile. Retry
+        // only our exact identity, with a bounded delay; never unlink a newer
+        // session or force permissions on a changed/foreign descriptor.
+        for _ in 0..50 {
+            let Ok(current) = SessionDescriptor::read(&self.archive_root) else {
+                break;
+            };
+            if current != self.identity {
+                break;
+            }
+            let Some(parent) = self.archive_root.parent() else {
+                break;
+            };
+            match fs::remove_file(parent.join("capture-ipc-v1.json")) {
+                Ok(()) => break,
+                Err(error) if matches!(error.raw_os_error(), Some(5 | 32 | 33)) => {
+                    thread::sleep(Duration::from_millis(10))
                 }
+                Err(_) => break,
             }
         }
     }
@@ -185,6 +201,68 @@ mod qualification {
             return;
         };
         let mode = std::env::var("MP9B_SYNTHETIC_IPC_MODE").unwrap();
+        if matches!(
+            mode.as_str(),
+            "forged" | "replay" | "old-session" | "oversize"
+        ) {
+            use mind_place_capture_host::ipc::SignedCapture;
+            use std::io::{Read, Write};
+            let root = std::path::Path::new(&root);
+            let descriptor = SessionDescriptor::read(root).unwrap();
+            let send = |payload: &[u8], oversize: bool| {
+                let mut stream =
+                    std::net::TcpStream::connect(("127.0.0.1", descriptor.port)).unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                stream
+                    .set_write_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                stream
+                    .write_all(
+                        &(if oversize {
+                            u32::MAX
+                        } else {
+                            payload.len() as u32
+                        })
+                        .to_le_bytes(),
+                    )
+                    .unwrap();
+                if !oversize {
+                    stream.write_all(payload).unwrap();
+                }
+                let mut size = [0u8; 4];
+                stream.read_exact(&mut size).unwrap();
+                let size = u32::from_le_bytes(size) as usize;
+                assert!(size > 0 && size <= 1024 * 1024);
+                let mut bytes = vec![0u8; size];
+                stream.read_exact(&mut bytes).unwrap();
+                serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()["ok"] == true
+            };
+            let payload = if mode == "old-session" {
+                fs::read(root.parent().unwrap().join("synthetic-old-frame.json")).unwrap()
+            } else {
+                let key = if mode == "forged" {
+                    [0u8; 32]
+                } else {
+                    descriptor.key().unwrap()
+                };
+                serde_json::to_vec(
+                    &SignedCapture::prepare(
+                        &key,
+                        &format!("chrome-extension://{}/", extension_id()),
+                        synthetic_capture(),
+                    )
+                    .unwrap(),
+                )
+                .unwrap()
+            };
+            if mode == "replay" {
+                assert!(send(&payload, false));
+            }
+            assert!(!send(&payload, mode == "oversize"));
+            return;
+        }
         let origin = if mode == "wrong-origin" {
             "chrome-extension://invalid/".to_owned()
         } else {
@@ -225,7 +303,7 @@ mod qualification {
         let gate = SecurityGate::open(home.path().join("security-v1.json")).unwrap();
         gate.initialize(b"synthetic-owner-session-only").unwrap();
         let lease = gate.require_unlocked().unwrap();
-        let (vault, _, manifest) = CryptoVault::provision(&gate, lease).unwrap();
+        let (vault, recovery, manifest) = CryptoVault::provision(&gate, lease).unwrap();
         let vault_root = home.path().join("encrypted-vault-v1");
         manifest.persist_new(&vault_root).unwrap();
         let writer = Arc::new(VaultCaptureStore::open(&vault_root, vault, &gate, lease).unwrap());
@@ -253,6 +331,21 @@ mod qualification {
         assert!(!archive_root.exists());
         run_process_probe(&archive_root, "allowed");
         run_process_probe(&archive_root, "wrong-origin");
+        run_process_probe(&archive_root, "forged");
+        run_process_probe(&archive_root, "replay");
+        run_process_probe(&archive_root, "oversize");
+        let old = SessionDescriptor::read(&archive_root).unwrap();
+        let signed = mind_place_capture_host::ipc::SignedCapture::prepare(
+            &old.key().unwrap(),
+            &origin,
+            synthetic_capture(),
+        )
+        .unwrap();
+        fs::write(
+            home.path().join("synthetic-old-frame.json"),
+            serde_json::to_vec(&signed).unwrap(),
+        )
+        .unwrap();
         // An overlapping owner desktop must never overwrite the active token.
         // It cannot silently change which vault receives browser captures.
         let original = fs::read(home.path().join("capture-ipc-v1.json")).unwrap();
@@ -278,5 +371,26 @@ mod qualification {
         .is_err());
         drop(ipc);
         assert!(!home.path().join("capture-ipc-v1.json").exists());
+        gate.unlock(b"synthetic-owner-session-only").unwrap();
+        let lease = gate.require_unlocked().unwrap();
+        let vault = CryptoVault::restore_with_recovery(&gate, lease, &manifest, &recovery).unwrap();
+        let writer = Arc::new(VaultCaptureStore::open(&vault_root, vault, &gate, lease).unwrap());
+        let next = NativeCaptureIpc::start(
+            archive_root.clone(),
+            writer,
+            gate.clone(),
+            lease,
+            Arc::new(Mutex::new(())),
+        )
+        .unwrap();
+        assert_ne!(
+            SessionDescriptor::read(&archive_root)
+                .unwrap()
+                .session_token,
+            old.session_token
+        );
+        run_process_probe(&archive_root, "old-session");
+        run_process_probe(&archive_root, "allowed");
+        drop(next);
     }
 }

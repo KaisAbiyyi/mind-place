@@ -31,12 +31,59 @@ const VERSION: u32 = 1;
 const MAX_FRAME: usize = MAX_CAPTURE_BYTES + 8192;
 const MAX_NONCES: usize = 200_000;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+fn open_descriptor(path: &Path) -> Result<fs::File> {
+    for component in path.ancestors() {
+        let metadata = fs::symlink_metadata(component)?;
+        if metadata.file_type().is_symlink() {
+            return Err(invalid("IPC descriptor ancestor is a link"));
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::MetadataExt;
+            if metadata.file_attributes() & 0x400 != 0 {
+                return Err(invalid("IPC descriptor ancestor is a reparse point"));
+            }
+        }
+    }
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // Pin this exact object against both write/truncate and rename/delete.
+        options.share_mode(1).custom_flags(0x0020_0000); // SHARE_READ / OPEN_REPARSE_POINT
+    }
+    let file = options.open(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.len() > 512 {
+        return Err(invalid("IPC session descriptor is unsafe"));
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        if metadata.file_attributes() & 0x400 != 0 {
+            return Err(invalid("IPC descriptor handle is a reparse point"));
+        }
+    }
+    Ok(file)
+}
+
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct SessionDescriptor {
     pub version: u32,
     pub port: u16,
     pub session_token: String,
+}
+impl std::fmt::Debug for SessionDescriptor {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("SessionDescriptor")
+            .field("version", &self.version)
+            .field("port", &self.port)
+            .field("session_token", &"[redacted]")
+            .finish()
+    }
 }
 impl SessionDescriptor {
     pub fn new(port: u16, key: &[u8; 32]) -> Self {
@@ -62,24 +109,31 @@ impl SessionDescriptor {
             .parent()
             .ok_or_else(|| invalid("IPC app root is unavailable"))?;
         let path = base.join("capture-ipc-v1.json");
-        let meta = fs::symlink_metadata(&path)?;
-        if !meta.is_file() || meta.len() > 512 {
-            return Err(invalid("IPC session descriptor is unsafe"));
-        }
+        let file = open_descriptor(&path)?;
         #[cfg(windows)]
+        verify_descriptor_file(&file)?;
+        #[cfg(unix)]
         {
-            use std::os::windows::fs::MetadataExt;
-            if meta.file_attributes() & 0x400 != 0 {
-                return Err(invalid("IPC session descriptor is a reparse point"));
+            use std::os::unix::fs::PermissionsExt;
+            if file.metadata()?.permissions().mode() & 0o077 != 0 {
+                return Err(invalid("IPC session permissions are not private"));
             }
         }
-        #[cfg(windows)]
-        verify_descriptor(&path)?;
-        let bytes = fs::read(&path)?;
+        let mut bytes = Vec::new();
+        file.take(513).read_to_end(&mut bytes)?;
+        if bytes.len() > 512 {
+            return Err(invalid("IPC descriptor grew beyond its limit"));
+        }
         let descriptor: Self = serde_json::from_slice(&bytes)?;
         descriptor.key()?;
         Ok(descriptor)
     }
+}
+
+#[cfg(windows)]
+pub fn verify_descriptor_file(file: &fs::File) -> Result<()> {
+    acl::verify_file(file)
+        .map_err(|_| invalid("IPC descriptor owner/DACL not verifiable on handle"))
 }
 
 #[derive(Serialize, Deserialize)]
@@ -224,6 +278,98 @@ mod tests {
             "warnings":["synthetic"]
         }))
         .unwrap()
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn descriptor_handle_blocks_replacement_and_truncation_until_closed() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("capture-ipc-v1.json");
+        fs::write(
+            &path,
+            serde_json::to_vec(&SessionDescriptor::new(12345, &[7u8; 32])).unwrap(),
+        )
+        .unwrap();
+        secure_descriptor(&path).unwrap();
+        let held = open_descriptor(&path).unwrap();
+        let moved = home.path().join("moved.json");
+        assert!(fs::rename(&path, &moved).is_err());
+        assert!(fs::OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(&path)
+            .is_err());
+        drop(held);
+        fs::rename(&path, &moved).unwrap();
+        fs::rename(&moved, &path).unwrap();
+        SessionDescriptor::read(&home.path().join("archive-v1")).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn anonymous_descriptor_read_probe() {
+        let Some(root) = std::env::var_os("MP9B_SYNTHETIC_DESCRIPTOR_ROOT") else {
+            return;
+        };
+        use windows_sys::Win32::{
+            Security::{ImpersonateAnonymousToken, RevertToSelf},
+            System::Threading::GetCurrentThread,
+        };
+        let root = std::path::PathBuf::from(root);
+        SessionDescriptor::read(&root).unwrap();
+        struct Revert;
+        impl Drop for Revert {
+            fn drop(&mut self) {
+                unsafe {
+                    RevertToSelf();
+                }
+            }
+        }
+        assert_ne!(unsafe { ImpersonateAnonymousToken(GetCurrentThread()) }, 0);
+        let revert = Revert;
+        let denied =
+            fs::File::open(root.parent().unwrap().join("capture-ipc-v1.json")).unwrap_err();
+        assert_eq!(denied.raw_os_error(), Some(5));
+        assert!(SessionDescriptor::read(&root).is_err());
+        drop(revert);
+        SessionDescriptor::read(&root).unwrap();
+        println!("SYNTHETIC_ANONYMOUS_TOKEN_DENIED");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn separate_process_anonymous_token_cannot_read_owner_capability() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("capture-ipc-v1.json");
+        fs::write(
+            &path,
+            serde_json::to_vec(&SessionDescriptor::new(12345, &[9u8; 32])).unwrap(),
+        )
+        .unwrap();
+        secure_descriptor(&path).unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "ipc::tests::anonymous_descriptor_read_probe",
+                "--nocapture",
+            ])
+            .env(
+                "MP9B_SYNTHETIC_DESCRIPTOR_ROOT",
+                home.path().join("archive-v1"),
+            )
+            .output()
+            .unwrap();
+        let transcript = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success()
+                && transcript.contains("anonymous_descriptor_read_probe ... ok")
+                && transcript.contains("1 passed; 0 failed")
+                && transcript.contains("SYNTHETIC_ANONYMOUS_TOKEN_DENIED"),
+            "Anonymous-token child failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        // This is an actual anonymous thread token in another process, not a
+        // different installed Windows account. That external gate stays open.
     }
 
     #[test]

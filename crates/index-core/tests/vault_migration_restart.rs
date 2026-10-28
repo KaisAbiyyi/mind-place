@@ -102,6 +102,19 @@ fn fixture() -> Fixture {
             .unwrap();
         captures.push((receipt.id, receipt.snapshot_id, loaded.capture));
     }
+    let generic_raw = serde_json::to_vec(&serde_json::json!({
+        "title":"Synthetic raw agent import",
+        "messages":[{"role":"user", "content":"preserve original raw record", "authored_at":"2026-10-28T08:00:00Z"},
+                    {"role":"assistant", "text":"missing source time stays missing", "model":"synthetic-model"}]
+    })).unwrap();
+    let imported = archive.import_generic("json", &generic_raw).unwrap();
+    assert!(imported.raw_preserved);
+    let receipt = imported.saved.unwrap();
+    let loaded = archive
+        .read(&receipt.id, Some(&receipt.snapshot_id))
+        .unwrap();
+    assert!(loaded.capture.messages[1].authored_at.is_none());
+    captures.push((receipt.id, receipt.snapshot_id, loaded.capture));
     drop(archive);
     // Several AEAD chunks, including bytes that are not a valid text document.
     let bytes: Vec<u8> = (0..(2 * 1024 * 1024 + 17))
@@ -316,7 +329,13 @@ fn real_domains_recover_after_fresh_process_exit_at_every_boundary() {
         for (id, snapshot, expected) in &f.captures {
             let read = archive.read(id, Some(snapshot)).unwrap();
             assert_eq!(&read.capture, expected);
-            assert_eq!(read.summary.snapshot_count, 2);
+            assert_eq!(
+                read.summary.snapshot_count,
+                f.captures
+                    .iter()
+                    .filter(|(other, _, _)| other == id)
+                    .count()
+            );
         }
         assert_eq!(
             archive
@@ -436,4 +455,44 @@ fn real_conversion_rejects_partial_tampered_and_changed_source_without_overwrite
             assert_eq!(preserved, f.before);
         }
     }
+}
+
+#[test]
+fn migrated_attachment_reopens_without_access_to_plaintext_legacy_source() {
+    let f = fixture();
+    let home = f.home.path();
+    let source = home.join("legacy");
+    let destination = home.join("destination");
+    let gate = SecurityGate::open(home.join("gate.json")).unwrap();
+    gate.unlock(PASSWORD).unwrap();
+    let lease = gate.require_unlocked().unwrap();
+    let manifest = VaultManifest::read(&home.join("authorization")).unwrap();
+    let code =
+        zeroize::Zeroizing::new(fs::read_to_string(home.join("synthetic-recovery.txt")).unwrap());
+    let recovery = RecoverySecret::from_export_code(&code).unwrap();
+    let consent = consent();
+    let converter = LegacyEncryptedConversion {
+        gate: &gate,
+        lease,
+        consent: &consent,
+        manifest: &manifest,
+        recovery: &recovery,
+    };
+    let plan = converter
+        .resume_owner_consented(&source, &destination)
+        .unwrap();
+    converter.execute_or_resume(&plan).unwrap();
+    fs::rename(&source, home.join("preserved-offline-legacy")).unwrap();
+    let vault = CryptoVault::restore_with_recovery(&gate, lease, &manifest, &recovery).unwrap();
+    let archive = VaultCaptureStore::open(&destination, vault, &gate, lease).unwrap();
+    let (id, _, capture) = &f.captures[0];
+    let name = capture.messages[0].attachments[0]
+        .asset_path
+        .as_ref()
+        .unwrap();
+    assert_eq!(archive.asset(id, name).unwrap().data_url, PNG);
+    assert!(archive.asset(id, "../state.sqlite3").is_err());
+    assert!(archive.asset(&"0".repeat(64), name).is_err());
+    gate.lock();
+    assert!(archive.asset(id, name).is_err());
 }

@@ -13,13 +13,24 @@ use std::{
 };
 use zeroize::Zeroizing;
 
-#[path = "vault_migration_fs.rs"]
-mod durable;
+use crate::vault_fs as durable;
 
 const MAX_FILES: usize = 100_000;
 const MAX_SINGLE_FILE: u64 = 8 * 1024 * 1024 * 1024;
 const MAX_TOTAL_BYTES: u64 = 512 * 1024 * 1024 * 1024;
 const MAX_DEPTH: usize = 12;
+
+/// The legacy ArchiveStore uses this same OS lock for every capture/import.
+/// Exposed narrowly for the Windows offline owner maintenance runtime.
+pub fn lock_legacy_archive(file: &File) -> Result<()> {
+    FileExt::try_lock_exclusive(file)?;
+    Ok(())
+}
+
+/// Shared no-link boundary for the explicit offline maintenance runtime.
+pub fn validate_owner_migration_path(path: &Path) -> Result<()> {
+    check(path)
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LegacyFileReceipt {
@@ -72,6 +83,12 @@ impl LegacyMigrationPreflight {
         Self::inspect_paths(source, destination, false)
     }
 
+    /// Locate a recovery-wrapped manifest without adopting an existing target.
+    /// The caller must still authenticate resume_owner_consented before acting.
+    pub fn recovery_authorization_root(source: &Path, destination: &Path) -> Result<PathBuf> {
+        Ok(Self::inspect_paths(source, destination, true)?.authorization_root())
+    }
+
     fn inspect_paths(source: &Path, destination: &Path, recovering: bool) -> Result<Self> {
         if !source.is_absolute() || !destination.is_absolute() {
             return Err(SecurityError::UnsafePath);
@@ -82,7 +99,7 @@ impl LegacyMigrationPreflight {
             return Err(SecurityError::AlreadyConfigured);
         }
         let canonical_source = source.canonicalize()?;
-        if !canonical_source.is_dir() {
+        if !canonical_source.is_dir() || canonical_source.parent().is_none() {
             return Err(SecurityError::InvalidConfig);
         }
         let destination_parent = destination.parent().ok_or(SecurityError::UnsafePath)?;
@@ -153,6 +170,11 @@ impl LegacyMigrationPreflight {
             let name = entry.file_name();
             let name = name.to_str().ok_or(SecurityError::InvalidConfig)?;
             let metadata = fs::symlink_metadata(&path)?;
+            // Only this exact target is outside the legacy authority. During
+            // recovery it is admitted only after the bound journal authenticates.
+            if path == self.destination && metadata.is_dir() {
+                continue;
+            }
             match name {
                 "state.sqlite3" if metadata.is_file() => {}
                 "archive-v1" | "document-objects" if metadata.is_dir() => {}
@@ -243,7 +265,10 @@ fn collect_file(
     let mut file = File::open(path)?;
     let mut size = 0u64;
     let mut block = [0u8; 65536];
-    loop {
+    // Windows byte-range locks also reject a zero-length EOF probe through
+    // another handle. This exact empty sentinel has no source payload.
+    let empty_archive_lock = metadata.len() == 0 && path.ends_with("archive-v1/.archive.lock");
+    while !empty_archive_lock {
         let amount = file.read(&mut block)?;
         if amount == 0 {
             break;
@@ -320,11 +345,37 @@ impl LegacyMigrationPreflight {
     }
 
     fn journal_path(&self) -> PathBuf {
-        self.destination.with_extension("mp9b-migration-journal")
+        self.artifact_path("mp9b-migration-journal")
     }
 
     fn staging_path(&self) -> PathBuf {
-        self.destination.with_extension("mp9b-migration-staging")
+        self.artifact_path("mp9b-migration-staging")
+    }
+
+    /// Wrapped manifest only, never a plaintext key. Owner runtime persists it
+    /// after recovery confirmation so an interrupted conversion can reopen.
+    pub fn authorization_root(&self) -> PathBuf {
+        self.artifact_path("mp9b-migration-authorization")
+    }
+
+    fn artifact_path(&self, extension: &str) -> PathBuf {
+        if self.destination.parent() != Some(self.source.as_path()) {
+            return self.destination.with_extension(extension);
+        }
+        // The app vault is a child of the old root. Keep every working artifact
+        // outside that root, using a length-framed canonical path identity.
+        let mut hash = Sha256::new();
+        hash.update(b"mp9b-migration-artifacts-v1\0");
+        for path in [&self.source, &self.destination] {
+            let bytes = path.as_os_str().as_encoded_bytes();
+            hash.update((bytes.len() as u64).to_be_bytes());
+            hash.update(bytes);
+        }
+        self.source
+            .parent()
+            .expect("a child destination has a parent")
+            .join(format!(".mp9b-{:x}", hash.finalize()))
+            .with_extension(extension)
     }
 
     fn journal_identity(&self) -> Result<Vec<u8>> {
@@ -335,10 +386,7 @@ impl LegacyMigrationPreflight {
     }
 
     fn operation_lock(&self) -> Result<File> {
-        if self.destination.parent() == Some(self.source.as_path()) {
-            return Err(SecurityError::UnsafePath);
-        }
-        let path = self.destination.with_extension("mp9b-migration-lock");
+        let path = self.artifact_path("mp9b-migration-lock");
         check(&path)?;
         let file = OpenOptions::new()
             .read(true)
@@ -460,10 +508,6 @@ impl LegacyMigrationPreflight {
     ) -> Result<()> {
         gate.validate_lease(lease)?;
         let _operation = self.operation_lock()?;
-        // Journal and staging must live OUTSIDE the legacy inventory.
-        if self.destination.parent() == Some(self.source.as_path()) {
-            return Err(SecurityError::UnsafePath);
-        }
         self.verify_unchanged()?;
         check(&self.staging_path())?;
         if self.staging_path().exists() || self.journal_path().exists() {
@@ -627,7 +671,7 @@ impl LegacyMigrationPreflight {
             if !staging.is_dir() {
                 return Err(SecurityError::UnsafePath);
             }
-            let quarantined = self.destination.with_extension("mp9b-migration-rollback");
+            let quarantined = self.artifact_path("mp9b-migration-rollback");
             check(&quarantined)?;
             if quarantined.exists() {
                 return Err(SecurityError::AlreadyConfigured);
@@ -746,6 +790,64 @@ mod tests {
         let lease = gate.require_unlocked().unwrap();
         let (vault, _, _) = CryptoVault::provision(&gate, lease).unwrap();
         (home, plan, gate, lease, vault)
+    }
+
+    #[test]
+    fn app_child_publication_recovers_without_inventorying_it_as_legacy() {
+        let (_home, original, gate, lease, vault) = synthetic_journal_fixture();
+        let destination = original.source.join("encrypted-vault-v1");
+        let plan = LegacyMigrationPreflight::inspect(&original.source, &destination).unwrap();
+        let consent =
+            ExplicitMigrationConsent::from_owner_typed_confirmation("ENCRYPT MY LEGACY VAULT")
+                .unwrap();
+        plan.begin_owner_consented(&consent, &gate, lease, &vault)
+            .unwrap();
+        assert!(!plan.journal_path().starts_with(&plan.source));
+        assert!(!plan.staging_path().starts_with(&plan.source));
+        let stopped = plan.execute_or_resume_with_checkpoint(
+            &consent,
+            &gate,
+            lease,
+            &vault,
+            |_, stage| {
+                fs::write(stage.join("vault-v1.json"), b"synthetic-manifest")?;
+                fs::write(stage.join("state.sqlite3"), [7u8; 32])?;
+                Ok(())
+            },
+            |_| Ok(()),
+            |phase| {
+                if phase == MigrationCheckpoint::Published {
+                    return Err(SecurityError::Locked);
+                }
+                Ok(())
+            },
+        );
+        assert!(stopped.is_err());
+        assert!(destination.exists());
+        assert!(LegacyMigrationPreflight::inspect(&plan.source, &destination).is_err());
+        let fresh = LegacyMigrationPreflight::resume_owner_consented(
+            &plan.source,
+            &destination,
+            &consent,
+            &gate,
+            lease,
+            &vault,
+        )
+        .unwrap();
+        fresh
+            .execute_or_resume(
+                &consent,
+                &gate,
+                lease,
+                &vault,
+                |_, _| panic!("published output must not be converted again"),
+                |_| Ok(()),
+            )
+            .unwrap();
+        assert_eq!(
+            fs::read(plan.source.join("state.sqlite3")).unwrap(),
+            b"SQLite format 3\0synthetic-data"
+        );
     }
 
     fn fake_encrypted_conversion(_source: &Path, staging: &Path) -> Result<()> {

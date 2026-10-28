@@ -3,8 +3,8 @@
 //! native-host IPC and derived search indexing are fully ported and qualified.
 use crate::{documents::DocumentIndex, IndexError, IndexStore, Result};
 use mind_place_archive::{
-    markdown, validate_capture, Capture, Conversation, ConversationSummary, ExportResult,
-    SaveReceipt, SnapshotSummary, MAX_CAPTURE_BYTES,
+    markdown, validate_capture, AssetResult, Capture, Conversation, ConversationSummary,
+    ExportResult, SaveReceipt, SnapshotSummary, MAX_CAPTURE_BYTES,
 };
 use mind_place_security::{
     vault::{ContentKind, CryptoVault},
@@ -425,6 +425,45 @@ impl VaultCaptureStore {
         })
     }
 
+    pub fn asset(&self, archive_id: &str, name: &str) -> Result<AssetResult> {
+        self.gate
+            .validate_lease(self.lease)
+            .map_err(|_| IndexError::Revoked)?;
+        let valid_hash = |value: &str| {
+            value.len() == 64
+                && value
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        };
+        let (hash, extension) = name.split_once('.').ok_or(IndexError::InvalidEvidence)?;
+        if !valid_hash(archive_id)
+            || !valid_hash(hash)
+            || !matches!(extension, "png" | "jpg" | "gif" | "webp")
+        {
+            return Err(IndexError::InvalidEvidence);
+        }
+        self.read(archive_id, None)?;
+        let storage = self.storage()?;
+        let inventory = crate::vault_legacy_objects::RawLegacyInventory::read(
+            &self.root,
+            &self.vault,
+            &storage,
+            &self.gate,
+            self.lease,
+        )
+        .map_err(|_| IndexError::InvalidEvidence)?
+        .ok_or(IndexError::InvalidEvidence)?;
+        let relative = format!("archive-v1/conversations/{archive_id}/assets/{name}");
+        let bytes = inventory
+            .read_file(&relative, &storage, &self.gate, self.lease)
+            .map_err(|_| IndexError::InvalidEvidence)?;
+        let image = mind_place_archive::verified_image_asset(name, &bytes)?;
+        self.gate
+            .validate_lease(self.lease)
+            .map_err(|_| IndexError::Revoked)?;
+        Ok(image)
+    }
+
     /// Sidebar search remains capped; the FTS reindexer instead requests a
     /// complete cursor-paged inventory from one stable SQLCipher read snapshot.
     pub fn list(&self, query: &str) -> Result<Vec<ConversationSummary>> {
@@ -550,6 +589,90 @@ impl VaultCaptureStore {
             destination,
             generation,
         )
+    }
+
+    /// Backup/restore validation must walk every immutable revision, including
+    /// non-current captures, without recreating or trusting a missing catalog.
+    pub(crate) fn verify_backup_catalog(
+        root: &Path,
+        vault: &CryptoVault,
+        gate: &SecurityGate,
+        lease: UnlockLease,
+    ) -> Result<()> {
+        let path = root.join("archive-index.sqlite3");
+        if !path.exists() {
+            return Ok(());
+        }
+        let derived = vault
+            .derived_key(gate, lease, b"archive-index/sqlcipher/v1")
+            .map_err(|_| IndexError::Revoked)?;
+        let mut raw = [0u8; 32];
+        raw.copy_from_slice(derived.as_ref());
+        let key = CipherKey::new(raw, gate, lease);
+        raw.zeroize();
+        // This is an unpublished snapshot. A read-only WAL reader leaves
+        // empty WAL/SHM sidecars behind; a writable pager closes/checkpoints
+        // them before the snapshot's quiescent packaging/publication step.
+        let db = Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+        )?;
+        key.unlock(&db)?;
+        let app: i64 = db.query_row("PRAGMA application_id", [], |r| r.get(0))?;
+        let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+        if app != APPLICATION_ID || version != SCHEMA_VERSION {
+            return Err(IndexError::InvalidEvidence);
+        }
+        let storage = ImmutableVaultStorage::new(root, vault, gate, lease)
+            .map_err(|_| IndexError::InvalidEvidence)?;
+        let mut statement = db.prepare("SELECT archive_id,snapshot_id,identity,provider,conversation_id,title,source_url,captured_at,message_count,completeness,warnings_json FROM vault_captures ORDER BY archive_id,snapshot_id")?;
+        let mut rows = statement.query([])?;
+        while let Some(row) = rows.next()? {
+            gate.validate_lease(lease)
+                .map_err(|_| IndexError::Revoked)?;
+            let id: String = row.get(0)?;
+            let snapshot: String = row.get(1)?;
+            let identity: String = row.get(2)?;
+            if identity != Self::identity(&id, &snapshot) {
+                return Err(IndexError::InvalidEvidence);
+            }
+            let bytes = storage
+                .read(gate, lease, ContentKind::Archive, identity.as_bytes())
+                .map_err(|_| IndexError::InvalidEvidence)?;
+            let mut capture: Capture =
+                serde_json::from_slice(&bytes).map_err(|_| IndexError::InvalidEvidence)?;
+            validate_capture(&mut capture)?;
+            let expected_id = format!(
+                "{:x}",
+                Sha256::digest(
+                    format!("{}:{}", capture.provider, capture.conversation_id).as_bytes()
+                )
+            );
+            let mut normalized = capture.clone();
+            normalized.captured_at.clear();
+            let expected_snapshot = format!(
+                "{:x}",
+                Sha256::digest(
+                    serde_json::to_vec(&normalized).map_err(|_| IndexError::InvalidEvidence)?
+                )
+            );
+            let warnings: Vec<String> = serde_json::from_str(&row.get::<_, String>(10)?)
+                .map_err(|_| IndexError::InvalidEvidence)?;
+            if id != expected_id
+                || snapshot != expected_snapshot
+                || capture.provider != row.get::<_, String>(3)?
+                || capture.conversation_id != row.get::<_, String>(4)?
+                || capture.title != row.get::<_, String>(5)?
+                || capture.source_url != row.get::<_, String>(6)?
+                || capture.captured_at != row.get::<_, String>(7)?
+                || capture.messages.len() as i64 != row.get::<_, i64>(8)?
+                || capture.completeness != row.get::<_, String>(9)?
+                || capture.warnings != warnings
+            {
+                return Err(IndexError::InvalidEvidence);
+            }
+        }
+        Ok(())
     }
 
     pub fn snapshots(&self, archive_id: &str) -> Result<Vec<SnapshotSummary>> {

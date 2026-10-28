@@ -3,6 +3,7 @@
 //! Historical raw archive blobs are also preserved as keyed AEAD ciphertext,
 //! including attachments; encrypted readback must succeed before publication.
 use crate::vault_archive::VaultCaptureStore;
+use crate::vault_legacy_objects::{RawLegacyFile, RawLegacyInventory, RAW_MAP_ID};
 use mind_place_archive::{validate_capture, Capture, MAX_CAPTURE_BYTES};
 use mind_place_security::{
     vault::{ContentKind, CryptoVault, RecoverySecret, VaultManifest},
@@ -103,6 +104,8 @@ impl LegacyEncryptedConversion<'_> {
         self.ensure_manifest(stage)?;
         self.copy_state(source, stage)?;
         checkpoint(LegacyConversionCheckpoint::StateCopied)?;
+        // Preserve a stable, encrypted raw mapping before normalized views.
+        self.preserve_raw_inventory(source, stage)?;
         self.import_archives(source, stage)?;
         checkpoint(LegacyConversionCheckpoint::ArchiveImported)?;
         self.preserve_raw_archive(source, stage)?;
@@ -119,6 +122,13 @@ impl LegacyEncryptedConversion<'_> {
         self.verify_archives(source, stage)?;
         self.verify_raw_archive(source, stage)?;
         self.verify_documents(source, stage)?;
+        let vault = self.crypto()?;
+        let storage = ImmutableVaultStorage::new(stage, &vault, self.gate, self.lease)?;
+        let actual = RawLegacyInventory::read(stage, &vault, &storage, self.gate, self.lease)?
+            .ok_or(SecurityError::Crypto)?;
+        if actual != self.raw_inventory(source)? {
+            return Err(SecurityError::Crypto);
+        }
         self.verify_layout(source, stage)?;
         self.gate.validate_lease(self.lease)
     }
@@ -135,6 +145,11 @@ impl LegacyEncryptedConversion<'_> {
             expected.insert(PathBuf::from(category).join(&name[..2]).join(name));
             Ok(())
         };
+        object(
+            ContentKind::Archive,
+            std::str::from_utf8(RAW_MAP_ID).map_err(|_| SecurityError::Crypto)?,
+            "archive",
+        )?;
         let archive = source.join("archive-v1");
         if archive.exists() {
             for path in all_regular_files(&archive)? {
@@ -220,6 +235,42 @@ impl LegacyEncryptedConversion<'_> {
         file.write_all(&bytes)?;
         file.sync_all()?;
         Ok(())
+    }
+
+    fn raw_inventory(&self, source: &Path) -> SecResult<RawLegacyInventory> {
+        let mut files = Vec::new();
+        for category in ["archive-v1", "document-objects"] {
+            let root = source.join(category);
+            if !root.exists() {
+                continue;
+            }
+            for path in all_regular_files(&root)? {
+                let bytes = bounded_file(&path)?;
+                let relative = path
+                    .strip_prefix(source)
+                    .map_err(|_| SecurityError::UnsafePath)?;
+                let identity = raw_identity(relative)?;
+                files.push(RawLegacyFile {
+                    relative: identity
+                        .strip_prefix("legacy-file/v1/")
+                        .ok_or(SecurityError::Crypto)?
+                        .to_owned(),
+                    bytes: bytes.len() as u64,
+                    sha256: format!("{:x}", Sha256::digest(&bytes)),
+                });
+            }
+        }
+        files.sort_by(|a, b| a.relative.cmp(&b.relative));
+        let inventory = RawLegacyInventory { version: 1, files };
+        inventory.validate()?;
+        Ok(inventory)
+    }
+
+    fn preserve_raw_inventory(&self, source: &Path, stage: &Path) -> SecResult<()> {
+        let vault = self.crypto()?;
+        let storage = ImmutableVaultStorage::new(stage, &vault, self.gate, self.lease)?;
+        self.raw_inventory(source)?
+            .persist(&storage, self.gate, self.lease)
     }
 
     fn key(&self) -> SecResult<std::sync::Arc<CipherKey>> {
@@ -604,6 +655,11 @@ fn safe_regular(path: &Path) -> SecResult<()> {
 fn bounded_file(path: &Path) -> SecResult<Vec<u8>> {
     safe_regular(path)?;
     let file = File::open(path)?;
+    if path.ends_with("archive-v1/.archive.lock") && file.metadata()?.len() == 0 {
+        // The offline owner guard holds this empty sentinel's OS range lock.
+        // An EOF read via a second Windows handle would spuriously return 33.
+        return Ok(Vec::new());
+    }
     if file.metadata()?.len() > MAX_RAW_LEGACY_BLOB {
         return Err(SecurityError::InvalidConfig);
     }
@@ -648,8 +704,14 @@ fn all_regular_files(root: &Path) -> SecResult<Vec<PathBuf>> {
     Ok(files)
 }
 fn raw_identity(relative: &Path) -> SecResult<String> {
-    let name = relative.to_str().ok_or(SecurityError::InvalidConfig)?;
-    Ok(format!("legacy-file/v1/{}", name.replace('\\', "/")))
+    let components: Vec<_> = relative
+        .components()
+        .map(|part| match part {
+            std::path::Component::Normal(part) => part.to_str().ok_or(SecurityError::InvalidConfig),
+            _ => Err(SecurityError::UnsafePath),
+        })
+        .collect::<SecResult<_>>()?;
+    Ok(format!("legacy-file/v1/{}", components.join("/")))
 }
 fn hex64(s: &str) -> bool {
     s.len() == 64

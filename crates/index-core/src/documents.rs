@@ -330,6 +330,15 @@ impl DocumentIndex {
         mut check: impl FnMut() -> Result<()>,
     ) -> Result<DocumentIndexReport> {
         check()?;
+        // One approved-root generation spans scanner object/state publication
+        // and the FTS transaction below. A per-connection fence alone permits
+        // backup to cut between these two parts of the same generation.
+        let parent = self.path.parent().ok_or(IndexError::UnsafePath)?;
+        let _generation = if self.cipher_key.is_some() && parent.join("vault-v1.json").exists() {
+            Some(VaultWriterFence::writer(parent).map_err(|_| IndexError::InvalidEvidence)?)
+        } else {
+            None
+        };
         let mut scanner = self.scanner(state)?;
         let scan = scanner.rescan(root_id, || lease(&mut check))?;
         if !scan.complete {

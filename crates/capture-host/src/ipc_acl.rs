@@ -17,10 +17,10 @@ use windows_sys::Win32::{
         Authorization::{
             ConvertSecurityDescriptorToStringSecurityDescriptorW, ConvertSidToStringSidW,
             ConvertStringSecurityDescriptorToSecurityDescriptorW, ConvertStringSidToSidW,
-            SDDL_REVISION_1,
+            GetSecurityInfo, SDDL_REVISION_1, SE_FILE_OBJECT,
         },
-        GetFileSecurityW, GetTokenInformation, SetFileSecurityW, TokenUser,
-        DACL_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, TOKEN_QUERY, TOKEN_USER,
+        GetTokenInformation, SetFileSecurityW, TokenUser, DACL_SECURITY_INFORMATION,
+        OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, TOKEN_QUERY, TOKEN_USER,
     },
     System::Threading::{GetCurrentProcess, OpenProcessToken},
 };
@@ -102,9 +102,14 @@ fn set_dacl(path: &Path, sddl: &str) -> io::Result<()> {
             return Err(io::Error::last_os_error());
         }
         let owned = LocalAllocation(descriptor);
+        let owner_information = if sddl.starts_with("O:") {
+            OWNER_SECURITY_INFORMATION
+        } else {
+            0
+        };
         let result = SetFileSecurityW(
             wide(path).as_ptr(),
-            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION | owner_information,
             descriptor,
         );
         drop(owned);
@@ -115,34 +120,43 @@ fn set_dacl(path: &Path, sddl: &str) -> io::Result<()> {
     Ok(())
 }
 
-fn get_dacl(path: &Path) -> io::Result<String> {
+fn get_security(file: &std::fs::File) -> io::Result<(String, String)> {
     unsafe {
-        let name = wide(path);
-        let mut required = 0u32;
-        GetFileSecurityW(
-            name.as_ptr(),
-            DACL_SECURITY_INFORMATION,
+        let mut owner = std::ptr::null_mut();
+        let mut descriptor = std::ptr::null_mut();
+        let status = GetSecurityInfo(
+            file.as_raw_handle() as _,
+            SE_FILE_OBJECT,
+            OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+            &mut owner,
             std::ptr::null_mut(),
-            0,
-            &mut required,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut descriptor,
         );
-        if required == 0 || required > 65536 {
+        if status != 0 {
+            return Err(io::Error::from_raw_os_error(status as i32));
+        }
+        let _descriptor = LocalAllocation(descriptor);
+        if owner.is_null() || descriptor.is_null() {
+            return Err(io::ErrorKind::InvalidData.into());
+        }
+        let mut owner_text = std::ptr::null_mut();
+        if ConvertSidToStringSidW(owner, &mut owner_text) == 0 {
             return Err(io::Error::last_os_error());
         }
-        let mut data = vec![0usize; (required as usize).div_ceil(size_of::<usize>())];
-        if GetFileSecurityW(
-            name.as_ptr(),
-            DACL_SECURITY_INFORMATION,
-            data.as_mut_ptr().cast(),
-            required,
-            &mut required,
-        ) == 0
-        {
-            return Err(io::Error::last_os_error());
+        let _owner_text = LocalAllocation(owner_text.cast());
+        let owner_length = (0..256)
+            .take_while(|&index| *owner_text.add(index) != 0)
+            .count();
+        if owner_length == 256 {
+            return Err(io::ErrorKind::InvalidData.into());
         }
+        let owner = String::from_utf16(std::slice::from_raw_parts(owner_text, owner_length))
+            .map_err(|_| io::ErrorKind::InvalidData)?;
         let mut sddl = std::ptr::null_mut();
         if ConvertSecurityDescriptorToStringSecurityDescriptorW(
-            data.as_mut_ptr().cast(),
+            descriptor,
             SDDL_REVISION_1,
             DACL_SECURITY_INFORMATION,
             &mut sddl,
@@ -159,7 +173,7 @@ fn get_dacl(path: &Path) -> io::Result<String> {
         let result = String::from_utf16(std::slice::from_raw_parts(sddl, len))
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid DACL"))?;
         drop(owned);
-        Ok(result)
+        Ok((result, owner))
     }
 }
 
@@ -203,7 +217,7 @@ fn canonical_sid(sddl_sid: &str) -> io::Result<String> {
 /// LocalSystem need full control; inherited/everyone/group grants are excluded.
 pub(super) fn protect(path: &Path) -> io::Result<()> {
     let sid = current_sid()?;
-    set_dacl(path, &format!("D:P(A;;FA;;;SY)(A;;FA;;;{sid})"))?;
+    set_dacl(path, &format!("O:{sid}D:P(A;;FA;;;SY)(A;;FA;;;{sid})"))?;
     verify(path)
 }
 
@@ -211,9 +225,13 @@ pub(super) fn protect(path: &Path) -> io::Result<()> {
 /// The formatted DACL must have exactly two full-control allow ACEs and no
 /// deny, inherited, callback, group, Everyone or app-package ACEs.
 pub(super) fn verify(path: &Path) -> io::Result<()> {
-    let sddl = get_dacl(path)?;
+    verify_file(&std::fs::File::open(path)?)
+}
+
+pub(super) fn verify_file(file: &std::fs::File) -> io::Result<()> {
+    let (sddl, owner_sid) = get_security(file)?;
     let current = current_sid()?;
-    if !sddl.starts_with("D:P") {
+    if owner_sid != current || !sddl.starts_with("D:P") {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
             "IPC DACL inheritance",

@@ -2,19 +2,24 @@
 //! Holds one exclusive cross-process writer fence while capturing all keyed
 //! SQLite WAL-visible pages and every immutable encrypted object. This is
 //! NOT a substitute for auditing every future writer and testing native IPC.
-use crate::{IndexError, Result};
+use crate::{
+    documents::DocumentIndex, vault_archive::VaultCaptureStore,
+    vault_legacy_objects::RawLegacyInventory, IndexError, IndexStore, Result,
+};
 use mind_place_security::{
     vault::{CryptoVault, VaultManifest},
     vault_backup::{BackupMetadata, PortableBackup},
     vault_fence::VaultWriterFence,
+    vault_storage::ImmutableVaultStorage,
     SecurityGate, UnlockLease,
 };
-use mind_place_state::CipherKey;
+use mind_place_state::{CipherKey, StateStore};
 use rusqlite::{backup::Backup, Connection, OpenFlags};
+use sha2::{Digest, Sha256};
 use std::{
     fs::{self, File, OpenOptions},
     io::{Read, Write},
-    path::{Path, PathBuf},
+    path::Path,
     time::Duration,
 };
 use zeroize::Zeroize;
@@ -41,6 +46,9 @@ impl VaultOnlineBackup {
     ) -> Result<BackupMetadata> {
         gate.validate_lease(lease)
             .map_err(|_| IndexError::Revoked)?;
+        let resolved = mind_place_security::vault_fs::checked_new_destination(source, destination)
+            .map_err(|_| IndexError::UnsafePath)?;
+        let destination = resolved.as_path();
         if destination.starts_with(source)
             || source.starts_with(destination)
             || destination.exists()
@@ -108,6 +116,7 @@ impl VaultOnlineBackup {
         if !have_state {
             return Err(IndexError::InvalidEvidence);
         }
+        verify_coherent_snapshot(gate, lease, vault, &scratch)?;
         gate.validate_lease(lease)
             .map_err(|_| IndexError::Revoked)?;
         // Package a fully quiesced scratch root. Existing portable restore
@@ -132,6 +141,10 @@ impl VaultOnlineBackup {
     ) -> Result<BackupMetadata> {
         gate.validate_lease(lease)
             .map_err(|_| IndexError::Revoked)?;
+        let resolved =
+            mind_place_security::vault_fs::checked_new_destination(backup_root, destination)
+                .map_err(|_| IndexError::UnsafePath)?;
+        let destination = resolved.as_path();
         if destination.exists()
             || backup_root.starts_with(destination)
             || destination.starts_with(backup_root)
@@ -190,12 +203,12 @@ impl VaultOnlineBackup {
         if !found_state {
             return Err(IndexError::InvalidEvidence);
         }
+        verify_coherent_snapshot(gate, lease, &vault, &staged)?;
         gate.validate_lease(lease)
             .map_err(|_| IndexError::Revoked)?;
         // All SQLite handles above have closed before Windows directory rename.
-        fs::rename(&staged, destination)?;
-        #[cfg(unix)]
-        File::open(parent)?.sync_all()?;
+        mind_place_security::vault_fs::publish_new_directory(&staged, destination)
+            .map_err(|_| IndexError::InvalidEvidence)?;
         Ok(meta)
     }
 }
@@ -245,10 +258,121 @@ fn snapshot_sqlcipher(
     drop(output);
     drop(input);
     let mut header = [0u8; 16];
-    File::open(destination)?.read_exact(&mut header)?;
+    let mut durable = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(destination)?;
+    durable.read_exact(&mut header)?;
     if &header == b"SQLite format 3\0" {
         return Err(IndexError::InvalidIndex);
     }
+    durable.sync_all()?;
+    Ok(())
+}
+
+fn verify_coherent_snapshot(
+    gate: &SecurityGate,
+    lease: UnlockLease,
+    vault: &CryptoVault,
+    root: &Path,
+) -> Result<()> {
+    let _validation = VaultWriterFence::writer(root).map_err(|_| IndexError::InvalidEvidence)?;
+    let storage = ImmutableVaultStorage::new(root, vault, gate, lease)
+        .map_err(|_| IndexError::InvalidEvidence)?;
+    for (filename, domain) in DB_DOMAINS {
+        let path = root.join(filename);
+        if !path.exists() {
+            continue;
+        }
+        let derived = vault
+            .derived_key(gate, lease, domain)
+            .map_err(|_| IndexError::Revoked)?;
+        let mut raw = [0u8; 32];
+        raw.copy_from_slice(derived.as_ref());
+        // These product constructors validate actual application/schema and
+        // migration identity, not merely SQLite's physical page consistency.
+        let valid = match filename {
+            "state.sqlite3" => StateStore::open_encrypted(&path, raw, gate, lease)
+                .map(drop)
+                .map_err(IndexError::from),
+            "index.sqlite3" => IndexStore::open_encrypted(&path, raw, gate, lease).map(drop),
+            "document-index.sqlite3" => {
+                DocumentIndex::open_encrypted(&path, raw, gate, lease).map(drop)
+            }
+            _ => Ok(()),
+        };
+        let key = CipherKey::new(raw, gate, lease);
+        raw.zeroize();
+        valid?;
+        let db = Connection::open_with_flags(
+            &path,
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+        )?;
+        key.unlock(&db)?;
+        let health: String = db.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
+        if health != "ok"
+            || db
+                .prepare("PRAGMA foreign_key_check")?
+                .query([])?
+                .next()?
+                .is_some()
+        {
+            return Err(IndexError::InvalidEvidence);
+        }
+        // FTS external-content correctness is distinct from SQLite page checks.
+        let tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND lower(sql) LIKE '%using fts5%' ORDER BY name")?
+            .query_map([], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+        for name in tables {
+            let quoted = name.replace('"', "\"\"");
+            db.execute_batch(&format!(
+                "INSERT INTO \"{quoted}\"(\"{quoted}\", rank) VALUES('integrity-check', 1)"
+            ))?;
+        }
+        if filename == "state.sqlite3" {
+            let mut query = db.prepare(
+                "SELECT content_hash,byte_length FROM document_objects ORDER BY content_hash",
+            )?;
+            let mut rows = query.query([])?;
+            while let Some(row) = rows.next()? {
+                let hash: String = row.get(0)?;
+                let length: i64 = row.get(1)?;
+                if hash.len() != 64
+                    || !hash
+                        .bytes()
+                        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+                    || length < 0
+                {
+                    return Err(IndexError::InvalidEvidence);
+                }
+                let bytes = storage
+                    .read(
+                        gate,
+                        lease,
+                        mind_place_security::vault::ContentKind::DocumentObject,
+                        format!("document/{hash}").as_bytes(),
+                    )
+                    .map_err(|_| IndexError::InvalidEvidence)?;
+                if bytes.len() as i64 != length || format!("{:x}", Sha256::digest(&bytes)) != hash {
+                    return Err(IndexError::InvalidEvidence);
+                }
+            }
+        }
+    }
+    let raw = RawLegacyInventory::read(root, vault, &storage, gate, lease)
+        .map_err(|_| IndexError::InvalidEvidence)?;
+    if root.join("archive").exists()
+        && !root.join("archive-index.sqlite3").exists()
+        && raw.is_none()
+    {
+        return Err(IndexError::InvalidEvidence);
+    }
+    if let Some(raw) = raw {
+        raw.verify_all(&storage, gate, lease)
+            .map_err(|_| IndexError::InvalidEvidence)?;
+    }
+    VaultCaptureStore::verify_backup_catalog(root, vault, gate, lease)?;
+    gate.validate_lease(lease)
+        .map_err(|_| IndexError::Revoked)?;
     Ok(())
 }
 

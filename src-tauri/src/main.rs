@@ -1046,6 +1046,13 @@ async fn get_asset(
     id: String,
     asset_path: String,
 ) -> Result<AssetResult, String> {
+    let archive_id = id.clone();
+    let name = asset_path.clone();
+    if let Some(asset) =
+        vaulted_blocking(&state, move |vault| vault.asset(&archive_id, &name)).await?
+    {
+        return Ok(asset);
+    }
     let store = legacy_archive(&state)?;
     gated_blocking(&state, move || store.asset(&id, &asset_path)).await
 }

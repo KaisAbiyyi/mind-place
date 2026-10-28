@@ -880,16 +880,24 @@ impl ArchiveStore {
         let dir = self.conversation_dir(id)?.join("assets");
         no_link(&dir)?;
         let bytes = bounded_read(&dir.join(name), MAX_IMAGE_BYTES)?;
-        let (mime, ext) =
-            image_kind(&bytes).ok_or_else(|| invalid("Invalid archive image type"))?;
-        if name != format!("{}.{}", digest(&bytes), ext) {
-            return Err(invalid("Archive image digest does not match its identity"));
-        }
-        Ok(AssetResult {
-            mime_type: mime.into(),
-            data_url: format!("data:{mime};base64,{}", STANDARD.encode(bytes)),
-        })
+        verified_image_asset(name, &bytes)
     }
+}
+
+/// Shared plaintext-in-memory validation for legacy and encrypted image reads.
+/// Never fetch a URL or trust a filename/MIME without byte and digest checks.
+pub fn verified_image_asset(name: &str, bytes: &[u8]) -> Result<AssetResult> {
+    if !asset_name(name) || bytes.len() > MAX_IMAGE_BYTES {
+        return Err(invalid("Invalid archive asset path or size"));
+    }
+    let (mime, ext) = image_kind(bytes).ok_or_else(|| invalid("Invalid archive image type"))?;
+    if name != format!("{}.{}", digest(bytes), ext) {
+        return Err(invalid("Archive image digest does not match its identity"));
+    }
+    Ok(AssetResult {
+        mime_type: mime.into(),
+        data_url: format!("data:{mime};base64,{}", STANDARD.encode(bytes)),
+    })
 }
 
 pub fn markdown(c: &Capture) -> String {

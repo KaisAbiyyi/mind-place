@@ -56,9 +56,11 @@ impl PortableBackup {
         gate.validate_lease(lease)?;
         safe(vault_root)?;
         safe(destination)?;
+        let resolved = crate::vault_fs::checked_new_destination(vault_root, destination)?;
+        let destination = resolved.as_path();
         // Hold an exclusive cross-process writer fence throughout inventory,
-        // copy, source recheck and backup publication. Only writers using
-        // VaultWriterFence participate; product-wide coordination is pending.
+        // copy, source recheck and backup publication. Product writer coverage
+        // is inventoried in docs/implementation-plan/2026-10-28-mp9b-owner-runtime-and-writers.md.
         let _snapshot_fence = VaultWriterFence::snapshot(vault_root)?;
         if destination.starts_with(vault_root) || vault_root.starts_with(destination) {
             return Err(SecurityError::UnsafePath);
@@ -179,8 +181,7 @@ impl PortableBackup {
         drop(metadata_file);
         drop(encrypted_manifest);
         gate.validate_lease(lease)?;
-        fs::rename(&staging, destination)?;
-        sync_parent(parent)?;
+        crate::vault_fs::publish_new_directory(&staging, destination)?;
         Ok(meta)
     }
 
@@ -196,6 +197,8 @@ impl PortableBackup {
         gate.validate_lease(lease)?;
         safe(backup_root)?;
         safe(destination)?;
+        let resolved = crate::vault_fs::checked_new_destination(backup_root, destination)?;
+        let destination = resolved.as_path();
         if backup_root.starts_with(destination) || destination.starts_with(backup_root) {
             return Err(SecurityError::UnsafePath);
         }
@@ -283,8 +286,7 @@ impl PortableBackup {
         // Otherwise Windows reports ERROR_ACCESS_DENIED on the rename.
         drop(config);
         gate.validate_lease(lease)?;
-        fs::rename(&staging, destination)?;
-        sync_parent(destination.parent().ok_or(SecurityError::UnsafePath)?)?;
+        crate::vault_fs::publish_new_directory(&staging, destination)?;
         Ok(meta)
     }
 }
@@ -484,13 +486,6 @@ fn copy_digest(src: &mut File, dst: &mut File) -> Result<(u64, String)> {
         sha.update(&buf[..amount]);
     }
     Ok((len, format!("{:x}", sha.finalize())))
-}
-fn sync_parent(path: &Path) -> Result<()> {
-    #[cfg(unix)]
-    File::open(path)?.sync_all()?;
-    #[cfg(not(unix))]
-    let _ = path;
-    Ok(())
 }
 #[cfg(test)]
 mod tests {

@@ -5,6 +5,11 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[[bin]]
+name = "mp-vault-migrate"
+path = "src/bin/mp-vault-migrate.rs"
+required-features = ["sqlcipher-preview"]
+
 [dependencies]
 mind-place-archive = { path = "../archive-core" }
 mind-place-state = { path = "../state-core" }

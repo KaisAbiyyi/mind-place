@@ -2,6 +2,12 @@
 
 This file is the small execution-order pointer for cloud agents. Strategy lives in `../BIG-IMPLEMENTATION-PLAN.md`; detailed design notes live beside this file. If older phase labels conflict with this file, follow this file for the current execution order.
 
+## Current execution gate — 2026-10-28 authorized local takeover
+
+The live DAG accepts the earlier Phase 3–8 gates; historical snapshots below do not reopen them. **Now:** MP-9B (#126 / Draft #127) and MP-CI-100K-01 (#128 / Draft #129), serialized under one owner-authorized local Windows executor. **Up Next:** MP-9C, MP-9D, MP-9E only; their other AND predecessors are accepted Done. No limit applies to eligible Now/direct successors; Last Done alone is capped at five. Optional semantic/Tantivy/UI research still requires its own measurement/owner priority and is not silently claimed.
+
+The takeover repairs Windows migration flush, authenticated fresh-process resume, real raw/archive/media/document equivalence, coordinated online backup/restore, descriptor owner/ACL/session checks and PR-bound final qualification. The explicit Windows [offline owner runtime and writer inventory](2026-10-28-mp9b-owner-runtime-and-writers.md) preserves plaintext source and requires recovery confirmation; it is not an installed graphical migration flow. [Implementation summary](../implementation-summary/2026-10-28-mp9b-ci100k-local-takeover.md) carries verification boundaries. Both PRs remain Draft; independent approval, installed-owner and actual different-Windows-account qualification remain separate. Freeze and pass relevant cheap checks before one combined-candidate 100K run; no merge/release is authorized.
+
 ## Current execution gate � 2026-10-23
 
 **MP-4L2: native document qualification recovery**, [PR #42](https://github.com/KaisAbiyyi/mind-place/pull/42). The optimized Windows real-corpus gate passes 10/10 with no skips on product SHA `60233a0`; [implementation receipt](../implementation-summary/2026-10-23-mp-4l2-native-parser-recovery.md) and [machine-readable evidence](../qualification/2026-10-23-mp-4l2-release.json). Final-head CI and reviewed merge are required for integration acceptance. This local bounded repair was explicitly owner-authorized.
