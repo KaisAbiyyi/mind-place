@@ -280,7 +280,7 @@ class PriorProofTests(unittest.TestCase):
         self.repo, self.pr = "owner/repo", 128
         self.tree = [{"type": "blob", "mode": "100644", "sha": "e"*40, "path": "Cargo.lock"}]
         self.scale_bytes = b"jobs:\n  document-smoke:\n    runs-on: windows-latest\n    steps:\n      - run: cargo test smoke\n  document-scale:\n    runs-on: windows-latest\n    steps:\n      - run: cargo test full\n  provenance:\n    runs-on: ubuntu-latest\n"
-        self.scale_sha = hashlib.sha1(b"blob " + str(len(self.scale_bytes)).encode() + b"\\0" + self.scale_bytes).hexdigest()
+        self.scale_sha = hashlib.sha1(b"blob " + str(len(self.scale_bytes)).encode() + b"\0" + self.scale_bytes).hexdigest()
         self.tree.append({"type": "blob", "mode": "100644", "sha": self.scale_sha,
                           "path": ".github/workflows/mp-10c-scale.yml"})
         self.fp = gate.fingerprint_entries([(x["mode"].encode(), x["sha"].encode(), x["path"].encode()) for x in self.tree], scale_workflow=self.scale_bytes)
@@ -379,7 +379,7 @@ class PriorProofTests(unittest.TestCase):
         self.repack()
         self.assertIsNotNone(self.check())  # Legacy proof bound to original v1 Git tree.
         self.scale_bytes = self.scale_bytes.replace(b"cargo test full", b"cargo test changed")
-        self.scale_sha = hashlib.sha1(b"blob " + str(len(self.scale_bytes)).encode() + b"\\0" + self.scale_bytes).hexdigest()
+        self.scale_sha = hashlib.sha1(b"blob " + str(len(self.scale_bytes)).encode() + b"\0" + self.scale_bytes).hexdigest()
         self.tree[-1]["sha"] = self.scale_sha
         self.assertIsNone(self.check())  # Changed scale semantics refuse proof reuse.
 
