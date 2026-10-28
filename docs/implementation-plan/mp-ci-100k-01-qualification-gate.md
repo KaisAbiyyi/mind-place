@@ -1,3 +1,15 @@
+## 2026-10-29 cloud recovery: versioned workload identity and Ubuntu gate
+
+CI now separates the **v2 workload identity** (Rust source, dependencies, security/authority, native Windows smoke/100K execution contract) from **evidence verifier policy** (Python receipt parser, GitHub job/step verification and coordinator). The v2 fingerprint hashes Git tree mode/blob tuples plus a SHA256 of the Windows smoke/scale job runner-through-steps content. Scheduling/dependency edits above `runs-on`, verifier-only edits and docs no longer invalidate a successful identical workload. Any changed Windows step, receipt assertion, toolchain command, runner or production/test/security file still requires new scale work.
+
+Legacy v1 proof may be reused **only after** independent verification of its exact old GitHub tree and original v1 fingerprint, full scale attempt job/steps, attestation attempt, raw ZIP+proof ZIP digests, byte equality, event/PR/source SHA, tier dimensions and recomputation of the **new v2 workload signature** from the original source's actual Git blob. A stricter current verifier can refuse that evidence. No old proof is silently relabeled as a new PASS. Manual/final/release still explicitly demand fresh work.
+
+The new Ubuntu `prerequisite-coordination` job waits up to 80 minutes (85-minute runner cap) for source-exact native Product and applicable dual-platform SQLCipher jobs and their required successful steps. Queued/running/missing checks are pending rather than an early false red; verified failure/cancellation/skipped critical jobs are terminal failures; API errors remain untrusted, eventually fail closed. The Windows full job does not acquire a costly runner before coordinator success. It also rejects PRs superseded before indexing. GitHub job-level concurrency and second proof check continue to suppress redundant indexing on a queued follower. Draft remains development-only.
+
+A parallel Rust fast-feedback job checks pinned Rust 1.90 rustfmt, workspace core compile, SQLCipher and vault MCP feature compilation, and focused security tests. Windows Product depends on that Rust job; Draft does not run Windows Product. No local owner data or machine is involved.
+
+P2 Storage: cumulative PR-wide path filters still cause possible redundant Windows three-tier matrix after Ready. A trusted same-PR, same-workload storage receipt/cache has **not** been implemented yet; leaving this residual explicit avoids an unsafe skip and scope expansion. Keep full 10K/100K/1M and SQLite/FTS qualification for ready/release/final.
+
 # MP-CI-100K-01 — Source-bound MP-10C qualification gate
 
 Issue: [#128](https://github.com/KaisAbiyyi/mind-place/issues/128) · [Notion task](https://app.notion.com/p/406c4a6aaf7381c89564ef41a5c71336). This is CI-only work. It does not modify MP-9B or reopen the accepted MP-10C workload.
