@@ -4,19 +4,52 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
-concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
+  fast:
+    name: Fast developer feedback
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Verify repository contract
+        run: npm run verify:repo
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Test reader and browser contracts
+        run: npm run test:web
+      - name: Build reader
+        run: npm run build:web
+      - name: Validate document qualification gate policy
+        run: python3 -m unittest discover -s scripts/tests -p 'test_mp10c_ci_gate.py' -q
+      - name: Report draft acceptance boundary
+        if: github.event_name == 'pull_request' && github.event.pull_request.draft == true
+        run: |
+          echo '### Development checks only' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Full Windows product, security/native and storage qualification are PENDING for this Draft PR. A skipped native job does not certify acceptance. Switch to Ready for Review after freezing the candidate, or dispatch final qualification explicitly.' >> "$GITHUB_STEP_SUMMARY"
+
   verify:
     name: Verify Windows product
+    # Drafts receive fast feedback above. Run the full native/security suite
+    # when the PR becomes reviewable, on subsequent ready-PR pushes, on main,
+    # or by explicit dispatch. This job remains the Windows acceptance signal.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 90
+    concurrency:
+      group: windows-product-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: false
     env:
       CARGO_BUILD_JOBS: 1
       CARGO_INCREMENTAL: 0
