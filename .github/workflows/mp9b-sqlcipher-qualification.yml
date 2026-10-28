@@ -2,6 +2,7 @@ name: MP-9B SQLCipher native qualification
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
     paths:
       - 'Cargo.lock'
       - 'crates/state-core/**'
@@ -18,6 +19,9 @@ permissions:
 jobs:
   sqlcipher:
     name: SQLCipher / ${{ matrix.os }}
+    # Draft work receives fast feedback through CI. Keep native SQLCipher
+    # qualification mandatory on Ready for Review and subsequent ready pushes.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     strategy:
       fail-fast: false
       matrix:
