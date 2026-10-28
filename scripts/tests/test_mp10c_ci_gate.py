@@ -155,13 +155,46 @@ class DecisionTests(unittest.TestCase):
 
     def test_full_run_waits_for_exact_source_cheap_ci(self):
         source = "a"*40
-        passed = [{"path": path, "head_sha": source, "status": "completed", "conclusion": "success"}
-                  for path in (".github/workflows/ci.yml", ".github/workflows/mp9b-sqlcipher-qualification.yml")]
-        gate.require_prerequisites(passed, source, vault=True)
+        passed = [{"id": i, "run_attempt": 1, "path": path, "head_sha": source,
+                   "status": "completed", "conclusion": "success"}
+                  for i, path in enumerate((".github/workflows/ci.yml",
+                      ".github/workflows/mp9b-sqlcipher-qualification.yml"), start=1)]
+        def job(name, steps, *, conclusion="success"):
+            return {"name": name, "status": "completed", "conclusion": conclusion,
+                    "steps": [{"name": s, "conclusion": "success"} for s in steps]}
+        product = job("Verify Windows product", ("Test", "Test hosted tunnel desktop boundaries", "Build desktop app"))
+        sql_steps = ("Encrypted state/index and FTS regression",
+                     "Keyed MCP synthetic authorization and revocation",
+                     "Vault and backup adversarial regression")
+        sql_ubuntu = job("SQLCipher / ubuntu-24.04", sql_steps)
+        sql_windows = job("SQLCipher / windows-2022", sql_steps)
+        jobs = {1: [product], 2: [sql_ubuntu, sql_windows]}
+        def fetch(run):
+            return {"jobs": jobs[run["id"]], "total_count": len(jobs[run["id"]])}
+        gate.require_prerequisites(passed, source, vault=True, fetch_jobs=fetch)
         for bad in ([], passed[:1], [dict(r, head_sha="b"*40) for r in passed],
                     [dict(r, conclusion="failure") for r in passed]):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
-                gate.require_prerequisites(bad, source, vault=True)
+                gate.require_prerequisites(bad, source, vault=True, fetch_jobs=fetch)
+        # A successful Draft workflow can contain a skipped native job. Never
+        # treat its overall SUCCESS as proof for a multi-hour qualification.
+        for replacement in (dict(product, conclusion="skipped"),
+                            dict(product, steps=[{"name": "Build desktop app", "conclusion": "skipped"}]),
+                            dict(product, name="Fast developer feedback")):
+            with self.subTest(replacement=replacement), self.assertRaises(ValueError):
+                jobs[1] = [replacement]
+                gate.require_prerequisites(passed, source, vault=False, fetch_jobs=fetch)
+        jobs[1] = [product]
+        for replacement in (dict(sql_windows, conclusion="skipped"),
+                            dict(sql_windows, steps=[]),
+                            dict(sql_windows, name="SQLCipher / macos-15")):
+            with self.subTest(replacement=replacement), self.assertRaises(ValueError):
+                jobs[2] = [sql_ubuntu, replacement]
+                gate.require_prerequisites(passed, source, vault=True, fetch_jobs=fetch)
+        jobs[2] = [sql_ubuntu, sql_windows]
+        with self.assertRaises(ValueError):
+            gate.require_prerequisites(passed, source, vault=True,
+                                       fetch_jobs=lambda r: {"jobs": jobs[r["id"]], "total_count": 101})
 
 
 class DispatchTargetTests(unittest.TestCase):
