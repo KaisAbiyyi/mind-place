@@ -178,13 +178,17 @@ impl LegacyEncryptedConversion<'_> {
         let version: i64 = sql(original.query_row("PRAGMA user_version", [], |r| r.get(0)))?;
         sql(dest.execute_batch(&format!("PRAGMA main.application_id = {app}; PRAGMA main.user_version = {version}; DETACH DATABASE legacy;")))?;
         sqlite_healthy(&dest)?;
-        drop(dest);
+        sql(dest.close().map_err(|(_, error)| error))?;
         let mut header = [0u8; 16];
-        File::open(&partial)?.read_exact(&mut header)?;
+        // Windows FlushFileBuffers requires GENERIC_WRITE. Reopen without
+        // truncation, then close this handle before linking/unlinking staging.
+        let mut copied = OpenOptions::new().read(true).write(true).open(&partial)?;
+        copied.read_exact(&mut header)?;
         if &header == b"SQLite format 3\0" {
             return Err(SecurityError::Crypto);
         }
-        File::open(&partial)?.sync_all()?;
+        copied.sync_all()?;
+        drop(copied);
         // Linking is atomic and refuses an existing target on both Unix and
         // Windows; a restart after linking verifies the target before cleanup.
         fs::hard_link(&partial, &target)?;
