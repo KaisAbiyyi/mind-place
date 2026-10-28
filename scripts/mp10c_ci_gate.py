@@ -21,7 +21,7 @@ import urllib.parse
 import urllib.request
 import zipfile
 
-SCHEMA = "mind-place-mp10c-qualification/v1"
+SCHEMA = "mind-place-mp10c-qualification/v2"
 ARTIFACT = "mp10c-qualified-100000"
 WORKFLOW = "mp-10c-scale.yml"
 FULL_JOB = "Windows approved documents / 100000 files"
@@ -54,8 +54,7 @@ def fingerprint(root: str = ".") -> str:
     narrowly documented non-inputs, not an allowlist of possible dependencies.
     """
     records = subprocess.check_output(["git", "ls-files", "--stage", "-z"], cwd=root)
-    digest = hashlib.sha256(b"mp10c-effective-inputs/v1\0")
-    included = 0
+    entries = []
     for record in records.split(b"\0"):
         if not record:
             continue
@@ -63,8 +62,21 @@ def fingerprint(root: str = ".") -> str:
         mode, oid, stage = meta.split(b" ")
         if stage != b"0":
             raise ValueError("Unmerged index: refusing fingerprint")
-        path = path_bytes.decode("utf-8", errors="surrogateescape")
-        if excluded(path):
+        entries.append((mode, oid, path_bytes))
+    return fingerprint_entries(entries)
+
+
+def fingerprint_entries(entries: list[tuple[bytes, bytes, bytes]]) -> str:
+    digest = hashlib.sha256(b"mp10c-effective-inputs/v1\0")
+    included = 0
+    seen = set()
+    for mode, oid, path_bytes in sorted(entries, key=lambda item: item[2]):
+        if path_bytes in seen or mode not in {b"100644", b"100755", b"120000", b"160000"}:
+            raise ValueError("Invalid or duplicate effective tree entry")
+        seen.add(path_bytes)
+        if not HEX40.fullmatch(oid.decode("ascii")):
+            raise ValueError("Invalid effective tree object")
+        if excluded(path_bytes.decode("utf-8", errors="surrogateescape")):
             continue
         digest.update(mode + b"\0" + oid + b"\0" + path_bytes + b"\0")
         included += 1
@@ -103,13 +115,25 @@ def validate_proof(proof: dict, raw_bytes: bytes, *, run: dict, artifact: dict,
     source = proof.get("checkout_sha")
     if not isinstance(source, str) or not HEX40.fullmatch(source):
         raise ValueError("Invalid qualified checkout SHA")
-    if proof.get("run_id") != run.get("id") or proof.get("run_attempt") != run.get("run_attempt"):
+    if (type(proof.get("run_id")) is not int or type(proof.get("run_attempt")) is not int
+            or proof.get("run_id") != run.get("id") or proof.get("run_attempt") != run.get("run_attempt")):
         raise ValueError("Provenance does not belong to successful run attempt")
-    if proof.get("repo") != repo or proof.get("pr_number") != pr or proof.get("event") != "pull_request":
+    event = run.get("event")
+    if (proof.get("repo") != repo or type(pr) is not int
+            or (pr != 0 if event == "push" else pr <= 0)
+            or type(proof.get("pr_number")) is not int or proof.get("pr_number") != pr
+            or event not in {"pull_request", "workflow_dispatch", "push"} or proof.get("event") != event):
         raise ValueError("Proof belongs to another repository, PR, or event")
     # PR run metadata records branch HEAD; checkout tests a synthetic merge.
     if proof.get("source_sha") != run.get("head_sha"):
         raise ValueError("PR branch HEAD SHA != GitHub qualified run")
+    if event in {"workflow_dispatch", "push"} and source != proof["source_sha"]:
+        raise ValueError("Manual qualification must test the exact dispatched PR head")
+    if proof.get("source_ref") != run.get("head_branch") or not proof.get("source_ref"):
+        raise ValueError("Qualification branch does not match workflow event")
+    scale_attempt = proof.get("scale_run_attempt")
+    if type(scale_attempt) is not int or not 0 < scale_attempt <= run["run_attempt"]:
+        raise ValueError("Invalid original full-scale attempt")
     if proof.get("tier") != 100000 or proof.get("qualified") is not True:
         raise ValueError("Proof does not attest completed full tier")
     if proof.get("input_fingerprint") != desired or not HEX64.fullmatch(desired):
@@ -117,7 +141,7 @@ def validate_proof(proof: dict, raw_bytes: bytes, *, run: dict, artifact: dict,
     if proof.get("raw_receipt_sha256") != hashlib.sha256(raw_bytes).hexdigest():
         raise ValueError("Raw acceptance receipt does not match provenance hash")
     require_raw_receipt(json.loads(raw_bytes))
-    if artifact.get("expired") is not False or artifact.get("name") != ARTIFACT:
+    if artifact.get("expired") is not False or artifact.get("name") != artifact_name(ARTIFACT, run["run_attempt"]):
         raise ValueError("Artifact expired/misnamed")
     if artifact.get("workflow_run", {}).get("id") != run.get("id"):
         raise ValueError("Artifact belongs to different workflow run")
@@ -146,7 +170,8 @@ def check_merge_source(*, repo_root: str = ".", expected_source: str) -> None:
 
 def make_proof(*, receipt: bytes, source: str, run_id: int, attempt: int,
                pr: int, repo: str, event: str, effective: str,
-               head_sha: str | None = None) -> dict:
+               head_sha: str | None = None, head_ref: str = "",
+               scale_attempt: int | None = None) -> dict:
     require_raw_receipt(json.loads(receipt))
     head_sha = head_sha or source
     if not HEX40.fullmatch(source) or not HEX40.fullmatch(head_sha) or not HEX64.fullmatch(effective):
@@ -155,14 +180,59 @@ def make_proof(*, receipt: bytes, source: str, run_id: int, attempt: int,
         raise ValueError("Missing workflow identity")
     if not repo or event not in {"pull_request", "workflow_dispatch", "push"}:
         raise ValueError("Missing workflow identity")
+    if (type(pr) is not int or (pr != 0 if event == "push" else pr <= 0) or not head_ref):
+        raise ValueError("Qualification requires a positive PR identity and branch")
+    scale_attempt = attempt if scale_attempt is None else scale_attempt
+    if type(scale_attempt) is not int or not 0 < scale_attempt <= attempt:
+        raise ValueError("Invalid original full-scale attempt")
     return {
         "schema": SCHEMA, "tier": 100000, "qualified": True,
         "repo": repo, "event": event, "pr_number": pr,
         "checkout_sha": source, "source_sha": head_sha,
+        "source_ref": head_ref, "scale_run_attempt": scale_attempt,
         "input_fingerprint": effective,
         "run_id": run_id, "run_attempt": attempt,
         "raw_receipt_sha256": hashlib.sha256(receipt).hexdigest(),
     }
+
+
+def artifact_name(name: str, attempt: int) -> str:
+    if type(attempt) is not int or attempt <= 0:
+        raise ValueError("Invalid artifact attempt")
+    return f"{name}-attempt-{attempt}"
+
+
+def resolve_target(*, event: str, payload: dict, repo: str, sha: str,
+                   ref: str, token: str) -> dict:
+    """Bind manual qualification to an open, same-repository PR at dispatch.
+
+    A dispatch runs on the PR's own branch, tests its exact immutable head,
+    and never silently qualifies the default branch or PR zero.
+    """
+    if event == "push":
+        if not ref.startswith("refs/tags/") or not HEX40.fullmatch(sha):
+            raise ValueError("Only a release tag may qualify without a PR")
+        return {"pr": 0, "head": sha, "branch": ref.removeprefix("refs/tags/")}
+    if event == "pull_request":
+        pull = payload["pull_request"]
+    elif event == "workflow_dispatch":
+        number = payload.get("inputs", {}).get("pr_number", "")
+        if not isinstance(number, str) or not re.fullmatch(r"[1-9][0-9]*", number):
+            raise ValueError("Manual/final qualification requires pr_number")
+        pull = api_json(f"https://api.github.com/repos/{repo}/pulls/{number}", token)
+        if pull.get("number") != int(number) or pull.get("state") != "open":
+            raise ValueError("Manual target PR is not open")
+        if pull.get("head", {}).get("sha") != sha or ref != "refs/heads/" + pull.get("head", {}).get("ref", ""):
+            raise ValueError("Dispatch must select the current target PR head branch")
+    else:
+        raise ValueError("Unsupported qualification event")
+    if (pull.get("head", {}).get("repo", {}).get("full_name") != repo
+            or pull.get("base", {}).get("repo", {}).get("full_name") != repo):
+        raise ValueError("Cross-repository qualification is not authorized")
+    number, head, branch = pull.get("number"), pull["head"].get("sha"), pull["head"].get("ref")
+    if type(number) is not int or number <= 0 or not HEX40.fullmatch(head or "") or not branch:
+        raise ValueError("Invalid PR source identity")
+    return {"pr": number, "head": head, "branch": branch}
 
 
 def api_json(url: str, token: str) -> dict:
@@ -198,74 +268,107 @@ def artifact_bytes(url: str, token: str, maximum: int = 4 * 1024 * 1024) -> byte
     return payload
 
 
-def validated_candidate(run: dict, *, token: str, repo: str, pr: int, desired: str) -> dict | None:
-    if (run.get("event") != "pull_request" or run.get("status") != "completed"
-            or run.get("conclusion") != "success" or run.get("path") != ".github/workflows/" + WORKFLOW):
-        return None
-    run_id = run["id"]
-    api = f"https://api.github.com/repos/{repo}/actions/runs/{run_id}"
-    jobs = api_json(api + "/jobs?per_page=100", token).get("jobs", [])
-    # A completed workflow containing only a previously-skipped heavyweight
-    # job is NOT an authoritative qualification, even when overall run green.
-    def succeeded(job: dict, required_steps: tuple[str, ...]) -> bool:
-        return job.get("conclusion") == "success" and all(
-            any(s.get("name") == name and s.get("conclusion") == "success"
-                for s in job.get("steps", [])) for name in required_steps)
+def read_verified_artifact(item: dict, files: set[str], *, run_id: int, token: str) -> dict[str, bytes]:
+    if item.get("expired") is not False or item.get("workflow_run", {}).get("id") != run_id:
+        raise ValueError("Expired or foreign artifact")
+    zipped = artifact_bytes(item["archive_download_url"], token)
+    digest = item.get("digest", "")
+    if (not re.fullmatch(r"sha256:[0-9a-f]{64}", digest or "")
+            or hashlib.sha256(zipped).hexdigest() != digest.removeprefix("sha256:")):
+        raise ValueError("Artifact archive digest mismatch")
+    with zipfile.ZipFile(io.BytesIO(zipped)) as archive:
+        if (len(archive.infolist()) != len(files) or set(archive.namelist()) != files
+                or any(archive.getinfo(name).file_size > 65536 for name in files)):
+            raise ValueError("Unexpected or oversized artifact entries")
+        return {name: archive.read(name) for name in files}
 
-    full = [j for j in jobs if j.get("name") == FULL_JOB and succeeded(j, (
-        "Qualify real authorized document scale", "Validate exact-tier receipt",
-        "Upload validated raw 100K receipt"))]
-    attested = [j for j in jobs if j.get("name") == PROOF_JOB and succeeded(j, (
-        "Mint source-bound 100K provenance", "Upload qualified receipt and provenance"))]
-    if len(full) != 1 or len(attested) != 1:
+
+def verify_source_tree(proof: dict, run: dict, *, repo: str, pr: int, desired: str, token: str) -> None:
+    base = f"https://api.github.com/repos/{repo}"
+    commit = api_json(base + "/git/commits/" + proof["checkout_sha"], token)
+    if commit.get("sha") != proof["checkout_sha"]:
+        raise ValueError("Qualified commit object mismatch")
+    if run["event"] == "pull_request":
+        parents = [p.get("sha") for p in commit.get("parents", [])]
+        if len(parents) != 2 or parents[0] == parents[1] or parents[1] != proof["source_sha"]:
+            raise ValueError("Qualified merge does not contain the run's PR head")
+    elif run["event"] == "workflow_dispatch":
+        pull = api_json(base + f"/pulls/{pr}", token)
+        if (pull.get("number") != pr or pull.get("head", {}).get("ref") != proof["source_ref"]
+                or pull.get("head", {}).get("repo", {}).get("full_name") != repo
+                or pull.get("base", {}).get("repo", {}).get("full_name") != repo):
+            raise ValueError("Dispatched source is not bound to this repository's PR")
+        head = pull["head"].get("sha", "")
+        if not HEX40.fullmatch(head):
+            raise ValueError("Invalid current PR head")
+        if head != proof["source_sha"]:
+            relation = api_json(base + f"/compare/{proof['source_sha']}...{head}", token)
+            if relation.get("status") not in {"ahead", "identical"}:
+                raise ValueError("Dispatched source is no longer in PR history")
+    tree_sha = commit.get("tree", {}).get("sha", "")
+    if not HEX40.fullmatch(tree_sha):
+        raise ValueError("Missing qualified tree object")
+    tree = api_json(base + f"/git/trees/{tree_sha}?recursive=1", token)
+    if tree.get("truncated") is not False or tree.get("sha") != tree_sha:
+        raise ValueError("Incomplete qualified source tree")
+    entries = [(e["mode"].encode("ascii"), e["sha"].encode("ascii"), e["path"].encode("utf-8"))
+               for e in tree["tree"] if e["type"] in {"blob", "commit"}]
+    if fingerprint_entries(entries) != desired:
+        raise ValueError("Qualified GitHub tree does not match effective inputs")
+
+
+def validated_candidate(run: dict, *, token: str, repo: str, pr: int, desired: str,
+                        active_run_id: int | None = None) -> dict | None:
+    completed = run.get("status") == "completed" and run.get("conclusion") == "success"
+    active = run.get("status") == "in_progress" and run.get("id") == active_run_id
+    if (run.get("event") not in {"pull_request", "workflow_dispatch", "push"}
+            or not (completed or active)
+            or run.get("path") != ".github/workflows/" + WORKFLOW):
         return None
+    run_id, attempt = run["id"], run["run_attempt"]
+    api = f"https://api.github.com/repos/{repo}/actions/runs/{run_id}"
     artifacts = api_json(api + "/artifacts?per_page=100", token).get("artifacts", [])
-    raw_artifacts = [a for a in artifacts if a.get("name") == RAW_ARTIFACT
-                     and a.get("expired") is False
-                     and a.get("workflow_run", {}).get("id") == run_id]
-    if len(raw_artifacts) != 1:
+    qualified = [a for a in artifacts if a.get("name") == artifact_name(ARTIFACT, attempt)]
+    if len(qualified) != 1:
         return None
-    raw_item = raw_artifacts[0]
-    raw_zip = artifact_bytes(raw_item["archive_download_url"], token)
-    raw_digest = raw_item.get("digest", "")
-    if not re.fullmatch(r"sha256:[0-9a-f]{64}", raw_digest or "") or (
-            hashlib.sha256(raw_zip).hexdigest() != raw_digest.removeprefix("sha256:")):
+    try:
+        item = qualified[0]
+        bundle = read_verified_artifact(item, {"mp10c-provenance.json", "mp10c-100000.json"},
+                                        run_id=run_id, token=token)
+        proof, receipt = json.loads(bundle["mp10c-provenance.json"]), bundle["mp10c-100000.json"]
+        validate_proof(proof, receipt, run=run, artifact=item, pr=pr, repo=repo, desired=desired)
+        scale_attempt = proof["scale_run_attempt"]
+        raw_items = [a for a in artifacts if a.get("name") == artifact_name(RAW_ARTIFACT, scale_attempt)]
+        if len(raw_items) != 1:
+            return None
+        raw = read_verified_artifact(raw_items[0], {"mp10c-100000.json"}, run_id=run_id, token=token)
+        if raw["mp10c-100000.json"] != receipt:
+            return None
+
+        def succeeded(job: dict, name: str, required_steps: tuple[str, ...]) -> bool:
+            return job.get("name") == name and job.get("conclusion") == "success" and all(
+                sum(s.get("name") == step and s.get("conclusion") == "success"
+                    for s in job.get("steps", [])) == 1 for step in required_steps)
+
+        # The indexing attempt remains independently verifiable when a failed
+        # lightweight provenance job is rerun in a later attempt of this run.
+        scale_jobs = api_json(api + f"/attempts/{scale_attempt}/jobs?per_page=100", token).get("jobs", [])
+        proof_jobs = scale_jobs if scale_attempt == attempt else api_json(
+            api + f"/attempts/{attempt}/jobs?per_page=100", token).get("jobs", [])
+        full = [j for j in scale_jobs if succeeded(j, FULL_JOB, (
+            "Qualify real authorized document scale", "Validate exact-tier receipt",
+            "Upload validated raw 100K receipt"))]
+        attested = [j for j in proof_jobs if succeeded(j, PROOF_JOB, (
+            "Mint source-bound 100K provenance", "Upload qualified receipt and provenance"))]
+        if len(full) != 1 or len(attested) != 1:
+            return None
+        verify_source_tree(proof, run, repo=repo, pr=pr, desired=desired, token=token)
+        return {"run_id": run_id, "artifact_id": item["id"],
+                "qualified_sha": proof["source_sha"], "artifact_digest": item["digest"],
+                "raw_artifact_id": raw_items[0]["id"], "raw_artifact_digest": raw_items[0]["digest"],
+                "proof": proof, "run_url": run["html_url"]}
+    except (KeyError, ValueError, TypeError, OSError, zipfile.BadZipFile, json.JSONDecodeError):
         return None
-    with zipfile.ZipFile(io.BytesIO(raw_zip)) as z:
-        if set(z.namelist()) != {"mp10c-100000.json"}:
-            return None
-        if z.getinfo("mp10c-100000.json").file_size > 65536:
-            return None
-        verified_raw = z.read("mp10c-100000.json")
-    require_raw_receipt(json.loads(verified_raw))
-    for item in artifacts:
-        if item.get("name") != ARTIFACT or item.get("expired") is not False:
-            continue
-        try:
-            zip_bytes = artifact_bytes(item["archive_download_url"], token)
-            archive_digest = item.get("digest", "")
-            if not re.fullmatch(r"sha256:[0-9a-f]{64}", archive_digest or ""):
-                continue
-            if hashlib.sha256(zip_bytes).hexdigest() != archive_digest.removeprefix("sha256:"):
-                continue
-            with zipfile.ZipFile(io.BytesIO(zip_bytes)) as z:
-                expected_files = {"mp10c-provenance.json", "mp10c-100000.json"}
-                if set(z.namelist()) != expected_files:
-                    continue
-                if any(z.getinfo(name).file_size > 65536 for name in expected_files):
-                    continue
-                proof = json.loads(z.read("mp10c-provenance.json"))
-                receipt = z.read("mp10c-100000.json")
-            if receipt != verified_raw:
-                continue
-            validate_proof(proof, receipt, run=run, artifact=item,
-                           pr=pr, repo=repo, desired=desired)
-            return {"run_id": run_id, "artifact_id": item["id"],
-                    "qualified_sha": proof["source_sha"], "artifact_digest": archive_digest,
-                    "proof": proof, "run_url": run["html_url"]}
-        except (KeyError, ValueError, TypeError, OSError, zipfile.BadZipFile, json.JSONDecodeError):
-            continue
-    return None
 
 
 def find_accepted(*, token: str, repo: str, pr: int, desired: str) -> dict | None:
@@ -273,10 +376,10 @@ def find_accepted(*, token: str, repo: str, pr: int, desired: str) -> dict | Non
     # Bounded lookup. Exhaustion, network errors, revoked artifacts => run FULL,
     # never silently accept an unverifiable qualification.
     for page in range(1, 4):
-        url = base + f"?event=pull_request&status=success&per_page=100&page={page}"
+        url = base + f"?status=success&per_page=100&page={page}"
         runs = api_json(url, token).get("workflow_runs", [])
         for run in runs:
-            if not any(x.get("number") == pr for x in run.get("pull_requests", [])):
+            if run.get("event") == "pull_request" and not any(x.get("number") == pr for x in run.get("pull_requests", [])):
                 continue
             candidate = validated_candidate(run, token=token, repo=repo, pr=pr, desired=desired)
             if candidate:
@@ -296,6 +399,16 @@ def decision(event: str, mode: str, previous: dict | None) -> tuple[bool, str]:
     return False, "Identical effective inputs; prior full qualification reused (NOT a new PASS)"
 
 
+def require_prerequisites(runs: list[dict], source: str, *, vault: bool) -> None:
+    required = {".github/workflows/ci.yml"}
+    if vault:
+        required.add(".github/workflows/mp9b-sqlcipher-qualification.yml")
+    passed = {r.get("path") for r in runs if r.get("head_sha") == source
+              and r.get("status") == "completed" and r.get("conclusion") == "success"}
+    if not required.issubset(passed):
+        raise ValueError("Frozen source needs successful Windows Product CI and applicable Windows/Ubuntu SQLCipher CI before 100K")
+
+
 def write_output(path: str, values: dict[str, str]) -> None:
     with open(path, "a", encoding="utf-8") as f:
         for k, v in values.items():
@@ -306,7 +419,7 @@ def write_output(path: str, values: dict[str, str]) -> None:
 
 def main() -> int:
     p = argparse.ArgumentParser()
-    p.add_argument("command", choices=("decide", "attest", "fingerprint"))
+    p.add_argument("command", choices=("decide", "attest", "accept", "preflight", "fingerprint"))
     p.add_argument("--output")
     p.add_argument("--receipt")
     args = p.parse_args()
@@ -314,21 +427,61 @@ def main() -> int:
     if args.command == "fingerprint":
         print(fp)
         return 0
+    event = os.environ["GITHUB_EVENT_NAME"]
+    repo = os.environ["GITHUB_REPOSITORY"]
+    checkout = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+    if args.command == "preflight":
+        if os.environ.get("EXPECTED_FINGERPRINT") != fp:
+            raise ValueError("Preflight input fingerprint changed")
+        source = os.environ["PR_HEAD_SHA"]
+        if not HEX40.fullmatch(source):
+            raise ValueError("Invalid prerequisite source")
+        runs = api_json(f"https://api.github.com/repos/{repo}/actions/runs?head_sha={source}&per_page=100",
+                        os.environ["GH_TOKEN"]).get("workflow_runs", [])
+        require_prerequisites(runs, source, vault=Path(".github/workflows/mp9b-sqlcipher-qualification.yml").is_file())
+        print("Frozen source cheap CI prerequisites verified; full qualification may start")
+        return 0
+    if args.command == "accept":
+        if os.environ.get("EXPECTED_FINGERPRINT") != fp:
+            raise ValueError("Acceptance checkout differs from gate inputs")
+        token, pr, run_id = os.environ["GH_TOKEN"], int(os.environ["PR_NUMBER"]), int(os.environ["GITHUB_RUN_ID"])
+        current = api_json(f"https://api.github.com/repos/{repo}/actions/runs/{run_id}", token)
+        accepted = validated_candidate(current, token=token, repo=repo, pr=pr, desired=fp,
+                                       active_run_id=run_id)
+        fresh = accepted is not None
+        if not fresh and event == "pull_request" and os.environ.get("QUALIFICATION_MODE", "auto") == "auto":
+            accepted = find_accepted(token=token, repo=repo, pr=pr, desired=fp)
+        if not accepted:
+            raise ValueError("Final 100K qualification REQUIRED: no authenticated matching evidence")
+        report = ("Fresh full 100K qualification accepted" if fresh else
+                  "Prior full 100K proof reused for identical inputs; NOT a new 100K PASS")
+        print(report, json.dumps(accepted, sort_keys=True))
+        summary = os.environ.get("GITHUB_STEP_SUMMARY")
+        if summary:
+            with open(summary, "a", encoding="utf-8") as stream:
+                stream.write(f"## {report}\n\nRun: {accepted['run_url']}\n")
+        return 0
     if args.command == "attest":
         if not args.receipt or not args.output:
             p.error("attest requires --receipt and --output")
         receipt = Path(args.receipt).read_bytes()
         proof = make_proof(
-            receipt=receipt, source=subprocess.check_output(
-                ["git", "rev-parse", "HEAD"], text=True).strip(),
+            receipt=receipt, source=checkout,
             run_id=int(os.environ["GITHUB_RUN_ID"]),
             attempt=int(os.environ["GITHUB_RUN_ATTEMPT"]),
             pr=int(os.environ.get("PR_NUMBER") or 0),
-            repo=os.environ["GITHUB_REPOSITORY"],
-            event=os.environ["GITHUB_EVENT_NAME"],
-            effective=fp, head_sha=os.environ["PR_HEAD_SHA"])
-        if os.environ["GITHUB_EVENT_NAME"] == "pull_request":
+            repo=repo, event=event,
+            effective=fp, head_sha=os.environ["PR_HEAD_SHA"], head_ref=os.environ["PR_HEAD_REF"],
+            scale_attempt=int(os.environ["SCALE_RUN_ATTEMPT"]))
+        if event == "pull_request":
             check_merge_source(expected_source=proof["source_sha"])
+        elif event == "workflow_dispatch":
+            payload = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_bytes())
+            if (payload.get("inputs", {}).get("pr_number") != str(proof["pr_number"])
+                    or proof["source_sha"] != os.environ["GITHUB_SHA"]
+                    or checkout != proof["source_sha"]
+                    or os.environ["GITHUB_REF"] != "refs/heads/" + proof["source_ref"]):
+                raise ValueError("Dispatch event, PR and tested checkout disagree")
         expected = os.environ.get("EXPECTED_FINGERPRINT")
         if expected != fp:
             raise ValueError("Checkout/input TOCTOU mismatch: gate and full job differ")
@@ -337,7 +490,14 @@ def main() -> int:
         return 0
     if not args.output:
         p.error("decide requires --output")
-    event = os.environ["GITHUB_EVENT_NAME"]
+    payload = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_bytes())
+    target = resolve_target(event=event, payload=payload, repo=repo,
+                            sha=os.environ["GITHUB_SHA"], ref=os.environ["GITHUB_REF"],
+                            token=os.environ["GH_TOKEN"])
+    if event == "pull_request":
+        check_merge_source(expected_source=target["head"])
+    elif event == "workflow_dispatch" and checkout != target["head"]:
+        raise ValueError("Manual checkout is not the resolved target PR head")
     mode = os.environ.get("QUALIFICATION_MODE", "auto")
     previous = None
     fault = ""
@@ -345,8 +505,7 @@ def main() -> int:
         try:
             previous = find_accepted(
                 token=os.environ["GH_TOKEN"],
-                repo=os.environ["GITHUB_REPOSITORY"],
-                pr=int(os.environ["PR_NUMBER"]), desired=fp)
+                repo=repo, pr=target["pr"], desired=fp)
         except (KeyError, ValueError, OSError, urllib.error.URLError, TimeoutError) as exc:
             fault = f"Unable to verify cached proof: {type(exc).__name__}; fail closed."
     run_full, reason = decision(event, mode, previous)
@@ -356,6 +515,8 @@ def main() -> int:
         "fingerprint": fp,
         "qualified-run": str(previous["run_id"] if previous else ""),
         "qualified-artifact": str(previous["artifact_id"] if previous else ""),
+        "pr-number": str(target["pr"]), "source-sha": target["head"],
+        "source-ref": target["branch"], "checkout-sha": checkout,
     })
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
