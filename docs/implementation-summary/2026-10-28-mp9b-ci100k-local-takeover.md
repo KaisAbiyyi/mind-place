@@ -1,6 +1,6 @@
 # MP-9B + MP-CI-100K-01 authorized local takeover
 
-Date: 2026-10-28 (Asia/Jakarta). Status: **IN PROGRESS / PARTIAL / DRAFT / DO NOT MERGE**.
+Date: 2026-10-28 (Asia/Jakarta). Status: **SOURCE + SYNTHETIC QUALIFICATION PASS / INDEPENDENT REVIEW PENDING / DRAFT / DO NOT MERGE**.
 
 Single execution owner: Codex local Windows, instance `codex-local-20261028-01a18146`. Owner-directed transfer supersedes the former execution owner in issue [126](https://github.com/KaisAbiyyi/mind-place/issues/126#issuecomment-6462618046) and [128](https://github.com/KaisAbiyyi/mind-place/issues/128#issuecomment-6462618767). Locks remain `crypto-migration` and `ci-document-scale-workflow`; no other agents were dispatched.
 
@@ -63,11 +63,21 @@ Implementation source **`8878a29b0a04fcff02f59462fce49022c54d104f`** is pushed a
 
 Exact implementation-source hosted checks all completed SUCCESS: [Windows Product](https://github.com/KaisAbiyyi/mind-place/actions/runs/40667487607), [SQLCipher Windows/Ubuntu](https://github.com/KaisAbiyyi/mind-place/actions/runs/40667487610), [storage](https://github.com/KaisAbiyyi/mind-place/actions/runs/40667487624), [visual](https://github.com/KaisAbiyyi/mind-place/actions/runs/40667487603) and [development/100-file smoke](https://github.com/KaisAbiyyi/mind-place/actions/runs/40667487602). The latter skipped full100K and is not full qualification.
 
-After all cheap gates passed, exactly one [PR127-bound final run40683383688](https://github.com/KaisAbiyyi/mind-place/actions/runs/40683383688) was dispatched at `2026-10-28T11:53:04Z`. Its fresh100-file smoke passed; the100000-file job is **IN PROGRESS / NOT YET ACCEPTED**. Effective fingerprint: `4b8a201f23026b25d2bc4b6cd2fb908ef753d249b20fd2a93e5f61625fe871ee`. A thread continuation checks every15minutes, stays quiet when unchanged and will validate raw/provenance/final acceptance, synchronize evidence, then pause itself. It must not start another indexing run. This documentation receipt does not alter the frozen implementation inputs. Independent security and actual-account/installed-owner gates remain pending.
+After all cheap gates passed, exactly one [PR127-bound final run40683383688](https://github.com/KaisAbiyyi/mind-place/actions/runs/40683383688) was dispatched at `2026-10-28T11:53:04Z` and completed SUCCESS at `2026-10-28T15:41:35Z`. Its100-file smoke, full100000-file workload, separate provenance and final acceptance jobs all passed on original attempt1. Effective fingerprint: `4b8a201f23026b25d2bc4b6cd2fb908ef753d249b20fd2a93e5f61625fe871ee`. No indexing rerun or attestation retry was required.
+
+The independent local validator downloaded both artifacts, verified their ZIP digests and byte-identical raw receipts, checked the actual attempt-specific successful job/steps, PR/event/source identity, original scale attempt and independently fetched GitHub commit/tree fingerprint. Accepted proof binds `workflow_dispatch`, PR127 and source/checkout `8878a29b0a04fcff02f59462fce49022c54d104f`; later documentation-only receipts retain the identical fingerprint. The100K receipt has exactly100000 physical files,1000000 extracted chunks,10 approved roots with10000-file production cap, `raw_bytes_unchanged=true`, SQLite/FTS integrity PASS and keyed-state-independent reopen/reconciliation/search checks. Initial indexing12242116ms (3h24m02s), first-root reconciliation934751ms, evidence-search median43021us, reopen5704ms. These are hosted synthetic measurements; owner-device/WebView cold start and encrypted-vault overhead are not qualified by this workload.
+
+| Evidence | Identity and SHA256 |
+| --- | --- |
+| [Raw artifact](https://github.com/KaisAbiyyi/mind-place/actions/runs/40683383688/artifacts/12829417043) | `mp10c-raw-100000-attempt-1`; ZIP `8dc05d679d8e96580ff1caf2a06f5eda425af1fc7ca14da2dece02f7c08857bb` |
+| [Qualified artifact](https://github.com/KaisAbiyyi/mind-place/actions/runs/40683383688/artifacts/12830025703) | `mp10c-qualified-100000-attempt-1`; ZIP `5c562b8a1be8caec3eb03bfa5b49763ab28f1479678a98152931b085fe6c8943` |
+| Byte-identical raw JSON | `a2fcdd735080080d13d4ad09217caa3dcf89b9f884ce89e5b1414fcee8fa73a4` |
+
+Both ZIPs, raw/proof JSON, run/job/artifact metadata and verified acceptance are preserved at `D:/projects/mind-place-takeover-evidence-20261028/qualification-40683383688/`. This is fresh full qualification of the combined127 source, not a new standalone129 workload PASS. Documentation checkpoint `c995b08ff1027dc93299c7e691e139a906c25921` also completed all five hosted workflows SUCCESS: Product40692946759, SQLCipher40692946777, storage40692946892, visual40692946755 and development smoke40692946857. This final evidence-only receipt changes no effective qualification input. Independent security and actual-account/installed-owner gates remain pending.
 
 Original D: checkout remains at `8ac2faa476a9b587fefae73e340402109cdbae69`, with only its original Cargo.lock WIP; SHA256 `A8CAA0FEFBCAB0A17A392E85CC2D6376F79D9C4456CA766E1AC514026B68A2EC` reverified unchanged.
 
-1. Await raw receipt, provenance and final acceptance from the existing full run; retain raw evidence if lightweight attestation needs repair. No skipped or unfinished job is full100KPASS.
+1. Full run, raw/provenance and final acceptance are verified PASS. Retain downloaded evidence and hand off for independent review; do not repeat indexing solely for this evidence-only summary.
 2. Keep both PRs Draft. Source/integration pushes and retargeting are complete. Exact head/receipt URLs belong in the PR and issue records; no stale checkpoint is promoted to final PASS.
 3. Preserve real different-account Windows and installed-owner recovery/migration qualification as NOT RUN. Independent reviewer approval is PENDING; implementor self-review cannot substitute. No owner data was read or migrated.
 4. Recomputed the entire live Notion DAG: Now MP-9B + MP-CI-100K-01; Up Next MP-9C/9D/9E with all other AND prerequisites Done; Last Done five accepted tasks. Optional research/optimization is not authorized by prerequisite completion alone. No focus cap applies to Now/Up Next and no task was falsely marked Done.
