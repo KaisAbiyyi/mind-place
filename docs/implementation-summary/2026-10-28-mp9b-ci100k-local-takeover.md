@@ -57,8 +57,18 @@ Earlier durable `6a638980848a8e51b8a869723b68ea8ae303ade5` independently complet
 
 ## Remaining execution ledger
 
-1. Finish the required default baseline/desktop build and exact combined-head hosted Windows/Ubuntu checks; freeze that source before one full 100K qualification. No expensive run while a relevant cheap gate fails.
-2. Push the coherent integrated #127 candidate and retarget its base to #129 after the merge is durable. Keep both Draft. Exact head/receipt URLs belong in the PR and issue records; no stale checkpoint is promoted to final PASS.
+### Frozen source qualification checkpoint
+
+Implementation source **`8878a29b0a04fcff02f59462fce49022c54d104f`** is pushed and PR #127 now stacks on PR #129 (`0958ee0acd44d3cff206fbb3a0580c5dcf7c4f6b`). Full local required baseline, release desktop build (12m20s), portable MIT/notices verification, keyed suites231/0, default Rust252/0 and web186/0 PASS. The two scale entries were explicitly ignored by ordinary suites.
+
+Exact implementation-source hosted checks all completed SUCCESS: [Windows Product](https://github.com/KaisAbiyyi/mind-place/actions/runs/40667487607), [SQLCipher Windows/Ubuntu](https://github.com/KaisAbiyyi/mind-place/actions/runs/40667487610), [storage](https://github.com/KaisAbiyyi/mind-place/actions/runs/40667487624), [visual](https://github.com/KaisAbiyyi/mind-place/actions/runs/40667487603) and [development/100-file smoke](https://github.com/KaisAbiyyi/mind-place/actions/runs/40667487602). The latter skipped full100K and is not full qualification.
+
+After all cheap gates passed, exactly one [PR127-bound final run40683383688](https://github.com/KaisAbiyyi/mind-place/actions/runs/40683383688) was dispatched at `2026-10-28T11:53:04Z`. Its fresh100-file smoke passed; the100000-file job is **IN PROGRESS / NOT YET ACCEPTED**. Effective fingerprint: `4b8a201f23026b25d2bc4b6cd2fb908ef753d249b20fd2a93e5f61625fe871ee`. A thread continuation checks every15minutes, stays quiet when unchanged and will validate raw/provenance/final acceptance, synchronize evidence, then pause itself. It must not start another indexing run. This documentation receipt does not alter the frozen implementation inputs. Independent security and actual-account/installed-owner gates remain pending.
+
+Original D: checkout remains at `8ac2faa476a9b587fefae73e340402109cdbae69`, with only its original Cargo.lock WIP; SHA256 `A8CAA0FEFBCAB0A17A392E85CC2D6376F79D9C4456CA766E1AC514026B68A2EC` reverified unchanged.
+
+1. Await raw receipt, provenance and final acceptance from the existing full run; retain raw evidence if lightweight attestation needs repair. No skipped or unfinished job is full100KPASS.
+2. Keep both PRs Draft. Source/integration pushes and retargeting are complete. Exact head/receipt URLs belong in the PR and issue records; no stale checkpoint is promoted to final PASS.
 3. Preserve real different-account Windows and installed-owner recovery/migration qualification as NOT RUN. Independent reviewer approval is PENDING; implementor self-review cannot substitute. No owner data was read or migrated.
 4. Recomputed the entire live Notion DAG: Now MP-9B + MP-CI-100K-01; Up Next MP-9C/9D/9E with all other AND prerequisites Done; Last Done five accepted tasks. Optional research/optimization is not authorized by prerequisite completion alone. No focus cap applies to Now/Up Next and no task was falsely marked Done.
 
