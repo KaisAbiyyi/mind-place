@@ -77,7 +77,7 @@ jobs:
     if: needs.plan.outputs.mode == 'native' && needs.coordinate.outputs.mode == 'native'
     needs: [plan, coordinate]
     runs-on: windows-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     env:
       CARGO_BUILD_JOBS: 1
       CARGO_INCREMENTAL: 0
