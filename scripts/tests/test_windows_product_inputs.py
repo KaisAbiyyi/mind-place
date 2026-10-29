@@ -19,7 +19,7 @@ class InputIdentityTests(unittest.TestCase):
         self.git("config", "user.name", "Fixture")
         self.git("config", "user.email", "fixture@example.invalid")
         self.write("crates/core/src/lib.rs", "initial")
-        self.write("docs/guide.md", "initial")
+        self.write("docs/windows-product-gate-handoff.md", "initial")
         self.write(".github/workflows/ci.yml", "initial")
         self.base = self.commit()
 
@@ -40,20 +40,20 @@ class InputIdentityTests(unittest.TestCase):
         return inputs.fingerprint(sha, str(self.root))
 
     def test_docs_only_commit_preserves_identity(self):
-        self.write("docs/guide.md", "revised")
+        self.write("docs/windows-product-gate-handoff.md", "revised")
         self.assertEqual(self.fp(self.base), self.fp(self.commit()))
 
     def test_mixed_history_uses_tree_not_latest_diff(self):
         self.write("crates/core/src/lib.rs", "changed")
         changed = self.commit()
-        self.write("docs/guide.md", "revised")
+        self.write("docs/windows-product-gate-handoff.md", "revised")
         self.assertEqual(self.fp(changed), self.fp(self.commit()))
         self.assertNotEqual(self.fp(self.base), self.fp(changed))
 
     def test_sensitive_paths_are_bound(self):
         for path in ("src-tauri/src/main.rs", "test/ipc.test.mjs", "package-lock.json",
-                     "rust-toolchain.toml", "scripts/package.mjs", ".github/workflows/ci.yml",
-                     "scripts/windows_product_inputs.py", "docs/build-config.json"):
+                     "rust-toolchain.toml", "scripts/package.mjs", ".github/workflows/windows-product.yml",
+                     "scripts/windows_product_inputs.py", "docs/build-config.json", "docs/guide.md"):
             with self.subTest(path=path):
                 self.write(path, "changed")
                 new = self.commit()
@@ -71,8 +71,18 @@ class InputIdentityTests(unittest.TestCase):
         self.assertEqual(expected, self.fp(self.base))
 
     def test_executable_document_is_bound(self):
-        document = self.root / "docs/guide.md"
+        document = self.root / "docs/windows-product-gate-handoff.md"
         document.chmod(0o755)
+        self.assertNotEqual(self.fp(self.base), self.fp(self.commit()))
+
+    def test_fast_orchestration_is_separate_from_native_contract(self):
+        self.write(".github/workflows/ci.yml", "fast feedback change")
+        self.assertEqual(self.fp(self.base), self.fp(self.commit()))
+
+    def test_symlink_document_is_bound(self):
+        path = self.root / "docs/windows-product-gate-handoff.md"
+        path.unlink()
+        path.symlink_to("../package.json")
         self.assertNotEqual(self.fp(self.base), self.fp(self.commit()))
 
 

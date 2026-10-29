@@ -1,0 +1,20 @@
+[
+  "Checkout",
+  "Recheck after Windows slot",
+  "Setup Node.js",
+  "Setup Rust 1.90",
+  "Install dependencies",
+  "Check Rust formatting",
+  "Verify repository contract",
+  "Typecheck",
+  "Visual Settings scroll and footer regression",
+  "Qualify bundled SQLite runtime",
+  "Test",
+  "Stage capture sidecar for native desktop tests",
+  "Qualify Phase 3E simulated MCP and revocation boundary",
+  "Test hosted tunnel desktop boundaries",
+  "Build desktop app",
+  "Verify portable MIT license and third-party notices",
+  "Record native proof",
+  "Upload native proof"
+]

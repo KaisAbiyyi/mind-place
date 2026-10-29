@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Experimental Windows product input identity; this is not an acceptance gate.
+"""Conservative immutable Windows source closure (not an acceptance signal).
 
-Hash immutable Git tree entries, including the workflow and this policy. Only
-Markdown files under docs/ are excluded. Callers must obtain the *tested merge*
-commit independently; a PR head alone does not describe a merge build.
+Native execution lives in windows-product.yml, independently checked byte for
+byte by the policy authority. Only fast CI orchestration and the audited gate
+handoff document are outside the closure. All other docs remain inputs.
 """
 import argparse
 import hashlib
@@ -11,6 +11,8 @@ import re
 import subprocess
 
 OID = re.compile(rb"[0-9a-f]{40}\Z")
+POLICY = "windows-product/v1"
+EXCLUDED = {b".github/workflows/ci.yml", b"docs/windows-product-gate-handoff.md"}
 
 
 def fingerprint(commit, root="."):
@@ -24,7 +26,7 @@ def fingerprint(commit, root="."):
     raw = subprocess.check_output(
         ["git", "ls-tree", "-r", "-z", "--full-tree", commit], cwd=root
     )
-    digest = hashlib.sha256(b"windows-product-inputs/experimental-v1\0")
+    digest = hashlib.sha256((POLICY + "/inputs-v2\0").encode())
     count = 0
     previous = None
     entries = []
@@ -43,9 +45,8 @@ def fingerprint(commit, root="."):
         if path == previous:
             raise ValueError("duplicate tree entry")
         previous = path
-        # Only ordinary Markdown documents are outside the native workload.
-        # Symlinks and executable files remain bound.
-        if path.startswith(b"docs/") and path.endswith(b".md") and mode == b"100644":
+        # Never omit executable documents, symlinks or unreviewed docs.
+        if path in EXCLUDED and mode == b"100644":
             continue
         digest.update(mode + b"\0" + oid + b"\0" + path + b"\0")
         count += 1
