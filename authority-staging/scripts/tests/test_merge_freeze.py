@@ -349,6 +349,27 @@ class InspectionTransportTests(unittest.TestCase):
             with self.subTest(link=link), self.assertRaises(Rejected):
                 self.call(self.response(json.dumps([{}]*100).encode(), link))
 
+    def test_inconsistent_last_first_and_previous_links_rejected(self):
+        for endpoint in ("/rulesets?includes_parents=true&", "/rules/branches/main?"):
+            root = "https://api.github.com/repos/KaisAbiyyi/mind-place" + endpoint + "per_page=100&page="
+            for href, rel in ((root+"2", "last"), (root+"2", "first"), (root+"1", "prev"),
+                              (root+"bad", "last"), ("https://foreign.invalid/?page=1", "last")):
+                with self.subTest(href=href, rel=rel), self.assertRaises(Rejected):
+                    self.call(self.response(b"[]", f'<{href}>; rel="{rel}"'),
+                              endpoint+"per_page=100&page=1")
+
+    def test_last_cannot_contradict_next(self):
+        root = "https://api.github.com/repos/KaisAbiyyi/mind-place/rulesets?includes_parents=true&per_page=100&page="
+        link = f'<{root}2>; rel="next", <{root}1>; rel="last"'
+        with self.assertRaises(Rejected):
+            self.call(self.response(json.dumps([{}]*100).encode(), link))
+
+    def test_complete_last_link_and_empty_sentinel_page_allowed(self):
+        root = "https://api.github.com/repos/KaisAbiyyi/mind-place/rulesets?includes_parents=true&per_page=100&page="
+        self.assertEqual(self.call(self.response(b"[]", f'<{root}1>; rel="last"')), [])
+        self.assertEqual(self.call(self.response(b"[]", f'<{root}1>; rel="last", <{root}1>; rel="prev"'),
+                                  "/rulesets?includes_parents=true&per_page=100&page=2"), [])
+
     def test_valid_page_continuation_and_reordered_query(self):
         link = '<https://api.github.com/repos/KaisAbiyyi/mind-place/rulesets?page=2&per_page=100&includes_parents=true>; rel="next"'
         self.assertEqual(len(self.call(self.response(json.dumps([{}]*100).encode(), link))), 100)
@@ -357,6 +378,26 @@ class InspectionTransportTests(unittest.TestCase):
     def test_partial_http_response_rejected(self):
         with self.assertRaisesRegex(Rejected, "incomplete HTTP"):
             self.call(self.response(b"[]", status=206))
+
+    def test_real_http_response_rejects_premature_eof_with_valid_json_prefix(self):
+        from http.client import HTTPResponse
+        from io import BytesIO
+        class Socket:
+            def __init__(self, wire):
+                self.wire = wire
+            def makefile(self, *args):
+                return BytesIO(self.wire)
+        for path in ("/rulesets?includes_parents=true&per_page=100&page=1",
+                     "/rules/branches/main?per_page=100&page=1"):
+            for length in ("100", "-1", "2,2", "invalid"):
+                response = HTTPResponse(Socket(
+                    f"HTTP/1.1 200 OK\r\nContent-Length: {length}\r\n\r\n[]".encode()))
+                response.begin()
+                with self.subTest(length=length, path=path), self.assertRaises(Rejected):
+                    self.call(response, path)
+        response = HTTPResponse(Socket(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n[]"))
+        response.begin()
+        self.assertEqual(self.call(response), [])
 
     def test_malformed_json_and_oversized_body_rejected(self):
         with self.assertRaises(ValueError):

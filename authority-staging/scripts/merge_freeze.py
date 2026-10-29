@@ -37,24 +37,44 @@ class InspectionGitHub(GitHub):
             require(response.status == 200, "incomplete HTTP API response")
             payload = response.read(2 * 1024 * 1024 + 1)
             links = response.headers.get("Link", "")
+            declared = response.headers.get("Content-Length")
         require(len(payload) <= 2 * 1024 * 1024, "oversized API response")
+        require(declared is None or (re.fullmatch(r"[0-9]{1,10}", declared) is not None and
+                int(declared) == len(payload)), "incomplete or malformed HTTP body length")
         data = json.loads(payload)
         if "per_page=100&page=" in path:
-            seen = set()
+            current = int(path.rsplit("=", 1)[1])
+            destinations = {}
             for link in links.split(",") if links else []:
                 match = re.fullmatch(r'\s*<([^>]+)>;\s*rel="(next|prev|first|last)"\s*', link)
                 require(match is not None, "malformed API pagination Link")
                 href, rel = match.groups()
-                require(rel not in seen, "duplicate API pagination Link")
-                seen.add(rel)
-                if rel == "next":
-                    expected = url.rsplit("=", 1)[0] + "=" + str(int(path.rsplit("=", 1)[1]) + 1)
-                    actual_parts, expected_parts = urlsplit(href), urlsplit(expected)
-                    require(actual_parts[:3] == expected_parts[:3] and
-                            sorted(parse_qsl(actual_parts.query)) == sorted(parse_qsl(expected_parts.query)) and
-                            not actual_parts.fragment, "inconsistent API pagination Link")
-                    require(type(data) is list and len(data) == 100,
-                            "truncated API page with continuation")
+                require(rel not in destinations, "duplicate API pagination Link")
+                actual_parts = urlsplit(href)
+                query = parse_qsl(actual_parts.query, keep_blank_values=True)
+                page = dict(query).get("page", "")
+                require(re.fullmatch(r"[1-9][0-9]*", page) is not None,
+                        "malformed API pagination page")
+                number = int(page)
+                expected = url.rsplit("=", 1)[0] + "=" + page
+                expected_parts = urlsplit(expected)
+                require(actual_parts[:3] == expected_parts[:3] and
+                        sorted(query) == sorted(parse_qsl(expected_parts.query)) and
+                        not actual_parts.fragment, "inconsistent API pagination Link")
+                destinations[rel] = number
+                wanted = {"next": current + 1, "prev": current - 1, "first": 1}
+                require(rel == "last" or number == wanted[rel], "inconsistent API pagination relation")
+            if "next" in destinations:
+                require(type(data) is list and len(data) == 100,
+                        "truncated API page with continuation")
+            if "last" in destinations:
+                last = destinations["last"]
+                # A sentinel GET after an exactly full final page may be empty
+                # and point back to that final page. No evidence is discarded.
+                require(last >= current or (data == [] and last == current - 1),
+                        "inconsistent API pagination last page")
+                require((last > current) == ("next" in destinations),
+                        "inconsistent API pagination continuation")
         return data
 
 
