@@ -1,0 +1,123 @@
+# One-shot exact-source hosted qualification. NOT official trusted Windows acceptance.
+# The workflow exists only on a separate no-PR branch. No secrets, releases, shared caches, or push access.
+name: MP P0 C1 native exact-source qualification (not trusted acceptance)
+'on':
+  push:
+    branches: [codex/mp-p0-checkpoint1-native-20261029]
+    paths:
+      - '.github/workflows/mp-p0-checkpoint1-native.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  windows-product-native:
+    name: Hosted Windows Product native / pinned integrated source
+    runs-on: windows-latest
+    timeout-minutes: 120
+    env:
+      CARGO_BUILD_JOBS: '1'
+      CARGO_INCREMENTAL: '0'
+      EXPECTED_SOURCE: '3ab2516ae468e2dfe03bac3b26395db44df2db03'
+    steps:
+      - name: Checkout immutable integrated source (not harness)
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: '3ab2516ae468e2dfe03bac3b26395db44df2db03'
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Assert exact source
+        shell: pwsh
+        run: |
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -ne $env:EXPECTED_SOURCE) { throw "Source mismatch: $actual" }
+          Write-Output "EXACT_SOURCE=$actual; EVENT=$env:GITHUB_EVENT_NAME; HARNESS_ONLY=true"
+      - name: Setup Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: 24
+      - name: Setup Rust 1.90
+        shell: pwsh
+        run: |
+          rustup toolchain install 1.90.0 --profile minimal --component rustfmt --no-self-update
+          rustup default 1.90.0
+      - name: Install dependencies
+        run: npm ci
+      - name: Check Rust formatting
+        run: cargo fmt --all -- --check
+      - name: Verify repository contract
+        run: npm run verify:repo
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Visual Settings scroll and footer regression
+        run: node scripts/verify-settings-render.mjs
+      - name: Qualify bundled SQLite runtime
+        run: cargo test -p mind-place-state bundled_sqlite_version_is_supported -- --nocapture
+      - name: Test
+        run: npm test
+      - name: Stage capture sidecar for native desktop tests
+        shell: pwsh
+        run: |
+          cargo build -p mind-place-capture-host
+          New-Item -ItemType Directory -Force src-tauri/binaries | Out-Null
+          Copy-Item "target/debug/mind-place-capture-host.exe" "src-tauri/binaries/mind-place-capture-host-x86_64-pc-windows-msvc.exe"
+          node scripts/tunnel-helper.mjs
+          node scripts/generate-notices.mjs
+          npm run build:web
+      - name: Qualify Phase 3E simulated MCP and revocation boundary
+        run: cargo test -p mind-place-integration --test mcp -- --nocapture
+      - name: Test hosted tunnel desktop boundaries
+        run: cargo test -p mind-place --bin mind-place hosted_tunnel::tests -- --nocapture
+      - name: Qualify native capture encrypted IPC and revoked owner epoch
+        shell: pwsh
+        run: |
+          $listing = & cargo test -p mind-place --bin mind-place native_capture_ipc::qualification -- --list 2>&1
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot enumerate native encrypted IPC qualification' }
+          foreach ($required in @(
+            'native_capture_ipc::qualification::separate_process_capture_probe: test',
+            'native_capture_ipc::qualification::owner_local_capture_roundtrip_requires_unlocked_epoch: test'
+          )) {
+            if (-not ($listing | Select-String -SimpleMatch $required)) { throw "Missing qualification: $required" }
+          }
+          cargo test -p mind-place --bin mind-place native_capture_ipc::qualification -- --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'Native encrypted IPC qualification failed' }
+      - name: Build desktop app (not installer or release)
+        run: npm run build
+      - name: Verify portable MIT license and third-party notices
+        run: npm run verify:distribution-license
+  sqlcipher:
+    name: MP-9B SQLCipher native / ${{ matrix.os }} / pinned integrated source
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    env:
+      CARGO_INCREMENTAL: '0'
+      CARGO_BUILD_JOBS: '2'
+      EXPECTED_SOURCE: '3ab2516ae468e2dfe03bac3b26395db44df2db03'
+    steps:
+      - name: Checkout immutable integrated source (not harness)
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: '3ab2516ae468e2dfe03bac3b26395db44df2db03'
+          persist-credentials: false
+      - name: Assert exact source
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE"
+          echo "EXACT_SOURCE=$EXPECTED_SOURCE; HARNESS_ONLY=true"
+      - name: Install Rust 1.90
+        shell: bash
+        run: |
+          rustup toolchain install 1.90.0 --profile minimal --component rustfmt --no-self-update
+          rustup default 1.90.0
+      - name: Check Rust formatting
+        run: cargo fmt --all -- --check
+      - name: Encrypted state/index and FTS regression
+        run: cargo test --locked -p mind-place-state -p mind-place-index --features sqlcipher-preview -- --nocapture
+      - name: Keyed MCP synthetic authorization and revocation
+        run: cargo test --locked -p mind-place-integration --features vault-mcp --test mcp_vault -- --nocapture
+      - name: Vault and backup adversarial regression
+        run: cargo test --locked -p mind-place-security -- --nocapture
