@@ -61,7 +61,8 @@ class GitHub:
     def request(self, path, data=None, method=None, binary=False):
         require(path.startswith("/") and not path.startswith("//"), "invalid API path")
         headers = {"Authorization": "Bearer " + self.token,
-                   "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
+                   "Accept": "application/vnd.github+json", "Content-Type": "application/json",
+                   "X-GitHub-Api-Version": "2022-11-28"}
         request = urllib.request.Request("https://api.github.com/repos/" + self.repo + path,
                                          data=None if data is None else json.dumps(data).encode(),
                                          headers=headers, method=method)
@@ -70,15 +71,17 @@ class GitHub:
         require(len(payload) <= 2 * 1024 * 1024, "oversized API response")
         return payload if binary else json.loads(payload)
 
-    def pages(self, path, key=None):
-        result = []
+    def iter_pages(self, path, key=None):
         for page in range(1, 21):
             data = self.request(path + ("&" if "?" in path else "?") + f"per_page=100&page={page}")
             items = data if key is None else data[key]
-            result.extend(items)
+            yield from items
             if len(items) < 100:
-                return result
+                return
         raise Rejected("API pagination limit; no partial evidence accepted")
+
+    def pages(self, path, key=None):
+        return list(self.iter_pages(path, key))
 
 
 class Sources:
@@ -168,7 +171,8 @@ def verify_run(api, sources, run_id, current, identity, policy_root, now=None):
     """All assertions use GitHub-owned data + independently pinned execution bytes."""
     now = now or utc()
     run = api.request(f"/actions/runs/{int(run_id)}")
-    require(run["id"] == int(run_id) and run["repository"]["full_name"] == api.repo, "foreign run")
+    require(run["id"] == int(run_id) and run["repository"]["full_name"] == api.repo
+            and run["head_repository"]["full_name"] == api.repo, "foreign run")
     require(run["path"] == WORKFLOW and run["event"] in {"pull_request", "workflow_dispatch"}, "wrong execution origin")
     require(run["status"] == "completed" and run["conclusion"] == "success", "native run incomplete or failed")
     require(0 <= (now - dt.datetime.fromisoformat(run["updated_at"].replace("Z", "+00:00"))).total_seconds() <= MAX_AGE,
@@ -179,7 +183,10 @@ def verify_run(api, sources, run_id, current, identity, policy_root, now=None):
     artifacts = [a for a in artifacts if a["name"] == f"windows-product-proof-{run_id}-{attempt}"]
     require(len(artifacts) == 1 and not artifacts[0]["expired"], "missing or ambiguous native proof")
     artifact = artifacts[0]
-    require(artifact.get("workflow_run", {}).get("id") == run_id, "foreign artifact provenance")
+    origin = artifact.get("workflow_run", {})
+    require(origin.get("id") == run_id and origin.get("head_sha") == run["head_sha"]
+            and origin.get("repository_id") == run["repository"]["id"]
+            and origin.get("head_repository_id") == run["repository"]["id"], "foreign artifact provenance")
     proof = unpack_proof(api.request(f"/actions/artifacts/{artifact['id']}/zip", binary=True))
     require(proof.get("schema") == SCHEMA and proof.get("policy") == POLICY, "unknown proof policy")
     require(proof.get("repository") == api.repo and proof.get("pr") == current["pr"], "foreign proof")
@@ -215,7 +222,7 @@ def verify_run(api, sources, run_id, current, identity, policy_root, now=None):
 
 
 def find_proof(api, sources, current, identity, policy_root, fresh=False, fresh_after=None):
-    runs = api.pages("/actions/workflows/windows-product.yml/runs?status=success", "workflow_runs")
+    runs = api.iter_pages("/actions/workflows/windows-product.yml/runs?status=success", "workflow_runs")
     for run in runs:
         if fresh and (run["event"] != "workflow_dispatch" or run["head_sha"] != current["head"]):
             continue
@@ -272,11 +279,19 @@ def controller(api, sources, policy_root, config, fresh=False):
     for pr in api.pages("/pulls?state=open"):
         if pr["draft"]:
             continue
-        current = snapshot(api, pr["number"])
         check_id = None
         try:
+            current = snapshot(api, pr["number"])
+            existing = api.pages(f"/commits/{current['head']}/check-runs?check_name=Windows%20Product%20%2F%20trusted%20acceptance", "check_runs")
+            owned = [c for c in existing if c["name"] == CHECK and c["app"]["id"] == config["app_id"] and "id" in c]
+            check_id = owned[0]["id"] if owned else None
             enforcement(api, current, config)
             identity = validate_source(sources, current, policy_root)
+            # Native commands execute PR build/test code. An unreviewed input
+            # cannot promote its own successful run into independent authority,
+            # even if it rewrites/restores the workspace or forges a receipt.
+            require(identity in config.get("approved_fingerprints", []),
+                    "native inputs need independent policy review and fingerprint approval")
             require_fresh = fresh or config.get("require_fresh", False)
             fresh_after = config.get("fresh_after") if require_fresh else None
             require(not require_fresh or (isinstance(fresh_after, str) and
@@ -286,13 +301,13 @@ def controller(api, sources, policy_root, config, fresh=False):
                      "fingerprint": identity, "anchor_enforced": True, "expires": int(utc().timestamp()) + 600,
                      "require_fresh": require_fresh, "fresh_after": fresh_after}
             # Token must belong to the App whose ID is pinned by required checks.
-            existing = api.pages(f"/commits/{current['head']}/check-runs?check_name=Windows%20Product%20%2F%20trusted%20acceptance", "check_runs")
-            owned = [c for c in existing if c["name"] == CHECK and c["app"]["id"] == config["app_id"] and "id" in c]
-            check_id = owned[0]["id"] if owned else None
-            check = api.request("/check-runs" + (f"/{check_id}" if check_id else ""),
-                                {"name": CHECK, "head_sha": current["head"], "status": "in_progress",
+            payload = {"name": CHECK, "status": "in_progress",
                                  "output": {"title": "Native evidence pending", "summary": "Independent policy verification",
-                                            "text": json.dumps(lease)}}, "PATCH" if check_id else "POST")
+                                            "text": json.dumps(lease)}}
+            if check_id is None:
+                payload["head_sha"] = current["head"]
+            check = api.request("/check-runs" + (f"/{check_id}" if check_id else ""), payload,
+                                "PATCH" if check_id else "POST")
             check_id = check["id"]
             require(check["app"]["id"] == config["app_id"], "wrong publishing App")
             evidence = find_proof(api, sources, current, identity, policy_root, require_fresh, fresh_after)
@@ -305,11 +320,11 @@ def controller(api, sources, policy_root, config, fresh=False):
                             "output": {"title": lease["outcome"], "summary": "Verified actual native execution and immutable inputs",
                                        "text": json.dumps(lease)}}, "PATCH")
             print(json.dumps({"pr": current["pr"], "check_id": check_id, "evidence": evidence}))
-        except (Rejected, urllib.error.URLError, KeyError, ValueError, subprocess.CalledProcessError) as error:
+        except (Rejected, urllib.error.URLError, KeyError, ValueError, TypeError, subprocess.CalledProcessError) as error:
             if check_id is not None:
                 api.request(f"/check-runs/{check_id}", {"status": "completed", "conclusion": "failure",
                             "output": {"title": "Windows acceptance rejected", "summary": str(error)}}, "PATCH")
-            print(json.dumps({"pr": current["pr"], "rejected": str(error)}))
+            print(json.dumps({"pr": pr["number"], "rejected": str(error)}))
 
 
 def main():
@@ -337,7 +352,14 @@ def main():
         current = {"pr": 0, "head": sha(os.environ["GITHUB_SHA"]), "base": "", "base_ref": "", "source": sha(os.environ["GITHUB_SHA"])}
         mode, identity = "native", sources.fingerprint(current["source"])
     else:
-        current = snapshot(api, int(number))
+        if args.command == "proof" and not fresh:
+            # Finish an already-running, valid older qualification. It may be
+            # reused only after the controller compares current effective inputs.
+            current = {"pr": int(number), "head": sha(event["pull_request"]["head"]["sha"]),
+                       "base": sha(event["pull_request"]["base"]["sha"]), "source": sha(os.environ["GITHUB_SHA"]),
+                       "base_ref": event["pull_request"]["base"]["ref"]}
+        else:
+            current = snapshot(api, int(number))
         if not fresh:
             require(event["pull_request"]["head"]["sha"] == current["head"]
                     and event["pull_request"]["base"]["sha"] == current["base"]
@@ -350,6 +372,8 @@ def main():
         # own pinned files, so editing this verifier cannot self-qualify a PR.
         mode, identity, _ = decision(api, sources, current, os.environ.get("WINDOWS_PRODUCT_APP_ID"), args.policy_root, fresh)
     if args.command == "proof":
+        require(sources.git("rev-parse", "HEAD").decode().strip() == current["source"], "native checkout moved")
+        sources.git("diff", "--exit-code", current["source"], "--")
         proof = {"schema": SCHEMA, "policy": POLICY, "repository": api.repo, **current, "fingerprint": identity,
                  "run_id": int(os.environ["GITHUB_RUN_ID"]), "attempt": int(os.environ["GITHUB_RUN_ATTEMPT"])}
         Path("qualification").mkdir(exist_ok=True)

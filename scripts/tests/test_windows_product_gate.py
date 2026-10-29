@@ -40,6 +40,9 @@ class API:
         result = self.request(path)
         return result if key is None else result[key]
 
+    def iter_pages(self, path, key=None):
+        return iter(self.pages(path, key))
+
 
 class GateTests(unittest.TestCase):
     def setUp(self):
@@ -68,7 +71,7 @@ class GateTests(unittest.TestCase):
         self.sources = gate.Sources(self.repo, API.repo)
         self.identity = self.sources.fingerprint(self.source)
         self.api = API()
-        self.run = {"id": 7, "repository": {"full_name": API.repo}, "path": gate.WORKFLOW,
+        self.run = {"id": 7, "repository": {"id": 123, "full_name": API.repo}, "head_repository": {"full_name": API.repo}, "path": gate.WORKFLOW,
                     "event": "pull_request", "status": "completed", "conclusion": "success", "run_attempt": 1,
                     "updated_at": gate.utc().isoformat(), "head_sha": self.head,
                     "pull_requests": [{"number": 131, "head": {"sha": self.head}, "base": {"sha": self.base}}]}
@@ -76,7 +79,8 @@ class GateTests(unittest.TestCase):
                       **self.current, "fingerprint": self.identity, "run_id": 7, "attempt": 1}
         self.steps = [{"name": name, "status": "completed", "conclusion": "success"}
                       for name in json.loads((ROOT / ".github/windows-policy/native-steps.json").read_text())]
-        self.artifact = {"id": 8, "name": "windows-product-proof-7-1", "expired": False, "workflow_run": {"id": 7}}
+        self.artifact = {"id": 8, "name": "windows-product-proof-7-1", "expired": False,
+                         "workflow_run": {"id": 7, "head_sha": self.head, "repository_id": 123, "head_repository_id": 123}}
         self.api.data = {
             "/actions/runs/7": self.run,
             "/actions/runs/7/artifacts": {"artifacts": [self.artifact]},
@@ -87,7 +91,8 @@ class GateTests(unittest.TestCase):
                                            "enforce_admins": {"enabled": True}},
             "/pulls?state=open": [{"number": 131, "draft": False}],
         }
-        self.config = {"enabled": True, "repository": API.repo, "app_id": 42, "policy": gate.POLICY}
+        self.config = {"enabled": True, "repository": API.repo, "app_id": 42, "policy": gate.POLICY,
+                       "approved_fingerprints": [self.identity]}
         self.publish_current()
         self.pack()
 
@@ -292,7 +297,7 @@ class GateTests(unittest.TestCase):
         # Actual CLI event/output integration, with only transport substituted.
         event = self.root / "event.json"
         event.write_text(json.dumps({"number": 131, "pull_request": {
-            "head": {"sha": self.head}, "base": {"sha": self.base}}}))
+            "head": {"sha": self.head}, "base": {"sha": self.base, "ref": "main"}}}))
         output = self.root / "output"
         env = {"GITHUB_EVENT_PATH": str(event), "GITHUB_EVENT_NAME": "pull_request", "GITHUB_REPOSITORY": API.repo,
                "GITHUB_SHA": self.source, "GITHUB_OUTPUT": str(output), "GITHUB_RUN_ID": "7", "GITHUB_RUN_ATTEMPT": "1",
@@ -300,12 +305,86 @@ class GateTests(unittest.TestCase):
         previous = os.getcwd()
         self.addCleanup(os.chdir, previous)
         os.chdir(self.repo)
+        self.git("checkout", "-q", self.source)
         with patch.dict(os.environ, env), patch.object(gate, "GitHub", return_value=self.api):
             for command in ["plan", "slot", "proof"]:
                 with patch.object(sys, "argv", ["gate", command, "--policy-root", str(self.policy)]):
                     gate.main()
+            self.write("Cargo.toml", "unexpected workspace mutation")
+            with patch.object(sys, "argv", ["gate", "proof", "--policy-root", str(self.policy)]):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    gate.main()
+            self.git("restore", "Cargo.toml")
+            self.advance("docs/windows-product-gate-handoff.md", "push during native execution")
+            self.git("checkout", "-q", self.source)
+            with patch.object(sys, "argv", ["gate", "plan", "--policy-root", str(self.policy)]):
+                with self.assertRaisesRegex(gate.Rejected, "superseded PR event"):
+                    gate.main()
+            with patch.object(sys, "argv", ["gate", "proof", "--policy-root", str(self.policy)]):
+                gate.main()  # A running older qualification can finish safely.
         self.assertIn("mode=reuse", output.read_text())
         self.assertEqual(json.loads((self.repo / "qualification/proof.json").read_text())["source"], self.source)
+
+    def test_unreviewed_native_code_cannot_self_accept_even_with_valid_run(self):
+        self.config["approved_fingerprints"] = []
+        gate.controller(self.api, self.sources, self.policy, self.config)
+        self.assertFalse(self.api.writes)
+
+    def test_foreign_pr_cannot_abort_other_pr_verification(self):
+        self.api.data["/pulls?state=open"].insert(0, {"number": 132, "draft": False})
+        self.api.data["/pulls/132"] = copy.deepcopy(self.api.data["/pulls/131"])
+        self.api.data["/pulls/132"]["head"]["repo"]["full_name"] = "attacker/fork"
+        gate.controller(self.api, self.sources, self.policy, self.config)
+        self.assertEqual(self.api.writes[-1][1]["conclusion"], "success")
+
+    def test_fake_merge_tree_with_real_parents_rejected(self):
+        self.write("Cargo.toml", "forged tested input")
+        fake = self.commit()
+        self.current["source"] = self.git("commit-tree", self.git("rev-parse", fake + "^{tree}"),
+                                            "-p", self.base, "-p", self.head, "-m", "fake merge")
+        with self.assertRaisesRegex(gate.Rejected, "reconstructed PR merge"):
+            self.decide()
+
+    def test_idempotent_controller_reuses_owned_check(self):
+        self.check["id"] = 99
+        gate.controller(self.api, self.sources, self.policy, self.config)
+        self.assertEqual(self.api.writes[0][0], "/check-runs/99")
+        self.assertNotIn("head_sha", self.api.writes[0][1])
+        self.assertEqual(self.api.writes[0][2], "PATCH")
+
+    def test_policy_revocation_invalidates_existing_success(self):
+        self.check.update(id=99, status="completed", conclusion="success")
+        self.config["approved_fingerprints"] = []
+        gate.controller(self.api, self.sources, self.policy, self.config)
+        self.assertEqual(self.api.writes[-1][0], "/check-runs/99")
+        self.assertEqual(self.api.writes[-1][1]["conclusion"], "failure")
+
+    def test_final_policy_rejects_old_manual_proof(self):
+        self.config.update(require_fresh=True, fresh_after="2099-01-01T00:00:00Z")
+        self.run.update(event="workflow_dispatch", created_at="2026-10-29T01:00:00Z")
+        gate.controller(self.api, self.sources, self.policy, self.config)
+        self.assertEqual(self.api.writes[-1][1]["status"], "in_progress")
+
+    def test_recent_valid_proof_does_not_require_unbounded_historical_pages(self):
+        real = gate.GitHub(API.repo, "fixture")
+        calls = []
+        def wire(path, *args, **kwargs):
+            if path.startswith("/actions/workflows/windows-product.yml/runs?"):
+                calls.append(path)
+                if "page=1" in path:
+                    return {"workflow_runs": [self.run] * 100, "total_count": 2500}
+                self.fail("valid recent proof must return before requesting older pages")
+            return self.api.request(path.split("?per_page=", 1)[0], *args, **kwargs)
+        with patch.object(real, "request", side_effect=wire):
+            proof = gate.find_proof(real, self.sources, self.current, self.identity, self.policy)
+        self.assertEqual(proof["run_id"], 7)
+        self.assertEqual(len(calls), 1)
+
+    def test_finalizing_predecessor_is_not_evidence_until_whole_workflow_completes(self):
+        self.run.update(status="in_progress", conclusion=None)
+        self.assertEqual(self.decide(), "native")
+        self.run.update(status="completed", conclusion="success")
+        self.assertEqual(self.decide(), "reuse")
 
 
 if __name__ == "__main__":

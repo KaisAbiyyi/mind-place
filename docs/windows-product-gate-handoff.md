@@ -27,6 +27,17 @@ Target Git trees are fetched into a disposable bare object database. The App
 private key exists only in the policy repository's protected environment.
 The target repository's Actions token cannot impersonate this App.
 
+The independently pinned config must also list each reviewed native input
+fingerprint in `approved_fingerprints`. Native steps execute product-controlled
+build/test code, which can modify and restore a workspace or forge an artifact.
+Job success alone cannot prove the semantics of arbitrary PR scripts. Each new
+native input closure therefore needs independent source/consumer review before
+the App can issue any lease or acceptance. This is an ongoing external review
+requirement. Excluded handoff/fast-only changes retain the approved fingerprint.
+The worker additionally rejects a moved or dirty tracked checkout at proof
+emission. Removing an approval invalidates an existing App check on the next
+successful controller sweep; failed API calls cannot publish new acceptance.
+
 The App creates/updates the stable `Windows Product / trusted acceptance`
 check on the current PR head. Branch protection must require that exact context
 **and App ID**, require up-to-date branches, and include administrators. The
@@ -72,6 +83,10 @@ A same-repository Ready PR runs native when there is no independently authorized
 matching evidence. A valid App check carries a source-bound authorization lease
 of at most ten minutes. Both initial scheduling and the native job after its
 per-PR concurrency slot independently reverify available completed evidence.
+The lock covers the entire Windows workflow, including its final reporting job;
+its successor cannot start before the predecessor run is completed and eligible
+as evidence. The second recheck also fences source changes while a Windows
+runner is being allocated.
 A proof arriving while queued avoids duplicate compilation. Unrelated PRs use
 different slots; running native jobs are not cancelled on new pushes. Queued
 superseded events fail before compiling; a superseded completed qualification
@@ -134,6 +149,12 @@ changing the closure requires independent policy review and a new qualification.
    `enabled: true`, commit/review, and pin its **full immutable commit** in
    environment variable `WINDOWS_POLICY_COMMIT`. Set environment variable
    `WINDOWS_PRODUCT_APP_ID` to that App ID. Actions are already SHA-pinned.
+   Independently inspect the proposed immutable source, including package
+   scripts/build.rs/test and packaging consumers, and compute its fingerprint
+   using the trusted policy's input script on the reconstructed merge object.
+   Add that digest to `approved_fingerprints` in the reviewed policy commit.
+   Repeat that approval for every changed native input closure. A full native
+   rerun alone cannot substitute for this independent source approval.
 6. On every accepted target base (main, and stacked base if testing before
    integration), configure strict branch protection with:
    `required_status_checks.strict=true`, `enforce_admins=true`, and
@@ -156,6 +177,8 @@ separate App/policy repository and App-bound branch protection after review.
 ## Validation and performance
 
 Baseline supplied by owner: approximately 43 minutes per native Windows build.
+Verified historical job [122927850182](https://github.com/KaisAbiyyi/mind-place/actions/runs/40719963906/job/122927850182)
+ran from 2026-10-28T15:50:14Z through 16:32:12Z: 41 minutes 58 seconds, SUCCESS.
 Controlled production verifier/decision/CLI/workflow tests demonstrate validated
 reuse and fail-closed fallback, including post-slot discovery. They do not measure
 hosted Windows savings. The independent authority polls every five minutes;

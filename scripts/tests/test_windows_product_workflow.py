@@ -35,8 +35,13 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.steps[-2]["name"], "Record native proof")
         self.assertEqual(self.steps[-1]["name"], "Upload native proof")
         self.assertEqual(self.jobs["verify"]["if"], "needs.plan.outputs.mode == 'native'")
-        self.assertFalse(self.jobs["verify"]["concurrency"]["cancel-in-progress"])
-        self.assertIn("outputs.pr", self.jobs["verify"]["concurrency"]["group"])
+        self.assertFalse(self.workflow["concurrency"]["cancel-in-progress"])
+        self.assertIn("pull_request.number", self.workflow["concurrency"]["group"])
+        self.assertIn("inputs.pr_number", self.workflow["concurrency"]["group"])
+        self.assertNotIn("concurrency", self.jobs["verify"])
+        # This lock includes candidate, so the successor plan cannot start while
+        # predecessor proof exists but the containing workflow is still pending.
+        self.assertIn("verify", self.jobs["candidate"]["needs"])
 
     def test_trusted_required_steps_exactly_cover_real_native_workflow(self):
         names = json.loads((ROOT / ".github/windows-policy/native-steps.json").read_text())

@@ -2,5 +2,8 @@
   "enabled": false,
   "repository": "KaisAbiyyi/mind-place",
   "app_id": 0,
-  "policy": "windows-product/v1"
+  "policy": "windows-product/v1",
+  "approved_fingerprints": [],
+  "require_fresh": false,
+  "fresh_after": null
 }
