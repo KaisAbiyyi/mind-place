@@ -11,10 +11,12 @@ tauri-build = { version = "=2.7.2", features = [] }
 [dependencies]
 tauri = { version = "=2.12.3", features = [] }
 mind-place-archive = { path = "../crates/archive-core" }
+mind-place-capture-host = { path = "../crates/capture-host" }
+getrandom = "0.4.3"
 mind-place-security = { path = "../crates/security-core" }
-mind-place-state = { path = "../crates/state-core" }
-mind-place-index = { path = "../crates/index-core" }
-mind-place-integration = { path = "../crates/integration-core" }
+mind-place-state = { path = "../crates/state-core", features = ["sqlcipher-preview"] }
+mind-place-index = { path = "../crates/index-core", features = ["sqlcipher-preview"] }
+mind-place-integration = { path = "../crates/integration-core", features = ["vault-mcp"] }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

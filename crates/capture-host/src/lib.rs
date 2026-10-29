@@ -1,3 +1,5 @@
+pub mod ipc;
+
 use mind_place_archive::{
     extension_id, ArchiveError, ArchiveStore, Capture, Result, MAX_CAPTURE_BYTES,
 };
@@ -68,6 +70,20 @@ pub fn serve_one(input: impl Read, output: impl Write, root: &Path, origin: &str
                 ) {
                     return Err(ArchiveError::Invalid(
                         "Browser requests must be DOM captures".into(),
+                    ));
+                }
+                // A marked encrypted installation MUST only use the
+                // authenticated desktop writer. Never fall back to the legacy
+                // raw archive after a failed/locked/unavailable IPC session.
+                if root
+                    .parent()
+                    .is_some_and(|parent| parent.join("encrypted-vault-v1/vault-v1.json").exists())
+                {
+                    return ipc::forward_capture(root, origin, capture);
+                }
+                if !root.is_dir() {
+                    return Err(ArchiveError::Invalid(
+                        "MP_VAULT_IPC_REQUIRED:owner session is not initialized".into(),
                     ));
                 }
                 let receipt = ArchiveStore::open(root)?.save(capture)?;

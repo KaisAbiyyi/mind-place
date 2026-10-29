@@ -33,6 +33,10 @@ jobs:
         run: npm run build:web
       - name: Validate document qualification gate policy
         run: python3 -m unittest discover -s scripts/tests -p 'test_mp10c_ci_gate.py' -q
+      - name: Validate Windows qualification policy
+        run: |
+          python3 -m pip install --disable-pip-version-check PyYAML==6.0.3
+          python3 -m unittest discover -s scripts/tests -p 'test_windows_product*.py' -v
       - name: Report draft acceptance boundary
         if: github.event_name == 'pull_request' && github.event.pull_request.draft == true
         run: |
@@ -81,78 +85,3 @@ jobs:
           PY
       - name: Focused security tests
         run: cargo test --locked -p mind-place-security --lib
-
-  verify:
-    name: Verify Windows product
-    # Drafts receive fast feedback above. Run the full native/security suite
-    # when the PR becomes reviewable, on subsequent ready-PR pushes, on main,
-    # or by explicit dispatch. This job remains the Windows acceptance signal.
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
-    needs: rust-fast
-    runs-on: windows-latest
-    timeout-minutes: 90
-    concurrency:
-      group: windows-product-${{ github.event.pull_request.number || github.ref }}
-      cancel-in-progress: false
-    env:
-      CARGO_BUILD_JOBS: 1
-      CARGO_INCREMENTAL: 0
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: 24
-          cache: npm
-
-      - name: Setup Rust 1.90
-        shell: pwsh
-        run: |
-          rustup toolchain install 1.90.0 --profile minimal --component rustfmt --no-self-update
-          rustup default 1.90.0
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Check Rust formatting
-        run: cargo fmt --all -- --check
-
-      - name: Verify repository contract
-        run: npm run verify:repo
-
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Visual Settings scroll and footer regression
-        run: node scripts/verify-settings-render.mjs
-
-      - name: Qualify bundled SQLite runtime
-        run: cargo test -p mind-place-state bundled_sqlite_version_is_supported -- --nocapture
-
-      - name: Test
-        run: npm test
-
-      - name: Stage capture sidecar for native desktop tests
-        shell: pwsh
-        run: |
-          cargo build -p mind-place-capture-host
-          New-Item -ItemType Directory -Force src-tauri/binaries | Out-Null
-          Copy-Item "target/debug/mind-place-capture-host.exe" "src-tauri/binaries/mind-place-capture-host-x86_64-pc-windows-msvc.exe"
-          node scripts/tunnel-helper.mjs
-          node scripts/generate-notices.mjs
-          npm run build:web
-
-      - name: Qualify Phase 3E simulated MCP and revocation boundary
-        run: cargo test -p mind-place-integration --test mcp -- --nocapture
-
-      - name: Test hosted tunnel desktop boundaries
-        run: cargo test -p mind-place --bin mind-place hosted_tunnel::tests -- --nocapture
-
-      - name: Build desktop app
-        run: npm run build
-
-      - name: Verify portable MIT license and third-party notices
-        run: npm run verify:distribution-license

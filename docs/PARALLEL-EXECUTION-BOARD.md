@@ -1,5 +1,7 @@
 # Mind Place — dependency and parallel execution board
 
+**Live reconciliation 2026-10-28:** owner-authorized single-agent local takeover holds `crypto-migration` (MP-9B) and `ci-document-scale-workflow` (MP-CI-100K-01). Both are In Progress / Now; MP-9C/9D/9E are the complete direct-successor Up Next set after all AND prerequisites were checked in the live Notion database. Last Done has five accepted entries; optional tasks remain outside the focus projection pending their separate authorization/measurement. See the [takeover summary](implementation-summary/2026-10-28-mp9b-ci100k-local-takeover.md). Historical claims below are not current claims. No accepted predecessor is reopened and no implementation/owner gate is falsely marked Done.
+
 **Last coordinated baseline:** 2026-10-21. This supplements [the BIG plan](BIG-IMPLEMENTATION-PLAN.md) and [current phase](implementation-plan/CURRENT-PHASE.md); it does **not** replace acceptance gates or rewrite historical status. Read [agent orchestration policy](AGENT-ORCHESTRATION.md).
 
 ## P0 · License migration — MP-LIC-00 (22 October 2026)

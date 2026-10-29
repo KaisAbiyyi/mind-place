@@ -2,9 +2,8 @@
 //! A root is polled only after the owner explicitly indexes it. No boot scans,
 //! implicit client grants, persistent background work, or MCP exposure.
 use crate::AppState;
-use mind_place_index::{documents::DocumentIndex, IndexError};
+use mind_place_index::IndexError;
 use mind_place_security::UnlockLease;
-use mind_place_state::StateStore;
 use std::{
     collections::BTreeMap,
     sync::{
@@ -47,6 +46,7 @@ impl DocumentRefreshRegistry {
         let id = root_id.to_owned();
         let state_path = app.state_path.clone();
         let index_path = app.index_path.with_file_name("document-index.sqlite3");
+        let vault = crate::owner_vault(app);
         let security = app.security.clone();
         let ready = app.authority_ready.clone();
         let registry = self.clone();
@@ -66,8 +66,8 @@ impl DocumentRefreshRegistry {
                     // Search independently verifies every candidate against native
                     // bytes; a failed/incomplete refresh cannot expose stale data.
                     let attempt = (|| -> Result<(), IndexError> {
-                        let authority = StateStore::open(&state_path)?;
-                        let index = DocumentIndex::open(&index_path)?;
+                        let authority = crate::open_owner_state(&vault, &state_path)?;
+                        let index = crate::open_owner_document_index(&vault, &index_path)?;
                         index.refresh_root(&authority, &id, || {
                             if !active.load(Ordering::Acquire)
                                 || !ready.load(Ordering::Acquire)
@@ -84,8 +84,8 @@ impl DocumentRefreshRegistry {
                         if !active.load(Ordering::Acquire)
                             || !ready.load(Ordering::Acquire)
                             || security.validate_lease(lease).is_err()
-                            || StateStore::open(&state_path)
-                                .and_then(|s| s.document_root(&id))
+                            || crate::open_owner_state(&vault, &state_path)
+                                .and_then(|s| s.document_root(&id).map_err(IndexError::from))
                                 .ok()
                                 .flatten()
                                 .is_none_or(|r| !r.is_approved())
