@@ -5,7 +5,7 @@
 ## Actors and authority
 
 - **Human owner:** absolute product/release authority; approves real-account consent, destructive changes, irreversible publication and subjective acceptance, and initiates named local/native qualification gates. Do not burden the owner with routine agent-to-agent dispatch.
-- **ChatGPT Work/GitHub-connected agent, Codex Cloud/local, and optional future Antigravity:** capability-based workers. Any can plan, research, implement, test, review or coordinate if the actual environment has the necessary tools. **Never hard-code a task to one vendor/model.** A reviewer must be independent of the implementer for critical boundaries.
+- **ChatGPT Work/GitHub-connected agent, Codex Cloud/local, and optional future Antigravity:** capability-based workers. Any can plan, research, implement, test, review or coordinate if the actual environment has the necessary tools. **Never hard-code a task to one vendor/model.** The implementor MUST directly self-review the exact base-to-HEAD diff and critical security, data and integration boundaries; a separate reviewer/agent is NOT mandatory and MUST NOT be a merge gate. Record this truthfully as self-review, not independent approval; honor all actual CI/native/owner gates.
 - **GitHub:** durable source of truth for committed work, PRs, CI, SHA-specific evidence and handoffs. Conversation context and temporary cloud VMs are not durable coordination stores.
 - **Shared usage:** budget ChatGPT Work and Codex as one constrained pool where they share allowance; do not assume switching between them replenishes usage. Prefer bounded tasks, no idle agent waiting for CI, and measured concurrency over maximum simultaneous sessions. Do not assume rate/usage APIs exist.
 
