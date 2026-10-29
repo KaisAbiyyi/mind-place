@@ -55,6 +55,10 @@ with a changed command fails the byte comparison. The artifact's versioned
 claims must match independently computed immutable inputs and run provenance.
 Skipped native steps, foreign PRs, corrupted/expired artifacts, unavailable API
 data, failed/cancelled runs and superseded current sources cannot accept.
+Before parsing the bounded proof ZIP, the verifier requires GitHub's
+`sha256:<64 lowercase hex>` artifact digest and compares it with SHA-256 of the
+downloaded archive bytes. Missing/malformed digests and archive changes are
+rejected, including changed ZIP envelopes around otherwise valid proof JSON.
 
 The target's `Windows Product / candidate result` is explicitly advisory and
 must **never** be configured as the authoritative required acceptance check.
@@ -114,6 +118,8 @@ fresh qualification and changed/missing proof bypass the wait. This gives the
 five-minute controller time to process a new unchanged head before any Windows
 runner is allocated. The job has a ten-minute hard execution limit, and the
 Windows runner's final recheck never sleeps waiting for the controller.
+Evidence invalidated while awaiting authority requires fresh native work;
+source supersession still aborts instead of qualifying an obsolete candidate.
 The lock covers the entire Windows workflow, including its final reporting job;
 its successor cannot start before the predecessor run is completed and eligible
 as evidence. The second recheck also fences source changes while a Windows

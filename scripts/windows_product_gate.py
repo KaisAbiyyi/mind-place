@@ -6,6 +6,7 @@ Worker decisions are advisory; only the separately installed App check accepts.
 """
 import argparse
 import datetime as dt
+import hashlib
 import io
 import json
 import os
@@ -191,7 +192,11 @@ def verify_run(api, sources, run_id, current, identity, policy_root, now=None):
     require(origin.get("id") == run_id and origin.get("head_sha") == run["head_sha"]
             and origin.get("repository_id") == run["repository"]["id"]
             and origin.get("head_repository_id") == run["repository"]["id"], "foreign artifact provenance")
-    proof = unpack_proof(api.request(f"/actions/artifacts/{artifact['id']}/zip", binary=True))
+    digest = artifact.get("digest")
+    require(isinstance(digest, str) and re.fullmatch(r"sha256:[0-9a-f]{64}", digest), "missing or malformed artifact digest")
+    payload = api.request(f"/actions/artifacts/{artifact['id']}/zip", binary=True)
+    require(hashlib.sha256(payload).hexdigest() == digest.removeprefix("sha256:"), "artifact archive digest mismatch")
+    proof = unpack_proof(payload)
     require(proof.get("schema") == SCHEMA and proof.get("policy") == POLICY, "unknown proof policy")
     require(proof.get("repository") == api.repo and proof.get("pr") == current["pr"], "foreign proof")
     require(proof.get("run_id") == run_id and proof.get("attempt") == attempt, "proof attempt mismatch")
@@ -225,7 +230,7 @@ def verify_run(api, sources, run_id, current, identity, policy_root, now=None):
         matching = [s for s in steps if s["name"] == name]
         require(len(matching) == 1 and matching[0]["status"] == "completed"
                 and matching[0]["conclusion"] == "success", "native step did not execute: " + name)
-    return {"run_id": run_id, "attempt": attempt, "artifact_id": artifact["id"], "source": proof["source"],
+    return {"run_id": run_id, "attempt": attempt, "artifact_id": artifact["id"], "artifact_digest": digest, "source": proof["source"],
             "event": run["event"], "head": proof["head"]}
 
 
@@ -305,8 +310,11 @@ def coordinate(api, sources, current, app_id, policy_root, fresh=False,
         if state == "authorized":
             try:
                 proof = verify_run(api, sources, candidate["run_id"], current, identity, policy_root)
+            except (OSError, ValueError, KeyError, TypeError, zipfile.BadZipFile, subprocess.CalledProcessError):
+                return fallback
+            try:
                 require(snapshot(api, current["pr"]) == current, "source superseded during authority wait")
-            except (OSError, KeyError, TypeError, subprocess.CalledProcessError):
+            except OSError:
                 return fallback
             return "reuse", identity, proof
         remaining = deadline - clock()

@@ -1,6 +1,7 @@
 """Production verifier/decision tests over real Git merge objects and fake API wire data."""
 import copy
 import datetime as dt
+import hashlib
 import io
 import json
 import os
@@ -131,6 +132,7 @@ class GateTests(unittest.TestCase):
             for path, value in (members or {"proof.json": json.dumps(self.proof)}).items():
                 output.writestr(path, value)
         self.api.data["/actions/artifacts/8/zip"] = archive.getvalue()
+        self.artifact["digest"] = "sha256:" + hashlib.sha256(archive.getvalue()).hexdigest()
 
     def verify(self):
         return gate.verify_run(self.api, self.sources, 7, self.current, self.identity, self.policy)
@@ -146,6 +148,34 @@ class GateTests(unittest.TestCase):
 
     def test_actual_native_evidence(self):
         self.assertEqual(self.verify()["run_id"], 7)
+
+    def test_artifact_digest_missing_malformed_or_mismatched_cannot_qualify(self):
+        for value in [None, "", "sha256:invalid", "sha256:" + "0" * 64, "sha512:" + "a" * 64, 123]:
+            with self.subTest(digest=value):
+                self.artifact["digest"] = value
+                with self.assertRaisesRegex(gate.Rejected, "digest"):
+                    self.verify()
+                self.assertEqual(self.decide(), "native")
+
+    def test_modified_archive_envelope_rejected_even_with_unchanged_valid_proof(self):
+        payload = io.BytesIO(self.api.data["/actions/artifacts/8/zip"])
+        with zipfile.ZipFile(payload, "a") as archive:
+            archive.comment = b"changed transport envelope, same valid receipt"
+        self.api.data["/actions/artifacts/8/zip"] = payload.getvalue()
+        with self.assertRaisesRegex(gate.Rejected, "digest"):
+            self.verify()
+
+    def test_evidence_invalidated_during_authority_wait_requires_native(self):
+        path = f"/commits/{self.head}/check-runs?check_name=Windows%20Product%20%2F%20trusted%20acceptance"
+        self.api.data[path] = {"check_runs": []}
+        elapsed = [0]
+        def sleep(seconds):
+            elapsed[0] += seconds
+            self.api.data[path] = {"check_runs": [self.check]}
+            self.artifact["expired"] = True
+        result = gate.coordinate(self.api, self.sources, self.current, 42, self.policy,
+                                 timeout=31, clock=lambda: elapsed[0], sleep=sleep)
+        self.assertEqual(result[0], "native")
 
     def test_vault_source_cannot_qualify_without_native_encrypted_ipc(self):
         self.advance(".github/workflows/mp9b-sqlcipher-qualification.yml", "name: SQLCipher native qualification\n")
