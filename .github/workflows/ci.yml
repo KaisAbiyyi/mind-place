@@ -33,6 +33,8 @@ jobs:
         run: npm run build:web
       - name: Validate document qualification gate policy
         run: python3 -m unittest discover -s scripts/tests -p 'test_mp10c_ci_gate.py' -q
+      - name: Test experimental Windows input identity
+        run: python3 -m unittest discover -s scripts/tests -p 'test_windows_product_inputs.py' -q
       - name: Report draft acceptance boundary
         if: github.event_name == 'pull_request' && github.event.pull_request.draft == true
         run: |
