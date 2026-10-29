@@ -455,7 +455,13 @@ def decision(event: str, mode: str, previous: dict | None) -> tuple[bool, str]:
     return False, "Identical effective inputs; prior full qualification reused (NOT a new PASS)"
 
 
-def require_prerequisites(runs: list[dict], source: str, *, vault: bool, fetch_jobs) -> None:
+def product_workflow() -> str:
+    """Routing only: immutable checkout may have the separated Windows contract."""
+    return (".github/workflows/windows-product.yml" if Path(".github/workflows/windows-product.yml").is_file()
+            else ".github/workflows/ci.yml")
+
+
+def prerequisite_contract(vault: bool, product_path: str) -> dict:
     # A workflow can be green while its native job was skipped on a Draft PR.
     # Inspect the exact run attempt's required jobs AND their critical steps.
     product_steps = ("Test", "Test hosted tunnel desktop boundaries", "Build desktop app")
@@ -465,10 +471,10 @@ def require_prerequisites(runs: list[dict], source: str, *, vault: bool, fetch_j
         ".github/workflows/ci.yml": {
             "Fast Rust compile and vault feedback": (
                 "Rust format", "Compile production core crates",
-                "Compile available SQLCipher and vault features", "Focused security tests"),
-            "Verify Windows product": product_steps
+                "Compile available SQLCipher and vault features", "Focused security tests")
         }
     }
+    required.setdefault(product_path, {})["Verify Windows product"] = product_steps
     if vault:
         required[".github/workflows/mp9b-sqlcipher-qualification.yml"] = {
             "SQLCipher / ubuntu-24.04": ("Encrypted state/index and FTS regression",
@@ -478,27 +484,34 @@ def require_prerequisites(runs: list[dict], source: str, *, vault: bool, fetch_j
                                          "Keyed MCP synthetic authorization and revocation",
                                          "Vault and backup adversarial regression"),
         }
-    for path, expected_jobs in required.items():
-        verified = False
-        for run in runs:
-            if (run.get("path") != path or run.get("head_sha") != source
-                    or run.get("status") != "completed" or run.get("conclusion") != "success"
-                    or type(run.get("id")) is not int or run["id"] <= 0
-                    or type(run.get("run_attempt")) is not int or run["run_attempt"] <= 0):
-                continue
-            response = fetch_jobs(run)
-            jobs = response.get("jobs", [])
-            if (not isinstance(jobs, list) or type(response.get("total_count")) is not int
-                    or response["total_count"] != len(jobs)):
-                continue  # incomplete/paginated evidence is not acceptance
-            if all(sum(job.get("name") == name and job.get("status") == "completed"
-                       and job.get("conclusion") == "success" and all(
-                           sum(step.get("name") == step_name and step.get("conclusion") == "success"
-                               for step in job.get("steps", [])) == 1 for step_name in steps)
-                       for job in jobs) == 1 for name, steps in expected_jobs.items()):
-                verified = True
-                break
-        if not verified:
+    return required
+
+
+def prerequisite_succeeded(runs, source, path, expected_jobs, fetch_jobs) -> bool:
+    for run in runs:
+        if (run.get("path") != path or run.get("head_sha") != source
+                or run.get("status") != "completed" or run.get("conclusion") != "success"
+                or type(run.get("id")) is not int or run["id"] <= 0
+                or type(run.get("run_attempt")) is not int or run["run_attempt"] <= 0):
+            continue
+        response = fetch_jobs(run)
+        jobs = response.get("jobs", [])
+        if (not isinstance(jobs, list) or type(response.get("total_count")) is not int
+                or response["total_count"] != len(jobs)):
+            continue  # incomplete/paginated evidence is not acceptance
+        if all(sum(job.get("name") == name and job.get("status") == "completed"
+                   and job.get("conclusion") == "success" and all(
+                       sum(step.get("name") == step_name and step.get("conclusion") == "success"
+                           for step in job.get("steps", [])) == 1 for step_name in steps)
+                   for job in jobs) == 1 for name, steps in expected_jobs.items()):
+            return True
+    return False
+
+
+def require_prerequisites(runs: list[dict], source: str, *, vault: bool, fetch_jobs,
+                          product_path: str = ".github/workflows/ci.yml") -> None:
+    for path, expected_jobs in prerequisite_contract(vault, product_path).items():
+        if not prerequisite_succeeded(runs, source, path, expected_jobs, fetch_jobs):
             raise ValueError("Frozen source lacks a successful native Windows Product or SQLCipher job/step prerequisite")
 
 
@@ -544,7 +557,7 @@ def main() -> int:
                             f"/attempts/{run['run_attempt']}/jobs?per_page=100", token)
         require_prerequisites(runs, source,
                               vault=Path(".github/workflows/mp9b-sqlcipher-qualification.yml").is_file(),
-                              fetch_jobs=fetch_prerequisite_jobs)
+                              fetch_jobs=fetch_prerequisite_jobs, product_path=product_workflow())
         print("Frozen source cheap CI prerequisites verified; full qualification may start")
         return 0
     if args.command == "accept":

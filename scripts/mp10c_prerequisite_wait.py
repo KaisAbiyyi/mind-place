@@ -14,22 +14,20 @@ import urllib.error
 
 import mp10c_ci_gate as gate
 
-NATIVE_PATHS = (".github/workflows/ci.yml",
-                ".github/workflows/mp9b-sqlcipher-qualification.yml")
-
-
-def classify(runs, source, vault, fetch_jobs):
+def classify(runs, source, vault, fetch_jobs, product_path=".github/workflows/ci.yml"):
     """Return (ready|pending|failed, reason), without accepting skipped jobs."""
     try:
-        gate.require_prerequisites(runs, source, vault=vault, fetch_jobs=fetch_jobs)
+        gate.require_prerequisites(runs, source, vault=vault, fetch_jobs=fetch_jobs, product_path=product_path)
         return "ready", "Actual exact-source native jobs and steps succeeded"
     except ValueError:
         pass
-    required = NATIVE_PATHS if vault else NATIVE_PATHS[:1]
+    required = gate.prerequisite_contract(vault, product_path)
     missing = []
     pending = []
     failed = []
-    for path in required:
+    for path, expected_jobs in required.items():
+        if gate.prerequisite_succeeded(runs, source, path, expected_jobs, fetch_jobs):
+            continue
         same = [r for r in runs if r.get("path") == path and r.get("head_sha") == source]
         if not same:
             missing.append(path)
@@ -64,7 +62,7 @@ def snapshot(repo, source, pr, token, vault):
         return gate.api_json(
             f"https://api.github.com/repos/{repo}/actions/runs/{run['id']}"
             f"/attempts/{run['run_attempt']}/jobs?per_page=100", token)
-    return classify(runs, source, vault, jobs)
+    return classify(runs, source, vault, jobs, product_path=gate.product_workflow())
 
 
 def wait(repo, source, pr, token, vault, timeout=4800, poll=30, clock=time.monotonic,

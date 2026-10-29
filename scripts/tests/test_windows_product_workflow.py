@@ -1,5 +1,6 @@
 """Contract tests for real Actions control flow; runtime verifier needs only stdlib."""
 import json
+import sys
 from pathlib import Path
 import re
 import unittest
@@ -7,6 +8,9 @@ import unittest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts"))
+import mp10c_ci_gate as scale
+import mp10c_prerequisite_wait as coordinator
 
 
 class WorkflowTests(unittest.TestCase):
@@ -81,6 +85,30 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(checkout[0]["with"]["ref"], "${{ vars.WINDOWS_POLICY_COMMIT }}")
         self.assertEqual(policy["jobs"]["verify"]["environment"], "windows-policy-authority")
         self.assertNotIn("pull_request", str(policy.get("on", policy.get(True))))
+
+    def test_mp10c_requires_actual_exact_source_native_in_separated_workflow(self):
+        source = "a" * 40
+        product_path = ".github/workflows/windows-product.yml"
+        fast = {"id": 1, "run_attempt": 1, "head_sha": source, "status": "completed", "conclusion": "success",
+                "path": ".github/workflows/ci.yml"}
+        native = {**fast, "id": 2, "path": product_path}
+        rust = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())["jobs"]["rust-fast"]
+        def job(name, steps):
+            return {"name": name, "status": "completed", "conclusion": "success", "steps": [
+                {"name": step["name"], "conclusion": "success"} for step in steps if "name" in step]}
+        jobs = {1: [job(rust["name"], rust["steps"])],
+                2: [job(self.jobs["verify"]["name"], self.steps)]}
+        def fetch(run):
+            return {"total_count": len(jobs[run["id"]]), "jobs": jobs[run["id"]]}
+        self.assertEqual(scale.product_workflow(), product_path)
+        scale.require_prerequisites([fast, native], source, vault=False, fetch_jobs=fetch, product_path=product_path)
+        self.assertEqual(coordinator.classify([fast, native], source, False, fetch, product_path)[0], "ready")
+        self.assertEqual(coordinator.classify([fast], source, False, fetch, product_path)[0], "pending")
+        self.assertEqual(coordinator.classify([fast, {**native, "status": "in_progress"}], source, False, fetch, product_path)[0], "pending")
+        jobs[2][0]["conclusion"] = "skipped"
+        self.assertEqual(coordinator.classify([fast, native], source, False, fetch, product_path)[0], "failed")
+        with self.assertRaises(ValueError):
+            scale.require_prerequisites([fast, native], source, vault=False, fetch_jobs=fetch, product_path=product_path)
 
 
 if __name__ == "__main__":

@@ -78,6 +78,12 @@ candidate. Neither asserts that repository enforcement is active.
   exact native required-step manifest. This directory is not an active workflow.
 - `scripts/tests/test_windows_product*.py`: actual verifier and decision tests
   over real Git merge objects, API wire fixtures, CLI events and workflow flow.
+- `scripts/mp10c_ci_gate.py` and `scripts/mp10c_prerequisite_wait.py`: routing
+  adapter recognizes the separated Windows workflow while retaining legacy
+  checkouts. Exact-head actual native jobs/steps are still mandatory before a
+  full 100K qualification. Product-proof reuse does not satisfy that stricter
+  prerequisite; dispatch fresh Windows qualification on the current head when
+  a full scale run needs it. No indexing, tier, receipt or scale semantics change.
 
 A same-repository Ready PR runs native when there is no independently authorized
 matching evidence. A valid App check carries a source-bound authorization lease
