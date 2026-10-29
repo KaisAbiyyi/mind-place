@@ -40,10 +40,20 @@ def audit(api, config):
     # Treat uninspectable or potentially bypassable state as NOT VERIFIED.
     rulesets = api.request("/rulesets?includes_parents=true")
     require(type(rulesets) is list, "ruleset inventory unavailable")
-    for rule in rulesets:
-        require(type(rule) is dict, "malformed ruleset")
-        if rule.get("enforcement") == "active":
-            require(rule.get("bypass_actors") == [], "active ruleset bypass requires independent review")
+    for summary in rulesets:
+        require(type(summary) is dict, "malformed ruleset")
+        if summary.get("enforcement") == "active":
+            ruleset_id = summary.get("id")
+            require(type(ruleset_id) is int and ruleset_id > 0,
+                    "uninspectable active ruleset")
+            detail = api.request("/rulesets/" + str(ruleset_id) + "?includes_parents=true")
+            require(type(detail) is dict and detail.get("id") == ruleset_id and
+                    detail.get("enforcement") == "active",
+                    "incomplete active ruleset detail")
+            # GitHub may omit bypass_actors unless the token has the
+            # required ruleset write/inspection permission. Missing != [].
+            require(detail.get("bypass_actors") == [],
+                    "active ruleset bypass is present or not independently visible")
     results = []
     for base in bases:
         protection = api.request("/branches/" + quote(base, safe="") + "/protection")

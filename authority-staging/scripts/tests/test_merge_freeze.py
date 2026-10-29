@@ -18,6 +18,7 @@ class MockGitHub:
     def __init__(self):
         self.calls = []
         self.rulesets = []
+        self.ruleset_detail = {}
         self.protection = {
             "lock_branch": {"enabled": True},
             "enforce_admins": {"enabled": True},
@@ -37,6 +38,8 @@ class MockGitHub:
             raise URLError("GitHub API unavailable")
         if path == "/rulesets?includes_parents=true":
             return copy.deepcopy(self.rulesets)
+        if path.startswith("/rulesets/") and path.endswith("?includes_parents=true"):
+            return copy.deepcopy(self.ruleset_detail)
         if path in self.overrides:
             return copy.deepcopy(self.overrides[path])
         if path.startswith("/branches/") and path.endswith("/protection"):
@@ -147,9 +150,18 @@ class MergeFreezeTests(unittest.TestCase):
         self.reject("strict")
 
     def test_ruleset_bypass_or_unavailable_inventory_rejected(self):
-        self.api.rulesets = [{"enforcement": "active", "bypass_actors":
-                              [{"actor_id": 2, "actor_type": "RepositoryRole"}]}]
+        self.api.rulesets = [{"id": 100, "enforcement": "active"}]
+        self.api.ruleset_detail = {"id": 100, "enforcement": "active",
+                                  "bypass_actors": [{"actor_id": 2,
+                                                    "actor_type": "RepositoryRole"}]}
         self.reject("bypass")
+        self.api.ruleset_detail.pop("bypass_actors")
+        self.reject("bypass")
+        self.api.ruleset_detail["bypass_actors"] = []
+        self.assertTrue(audit(self.api, self.cfg)["configuration_snapshot_only"])
+        self.assertIn(("/rulesets/100?includes_parents=true", None, None), self.api.calls)
+        self.api.rulesets = [{"enforcement": "active"}]
+        self.reject("uninspectable")
         self.api.rulesets = None
         self.reject("inventory unavailable")
 

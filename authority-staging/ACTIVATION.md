@@ -43,3 +43,5 @@
 **Admin verification outstanding.** Neither GitHub's lock enforcement nor ordinary-writer non-bypass has been live tested here. No Checkpoint 2B GO can be claimed from staging CI.
 
 **Negative bypass requirement:** confirm `allow_fork_syncing`, `allow_force_pushes`, and `allow_deletions` are explicitly disabled in every protected base's effective branch protection; the read-only inspector rejects enabled or absent values. Do not treat `lock_branch` alone as evidence of complete admission blocking.
+
+**Inspection credentials:** a read-only API method does not imply that a low-privilege App token can see ruleset bypass actors. GitHub may withhold them without ruleset-management access. Owner/admin must supply a separately authorized inspection identity; absence of `bypass_actors` => fail closed, never infer an empty bypass list from the summary endpoint.
