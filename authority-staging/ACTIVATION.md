@@ -41,3 +41,5 @@
 7. OWNER incident: keep lock enforced, do not trust historic SUCCESS, investigate/revoke/patch checks when possible, and require a fresh independent admission review before any subsequent exception. If freeze was already open when API/admin became unavailable, the platform cannot guarantee automatic closure; declare **residual risk/incident**, halt merge operation, require owner remediation.
 
 **Admin verification outstanding.** Neither GitHub's lock enforcement nor ordinary-writer non-bypass has been live tested here. No Checkpoint 2B GO can be claimed from staging CI.
+
+**Negative bypass requirement:** confirm `allow_fork_syncing`, `allow_force_pushes`, and `allow_deletions` are explicitly disabled in every protected base's effective branch protection; the read-only inspector rejects enabled or absent values. Do not treat `lock_branch` alone as evidence of complete admission blocking.

@@ -21,6 +21,9 @@ class MockGitHub:
         self.protection = {
             "lock_branch": {"enabled": True},
             "enforce_admins": {"enabled": True},
+            "allow_fork_syncing": {"enabled": False},
+            "allow_force_pushes": {"enabled": False},
+            "allow_deletions": {"enabled": False},
             "required_status_checks": {"strict": True,
                 "checks": [{"context": "legacy-ci", "app_id": 123},
                            {"context": CHECK, "app_id": 42}]},
@@ -123,6 +126,16 @@ class MergeFreezeTests(unittest.TestCase):
         self.api.protection["enforce_admins"]["enabled"] = True
         self.api.protection["required_status_checks"]["checks"][-1]["app_id"] = 43
         self.reject("wrong or missing")
+
+    def test_branch_update_bypasses_fail_closed(self):
+        for flag in ("allow_fork_syncing", "allow_force_pushes", "allow_deletions"):
+            with self.subTest(flag=flag):
+                self.api.protection[flag]["enabled"] = True
+                self.reject(flag)
+                self.api.protection[flag]["enabled"] = False
+                self.api.protection.pop(flag)
+                self.reject(flag)
+                self.api.protection[flag] = {"enabled": False}
 
     def test_status_check_laundering_and_non_strict_rejected(self):
         self.api.protection["required_status_checks"]["checks"] = [

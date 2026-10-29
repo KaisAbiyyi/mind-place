@@ -83,3 +83,5 @@ Before any exception, require a GitHub-native negative live test where a deliber
 | Emergency incident/restart | No automatic historical revocation | Freeze persists, recovery requires independent live revalidation and explicit owner unfreeze |
 
 **Do not represent unit tests, this read-only inspector, or an unavailable admin API as live GitHub enforcement.** No production settings have been changed here. Checkpoint 2B remains **NO-GO until live enforcement is independently reviewed**.
+
+**Branch-lock bypass nuance:** even when `lock_branch.enabled=true`, require `allow_fork_syncing.enabled=false`, `allow_force_pushes.enabled=false`, and `allow_deletions.enabled=false` (all three must be explicitly inspectable, not absent). Fork sync can update a locked fork branch. Owner/admin must validate this in the live negative test; missing or enabled permissions fail the staging inspector.

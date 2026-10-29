@@ -50,6 +50,12 @@ def audit(api, config):
         require(type(protection) is dict, "missing branch protection: " + base)
         require(_enabled(protection, "lock_branch"), "branch is NOT locked: " + base)
         require(_enabled(protection, "enforce_admins"), "administrator enforcement absent: " + base)
+        # GitHub can permit fork syncing even on a locked branch. An
+        # uninspectable bypass setting is not acceptable evidence of a freeze.
+        for bypass_flag in ("allow_fork_syncing", "allow_force_pushes", "allow_deletions"):
+            state = protection.get(bypass_flag)
+            require(type(state) is dict and state.get("enabled") is False,
+                    "unsafe or unknown branch update bypass (" + bypass_flag + "): " + base)
         checks = protection.get("required_status_checks")
         require(isinstance(checks, dict) and checks.get("strict") is True,
                 "strict required checks absent: " + base)
