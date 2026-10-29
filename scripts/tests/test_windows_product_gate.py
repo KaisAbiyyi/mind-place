@@ -80,7 +80,7 @@ class GateTests(unittest.TestCase):
         self.proof = {"schema": gate.SCHEMA, "policy": gate.POLICY, "repository": API.repo,
                       **self.current, "fingerprint": self.identity, "run_id": 7, "attempt": 1}
         self.steps = [{"name": name, "status": "completed", "conclusion": "success"}
-                      for name in json.loads((ROOT / ".github/windows-policy/native-steps.json").read_text())]
+                      for name in json.loads((ROOT / ".github/windows-policy/native-steps.json").read_text())["common"]]
         self.artifact = {"id": 8, "name": "windows-product-proof-7-1", "expired": False,
                          "workflow_run": {"id": 7, "head_sha": self.head, "repository_id": 123, "head_repository_id": 123}}
         self.api.data = {
@@ -146,6 +146,24 @@ class GateTests(unittest.TestCase):
 
     def test_actual_native_evidence(self):
         self.assertEqual(self.verify()["run_id"], 7)
+
+    def test_vault_source_cannot_qualify_without_native_encrypted_ipc(self):
+        self.advance(".github/workflows/mp9b-sqlcipher-qualification.yml", "name: SQLCipher native qualification\n")
+        self.head, self.source = self.current["head"], self.current["source"]
+        self.identity = self.sources.fingerprint(self.source)
+        self.run.update(head_sha=self.head, pull_requests=[{"number": 131, "head": {"sha": self.head}, "base": {"sha": self.base}}])
+        self.artifact["workflow_run"]["head_sha"] = self.head
+        self.proof.update(**self.current, fingerprint=self.identity)
+        self.pack()
+        with self.assertRaisesRegex(gate.Rejected, "native capture encrypted IPC"):
+            self.verify()
+        ipc = {"name": "Qualify native capture encrypted IPC and revoked owner epoch", "status": "completed", "conclusion": "success"}
+        self.steps.append(ipc)
+        self.assertEqual(self.verify()["run_id"], 7)
+        for outcome in ["skipped", "failure", "cancelled"]:
+            ipc["conclusion"] = outcome
+            with self.assertRaisesRegex(gate.Rejected, "native capture encrypted IPC"):
+                self.verify()
 
     def test_new_unchanged_head_waits_on_ubuntu_then_avoids_windows(self):
         workflow = yaml.safe_load((ROOT / gate.WORKFLOW).read_text())

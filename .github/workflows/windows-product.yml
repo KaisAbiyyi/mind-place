@@ -152,6 +152,21 @@ jobs:
     - name: Test hosted tunnel desktop boundaries
       run: cargo test -p mind-place --bin mind-place hosted_tunnel::tests -- --nocapture
       if: steps.slot.outputs.native == 'true'
+    - name: Qualify native capture encrypted IPC and revoked owner epoch
+      if: steps.slot.outputs.native == 'true' && hashFiles('.github/workflows/mp9b-sqlcipher-qualification.yml') != ''
+      shell: pwsh
+      run: |
+        # Without MP-9B the named native module is absent. With MP-9B, do not
+        # let Cargo's successful zero-test filter masquerade as qualification.
+        $listing = & cargo test -p mind-place --bin mind-place native_capture_ipc::qualification -- --list 2>&1
+        if ($LASTEXITCODE -ne 0) { throw 'Cannot enumerate native encrypted IPC qualification' }
+        foreach ($required in @(
+          'native_capture_ipc::qualification::separate_process_capture_probe: test',
+          'native_capture_ipc::qualification::owner_local_capture_roundtrip_requires_unlocked_epoch: test'
+        )) {
+          if (-not ($listing | Select-String -SimpleMatch $required)) { throw "Missing qualification: $required" }
+        }
+        cargo test -p mind-place --bin mind-place native_capture_ipc::qualification -- --nocapture
     - name: Build desktop app
       run: npm run build
       if: steps.slot.outputs.native == 'true'

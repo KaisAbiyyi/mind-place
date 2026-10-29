@@ -75,7 +75,9 @@ candidate. Neither asserts that repository enforcement is active.
 - `.github/workflows/ci.yml`: fast feedback and policy regressions; native
   commands now have their own execution identity.
 - `.github/windows-policy/`: deployment template, disabled example config and
-  exact native required-step manifest. This directory is not an active workflow.
+  exact native required-step manifest. The v2 manifest separates common steps
+  from the vault-only encrypted IPC qualification and is independently pinned
+  alongside the verifier. This directory is not an active workflow.
 - `scripts/tests/test_windows_product*.py`: actual verifier and decision tests
   over real Git merge objects, API wire fixtures, CLI events and workflow flow.
 - `scripts/mp10c_ci_gate.py` and `scripts/mp10c_prerequisite_wait.py`: routing
@@ -84,6 +86,20 @@ candidate. Neither asserts that repository enforcement is active.
   full 100K qualification. Product-proof reuse does not satisfy that stricter
   prerequisite; dispatch fresh Windows qualification on the current head when
   a full scale run needs it. No indexing, tier, receipt or scale semantics change.
+
+The separated Windows workflow carries PR #127's real
+`cargo test -p mind-place --bin mind-place native_capture_ipc::qualification -- --nocapture`
+command, guarded by the presence of its SQLCipher qualification workflow. It
+first enumerates and requires the process probe and unlocked-owner-epoch tests,
+rejecting Cargo's otherwise-successful zero-test filter. Without vault inputs
+the step is explicitly not applicable/skipped. The independent verifier derives
+vault applicability from the immutable tested Git tree, not artifact claims or
+the mutable workspace, and then requires the IPC step to have actually passed.
+The integrated `vault=True` regression exercises the MP-10C adapter with real
+separated-workflow step names and SQLCipher prerequisites, including negative
+cases. The workflow PowerShell script is also exercised with synthetic Cargo
+responses on hosted CI, without compiling Rust. This carries the execution
+contract forward; it does not merge or qualify PR #127's product implementation.
 
 A same-repository Ready PR runs native when there is no independently authorized
 matching evidence. A valid App check carries a source-bound authorization lease

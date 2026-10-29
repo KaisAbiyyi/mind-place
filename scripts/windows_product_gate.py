@@ -23,7 +23,9 @@ from windows_product_inputs import POLICY, fingerprint
 CHECK = "Windows Product / trusted acceptance"
 WORKFLOW = ".github/workflows/windows-product.yml"
 SCHEMA = "windows-product-proof/v1"
-CONTRACT_FILES = (WORKFLOW, "scripts/windows_product_gate.py", "scripts/windows_product_inputs.py")
+CONTRACT_FILES = (WORKFLOW, "scripts/windows_product_gate.py", "scripts/windows_product_inputs.py",
+                  ".github/windows-policy/native-steps.json")
+VAULT_WORKFLOW = ".github/workflows/mp9b-sqlcipher-qualification.yml"
 MAX_AGE = 14 * 86400
 AUTHORITY_WAIT = 420  # One five-minute controller period plus scheduling slack.
 
@@ -213,7 +215,11 @@ def verify_run(api, sources, run_id, current, identity, policy_root, now=None):
     require(len(jobs) == 1 and jobs[0]["run_id"] == run_id and jobs[0]["conclusion"] == "success",
             "native job failed, skipped or ambiguous")
     require("windows-latest" in jobs[0]["labels"], "wrong native runner")
-    required = json.loads((Path(policy_root) / ".github/windows-policy/native-steps.json").read_text())
+    contract = json.loads((Path(policy_root) / ".github/windows-policy/native-steps.json").read_text())
+    require(contract.get("schema") == "windows-product-native-steps/v2", "unknown native step policy")
+    required = list(contract["common"])
+    if sources.git("ls-tree", proof["source"], "--", VAULT_WORKFLOW):
+        required += contract["vault"]
     steps = jobs[0]["steps"]
     for name in required:
         matching = [s for s in steps if s["name"] == name]

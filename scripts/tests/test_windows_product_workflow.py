@@ -1,6 +1,10 @@
 """Contract tests for real Actions control flow; runtime verifier needs only stdlib."""
 import json
+import os
+import shutil
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 import re
 import unittest
@@ -48,8 +52,9 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("verify", self.jobs["candidate"]["needs"])
 
     def test_trusted_required_steps_exactly_cover_real_native_workflow(self):
-        names = json.loads((ROOT / ".github/windows-policy/native-steps.json").read_text())
-        self.assertEqual(names, [step["name"] for step in self.steps])
+        contract = json.loads((ROOT / ".github/windows-policy/native-steps.json").read_text())
+        names = contract["common"] + contract["vault"]
+        self.assertCountEqual(names, [step["name"] for step in self.steps])
         self.assertEqual(len(set(names)), len(names))
 
     def test_read_only_pinned_actions_no_persisted_checkout_credentials(self):
@@ -109,6 +114,66 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(coordinator.classify([fast, native], source, False, fetch, product_path)[0], "failed")
         with self.assertRaises(ValueError):
             scale.require_prerequisites([fast, native], source, vault=False, fetch_jobs=fetch, product_path=product_path)
+
+    def test_mp9b_vault_integration_keeps_encrypted_native_ipc_prerequisite(self):
+        source = "a" * 40
+        product_path = ".github/workflows/windows-product.yml"
+        def run(identifier, path):
+            return {"id": identifier, "run_attempt": 1, "head_sha": source, "status": "completed",
+                    "conclusion": "success", "path": path}
+        rust = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())["jobs"]["rust-fast"]
+        def job(name, names):
+            return {"name": name, "status": "completed", "conclusion": "success",
+                    "steps": [{"name": n, "conclusion": "success"} for n in names]}
+        jobs = {1: [job(rust["name"], [s["name"] for s in rust["steps"] if "name" in s])],
+                2: [job(self.jobs["verify"]["name"], [s["name"] for s in self.steps])],
+                3: [job("SQLCipher / " + platform, ["Encrypted state/index and FTS regression",
+                      "Keyed MCP synthetic authorization and revocation", "Vault and backup adversarial regression"])
+                    for platform in ["ubuntu-24.04", "windows-2022"]]}
+        runs = [run(1, ".github/workflows/ci.yml"), run(2, product_path),
+                run(3, ".github/workflows/mp9b-sqlcipher-qualification.yml")]
+        def fetch(candidate):
+            return {"total_count": len(jobs[candidate["id"]]), "jobs": jobs[candidate["id"]]}
+        scale.require_prerequisites(runs, source, vault=True, fetch_jobs=fetch, product_path=product_path)
+        self.assertEqual(coordinator.classify(runs, source, True, fetch, product_path)[0], "ready")
+        ipc_name = "Qualify native capture encrypted IPC and revoked owner epoch"
+        ipc = next(step for step in self.steps if step["name"] == ipc_name)
+        self.assertIn("cargo test -p mind-place --bin mind-place native_capture_ipc::qualification -- --nocapture", ipc["run"])
+        for outcome in ["skipped", "failure", "cancelled"]:
+            next(s for s in jobs[2][0]["steps"] if s["name"] == ipc_name)["conclusion"] = outcome
+            with self.assertRaises(ValueError):
+                scale.require_prerequisites(runs, source, vault=True, fetch_jobs=fetch, product_path=product_path)
+
+    @unittest.skipUnless(shutil.which("pwsh"), "PowerShell unavailable in this cloud shell; exercised on hosted CI")
+    def test_native_ipc_powershell_step_cannot_pass_with_zero_missing_or_failing_tests(self):
+        ipc = next(step for step in self.steps if step["name"] == "Qualify native capture encrypted IPC and revoked owner epoch")
+        names = ["native_capture_ipc::qualification::separate_process_capture_probe: test",
+                 "native_capture_ipc::qualification::owner_local_capture_roundtrip_requires_unlocked_epoch: test"]
+        stub = '''function cargo {
+          [IO.File]::AppendAllText($env:IPC_COMMAND_LOG, ($args -join ' ') + "`n")
+          if ($args -contains '--list') {
+            $env:IPC_LIST_JSON | ConvertFrom-Json | Write-Output
+            $global:LASTEXITCODE = [int]$env:IPC_LIST_EXIT
+          } else { $global:LASTEXITCODE = [int]$env:IPC_TEST_EXIT }
+        }
+        '''
+        for listing, list_exit, test_exit, passed, count in [
+            (names, 0, 0, True, 2), (names[:1], 0, 0, False, 1), ([], 0, 0, False, 1),
+            (names, 1, 0, False, 1), (names, 0, 1, False, 2)]:
+            with self.subTest(listing=listing, list_exit=list_exit, test_exit=test_exit), tempfile.TemporaryDirectory() as directory:
+                script, log = Path(directory) / "qualify.ps1", Path(directory) / "commands.log"
+                # Match GitHub's pwsh wrapper while executing the actual workflow
+                # script. Only Cargo transport is substituted; no Rust is built.
+                script.write_text("$ErrorActionPreference = 'Stop'\n" + stub + ipc["run"] + "\nexit $LASTEXITCODE\n")
+                env = {**os.environ, "IPC_COMMAND_LOG": str(log), "IPC_LIST_JSON": json.dumps(listing),
+                       "IPC_LIST_EXIT": str(list_exit), "IPC_TEST_EXIT": str(test_exit)}
+                result = subprocess.run(["pwsh", "-NoProfile", "-NonInteractive", "-File", str(script)],
+                                        env=env, capture_output=True, text=True, timeout=30)
+                self.assertEqual(result.returncode == 0, passed, result.stdout + result.stderr)
+                commands = log.read_text().splitlines()
+                self.assertEqual(len(commands), count)
+                if count == 2:
+                    self.assertEqual(commands[-1], "test -p mind-place --bin mind-place native_capture_ipc::qualification -- --nocapture")
 
 
 if __name__ == "__main__":
