@@ -13,7 +13,7 @@
   },
   "controller_template": {
     "path": ".github/windows-policy/verifier.yml",
-    "blob": "5e6dd975c8958e1fc11c47851a7a3591cec91c44"
+    "blob": "ba361afec984775d8220a98edb1fbd07f363ac62"
   },
   "staging_only": true,
   "independent_approval": false

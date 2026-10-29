@@ -531,7 +531,7 @@ class GateTests(unittest.TestCase):
         self.check.update(id=99, status="completed", conclusion="success")
         self.lease["expires"] = 0
         self.check["output"]["text"] = json.dumps(self.lease)
-        self.assertEqual(gate.lease_state(self.api, self.current, self.identity, 42), "native")
+        self.assertEqual(gate.lease_state(self.api, self.current, self.identity, 42), "pending")
         self.assertEqual(self.check["conclusion"], "success")
         self.assertFalse(self.api.writes)  # Lease evaluation is not GitHub revocation.
 
@@ -572,7 +572,7 @@ class GateTests(unittest.TestCase):
         self.check.update(id=99, status="completed", conclusion="success")
         self.lease["expires"] = 0
         self.check["output"]["text"] = json.dumps(self.lease)
-        self.assertEqual(gate.lease_state(self.api, self.current, self.identity, 42), "native")
+        self.assertEqual(gate.lease_state(self.api, self.current, self.identity, 42), "pending")
         self.assertFalse(self.api.writes)
         self.assertEqual(self.check["conclusion"], "success")  # Still green until App writes.
 
