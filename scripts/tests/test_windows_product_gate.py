@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -13,6 +14,7 @@ import unittest
 from unittest.mock import patch
 import urllib.error
 import zipfile
+import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import windows_product_gate as gate
@@ -144,6 +146,96 @@ class GateTests(unittest.TestCase):
 
     def test_actual_native_evidence(self):
         self.assertEqual(self.verify()["run_id"], 7)
+
+    def test_new_unchanged_head_waits_on_ubuntu_then_avoids_windows(self):
+        workflow = yaml.safe_load((ROOT / gate.WORKFLOW).read_text())
+        self.assertIn("coordinate", workflow["jobs"], "new-head lease race needs a pre-native coordination stage")
+        self.advance("docs/windows-product-gate-handoff.md", "unchanged native closure")
+        check_path = f"/commits/{self.current['head']}/check-runs?check_name=Windows%20Product%20%2F%20trusted%20acceptance"
+        self.api.data[check_path] = {"check_runs": []}
+        event = self.root / "race-event.json"
+        event.write_text(json.dumps({"number": 131, "pull_request": {
+            "head": {"sha": self.current["head"]}, "base": {"sha": self.base, "ref": "main"}}}))
+        output = self.root / "race-output"
+        env = {"GITHUB_EVENT_PATH": str(event), "GITHUB_EVENT_NAME": "pull_request", "GITHUB_REPOSITORY": API.repo,
+               "GITHUB_SHA": self.current["source"], "GITHUB_OUTPUT": str(output), "WINDOWS_PRODUCT_APP_ID": "42",
+               "EXPECTED_SOURCE": self.current["source"]}
+        elapsed = [0]
+        def sleep(seconds):
+            elapsed[0] += seconds
+            if elapsed[0] >= 30:
+                self.api.data[check_path] = {"check_runs": [self.check]}
+        previous = os.getcwd()
+        try:
+            os.chdir(self.repo)
+            with patch.dict(os.environ, env), patch.object(gate, "GitHub", return_value=self.api), \
+                 patch.object(gate.time, "monotonic", side_effect=lambda: elapsed[0]), patch.object(gate.time, "sleep", side_effect=sleep):
+                plan = workflow["jobs"]["plan"]["steps"][-1]["run"]
+                with patch.object(sys, "argv", shlex.split(plan)[1:]):
+                    gate.main()
+                self.assertIn("mode=native", output.read_text())
+                output.write_text("")
+                coordinator = workflow["jobs"]["coordinate"]
+                self.assertEqual(coordinator["runs-on"], "ubuntu-latest")
+                with patch.object(sys, "argv", shlex.split(coordinator["steps"][-1]["run"])[1:]):
+                    gate.main()
+            self.assertIn("mode=reuse", output.read_text())
+            self.assertGreaterEqual(elapsed[0], 30)
+            self.assertLessEqual(elapsed[0], 420)
+            self.assertIn("coordinate", workflow["jobs"]["verify"]["needs"])
+            self.assertIn("needs.coordinate.outputs.mode == 'native'", workflow["jobs"]["verify"]["if"])
+        finally:
+            os.chdir(previous)
+
+    def test_authority_missing_or_unavailable_reaches_bounded_native_fallback(self):
+        path = f"/commits/{self.head}/check-runs?check_name=Windows%20Product%20%2F%20trusted%20acceptance"
+        for response in [{"check_runs": []}, urllib.error.URLError("controller/API unavailable")]:
+            with self.subTest(response=type(response).__name__):
+                self.api.data[path] = response
+                elapsed = [0]
+                def sleep(seconds):
+                    elapsed[0] += seconds
+                result = gate.coordinate(self.api, self.sources, self.current, 42, self.policy,
+                                         timeout=31, clock=lambda: elapsed[0], sleep=sleep)
+                self.assertEqual(result[0], "native")
+                self.assertEqual(elapsed[0], 31)
+
+    def test_fresh_disabled_or_changed_inputs_do_not_wait_for_authority(self):
+        def no_sleep(_):
+            self.fail("no reusable candidate or disabled/fresh authority must not wait")
+        for kwargs in [{"fresh": True}, {"app_id": None}]:
+            self.assertEqual(gate.coordinate(self.api, self.sources, self.current, kwargs.get("app_id", 42),
+                                             self.policy, fresh=kwargs.get("fresh", False), sleep=no_sleep)[0], "native")
+        self.advance("Cargo.toml", "changed")
+        self.assertEqual(gate.coordinate(self.api, self.sources, self.current, 42, self.policy, sleep=no_sleep)[0], "native")
+
+    def test_authority_wait_rejects_superseded_source(self):
+        path = f"/commits/{self.head}/check-runs?check_name=Windows%20Product%20%2F%20trusted%20acceptance"
+        self.api.data[path] = {"check_runs": []}
+        elapsed = [0]
+        def sleep(seconds):
+            elapsed[0] += seconds
+            self.api.data["/pulls/131"]["head"]["sha"] = "f" * 40
+        with self.assertRaisesRegex(gate.Rejected, "superseded"):
+            gate.coordinate(self.api, self.sources, self.current, 42, self.policy,
+                            timeout=31, clock=lambda: elapsed[0], sleep=sleep)
+
+    def test_stale_forged_and_expired_leases_cannot_end_authority_wait(self):
+        for mutation in [lambda: self.check["app"].update(id=43), lambda: self.lease.update(expires=0),
+                         lambda: self.lease["current"].update(source=self.head)]:
+            self.publish_current()
+            mutation()
+            self.check["output"]["text"] = json.dumps(self.lease)
+            elapsed = [0]
+            def sleep(seconds):
+                elapsed[0] += seconds
+            self.assertEqual(gate.coordinate(self.api, self.sources, self.current, 42, self.policy,
+                                              timeout=16, clock=lambda: elapsed[0], sleep=sleep)[0], "native")
+            self.assertEqual(elapsed[0], 16)
+
+    def test_authority_wait_rejects_unbounded_budget(self):
+        with self.assertRaisesRegex(gate.Rejected, "budget"):
+            gate.coordinate(self.api, self.sources, self.current, 42, self.policy, timeout=421)
 
     def test_docs_and_fast_only_changes_reuse(self):
         for path in ["docs/windows-product-gate-handoff.md", ".github/workflows/ci.yml"]:

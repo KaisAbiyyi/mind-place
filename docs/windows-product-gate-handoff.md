@@ -89,6 +89,15 @@ A same-repository Ready PR runs native when there is no independently authorized
 matching evidence. A valid App check carries a source-bound authorization lease
 of at most ten minutes. Both initial scheduling and the native job after its
 per-PR concurrency slot independently reverify available completed evidence.
+After the initial decision, a separate Ubuntu coordination job waits up to
+420 seconds for exact-current-source App authority, but only if matching native
+evidence has already been independently verified. It checks source freshness
+on every poll and revalidates the proof before selecting reuse. Missing authority
+at the deadline falls back to native; superseded source aborts. Disabled authority,
+fresh qualification and changed/missing proof bypass the wait. This gives the
+five-minute controller time to process a new unchanged head before any Windows
+runner is allocated. The job has a ten-minute hard execution limit, and the
+Windows runner's final recheck never sleeps waiting for the controller.
 The lock covers the entire Windows workflow, including its final reporting job;
 its successor cannot start before the predecessor run is completed and eligible
 as evidence. The second recheck also fences source changes while a Windows
@@ -188,9 +197,10 @@ ran from 2026-10-28T15:50:14Z through 16:32:12Z: 41 minutes 58 seconds, SUCCESS.
 Controlled production verifier/decision/CLI/workflow tests demonstrate validated
 reuse and fail-closed fallback, including post-slot discovery. They do not measure
 hosted Windows savings. The independent authority polls every five minutes;
-activation adds that eventual verification delay, Git/API lookup time and a
-small Linux gate. Without a fresh authority lease the native fallback may run
-unnecessarily; correctness takes priority. API pagination is bounded (20 pages)
+activation adds that eventual verification delay, Git/API lookup time and the
+bounded Linux coordination gate. If authority is still unavailable after the
+bounded wait, native fallback can run unnecessarily; correctness takes priority.
+API pagination is bounded (20 pages)
 and exhaustion fails closed. Artifact expiration triggers native qualification.
 
 Cloud baseline/native results and exact final SHA are reported in PR #131 and

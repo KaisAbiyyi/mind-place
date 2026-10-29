@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+import time
 import urllib.error
 import urllib.request
 import zipfile
@@ -24,6 +25,7 @@ WORKFLOW = ".github/workflows/windows-product.yml"
 SCHEMA = "windows-product-proof/v1"
 CONTRACT_FILES = (WORKFLOW, "scripts/windows_product_gate.py", "scripts/windows_product_inputs.py")
 MAX_AGE = 14 * 86400
+AUTHORITY_WAIT = 420  # One five-minute controller period plus scheduling slack.
 
 
 class Rejected(ValueError):
@@ -238,30 +240,75 @@ def find_proof(api, sources, current, identity, policy_root, fresh=False, fresh_
     return None
 
 
-def authorized_reuse(api, sources, current, identity, app_id, policy_root):
-    """An authenticated, short-lived App lease permits the read-only worker verifier.
-
-    It still re-verifies the completed native run after acquiring the runner slot.
-    The App separately rechecks everything before issuing final acceptance.
-    """
+def lease_state(api, current, identity, app_id):
+    """Return pending/authorized/native without trusting any PR-generated check."""
     if not app_id:
-        return None
+        return "native"
     checks = api.pages(f"/commits/{current['head']}/check-runs?check_name=Windows%20Product%20%2F%20trusted%20acceptance", "check_runs")
-    for check in reversed(checks):
+    for check in checks:
         if check["app"]["id"] != int(app_id) or check["name"] != CHECK or check["head_sha"] != current["head"]:
             continue
         if check["status"] != "in_progress" and check.get("conclusion") != "success":
-            continue
+            return "native"
         try:
             lease = json.loads(check["output"]["text"])
             require(lease["schema"] == "windows-product-acceptance/v1" and lease["policy"] == POLICY, "invalid lease")
             require(lease["current"] == current and lease["fingerprint"] == identity, "stale lease")
             require(lease["anchor_enforced"] is True and 0 <= lease["expires"] - utc().timestamp() <= 600, "expired lease")
-            require(not lease.get("require_fresh"), "final policy requires fresh manual native execution")
-            return find_proof(api, sources, current, identity, policy_root)
+            return "native" if lease.get("require_fresh") else "authorized"
         except (Rejected, ValueError, KeyError, TypeError):
             continue
+    return "pending"
+
+
+def authorized_reuse(api, sources, current, identity, app_id, policy_root):
+    if lease_state(api, current, identity, app_id) == "authorized":
+        return find_proof(api, sources, current, identity, policy_root)
     return None
+
+
+def coordinate(api, sources, current, app_id, policy_root, fresh=False,
+               timeout=AUTHORITY_WAIT, poll=15, clock=None, sleep=None):
+    """Cheap Ubuntu coordination only; never wait while occupying a Windows runner.
+
+    Wait only when verified matching native evidence exists but current-head
+    authority has not arrived. Missing authority at deadline schedules native;
+    a superseded source aborts. The native slot still performs its own recheck.
+    """
+    require(0 <= timeout <= AUTHORITY_WAIT and 0 < poll <= 30, "invalid authority wait budget")
+    clock, sleep = clock or time.monotonic, sleep or time.sleep
+    deadline = clock() + timeout
+    identity = validate_source(sources, current, policy_root)
+    fallback = ("native", identity, None)
+    if fresh or not app_id:
+        return fallback
+    try:
+        candidate = find_proof(api, sources, current, identity, policy_root)
+    except (OSError, Rejected, KeyError, TypeError, subprocess.CalledProcessError):
+        return fallback
+    if candidate is None:
+        return fallback
+    while True:
+        try:
+            require(snapshot(api, current["pr"]) == current, "source superseded during authority wait")
+            state = lease_state(api, current, identity, app_id)
+        except OSError:
+            state = "pending"  # Bounded retry; lookup failure cannot authorize reuse.
+        if state == "native":
+            return fallback
+        if state == "authorized":
+            try:
+                proof = verify_run(api, sources, candidate["run_id"], current, identity, policy_root)
+                require(snapshot(api, current["pr"]) == current, "source superseded during authority wait")
+            except (OSError, KeyError, TypeError, subprocess.CalledProcessError):
+                return fallback
+            return "reuse", identity, proof
+        remaining = deadline - clock()
+        if remaining <= 0:
+            print("Windows authority wait expired; native qualification required", flush=True)
+            return fallback
+        print("Windows authority pending for exact current source; waiting on Ubuntu", flush=True)
+        sleep(min(poll, remaining))
 
 
 def decision(api, sources, current, app_id, policy_root, fresh=False):
@@ -329,10 +376,11 @@ def controller(api, sources, policy_root, config, fresh=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["plan", "slot", "proof", "controller"])
+    parser.add_argument("command", choices=["plan", "coordinate", "slot", "proof", "controller"])
     parser.add_argument("--policy-root", default=".")
     parser.add_argument("--config")
     parser.add_argument("--fresh", action="store_true")
+    parser.add_argument("--wait-seconds", type=int, default=AUTHORITY_WAIT)
     args = parser.parse_args()
     if args.command == "controller":
         config = json.loads(Path(args.config).read_text())
@@ -370,7 +418,11 @@ def main():
         require(not expected or expected == current["source"], "superseded queued source")
         # In workers the contract is advisory. The independent controller uses its
         # own pinned files, so editing this verifier cannot self-qualify a PR.
-        mode, identity, _ = decision(api, sources, current, os.environ.get("WINDOWS_PRODUCT_APP_ID"), args.policy_root, fresh)
+        if args.command == "coordinate":
+            mode, identity, _ = coordinate(api, sources, current, os.environ.get("WINDOWS_PRODUCT_APP_ID"),
+                                           args.policy_root, fresh, timeout=args.wait_seconds)
+        else:
+            mode, identity, _ = decision(api, sources, current, os.environ.get("WINDOWS_PRODUCT_APP_ID"), args.policy_root, fresh)
     if args.command == "proof":
         require(sources.git("rev-parse", "HEAD").decode().strip() == current["source"], "native checkout moved")
         sources.git("diff", "--exit-code", current["source"], "--")

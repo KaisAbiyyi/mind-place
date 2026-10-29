@@ -51,10 +51,31 @@ jobs:
         GH_TOKEN: ${{ github.token }}
         WINDOWS_PRODUCT_APP_ID: ${{ vars.WINDOWS_PRODUCT_APP_ID }}
       run: python3 scripts/windows_product_gate.py plan
+  coordinate:
+    name: Await exact-source authority on Ubuntu
+    needs: plan
+    if: needs.plan.outputs.mode == 'native'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      mode: ${{ steps.authority.outputs.mode }}
+    steps:
+    - name: Checkout policy candidate
+      uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      with:
+        fetch-depth: 0
+        persist-credentials: false
+    - name: Bounded authority coordination before allocating Windows
+      id: authority
+      env:
+        GH_TOKEN: ${{ github.token }}
+        EXPECTED_SOURCE: ${{ needs.plan.outputs.source }}
+        WINDOWS_PRODUCT_APP_ID: ${{ vars.WINDOWS_PRODUCT_APP_ID }}
+      run: python3 scripts/windows_product_gate.py coordinate --wait-seconds 420
   verify:
     name: Verify Windows product
-    if: needs.plan.outputs.mode == 'native'
-    needs: plan
+    if: needs.plan.outputs.mode == 'native' && needs.coordinate.outputs.mode == 'native'
+    needs: [plan, coordinate]
     runs-on: windows-latest
     timeout-minutes: 90
     env:
@@ -158,6 +179,7 @@ jobs:
     if: always()
     needs:
     - plan
+    - coordinate
     - verify
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -165,7 +187,7 @@ jobs:
     - name: Report actual execution boundary
       env:
         PLAN: ${{ needs.plan.result }}
-        MODE: ${{ needs.plan.outputs.mode }}
+        MODE: ${{ needs.coordinate.outputs.mode || needs.plan.outputs.mode }}
         NATIVE: ${{ needs.verify.result }}
         EXECUTED: ${{ needs.verify.outputs.executed }}
         DRAFT: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft == true }}
