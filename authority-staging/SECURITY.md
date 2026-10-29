@@ -54,3 +54,32 @@ The reviewed policy repo root must contain **no `.github/workflows/*.yml`** in C
 ## Not performed
 
 No private policy repo, protected env, App/key installation, production required status checks, real merge freeze or queue, fingerprint approval, trusted acceptance, release, merge, native requalification, 100K indexing or owner-local tests.
+
+## Recommended P0 containment: default-closed independent merge freeze (Option B)
+
+**Selected design:** deny all merges on *each actual destination branch* by maintaining a GitHub-native, administrator-enforced **Lock branch** protection, with separately pinned independent-App required checks. Unlike a successful check's textual lease, the branch lock is evaluated by GitHub at the protected branch. This is a **default-closed/manual-admission** design, not a continuously automated merge-authorization service. It trades merge throughput for a smaller trust boundary and does not require merge-queue webhook infrastructure.
+
+The staging-only read-only inspector `scripts/merge_freeze.py` checks that ALL enumerated destination bases are locked, administrators are covered, strict checks include the correct App ID, and visible active rulesets have no bypass actors. Missing permission, unavailable API, unexpected ruleset bypass, changed or unprotected base, or disabled config => **NOT VERIFIED**. The config `policy/merge-freeze.example.json` is deliberately disabled. Inspection alone **cannot** prove actual merge blocking: inherited rules, roles, app bypass, external merge methods, concurrent setting changes and GitHub's server-side enforcement must be challenged with a real otherwise-green pull request in a controlled OWNER/ADMIN test. All inspector results explicitly say `NOT_YET_LIVE_VALIDATED`.
+
+**Security contract (narrower than immediate revocation):** when this frozen state is *live verified and continuously kept locked*, stale successful checks alone cannot authorize a protected-branch update. No controller, timer or expired policy lease can unfreeze it. There is **no unattended merge** in this mode. Every intended merge requires a separately reviewed, strictly serialized owner/admin exception: verify the real freeze again, audit the exact PR source/base/merge tree, current independent policy revision, App identity, source-bound native proof and required IPC, check other outstanding green PRs and bypass paths, then explicitly open and close the admission window. While unlocked, a previously issued success **can** be reused by GitHub and an outage/revocation **cannot be guaranteed** to relock the branch. The admissible contract is therefore *freeze at rest, manually controlled exception*; it is NOT instant revocation or automatic fail-closed on controller outage during an open window. There is no automatic unfreeze or auto-merge.
+
+Before any exception, require a GitHub-native negative live test where a deliberately otherwise-green PR fails to merge under the locked branch, under all relevant ordinary-writer identities; verify readback of the specific target branch and **both** stacked and main target refs. Capture all IDs/settings, actor bypass grants, UI/API outcomes and a fresh post-test readback. If the live test cannot be conducted, keep the branch locked and **P0 OPEN / production NO-GO**.
+
+### Alternatives rejected for this checkpoint
+
+- **A — Merge queue + fresh App acceptance:** A new `merge_group` SHA requires fresh checks for new entries, but an already green group can still merge after controller outage, approval revocation or internal lease expiration. Requires dedicated event delivery, exact group membership/base validation, independent App issuance and live queue/bypass tests. It does not meet immediate-revocation claims.
+- **C — Check issuance / lease protocol only:** GitHub retains completed SUCCESS independently of App policy timestamps. PATCHing failure, a short time-to-live, periodic sweep and credential revocation all depend on reachable authority/API. No documented revocation-on-lease-expiry exists; cannot close this P0.
+
+### Explicit residual failure modes and admission decision
+
+| Case | Read-only staging evidence | GitHub-native condition to verify |
+| --- | --- | --- |
+| Old SUCCESS / expired lease or revoked fingerprint | No false claim of check revocation; still SUCCESS | Independently LOCKED destination blocks merge until explicit manual exception |
+| Controller/App/GitHub API down before new acceptance | No new authorization; freeze-inspector returns NOT VERIFIED when API cannot be read | Previously verified locked state remains server-side; live probe needed |
+| Controller/App down **after** SUCCESS | Old SUCCESS still exists | Lock must stay in place; risk remains if already unlocked |
+| Wrong App, missing or non-strict check, bypass/grant | Synthetic preflight rejects | Independent App check source + no ordinary-writer bypass in real branch/ruleset |
+| Head/base/merge/native inputs/policy changed | Existing frozen source verifier independently rejects for new acceptance | Manual exception must revalidate immutable identities, IPC and current effective merge; no stale proof re-use |
+| Concurrent PR/base update or active green queue | Snapshot can become stale | Freeze remains locked, fresh readback and serialization required before exceptional unlock |
+| Emergency incident/restart | No automatic historical revocation | Freeze persists, recovery requires independent live revalidation and explicit owner unfreeze |
+
+**Do not represent unit tests, this read-only inspector, or an unavailable admin API as live GitHub enforcement.** No production settings have been changed here. Checkpoint 2B remains **NO-GO until live enforcement is independently reviewed**.

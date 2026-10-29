@@ -1,0 +1,12 @@
+{
+  "schema": "mp-p0-merge-freeze/v1",
+  "enabled": false,
+  "repository": "KaisAbiyyi/mind-place",
+  "policy": "windows-product/v1",
+  "app_id": 0,
+  "protected_bases": [
+    "main",
+    "codex/mp-ci-100k-01-20261027"
+  ],
+  "purpose": "staging-only illustration; never counts as production enforcement"
+}

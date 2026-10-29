@@ -30,6 +30,7 @@ jobs:
           python3 -m json.tool policy/contract-inventory.json >/dev/null
           python3 -m json.tool .github/windows-policy/config.json >/dev/null
           python3 -m json.tool policy/proposed-fingerprint.json >/dev/null
+          python3 -m json.tool policy/merge-freeze.example.json >/dev/null
       - name: Install actionlint tagged release for static workflow checks
         run: |
           GOBIN="$RUNNER_TEMP/bin" go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.9

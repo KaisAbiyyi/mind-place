@@ -28,3 +28,12 @@ Previously successful checks continue to exist even after lease expiration, fing
 6. Prepare owner/admin 2B gate only after independent reviewed GitHub merge-freeze or equivalent fail-closed mechanism; no App install, branch protection, policy repo activation or merge within this change.
 
 **Verdict requested:** P1 fixed in reviewed package, or explain specific failed invariant. **P0 OPEN / NO-GO for production until real GitHub enforcement is independently demonstrated.** All staging work remains nonactivated.
+
+## Final P0 admission candidate — independent security review required
+
+- **Recommended:** Option B, permanent default-closed branch lock on all real destination bases with manual, separately audited per-merge exceptions. No unattended green-check merge.
+- **Rejected:** Option A merge queue for this checkpoint (already-successful queue entries retain outage race); Option C (lease/check status does not expire completed SUCCESS).
+- **Code:** new read-only `scripts/merge_freeze.py`, disabled `policy/merge-freeze.example.json`, synthetic negative tests `scripts/tests/test_merge_freeze.py`. The original frozen verifier, native source, workflow template and contract blob inventory remain byte-identical.
+- **Reviewer test:** independently inspect actual branch protection `lock_branch`, `enforce_admins`, strict required context sourced from exact App, inherited/active rulesets and actor bypass. Verify that ordinary-writer REST and UI merge attempts fail with otherwise-green PRs on both stacked base and main. Read back actual protection after testing. Mock verification is explicitly **NOT_YET_LIVE_VALIDATED**.
+- **Residual:** existing SUCCESS is not revoked, outage in an open/manual exception window and privileged administrator changes can still admit stale success; no immediate revocation guarantee. GitHub admin/API permission was unavailable to the connected reviewer; live verification is outstanding.
+- **Verdict:** implementation candidate READY FOR INDEPENDENT REVIEW, **P0 OPEN / Checkpoint 2B NO-GO / production NO-GO** until actual GitHub branch enforcement and bypass tests pass. Do not merge staging payload into product.

@@ -35,3 +35,7 @@ actionlint .github/windows-policy/verifier.yml policy/contracts/.github/workflow
 The single Ubuntu staging workflow in the **product** root, `.github/workflows/mp-2a-security-staging.yml`, runs focused policy tests. It is not copied to the private policy repository and never has authority secrets.
 
 **P0 OPEN / ACTIVATION BLOCKED**: a previously successful check is not automatically revoked on lease expiry, controller outage or fingerprint revocation. See [SECURITY.md](SECURITY.md) and [ACTIVATION.md](ACTIVATION.md). Test success alone does not close this.
+
+## Selected P0 containment candidate
+
+Option B: **default-closed independent branch lock with manual per-merge exception only**. The read-only inspector is `scripts/merge_freeze.py` and its deliberately disabled config example is `policy/merge-freeze.example.json`. The staging inspector **never** publishes a check, changes GitHub settings or unfreezes a branch, and cannot certify actual enforcement. See SECURITY.md/ACTIVATION.md for the required owner-admin live negative test. P0 remains OPEN; Checkpoint 2B NO-GO until independent live validation.
