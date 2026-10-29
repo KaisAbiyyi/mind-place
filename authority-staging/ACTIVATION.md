@@ -24,24 +24,83 @@
 
 13. **OWNER — Before activation, reproduce P0 adversarial live tests**: a completed SUCCESS with expired internal lease; revoked fingerprint; controller outage and restart; stolen/revoked App credentials; wrong App identity; stale/superseded merge; policy change; unavailable GitHub API. Verify that merging is actually prohibited by GitHub while incident freeze is active. A controller error, failed API PATCH or absent App key **does not** remove existing SUCCESS. If this cannot be shown, leave **P0 OPEN / NO-GO**.
 14. **OWNER — On real incident**: execute verified independent **merge-freeze** on each affected protected base; halt new policy publications; enumerate all current PR HEADs and exact App check IDs; with authorized App PATCH affected completed checks to failure and **read them back**; rotate/revoke App key/installation if compromised; revoke fingerprints in separately reviewed policy. If PATCH/API/permissions fail, treat all existing SUCCESS as still valid and keep external merge freeze/incident stop active. Do **not** remove the required App context or relax protections to unblock builds. If GitHub or admin enforcement is unavailable, immediate fail-closed behavior cannot be guaranteed and merges/releases must stop operationally.
-15. **OWNER — Recovery**: independently review new policy commit, verify protected config, revalidate all affected source/merge/check identities and actual live freeze settings, publish fresh App checks as needed, and only then explicitly authorize unfreezing. Preserve incident logs privately; never assume a restarted controller automatically invalidated historical successes. Retarget stacked PR protection and its App-origin requirement when transitioning to main.
+15. **OWNER — Recovery**: independently review new policy commit, verify protected config, revalidate all affected source/merge/check identities and actual live freeze settings, publish fresh App checks as needed, and retain permanent locks. Any future admission requires a stronger separately reviewed design; do not authorize unfreezing under this runbook. Preserve incident logs privately; never assume a restarted controller automatically invalidated historical successes. Retarget stacked PR protection and its App-origin requirement when transitioning to main.
 
 **No privileged action was performed in Checkpoint 2A.** Independent reviewer must issue a documented GO/NO-GO before Checkpoint 2B. Current result is **P1 staging fix candidate, P0 OPEN, activation NO-GO**.
 
-## Default-closed merge freeze — proposed owner/admin live acceptance (NOT EXECUTED)
+## Permanent-lock containment handoff — no exceptions (NOT EXECUTED)
 
-**Chosen Option B; no automated merge-admission claim.** Read `SECURITY.md` before any change. The frozen-at-rest contract deliberately prohibits unattended merges. Config `policy/merge-freeze.example.json` is disabled; the static tool does not create locks or authorize checks.
+**Temporary unlocking is PROHIBITED. No merge authorization exists under this candidate, including after independent approval of these corrections.** Option B is viable only for permanent-lock containment. A stronger admission design requires a new independent review, live enforcement evidence and separate owner authorization. Operational serialization alone never establishes an atomic single-PR guarantee.
 
-1. OWNER (separately authorized): enumerate actual destinations (`main`, current stacked PR base `codex/mp-ci-100k-01-20261027`, plus any other current destinations). Record fresh GitHub API/UI reads and any inherited rulesets/bypass actors; reject unknown/ordinary-writer bypass paths.
-2. OWNER: set **Lock branch** plus **Do not allow bypassing** / administrators enforced on each target, retain all existing required checks, add the correct App-owned check with exact App ID and strict checks. Do not remove existing protections, and do not enable auto merge. Protect against direct push and admins bypass as verified by real GitHub behavior; do not infer correctness from the template.
-3. OWNER: from an independently protected, pinned policy checkout and real admin-readable API, create a separately reviewed enabled config with real App ID and complete target base set. Execute `python3 scripts/merge_freeze.py --config <approved-protected-config.json>` using a read-only API token. Output is a **configuration snapshot only**, not merge permission.
-4. OWNER/REVIEWER: prepare an otherwise-green *disposable* PR on each actual base and test an ordinary-writer UI merge, REST merge attempt and any alternate enabled push/merge path while frozen. They must **fail**; verify current branch head unchanged, check source App ID, resulting response, and server-side enforcement state. No production feature PR or frozen PR #132 should be merged for this test. Re-verify locked state after test and document denied bypass actors.
-5. REVIEWER: independently sign off exact evidence or leave P0 OPEN. Only after this may an explicit **per-merge exception** be requested. Freeze at rest cannot guarantee immediate revocation during an open exception window.
-6. OWNER exception (not authorized here): halt other merges, independently recheck target source/base/merge tree/policy/IPC and live protection, record concrete PR+SHA for the exception, temporarily unlock solely under supervised manual control, perform the one authorized merge, then **immediately re-lock and read back**, and rerun the negative probe. On API failure or unclear protection, no exception is allowed; never use expired success to infer approval. No automatic unfreeze/recovery.
-7. OWNER incident: keep lock enforced, do not trust historic SUCCESS, investigate/revoke/patch checks when possible, and require a fresh independent admission review before any subsequent exception. If freeze was already open when API/admin became unavailable, the platform cannot guarantee automatic closure; declare **residual risk/incident**, halt merge operation, require owner remediation.
+The following is an exact **future owner/admin test handoff**, not authorization to perform administrative actions now. Use a controlled disposable equivalent first; tests against actual `main` and stacked base `codex/mp-ci-100k-01-20261027` require separate owner approval. Never merge #132/#127/#129/#131 as probes.
 
-**Admin verification outstanding.** Neither GitHub's lock enforcement nor ordinary-writer non-bypass has been live tested here. No Checkpoint 2B GO can be claimed from staging CI.
+1. **Exclusive owner/admin + separate reviewer:** name one settings operator, one independent approver, precise repository/destinations, pinned policy/staging SHA, actor/App IDs, time window, test resources and incident contact. Inventory all admins, custom bypass roles, teams, Apps, deploy keys, integrations, merge bots and automation that can update refs/settings. Independently constrain competing actors/credentials and review direct push, force push, fork sync, REST/UI/GraphQL merges and queue paths. A promise to “halt other merges” is operational only. Concurrent or unknown administrators => stop; no exception.
+2. **Read current identities:** independently record repository ID/full name, exact destination ref SHAs, selected PR number/source repository/source SHA, current destination name and SHA, approved effective merge tree, policy revision, fingerprint and source-bound native proof/IPC, current App check ID/App ID/conclusion and current independent approval. Do not use a PR's potentially stale `baseRefOid` as the destination's current SHA; read the branch ref. Any source/base/tree/policy/check/approval change invalidates the record. No approval or revoked/old App check => stop. These are evidence prerequisites, not permission to merge.
+3. **Enumerate competitors completely** using the two read-only queries below for **each destination**, saving every page and rejecting partial data, GraphQL errors, null repository/ref, repeated cursor/entry or unavailable fields. Review every open PR as potentially green, not just those awaiting checks. Explicitly enumerate `autoMergeRequest`, `mergeQueueEntry` and queue entries, including “Merge when ready.” An empty or independently constrained state is required before any future proposed admission; cancellation/dequeue or credential restrictions require separate owner authorization and fresh readback. Empty snapshots alone do not exclude new requests during an open window.
+4. **Independently inspect all protections:** fully paginate repository rulesets with `includes_parents=true`, GET every active detail including inherited rules, inspect sensitive bypass actors with an authorized owner/admin identity, and GET fully paginated `/rules/branches/{encoded-branch}` for effective applicability. Unknown/inaccessible/inconsistent state => NOT VERIFIED. Inspect strict required contexts bound to the real numeric App ID while preserving other checks. Verify lock, administrator enforcement and explicitly disabled fork sync, force pushes and deletions on every destination. The disabled sample is not evidence of protection.
+5. **Only after separate administrative authorization:** establish permanent locks and keep them locked throughout negative probes. Run the read-only inspector from the independently pinned policy checkout using a separately reviewed config with real App ID and complete destination set. Recheck source SHA, **current branch ref SHA**, effective tree, approval, competitors, check state and settings immediately before the owner authorizes each **denial probe**. No unlock or real merge is authorized by this procedure.
+6. **Challenge enforcement:** execute the matrix below with disposable test resources and independently captured actor/API/UI responses. After **every** attempted operation, read back the exact destination ref SHA and every effective protection/ruleset; require unchanged branch SHA and lock still enforced. Evidence must identify repository, destination, PR/source/base/tree, actor/App and timestamps. If a disposable equivalent is used, real-destination equivalence and remaining real-base tests must be independently reviewed, not assumed.
+7. **Incident on any unexpected update/unlock, unavailable readback or relock failure:** halt all merge/release and policy publication activity immediately; notify the named owner/admin and independent reviewer through an authorized incident channel. Treat historical SUCCESS as valid and the branch as potentially open. Owner/admin must restore protection using an available authorized channel, then read back lock/admin/bypass state and destination SHA on every base. If GitHub/API/admin access is unavailable, report containment **NOT VERIFIED**, retain the incident stop and do not retry a merge. Controller outage after unlock has no automatic fail-closed guarantee. Recovery requires new independent approval; no automatic or manual unfreeze under this candidate.
+8. **Reviewer decision:** attach actual denial/readback evidence and declare only the narrowly demonstrated containment guarantee. Keep P0 OPEN until independent real enforcement acceptance; Checkpoint 2B and production remain NO-GO under this cloud-only delivery. No live test alone retroactively makes the former manual-unlock design atomic.
 
-**Negative bypass requirement:** confirm `allow_fork_syncing`, `allow_force_pushes`, and `allow_deletions` are explicitly disabled in every protected base's effective branch protection; the read-only inspector rejects enabled or absent values. Do not treat `lock_branch` alone as evidence of complete admission blocking.
+### Read-only competing-request inventory
 
-**Inspection credentials:** a read-only API method does not imply that a low-privilege App token can see ruleset bypass actors. GitHub may withhold them without ruleset-management access. Owner/admin must supply a separately authorized inspection identity; absence of `bypass_actors` => fail closed, never infer an empty bypass list from the summary endpoint.
+Run for `main`, then the current stacked base (and any other actual destination). `--paginate` follows the explicit connection's `pageInfo`; the owner must check that the final page has `hasNextPage=false`, all cursors progress, and no response contains `errors`. API failure/rate limit/authorization failure is NOT VERIFIED. The `ref` query independently reads the current base identity. Run again immediately before and after each authorized denial probe.
+
+```bash
+REVIEW_BASE=main
+gh api graphql --paginate -f branch="$REVIEW_BASE" -f ref="refs/heads/$REVIEW_BASE" -f query='
+query($branch:String!, $ref:String!, $endCursor:String) {
+  repository(owner:"KaisAbiyyi", name:"mind-place") {
+    id nameWithOwner autoMergeAllowed ref(qualifiedName:$ref) { target { oid } }
+    pullRequests(states:OPEN, baseRefName:$branch, first:100, after:$endCursor) {
+      nodes {
+        number headRefOid baseRefName headRepository { nameWithOwner }
+        autoMergeRequest { enabledAt enabledBy { login } }
+        mergeQueueEntry { id }
+      }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+}'
+gh api graphql --paginate -f branch="$REVIEW_BASE" -f query='
+query($branch:String!, $endCursor:String) {
+  repository(owner:"KaisAbiyyi", name:"mind-place") {
+    id nameWithOwner
+    mergeQueue(branch:$branch) {
+      entries(first:100, after:$endCursor) {
+        nodes { id pullRequest { number headRefOid baseRefName } }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  }
+}'
+```
+
+A null queue must be reconciled with independently inspected branch settings/plan availability; it is not permission to skip “Merge when ready” requests or the per-PR queue fields. Repository auto-merge disabled does not prove queues disabled. Queries enumerate current state; they neither reserve the branch nor bind an admission transaction.
+
+### Negative enforcement matrix
+
+All actual merge/push/settings behavior below is **LIVE VERIFICATION REQUIRED**, not simulated platform proof. Local fixtures can only reject unsafe/malformed snapshots; existing verifier tests cover new-evaluation source/base/tree/App/proof rejection without proving GitHub retracts completed checks.
+
+| Scenario | Required denial / owner evidence |
+| --- | --- |
+| Another otherwise-green PR pending | Enumerate all open PRs; it cannot merge under permanent lock; readback unchanged |
+| Unrelated auto-merge request, including later-green PR | Enumerate request, independently constrain it; it cannot update locked destination |
+| Nonempty merge queue / Merge when ready | Enumerate PR requests and every queue entry; no locked-destination update |
+| Concurrent administrator or settings change | Fence/serialize administrators operationally; any change invalidates snapshot. No claim that GitHub prevents an admin editing settings |
+| Source SHA changes during approval | Reject superseded source/approval; rerun exact identity evaluation, remain locked |
+| Base SHA changes during approval | Reject superseded base/tree; inspect actual ref, remain locked |
+| Previously successful but revoked App check / expired lease | Acknowledge SUCCESS may persist; otherwise-green stale check cannot defeat lock |
+| Stale approved merge tree | Reject tree mismatch; source-head match alone cannot authorize admission |
+| Controller outage before admission | No admission permitted; lock must independently deny otherwise-green PR |
+| Controller outage after unauthorized unlock | Incident: automatic closure is not guaranteed; do not deliberately unlock production to test this |
+| API failure while relocking / uncertain lock readback | Incident; no verified closure until settings and branch SHA independently read back; isolate failure injection from production |
+| Direct push / force push / fork sync / deletion | Test each applicable path/identity under lock; no update or deletion; readback settings/SHA |
+| Wrong App ID or spoofed context | Exact App-origin check requirement rejects unrelated success; verify identity live |
+| Branch protection/ruleset bypass actor | No ordinary-writer bypass; settings-changing admin power remains a residual risk; unknown bypass => stop |
+| Exception without independent approval | Always prohibited; even approved exception is prohibited under this candidate |
+
+### Read-only observations from this correction session
+
+The staging HEAD and frozen PR #132 HEAD matched the request. A complete one-page GraphQL read returned eight open PRs with `autoMergeRequest=null` and `mergeQueueEntry=null`; a separate queue query for each destination returned null. Both actual destination branches still reported `protected=false`, and complete repository ruleset enumeration was empty; containment is not currently established. These are transient observations, not future acceptance evidence. No queue cancellation, App installation, branch protection activation, live merge attempt or privileged enforcement change was performed.
