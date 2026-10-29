@@ -1,0 +1,26 @@
+{
+  "schema": "mp-windows-policy-fingerprint-proposal/v1",
+  "approved": false,
+  "enabled": false,
+  "repository": "KaisAbiyyi/mind-place",
+  "reviewed_head": "3ab2516ae468e2dfe03bac3b26395db44df2db03",
+  "synthetic_merge_commit": "e0610f8522881c93b2dd644d0490ef298534febb",
+  "effective_merge_tree": "4aada364dfa9575d0b74736ab5773e9690c1ecf3",
+  "input_fingerprint": "08c80f2ee6e6bbdfe7bcf47c2d8e5eb35e37a3c839bf215ebd07d9c455a0c11f",
+  "domain": "windows-product/v1/inputs-v2",
+  "contract": {
+    "workflow": ".github/workflows/windows-product.yml",
+    "verifier": "scripts/windows_product_gate.py",
+    "fingerprint_impl": "scripts/windows_product_inputs.py",
+    "required_steps": ".github/windows-policy/native-steps.json",
+    "vault_required": true
+  },
+  "source_blob_sha": {
+    "workflow": "b4d0d2dd4c67eab154773aaaab15616bbced3c64",
+    "verifier": "4688735e7b1ee616d7e65c66ac66b19289054d5f",
+    "inputs": "4117fd03521803057e91a6bf17f7cb422d7a9f6f",
+    "steps": "1086337f15989e828eae0fc69e43447ab10a491e",
+    "template": "5e6dd975c8958e1fc11c47851a7a3591cec91c44"
+  },
+  "review_gate": "Independent reviewer must approve fingerprint and contract bytes before activating config; THIS IS NOT AN APPROVAL."
+}

@@ -1,0 +1,39 @@
+# Checkpoint 2A staging-only verification. This is NOT the independent App authority.
+name: MP-P0 Checkpoint 2A staged authority tests
+'on':
+  push:
+    branches:
+      - codex/mp-p0-authority-2a
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  focused-policy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout immutable staging candidate
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - name: Install pinned YAML validator
+        run: python3 -m pip install --disable-pip-version-check PyYAML==6.0.3
+      - name: Security and contract regressions
+        working-directory: authority-staging
+        run: |
+          python3 -m unittest discover -s scripts/tests -p 'test_windows_product*.py' -v
+          python3 -m unittest discover -s scripts/tests -p 'test_authority_staging_boundaries.py' -v
+      - name: JSON schema and inactive config preflight
+        working-directory: authority-staging
+        run: |
+          python3 -m json.tool .github/windows-policy/native-steps.json >/dev/null
+          python3 -m json.tool .github/windows-policy/config.json >/dev/null
+          python3 -m json.tool policy/proposed-fingerprint.json >/dev/null
+      - name: Install actionlint tagged release for static workflow checks
+        run: |
+          GOBIN="$RUNNER_TEMP/bin" go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.9
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: Validate independent policy and target workflows
+        working-directory: authority-staging
+        run: |
+          actionlint .github/workflows/verify-windows.yml .github/workflows/windows-product.yml

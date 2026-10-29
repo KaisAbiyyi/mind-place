@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fast:
+    name: Fast developer feedback
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Verify repository contract
+        run: npm run verify:repo
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Test reader and browser contracts
+        run: npm run test:web
+      - name: Build reader
+        run: npm run build:web
+      - name: Validate document qualification gate policy
+        run: python3 -m unittest discover -s scripts/tests -p 'test_mp10c_ci_gate.py' -q
+      - name: Validate Windows qualification policy
+        run: |
+          python3 -m pip install --disable-pip-version-check PyYAML==6.0.3
+          python3 -m unittest discover -s scripts/tests -p 'test_windows_product*.py' -v
+      - name: Report draft acceptance boundary
+        if: github.event_name == 'pull_request' && github.event.pull_request.draft == true
+        run: |
+          echo '### Development checks only' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Full Windows product, security/native and storage qualification are PENDING for this Draft PR. A skipped native job does not certify acceptance. Switch to Ready for Review after freezing the candidate, or dispatch final qualification explicitly.' >> "$GITHUB_STEP_SUMMARY"
+
+  rust-fast:
+    name: Fast Rust compile and vault feedback
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      CARGO_INCREMENTAL: 0
+      CARGO_BUILD_JOBS: 2
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install pinned Rust 1.90
+        run: |
+          rustup toolchain install 1.90.0 --profile minimal --component rustfmt --no-self-update
+          rustup default 1.90.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: mind-place-fast-rust-190
+      - name: Rust format
+        run: cargo fmt --all -- --check
+      - name: Compile production core crates
+        run: cargo check --locked -p mind-place-security -p mind-place-state -p mind-place-index -p mind-place-integration
+      - name: Compile available SQLCipher and vault features
+        run: |
+          python3 - <<'PY'
+          import json
+          import subprocess
+          data = json.loads(subprocess.check_output(
+              ["cargo", "metadata", "--no-deps", "--format-version", "1"]))
+          packages = {p["name"]: p["features"] for p in data["packages"]}
+          for package, feature in (
+              ("mind-place-state", "sqlcipher-preview"),
+              ("mind-place-index", "sqlcipher-preview"),
+              ("mind-place-integration", "vault-mcp"),
+          ):
+              if feature in packages.get(package, {}):
+                  subprocess.run(["cargo", "check", "--locked", "-p", package,
+                                  "--features", feature], check=True)
+              else:
+                  print(f"Feature {package}/{feature} absent at this source SHA; "
+                        "normal core compilation remains mandatory")
+          PY
+      - name: Focused security tests
+        run: cargo test --locked -p mind-place-security --lib
