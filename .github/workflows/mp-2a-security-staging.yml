@@ -21,12 +21,13 @@ jobs:
       - name: Security and contract regressions
         working-directory: authority-staging
         run: |
-          python3 -m unittest discover -s scripts/tests -p 'test_windows_product*.py' -v
-          python3 -m unittest discover -s scripts/tests -p 'test_authority_staging_boundaries.py' -v
+          python3 scripts/staging_layout.py
+          python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
       - name: JSON schema and inactive config preflight
         working-directory: authority-staging
         run: |
-          python3 -m json.tool .github/windows-policy/native-steps.json >/dev/null
+          python3 -m json.tool policy/contracts/.github/windows-policy/native-steps.json >/dev/null
+          python3 -m json.tool policy/contract-inventory.json >/dev/null
           python3 -m json.tool .github/windows-policy/config.json >/dev/null
           python3 -m json.tool policy/proposed-fingerprint.json >/dev/null
       - name: Install actionlint tagged release for static workflow checks
@@ -36,4 +37,4 @@ jobs:
       - name: Validate independent policy and target workflows
         working-directory: authority-staging
         run: |
-          actionlint .github/workflows/verify-windows.yml .github/workflows/windows-product.yml
+          actionlint .github/windows-policy/verifier.yml policy/contracts/.github/workflows/*.yml

@@ -19,7 +19,7 @@ import mp10c_prerequisite_wait as coordinator
 
 class WorkflowTests(unittest.TestCase):
     def setUp(self):
-        self.workflow = yaml.safe_load((ROOT / ".github/workflows/windows-product.yml").read_text())
+        self.workflow = yaml.safe_load((ROOT / "policy/contracts/.github/workflows/windows-product.yml").read_text())
         self.jobs = self.workflow["jobs"]
         self.steps = self.jobs["verify"]["steps"]
 
@@ -52,7 +52,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("verify", self.jobs["candidate"]["needs"])
 
     def test_trusted_required_steps_exactly_cover_real_native_workflow(self):
-        contract = json.loads((ROOT / ".github/windows-policy/native-steps.json").read_text())
+        contract = json.loads((ROOT / "policy/contracts/.github/windows-policy/native-steps.json").read_text())
         names = contract["common"] + contract["vault"]
         self.assertCountEqual(names, [step["name"] for step in self.steps])
         self.assertEqual(len(set(names)), len(names))
@@ -77,7 +77,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("independent App acceptance is required", report)
 
     def test_fast_workflow_cannot_trigger_native_build(self):
-        fast = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
+        fast = yaml.safe_load((ROOT / "policy/contracts/.github/workflows/ci.yml").read_text())
         self.assertEqual(set(fast["jobs"]), {"fast", "rust-fast"})
         self.assertNotIn("windows-latest", str(fast))
 
@@ -97,7 +97,7 @@ class WorkflowTests(unittest.TestCase):
         fast = {"id": 1, "run_attempt": 1, "head_sha": source, "status": "completed", "conclusion": "success",
                 "path": ".github/workflows/ci.yml"}
         native = {**fast, "id": 2, "path": product_path}
-        rust = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())["jobs"]["rust-fast"]
+        rust = yaml.safe_load((ROOT / "policy/contracts/.github/workflows/ci.yml").read_text())["jobs"]["rust-fast"]
         def job(name, steps):
             return {"name": name, "status": "completed", "conclusion": "success", "steps": [
                 {"name": step["name"], "conclusion": "success"} for step in steps if "name" in step]}
@@ -121,7 +121,7 @@ class WorkflowTests(unittest.TestCase):
         def run(identifier, path):
             return {"id": identifier, "run_attempt": 1, "head_sha": source, "status": "completed",
                     "conclusion": "success", "path": path}
-        rust = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())["jobs"]["rust-fast"]
+        rust = yaml.safe_load((ROOT / "policy/contracts/.github/workflows/ci.yml").read_text())["jobs"]["rust-fast"]
         def job(name, names):
             return {"name": name, "status": "completed", "conclusion": "success",
                     "steps": [{"name": n, "conclusion": "success"} for n in names]}

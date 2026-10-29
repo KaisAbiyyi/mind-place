@@ -1,31 +1,30 @@
-# Checkpoint 2A independent-review handoff
-**Decision: PREPARATION CANDIDATE / PRODUCTION ACTIVATION BLOCKED.** All files are nonactivated and staged in the target repo. A separately administered policy repository and App are NOT provisioned.
+# Checkpoint 2A — corrected candidate for INDEPENDENT REVIEW
 
-## Frozen target evidence
-- PR #132 draft: https://github.com/KaisAbiyyi/mind-place/pull/132
-- HEAD: `3ab2516ae468e2dfe03bac3b26395db44df2db03`
-- Native source synthetic merge: `e0610f8522881c93b2dd644d0490ef298534febb`; effective tree: `4aada364dfa9575d0b74736ab5773e9690c1ecf3`
-- Native input fingerprint: `08c80f2ee6e6bbdfe7bcf47c2d8e5eb35e37a3c839bf215ebd07d9c455a0c11f` computed from immutable GitHub recursive tree entry mode/blob SHA/path with pinned `windows_product_inputs.py` algorithm; independently recalculate before approval.
-- Prior native run: https://github.com/KaisAbiyyi/mind-place/actions/runs/40812460976 attempt 1 Windows Product and SQLCipher hosted success. This run was not App acceptance and was not rerun here.
+**STAGING-ONLY / DO NOT MERGE INTO PRODUCT. P0 OPEN / ACTIVATION BLOCKED.** This is not a production App acceptance or a deployment authorization.
 
-## Static sources
-- Native workflow Git blob: `b4d0d2dd4c67eab154773aaaab15616bbced3c64`
-- Verifier Git blob: `4688735e7b1ee616d7e65c66ac66b19289054d5f`
-- Inputs Git blob: `4117fd03521803057e91a6bf17f7cb422d7a9f6f`
-- Native required steps: `1086337f15989e828eae0fc69e43447ab10a491e`
-- Controller workflow template: `5e6dd975c8958e1fc11c47851a7a3591cec91c44`.
-All are *Git blob IDs* of frozen source objects, not SHA-256; do not interchange these with proof archive SHA-256. Store signed/independently reviewed inventory at deployment.
+## Frozen evidence preserved
 
-## Reviewer checklist
-1. Compare staged copies to original blob IDs and exact source at PR HEAD + merge; verify all required native jobs/steps and IPC zero-test guard.
-2. Inspect `scripts/windows_product_gate.py` for fail-closed semantics, source/race checks, native contract parity, artifact digest and App identity.
-3. Run `scripts/tests/test_windows_product*.py` and `test_authority_staging_boundaries.py`; confirm negative scenarios around stale SHA/merge, wrong App, wrong attempt, corrupted ZIP, skipped job, zero tests, approved fingerprint, protection unavailable.
-4. Inspect policy workflow with actionlint, protected environment/checkout behavior, pinned action versions, and App permissions.
-5. Review controller outage / stale SUCCESS persistence and independent policy-revocation handling before considering production activation.
-6. Confirm actual independent policy repo ownership/access and App ID/branch protection against BOTH stacked base and main at release phase.
+- Product PR: https://github.com/KaisAbiyyi/mind-place/pull/132; HEAD `3ab2516ae468e2dfe03bac3b26395db44df2db03`, stacked base `codex/mp-ci-100k-01-20261027`.
+- Effective merge tree `4aada364dfa9575d0b74736ab5773e9690c1ecf3`, fingerprint `08c80f2ee6e6bbdfe7bcf47c2d8e5eb35e37a3c839bf215ebd07d9c455a0c11f`.
+- Native previously: https://github.com/KaisAbiyyi/mind-place/actions/runs/40812460976 / attempt 1; not rerun and not independent authority.
+- Source/verifier/inputs/native-steps blob IDs pinned by `policy/contract-inventory.json`, preserved byte-for-byte in `policy/contracts`.
+- Live `scripts/windows_product_gate.py` and `scripts/windows_product_inputs.py` are unchanged original bytes. The controller TEMPLATE only adds `--policy-root policy/contracts`.
 
-## Unperformed administrative steps
-Separate private repo, protected env, approved fingerprint, owner-held App key, App installation, required checks, main changes, production activation, native reruns, owner-local tests. The dedicated policy repository cannot be created through the available GitHub connector in this run, so only the staging payload has been prepared.
+## P1 workflow isolation candidate
 
-## Known risk
-**P0 for production:** Existing completed green GitHub check runs do not expire when the controller stops. The gate's worker lease-expiry checks do not change GitHub branch-protection interpretation. Requires explicit lifecycle mitigation before enforcing as a production security gate. Future independent reviewer may identify further issues.
+Four product/controller workflow copies formerly under staging `.github/workflows/` have been removed. Exact frozen product snapshot files are now in inert `policy/contracts/.github/workflows/`; the unpromoted controller template is `.github/windows-policy/verifier.yml`. The deploy validator enforces no active root workflow, six approved Git blob IDs, disallows missing/extra/ambiguous/traversing/symlink contracts and checks the controller root mapping. Independent deployment into a private policy repository remains unperformed.
+
+## P0 lifecycle: documented BLOCKER, not resolved
+
+Previously successful checks continue to exist even after lease expiration, fingerprint revocation, App credential revocation or controller outage. Source verification is fail-closed for a *new* evaluation, but no immediate historic check revocation is guaranteed without an independently enforced merge freeze or a separately proven fresh merge-admission design. A merge queue with new queue SHA checks is a candidate requiring independent implementation and live tests, NOT an activated feature. Do not close P0 on green synthetic tests.
+
+## Independent reviewer checklist
+
+1. Re-fetch source blobs and confirm `policy/contract-inventory.json` vs frozen PR HEAD and effective merge; verify target bytes and native execution step manifest/IPC.
+2. Check path isolation and exact controller `--policy-root policy/contracts`; reject direct-copy activation of any target workflow. Check source verifier has not been modified.
+3. Review adversarial `test_deployment_layout.py`, existing 58+ Windows Product tests, added stale-success models and 2A staging boundaries; inspect both negative proof tests for zero IPC matches.
+4. Inspect updated Ubuntu-only GitHub staging CI, actionlint, JSON, source blob inventory and independent reviewer report; do not repeat native, SQLCipher or scale qualification.
+5. Independently validate platform behavior: old SUCCESS on same SHA, new SHA, new merge source, revoked fingerprint, policy revision, wrong App, outage/restart/API failure. Record actual enforcement gaps.
+6. Prepare owner/admin 2B gate only after independent reviewed GitHub merge-freeze or equivalent fail-closed mechanism; no App install, branch protection, policy repo activation or merge within this change.
+
+**Verdict requested:** P1 fixed in reviewed package, or explain specific failed invariant. **P0 OPEN / NO-GO for production until real GitHub enforcement is independently demonstrated.** All staging work remains nonactivated.

@@ -59,7 +59,7 @@ class GateTests(unittest.TestCase):
             for target in (self.policy, self.repo):
                 file = target / name
                 file.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(ROOT / name, file)
+                shutil.copyfile(ROOT / 'policy/contracts' / name, file)
         self.git("init", "-q")
         self.git("config", "user.name", "Fixture")
         self.git("config", "user.email", "fixture@example.invalid")
@@ -81,7 +81,7 @@ class GateTests(unittest.TestCase):
         self.proof = {"schema": gate.SCHEMA, "policy": gate.POLICY, "repository": API.repo,
                       **self.current, "fingerprint": self.identity, "run_id": 7, "attempt": 1}
         self.steps = [{"name": name, "status": "completed", "conclusion": "success"}
-                      for name in json.loads((ROOT / ".github/windows-policy/native-steps.json").read_text())["common"]]
+                      for name in json.loads((ROOT / "policy/contracts/.github/windows-policy/native-steps.json").read_text())["common"]]
         self.artifact = {"id": 8, "name": "windows-product-proof-7-1", "expired": False,
                          "workflow_run": {"id": 7, "head_sha": self.head, "repository_id": 123, "head_repository_id": 123}}
         self.api.data = {
@@ -525,6 +525,56 @@ class GateTests(unittest.TestCase):
         self.assertEqual(self.decide(), "native")
         self.run.update(status="completed", conclusion="success")
         self.assertEqual(self.decide(), "reuse")
+
+
+    def test_existing_success_with_expired_lease_remains_green_in_github_model(self):
+        self.check.update(id=99, status="completed", conclusion="success")
+        self.lease["expires"] = 0
+        self.check["output"]["text"] = json.dumps(self.lease)
+        self.assertEqual(gate.lease_state(self.api, self.current, self.identity, 42), "native")
+        self.assertEqual(self.check["conclusion"], "success")
+        self.assertFalse(self.api.writes)  # Lease evaluation is not GitHub revocation.
+
+    def test_fingerprint_revoked_while_controller_down_cannot_retroactively_patch(self):
+        self.check.update(id=99, status="completed", conclusion="success")
+        self.config["approved_fingerprints"] = []
+        self.assertEqual(self.check["conclusion"], "success")
+        self.assertFalse(self.api.writes)  # No controller; native decision != old GitHub status.
+
+    def test_wrong_app_success_cannot_be_revoked_as_own_and_cannot_satisfy_app_anchor(self):
+        self.check.update(id=99, status="completed", conclusion="success")
+        self.check["app"]["id"] = 43
+        self.config["approved_fingerprints"] = []
+        gate.controller(self.api, self.sources, self.policy, self.config)
+        self.assertEqual(self.check["conclusion"], "success")
+        self.assertFalse(self.api.writes)  # Wrong App success remains but App 42 is required.
+
+    def test_failed_api_revocation_leaves_previous_success_unchanged(self):
+        self.check.update(id=99, status="completed", conclusion="success")
+        self.config["approved_fingerprints"] = []
+        original = self.api.request
+        def unavailable_write(path, data=None, method=None, binary=False):
+            if data is not None:
+                raise urllib.error.URLError("GitHub API write unavailable")
+            return original(path, data, method, binary)
+        with patch.object(self.api, "request", side_effect=unavailable_write):
+            with self.assertRaises(urllib.error.URLError):
+                gate.controller(self.api, self.sources, self.policy, self.config)
+        self.assertEqual(self.check["conclusion"], "success")
+        self.assertFalse(self.api.writes)
+
+    def test_policy_revision_without_contract_reapproval_rejects_new_evaluation(self):
+        self.advance(".github/workflows/windows-product.yml", "name: modified dangerous execution")
+        with self.assertRaisesRegex(gate.Rejected, "execution contract"):
+            gate.validate_source(self.sources, self.current, self.policy)
+
+    def test_controller_restart_requires_explicit_reconciliation_not_lease_magic(self):
+        self.check.update(id=99, status="completed", conclusion="success")
+        self.lease["expires"] = 0
+        self.check["output"]["text"] = json.dumps(self.lease)
+        self.assertEqual(gate.lease_state(self.api, self.current, self.identity, 42), "native")
+        self.assertFalse(self.api.writes)
+        self.assertEqual(self.check["conclusion"], "success")  # Still green until App writes.
 
 
 if __name__ == "__main__":

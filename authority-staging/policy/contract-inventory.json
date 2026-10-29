@@ -1,0 +1,20 @@
+{
+  "schema": "mp-authority-contract-inventory/v1",
+  "reviewed_target_head": "3ab2516ae468e2dfe03bac3b26395db44df2db03",
+  "effective_merge_tree": "4aada364dfa9575d0b74736ab5773e9690c1ecf3",
+  "contract_root": "policy/contracts",
+  "target_blobs": {
+    ".github/workflows/ci.yml": "631e5fbf238c016a47eb6a0e50b15710e8f7df45",
+    ".github/workflows/windows-product.yml": "b4d0d2dd4c67eab154773aaaab15616bbced3c64",
+    ".github/workflows/mp9b-sqlcipher-qualification.yml": "78e6b374bfaf252cb9129034d1040be7e0178c0d",
+    ".github/windows-policy/native-steps.json": "1086337f15989e828eae0fc69e43447ab10a491e",
+    "scripts/windows_product_gate.py": "4688735e7b1ee616d7e65c66ac66b19289054d5f",
+    "scripts/windows_product_inputs.py": "4117fd03521803057e91a6bf17f7cb422d7a9f6f"
+  },
+  "controller_template": {
+    "path": ".github/windows-policy/verifier.yml",
+    "blob": "5e6dd975c8958e1fc11c47851a7a3591cec91c44"
+  },
+  "staging_only": true,
+  "independent_approval": false
+}

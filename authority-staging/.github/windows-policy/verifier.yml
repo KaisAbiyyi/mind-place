@@ -50,4 +50,4 @@ jobs:
           args=()
           if [ "$REQUIRE_FRESH" = true ]; then args+=(--fresh); fi
           python3 scripts/windows_product_gate.py controller \
-            --config .github/windows-policy/config.json "${args[@]}"
+            --policy-root policy/contracts --config .github/windows-policy/config.json "${args[@]}"
