@@ -196,7 +196,7 @@ class GateTests(unittest.TestCase):
                 self.verify()
 
     def test_new_unchanged_head_waits_on_ubuntu_then_avoids_windows(self):
-        workflow = yaml.safe_load((ROOT / gate.WORKFLOW).read_text())
+        workflow = yaml.safe_load((ROOT / "policy/contracts" / gate.WORKFLOW).read_text())
         self.assertIn("coordinate", workflow["jobs"], "new-head lease race needs a pre-native coordination stage")
         self.advance("docs/windows-product-gate-handoff.md", "unchanged native closure")
         check_path = f"/commits/{self.current['head']}/check-runs?check_name=Windows%20Product%20%2F%20trusted%20acceptance"

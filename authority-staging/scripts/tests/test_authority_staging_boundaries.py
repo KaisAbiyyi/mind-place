@@ -56,7 +56,7 @@ class StagingBoundaryTests(unittest.TestCase):
     def test_stale_success_risk_must_be_documented(self):
         sec = (ROOT / "SECURITY.md").read_text()
         self.assertIn("previously successful check", sec)
-        self.assertIn("does not honor the lease timestamp", sec)
+        self.assertIn("do not honor the lease timestamp", sec)
         self.assertIn("controller outage", sec)
         self.assertIn("P0 OPEN", sec)
 

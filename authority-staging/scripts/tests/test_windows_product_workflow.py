@@ -105,7 +105,8 @@ class WorkflowTests(unittest.TestCase):
                 2: [job(self.jobs["verify"]["name"], self.steps)]}
         def fetch(run):
             return {"total_count": len(jobs[run["id"]]), "jobs": jobs[run["id"]]}
-        self.assertEqual(scale.product_workflow(), product_path)
+        self.assertTrue((ROOT / "policy/contracts" / product_path).is_file())
+        self.assertEqual(scale.product_workflow(), ".github/workflows/ci.yml")
         scale.require_prerequisites([fast, native], source, vault=False, fetch_jobs=fetch, product_path=product_path)
         self.assertEqual(coordinator.classify([fast, native], source, False, fetch, product_path)[0], "ready")
         self.assertEqual(coordinator.classify([fast], source, False, fetch, product_path)[0], "pending")
