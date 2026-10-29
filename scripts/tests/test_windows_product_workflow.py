@@ -173,7 +173,10 @@ class WorkflowTests(unittest.TestCase):
                 commands = log.read_text().splitlines()
                 self.assertEqual(len(commands), count)
                 if count == 2:
-                    self.assertEqual(commands[-1], "test -p mind-place --bin mind-place native_capture_ipc::qualification -- --nocapture")
+                    # PowerShell functions consume the '--' argument separator;
+                    # the real native-command spelling is checked above. This
+                    # substitute exercises qualification control flow only.
+                    self.assertEqual(commands[-1], "test -p mind-place --bin mind-place native_capture_ipc::qualification --nocapture")
 
 
 if __name__ == "__main__":
