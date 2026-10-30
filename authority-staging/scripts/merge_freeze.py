@@ -130,9 +130,16 @@ def _rulesets(api):
                  source == owner["login"]),
                 "unknown or inconsistent ruleset source; owner/admin inspection required")
 
+        # The inventory status selects active candidates; inactive summaries
+        # need no detail because they cannot contribute effective active rules.
+        # Active candidates are confirmed against the authoritative detail below.
+        if summary_state != "active":
+            inventory[rid] = {**summary, "enforcement": summary_state}
+            continue
+
         # Inventory summaries intentionally omit detail-only fields such as
-        # target. Fetch every detail so its enforcement, target and identity
-        # are authoritative and a stale summary cannot hide an active ruleset.
+        # target. Fetch the active detail for authoritative target, enforcement,
+        # conditions, rules and independently visible bypass actors.
         detail = api.request(f"/rulesets/{rid}?includes_parents=true")
         require(type(detail) is dict, "malformed ruleset detail")
         require(type(detail.get("id")) is int and detail["id"] == rid and

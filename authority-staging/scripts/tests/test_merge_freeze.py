@@ -173,16 +173,10 @@ class MergeFreezeTests(unittest.TestCase):
         self.api.ruleset_detail[rid] = detail
         return summary
 
-    def test_inactive_rulesets_are_detail_checked_but_need_no_bypass_visibility(self):
+    def test_disabled_and_evaluate_inventory_entries_are_not_expanded(self):
         self.api.rulesets = [self.ruleset(state="disabled"), self.ruleset(101, "evaluate")]
-        self.api.ruleset_detail[100].pop("bypass_actors")
-        self.api.ruleset_detail[101].pop("bypass_actors")
         audit(self.api, self.cfg)
-        detail_calls = [p for p, _, _ in self.api.calls if p.startswith("/rulesets/")]
-        self.assertEqual(detail_calls, [
-            "/rulesets/100?includes_parents=true",
-            "/rulesets/101?includes_parents=true",
-        ])
+        self.assertFalse(any(p.startswith("/rulesets/") for p, _, _ in self.api.calls))
 
     def test_documented_inventory_summary_without_target_enabled_matches_active_detail(self):
         summary = self.ruleset()
