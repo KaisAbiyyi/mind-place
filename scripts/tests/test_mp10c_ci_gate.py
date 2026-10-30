@@ -283,7 +283,9 @@ class AcceptancePrerequisiteTests(unittest.TestCase):
 
         docs = (root / "docs/implementation-plan/mp-ci-100k-01-qualification-gate.md").read_text()
         sequence = docs.split("### Mandatory operator sequence: native CI first, MP-10C second", 1)[1]
-        self.assertLess(sequence.index("Dispatch the CI workflow"), sequence.index("Dispatch MP-10C"))
+        ci_dispatch = sequence.index(".github/workflows/ci.yml")
+        scale_dispatch = sequence.index(".github/workflows/mp-10c-scale.yml")
+        self.assertLess(ci_dispatch, scale_dispatch)
         self.assertIn("does not automatically dispatch CI", sequence)
         self.assertIn("native contract fingerprint", sequence)
         self.assertIn("explicitly PR-bound workflow_dispatch", docs)
