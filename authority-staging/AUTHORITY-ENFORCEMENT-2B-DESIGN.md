@@ -54,9 +54,13 @@ The architecture must not claim stronger guarantees than these.
 
 ## 2. Current architecture and repository-verified state
 
-### 2.1 Accepted 2A starting point
+### 2.1 Owner-designated 2A starting point and acceptance-record discrepancy
 
-The supplied starting commit exists and is the current tip of `codex/mp-p0-authority-2a`:
+The supplied starting commit exists and is the current tip of `codex/mp-p0-authority-2a`. The execution brief supplied for this checkpoint describes the bounded 2A correction as accepted after independent code review. However, the latest visible comment in [Issue #133](https://github.com/KaisAbiyyi/mind-place/issues/133) still says not to treat the implementation/CI result as Checkpoint 2A acceptance; the inspected issue thread contains no later acceptance update. This is an unresolved record discrepancy.
+
+This design uses `c861bc14c2179407ad71959fec836bf3bf77da0c` as the owner-designated starting point, but does not independently assert formal 2A acceptance or production security acceptance. P0 remains OPEN in either case.
+
+The supplied starting commit is:
 
 - Branch: `codex/mp-p0-authority-2a`
 - HEAD: `c861bc14c2179407ad71959fec836bf3bf77da0c`
@@ -345,6 +349,8 @@ References:
 ---
 
 ## 5. Architecture alternatives
+
+**Option-label note:** A/B/C in this document follow the explicit Checkpoint 2B execution brief: A = PR-head checks, B = mandatory merge queue, C = App-mediated merge authorization. Older staging documents use legacy option labels for different proposals; no legacy label mapping is assumed.
 
 ### A. PR-head check enforcement
 
@@ -984,6 +990,7 @@ No step in this sequence is executed by Checkpoint 2B design work.
 | Who is the root settings authority? | Owners can change enforcement | Require explicit trusted-owner list and independent audit |
 | Accept a privileged Merge Broker App? | Broker compromise can cause merges | Keep Checker App read-only for merge purposes |
 | Use merge queue for integration? | Queue improves code freshness but not revocation | Do not treat queue as authorization |
+| Formal 2A acceptance record reconciled? | Issue #133's latest visible comment conflicts with the execution brief | Keep c861 as the owner-designated baseline; do not infer production acceptance |
 
 ---
 
