@@ -162,19 +162,74 @@ class MergeFreezeTests(unittest.TestCase):
         self.reject("strict")
 
     def ruleset(self, rid=100, state="active", source_type="Repository", source=None):
-        summary = {"id": rid, "name": "freeze", "enforcement": state,
-                   "source_type": source_type, "source": source or self.api.repo,
-                   "target": "branch"}
-        detail = {**summary, "bypass_actors": [],
+        inventory_state = {"active": "enabled", "disabled": "disabled",
+                           "evaluate": "evaluate"}.get(state, state)
+        summary = {"id": rid, "name": "freeze", "enforcement": inventory_state,
+                   "source_type": source_type, "source": source or self.api.repo}
+        detail = {**summary, "enforcement": state, "target": "branch",
+                  "bypass_actors": [],
                   "conditions": {"ref_name": {"include": ["~ALL"], "exclude": []}},
                   "rules": [{"type": "update"}]}
         self.api.ruleset_detail[rid] = detail
         return summary
 
-    def test_empty_complete_inventory_and_inactive_rulesets(self):
+    def test_inactive_rulesets_are_detail_checked_but_need_no_bypass_visibility(self):
         self.api.rulesets = [self.ruleset(state="disabled"), self.ruleset(101, "evaluate")]
+        self.api.ruleset_detail[100].pop("bypass_actors")
+        self.api.ruleset_detail[101].pop("bypass_actors")
         audit(self.api, self.cfg)
-        self.assertFalse(any(p.startswith("/rulesets/") for p, _, _ in self.api.calls))
+        detail_calls = [p for p, _, _ in self.api.calls if p.startswith("/rulesets/")]
+        self.assertEqual(detail_calls, [
+            "/rulesets/100?includes_parents=true",
+            "/rulesets/101?includes_parents=true",
+        ])
+
+    def test_documented_inventory_summary_without_target_enabled_matches_active_detail(self):
+        summary = self.ruleset()
+        self.assertEqual(summary["enforcement"], "enabled")
+        self.assertNotIn("target", summary)
+        self.assertEqual(self.api.ruleset_detail[100]["enforcement"], "active")
+        self.api.rulesets = [summary]
+        audit(self.api, self.cfg)
+        self.assertIn(("/rulesets/100?includes_parents=true", None, None), self.api.calls)
+
+    def test_inventory_target_is_not_authoritative(self):
+        summary = self.ruleset()
+        summary["target"] = "not-a-detail-target"
+        self.api.rulesets = [summary]
+        audit(self.api, self.cfg)
+        self.api.ruleset_detail[100]["target"] = "not-a-detail-target"
+        self.reject("detailed ruleset target")
+
+    def test_detail_identity_mismatches_are_rejected(self):
+        for field, value in (("id", 101), ("name", "other"), ("source_type", "Organization"),
+                             ("source", "other/repo")):
+            with self.subTest(field=field):
+                summary = self.ruleset()
+                self.api.rulesets = [summary]
+                self.api.ruleset_detail[100][field] = value
+                self.reject("identity")
+
+    def test_detail_enforcement_unknown_or_inconsistent_is_rejected(self):
+        summary = self.ruleset()
+        self.api.rulesets = [summary]
+        self.api.ruleset_detail[100]["enforcement"] = "enabled"
+        self.reject("detailed ruleset enforcement")
+        summary = self.ruleset()
+        self.api.rulesets = [summary]
+        self.api.ruleset_detail[100]["enforcement"] = "disabled"
+        self.reject("summary/detail enforcement")
+
+    def test_malformed_detail_response_is_rejected(self):
+        self.api.rulesets = [self.ruleset()]
+        self.api.ruleset_detail[100] = []
+        self.reject("malformed ruleset detail")
+
+    def test_active_ruleset_with_any_bypass_actor_is_rejected(self):
+        self.api.rulesets = [self.ruleset()]
+        self.api.ruleset_detail[100]["bypass_actors"] = [
+            {"actor_type": "RepositoryRole", "actor_id": 5, "bypass_mode": "always"}]
+        self.reject("bypass")
 
     def multipage(self):
         first = [self.ruleset(rid) for rid in range(1, 101)]
@@ -221,6 +276,10 @@ class MergeFreezeTests(unittest.TestCase):
         for state in (None, "unknown", "ACTIVE"):
             self.api.rulesets = [self.ruleset(state=state)]
             self.reject("enforcement")
+        summary = self.ruleset()
+        summary["enforcement"] = "active"
+        self.api.rulesets = [summary]
+        self.reject("enforcement")
         for state in ("active", "disabled"):
             first = self.ruleset()
             self.api.rulesets = [first, {**first, "enforcement": state}]

@@ -91,6 +91,21 @@ def _pages(api, path):
     raise Rejected("API pagination limit; no partial evidence accepted")
 
 
+def _normalize_summary_enforcement(value):
+    """Normalize the documented ruleset inventory representation."""
+    states = {"enabled": "active", "disabled": "disabled", "evaluate": "evaluate"}
+    require(type(value) is str and value in states,
+            "unknown ruleset inventory enforcement")
+    return states[value]
+
+
+def _normalize_detail_enforcement(value):
+    """Validate the detailed endpoint's enforcement vocabulary."""
+    require(type(value) is str and value in ("active", "disabled", "evaluate"),
+            "unknown detailed ruleset enforcement")
+    return value
+
+
 def _rulesets(api):
     repository = api.request("/")
     require(type(repository) is dict and repository.get("full_name") == api.repo and
@@ -102,33 +117,46 @@ def _rulesets(api):
     summaries = _pages(api, "/rulesets?includes_parents=true")
     inventory = {}
     for summary in summaries:
-        require(type(summary) is dict, "malformed ruleset")
+        require(type(summary) is dict, "malformed ruleset inventory entry")
         rid = summary.get("id")
         require(type(rid) is int and rid > 0, "uninspectable ruleset ID")
         require(rid not in inventory, "duplicate or inconsistent ruleset entry")
-        state = summary.get("enforcement")
-        require(state in ("active", "disabled", "evaluate"), "unknown effective enforcement")
+        name = summary.get("name")
+        require(isinstance(name, str) and bool(name), "uninspectable ruleset name")
+        summary_state = _normalize_summary_enforcement(summary.get("enforcement"))
         kind, source = summary.get("source_type"), summary.get("source")
         require((kind == "Repository" and source == api.repo) or
-                (kind == "Organization" and owner["type"] == "Organization" and source == owner["login"]),
+                (kind == "Organization" and owner["type"] == "Organization" and
+                 source == owner["login"]),
                 "unknown or inconsistent ruleset source; owner/admin inspection required")
-        require(summary.get("target") in ("branch", "tag", "push") and
-                isinstance(summary.get("name"), str) and summary["name"], "incomplete ruleset summary")
-        inventory[rid] = summary
-        if state != "active":
-            continue
+
+        # Inventory summaries intentionally omit detail-only fields such as
+        # target. Fetch every detail so its enforcement, target and identity
+        # are authoritative and a stale summary cannot hide an active ruleset.
         detail = api.request(f"/rulesets/{rid}?includes_parents=true")
-        require(type(detail) is dict and type(detail.get("id")) is int and all(
-                detail.get(key) == summary[key] for key in
-                ("id", "name", "enforcement", "source_type", "source", "target")),
-                "incomplete or inconsistent active ruleset detail")
+        require(type(detail) is dict, "malformed ruleset detail")
+        require(type(detail.get("id")) is int and detail["id"] == rid and
+                detail.get("name") == name and detail.get("source_type") == kind and
+                detail.get("source") == source,
+                "incomplete or inconsistent ruleset detail identity")
+        detail_state = _normalize_detail_enforcement(detail.get("enforcement"))
+        require(detail_state == summary_state,
+                "inconsistent ruleset summary/detail enforcement")
+        target = detail.get("target")
+        require(target in ("branch", "tag", "push"),
+                "incomplete or unsupported detailed ruleset target")
+
+        if detail_state != "active":
+            inventory[rid] = detail
+            continue
+
         require(detail.get("bypass_actors") == [],
                 "active ruleset bypass is present or not independently visible")
         conditions, rules = detail.get("conditions"), detail.get("rules")
         require(type(conditions) is dict and type(rules) is list and all(
                 type(rule) is dict and isinstance(rule.get("type"), str) and rule["type"] for rule in rules),
                 "incomplete active ruleset conditions or rules")
-        if detail["target"] in ("branch", "tag"):
+        if target in ("branch", "tag"):
             refs = conditions.get("ref_name")
             require(type(refs) is dict and all(type(refs.get(k)) is list and
                     all(isinstance(v, str) and v for v in refs[k]) for k in ("include", "exclude")),
