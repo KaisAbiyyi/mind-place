@@ -1103,11 +1103,11 @@ The independent reviewer must:
 12. Simulate Broker compromise/stolen token. The expected residual is that an attacker may merge against an eligible green required check without querying external authority; invariant #2 is conditional on Broker integrity.
 13. Review the App-mediated design for base-SHA TOCTOU, PR retargeting, stacked-PR asynchronous behavior, ambiguous merge results and compromised-Broker risk.
 14. Reject any claim that GitHub provides an atomic external-approval-plus-merge transaction.
-10. Confirm that no temporary unlock is proposed or authorized.
-11. Confirm that recovery never replays an expired or revoked authorization.
-12. State which mandatory invariants are fully guaranteed, conditionally mitigated or impossible under the selected trust model.
-13. Provide a separate GO/NO-GO for architecture acceptance and for any future implementation.
-14. Preserve production activation as NO-GO until owner authorization and live enforcement evidence exist.
+15. Confirm that no temporary unlock is proposed or authorized.
+16. Confirm that recovery never replays an expired or revoked authorization.
+17. State which mandatory invariants are fully guaranteed, conditionally mitigated or impossible under the selected trust model, explicitly marking invariant #2 conditional on Broker integrity.
+18. Provide a separate GO/NO-GO for architecture acceptance and for any future implementation.
+19. Preserve production activation as NO-GO until owner authorization and live enforcement evidence exist.
 
 ### Required review verdict format
 
