@@ -192,17 +192,15 @@ def validate_proof(proof: dict, raw_bytes: bytes, *, run: dict, artifact: dict,
         raise ValueError("Artifact belongs to different workflow run")
 
 
-def check_merge_source(*, repo_root: str = ".", expected_source: str) -> None:
-    """Read the actual merge commit object; works even at a shallow boundary.
-
-    'git rev-list --parents' intentionally hides shallow-boundary parents.
-    cat-file exposes the signed-by-Git object content, independent of ancestry
-    traversal. Reject an absent, non-merge, or differently parented checkout.
-    """
+def check_merge_source(*, repo_root: str = ".", expected_source: str,
+                       expected_base: str | None = None, revision: str = "HEAD") -> None:
+    """Verify exact base/head parents from the immutable PR merge object."""
     if not HEX40.fullmatch(expected_source):
         raise ValueError("Invalid expected PR source SHA")
+    if expected_base is not None and not HEX40.fullmatch(expected_base):
+        raise ValueError("Invalid expected PR base SHA")
     head = subprocess.check_output(
-        ["git", "rev-parse", "HEAD"], cwd=repo_root, text=True).strip()
+        ["git", "rev-parse", revision], cwd=repo_root, text=True).strip()
     data = subprocess.check_output(
         ["git", "cat-file", "-p", head], cwd=repo_root, text=True)
     headers = data.split("\n\n", 1)[0].splitlines()
@@ -211,6 +209,8 @@ def check_merge_source(*, repo_root: str = ".", expected_source: str) -> None:
         raise ValueError("Expected a two-parent PR checkout merge")
     if parents[0] == parents[1] or parents[1] != expected_source:
         raise ValueError("PR checkout merge does not match branch source SHA")
+    if expected_base is not None and parents[0] != expected_base:
+        raise ValueError("PR checkout merge does not match frozen base SHA")
 
 
 def make_proof(*, receipt: bytes, source: str, run_id: int, attempt: int,

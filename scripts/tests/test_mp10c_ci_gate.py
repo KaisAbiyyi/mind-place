@@ -131,6 +131,11 @@ class ShallowMergeTests(unittest.TestCase):
                 gate.check_merge_source(repo_root=str(clone), expected_source=base)
             with self.assertRaises(ValueError):
                 gate.check_merge_source(repo_root=str(clone), expected_source="0"*40)
+            with self.assertRaises(ValueError):
+                gate.check_merge_source(repo_root=str(clone), expected_source=source,
+                                        expected_base="f"*40)
+            gate.check_merge_source(repo_root=str(clone), expected_source=source,
+                                    expected_base=base)
 
 
 class DecisionTests(unittest.TestCase):
