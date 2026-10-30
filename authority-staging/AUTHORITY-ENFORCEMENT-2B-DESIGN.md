@@ -239,6 +239,8 @@ GitHub can configure a required status check to accept updates only from a selec
 
 App-ID binding is an identity control, not a liveness or revocation protocol.
 
+**Permission nuance:** The Checks API documents `Checks:write` for creating/updating check runs. The rulesets documentation describes `Statuses:write` for an expected source that publishes commit statuses. These permission sets are not interchangeable assumptions. The 2A template uses the Check Runs API path and `Checks:write`; the exact check type, App-source selector and required-check representation must be proven together on a disposable repository. Do not broaden App permissions or silently switch from check runs to commit statuses to make a setting appear green.
+
 Reference: [Available rules for rulesets — required status checks](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets#require-status-checks-to-pass-before-merging).
 
 ### 4.3 App suspension, uninstallation and credential revocation
