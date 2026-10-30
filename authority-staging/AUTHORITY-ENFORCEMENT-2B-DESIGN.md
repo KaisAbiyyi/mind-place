@@ -585,6 +585,25 @@ A merge queue is a useful integration mechanism, but it should not be presented 
 
 Do not enable both a queue and a broker without specifying exactly which one owns final merge admission. A queue automatically merges after checks pass; a direct broker owns the merge call. Mixing both creates ambiguous authority and bypass paths.
 
+### 6.4 Mandatory invariant disposition
+
+The following table is the explicit security disposition for the ten required invariants. "Conditional" means a proposed control exists but has not been implemented or live-proven. "Not guaranteeable" means the requested absolute property is not provided by GitHub's documented primitives under the stated trust model.
+
+| # | Required invariant | Permanent-lock / no-admission | App-mediated broker candidate | Platform limitation / qualification |
+|---:|---|---|---|---|
+| 1 | Fail closed when controller or authority is unavailable | Yes for new admission while the lock remains enforced | Conditional for new authorization; an already-sent/in-flight GitHub merge may complete | Immediate cancellation of an accepted merge is not guaranteed |
+| 2 | Stale SUCCESS cannot independently authorize a merge | Yes, because no merge admission exists | Yes, only if the broker is the sole enforced updater and rechecks live authority | A/B alone do not satisfy this invariant |
+| 3 | Revoked approvals/fingerprints cannot authorize future merges | Yes for admission, because all merges are denied | Conditional after serialized in-flight work is resolved and the epoch is incremented | Immediate revocation of an already accepted merge is not guaranteeable |
+| 4 | Exact source SHA, base SHA, policy fingerprint and authorization identity remain bound | No admission is issued | Conditional via signed tuple, bot-owned PR, live reads and durable journal | Merge API has expected head SHA, not expected base SHA/tree SHA |
+| 5 | PR updates during verification invalidate obsolete authorization | No admission | Conditional via expected head SHA and re-read; bot-owned PR limits ordinary retargeting | No atomic base/PR-metadata compare-and-swap exists |
+| 6 | No administrator or unintended actor silently bypasses enforcement | Conditional on the lock being enforced and not changed by the owner | Conditional for ordinary actors with no bypass and enforced App-only updates | Ultimate account/Organization/enterprise owner can change the settings; absolute protection against that root is impossible |
+| 7 | Inherited Organization rulesets are accounted for | Current repository is user-owned; future transfer requires a full parent-scope audit | Same; every repo/Organization/enterprise ruleset and effective branch rule must be re-read | Current repo has no Organization owner; future inheritance is a migration gate |
+| 8 | No temporary unlock or protection-removal window | Yes by policy; no admission | Yes by design; protection remains continuously enabled | Requires live proof that broker admission does not depend on unlocking |
+| 9 | No race-prone transition between verification and merge authorization | Yes for merge admission, because no merge occurs | Conditional mitigation through single writer, lock and head SHA | GitHub has no atomic external-authority + expected-base merge transaction; in-flight ambiguity remains |
+| 10 | Recovery never restores expired or revoked authorization | Yes; no authorization is restored | Conditional through epoch bump, journal reconciliation and fresh approval only | Must be implemented and tested; GitHub does not perform this external recovery logic |
+
+**Result:** no useful-merge architecture can currently be certified as satisfying all ten invariants absolutely. Permanent-lock/no-admission is the safest current posture. The broker candidate can satisfy "stale SUCCESS is not independently sufficient" but retains explicit in-flight, base-SHA and root-owner limitations. P0 therefore remains OPEN until those residuals are either accepted by the owner or eliminated by a stronger independently proven mechanism.
+
 ---
 
 ## 7. Authorization and revocation state machine
