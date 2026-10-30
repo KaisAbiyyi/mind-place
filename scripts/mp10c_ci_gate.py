@@ -56,41 +56,71 @@ def excluded(path: str, *, legacy: bool = False) -> bool:
 
 
 def scale_workflow_signature(contents: bytes) -> bytes:
-    """Hash the actual Windows smoke + full job execution contract.
+    """Hash the existing mp10c-workload/v2 Windows smoke + full workload contract.
 
-    Cross-workflow orchestration and scheduling are deliberately out of scope,
-    but Windows runner, timeouts, build flags, test commands, receipt acceptance,
-    artifact upload, and critical step guards remain bound. Unparseable YAML
-    shape fails closed; changes inside either executed job force reindexing.
+    This preserves the v2 workload boundary. Native workflow-wide execution
+    semantics (timeouts, dependencies, environment and evidence jobs) are
+    separately bound by mp10c_native_contract and are not mixed into workload
+    identity. Only approved identity keys in document-scale's job-level env
+    mapping are excluded from workload inputs.
     """
     source = contents.decode("utf-8")
+    lines = source.splitlines()
     digest = hashlib.sha256(b"mp10c-windows-scale-steps/v1\0")
+    identity_only = {
+        "PR_HEAD_REPOSITORY", "PR_HEAD_REPOSITORY_ID",
+        "PR_BASE_REPOSITORY", "PR_BASE_REPOSITORY_ID",
+        "PR_BASE_REF", "PR_BASE_SHA", "PR_NATIVE_CHECKOUT_SHA",
+        "NATIVE_CONTRACT_POLICY", "NATIVE_CONTRACT_FINGERPRINT",
+    }
     for name in ("document-smoke", "document-scale"):
-        begin = re.search(r"(?m)^  " + re.escape(name) + r":\s*$", source)
-        if not begin:
+        job_start = next((
+            index for index, line in enumerate(lines)
+            if re.fullmatch(r"  " + re.escape(name) + r":\s*", line)
+        ), None)
+        if job_start is None:
             raise ValueError("Scale workflow missing required Windows tier: " + name)
-        next_job = re.search(r"(?m)^  [a-z][a-z0-9-]*:\s*$", source[begin.end():])
-        body = source[begin.end(): begin.end() + next_job.start() if next_job else len(source)]
-        runner = re.search(r"(?m)^    runs-on: windows-latest\s*$", body)
-        if not runner:
+        job_end = next((
+            index for index in range(job_start + 1, len(lines))
+            if re.fullmatch(r"  [a-z][a-z0-9-]*:\s*", lines[index])
+        ), len(lines))
+        body_lines = lines[job_start + 1:job_end]
+        runner_index = next((
+            index for index, line in enumerate(body_lines)
+            if re.fullmatch(r"    runs-on: windows-latest\s*", line)
+        ), None)
+        if runner_index is None:
             raise ValueError("Scale workflow runner contract changed: " + name)
-        contract = body[runner.start():].rstrip()
-        if not re.search(r"(?m)^    steps:\s*$", contract):
+        if not any(re.fullmatch(r"    steps:\s*", line) for line in body_lines[runner_index:]):
             raise ValueError("Missing Windows scale steps: " + name)
+        contract_lines = body_lines[runner_index:]
         if name == "document-scale":
-            # Candidate identity/native-contract metadata is deliberately not a
-            # 100K workload input. Keep the real runner, commands, flags and
-            # indexing steps bound while excluding only these orchestration keys.
-            identity_only = {
-                "PR_HEAD_REPOSITORY", "PR_HEAD_REPOSITORY_ID",
-                "PR_BASE_REPOSITORY", "PR_BASE_REPOSITORY_ID",
-                "PR_BASE_REF", "PR_BASE_SHA", "PR_NATIVE_CHECKOUT_SHA",
-                "NATIVE_CONTRACT_POLICY", "NATIVE_CONTRACT_FINGERPRINT",
-            }
-            contract = "\n".join(
-                line for line in contract.splitlines()
-                if line.strip().split(":", 1)[0] not in identity_only
-            )
+            env_headers = [
+                index for index, line in enumerate(body_lines)
+                if re.fullmatch(r"    env:\s*", line)
+            ]
+            if len(env_headers) > 1:
+                raise ValueError("Ambiguous document-scale job-level env mapping")
+            if env_headers:
+                env_index = env_headers[0]
+                removed = set()
+                for index in range(env_index + 1, len(body_lines)):
+                    line = body_lines[index]
+                    if not line.strip() or line.lstrip().startswith("#"):
+                        continue
+                    indent = len(line) - len(line.lstrip(" "))
+                    if indent <= 4:
+                        break
+                    if indent != 6:
+                        continue
+                    match = re.match(r"^([A-Za-z_][A-Za-z0-9_-]*)\s*:", line.strip())
+                    if match and match.group(1) in identity_only:
+                        removed.add(index - runner_index)
+                contract_lines = [
+                    line for index, line in enumerate(contract_lines)
+                    if index not in removed
+                ]
+        contract = "\n".join(contract_lines).rstrip()
         digest.update(name.encode() + b"\0" + contract.encode() + b"\0")
     return digest.digest()
 
@@ -615,7 +645,7 @@ def decision(event: str, mode: str, previous: dict | None) -> tuple[bool, str]:
 
 def require_prerequisites(runs: list[dict], candidate: dict, *, repo: str,
                           vault: bool, contract_fingerprint: str, fetch_jobs,
-                          fetch_evidence) -> None:
+                          fetch_evidence, workflow_sources: dict[str, bytes | str] | None = None) -> None:
     """Accept only exact PR/base/head-bound native runs with same-run provenance."""
     if native_contract.requires_sqlcipher(repo, candidate["pr"]) is not vault:
         raise ValueError("Candidate SQLCipher policy mismatch")
@@ -653,6 +683,16 @@ def require_prerequisites(runs: list[dict], candidate: dict, *, repo: str,
         }
 
     for path, expected_jobs in required.items():
+        if workflow_sources is not None:
+            source = workflow_sources.get(path)
+            if source is None:
+                raise ValueError("Missing authoritative workflow source: " + path)
+        else:
+            source = Path(path).read_bytes()
+        runner_contracts = {
+            name: native_contract.workflow_job_runner_requirements(source, name)
+            for name in expected_jobs
+        }
         accepted = False
         for run in runs:
             if run.get("path") != path:
@@ -666,24 +706,33 @@ def require_prerequisites(runs: list[dict], candidate: dict, *, repo: str,
                     or type(run.get("run_attempt")) is not int or run["run_attempt"] <= 0):
                 continue
             response = fetch_jobs(run)
-            jobs = response.get("jobs", [])
-            if (not isinstance(jobs, list) or type(response.get("total_count")) is not int
-                    or response["total_count"] != len(jobs)):
-                raise ValueError("Incomplete native prerequisite job listing")
-            def succeeded(job: dict, name: str, steps: tuple[str, ...]) -> bool:
-                if (job.get("name") != name or job.get("status") != "completed"
+            jobs = response.get("jobs") if isinstance(response, dict) else None
+            total_count = response.get("total_count") if isinstance(response, dict) else None
+            if (not isinstance(jobs, list) or type(total_count) is not int
+                    or total_count < 0 or total_count != len(jobs)
+                    or any(not isinstance(job, dict) for job in jobs)):
+                raise ValueError("Incomplete or malformed native prerequisite job listing")
+
+            for name, critical_steps in expected_jobs.items():
+                matching_jobs = [job for job in jobs if job.get("name") == name]
+                if len(matching_jobs) != 1:
+                    raise ValueError("Required native job must exist exactly once: " + name)
+                job = matching_jobs[0]
+                if (job.get("run_attempt") != run["run_attempt"]
+                        or job.get("status") != "completed"
                         or job.get("conclusion") != "success"):
-                    return False
-                for step_name in steps:
-                    matching = [step for step in job.get("steps", [])
-                                if step.get("name") == step_name]
-                    if (len(matching) != 1 or matching[0].get("conclusion") != "success"
-                            or matching[0].get("status", "completed") != "completed"):
-                        return False
-                return True
-            if not all(sum(succeeded(job, name, steps) for job in jobs) == 1
-                       for name, steps in expected_jobs.items()):
-                continue
+                    raise ValueError("Required native job did not complete successfully on exact attempt: " + name)
+                native_contract.validate_runner_labels(job, runner_contracts[name])
+                steps = job.get("steps")
+                if not isinstance(steps, list) or any(not isinstance(step, dict) for step in steps):
+                    raise ValueError("Missing or malformed critical steps for native job: " + name)
+                for step_name in critical_steps:
+                    matching_steps = [step for step in steps if step.get("name") == step_name]
+                    if len(matching_steps) != 1:
+                        raise ValueError("Required critical step must exist exactly once: " + step_name)
+                    step = matching_steps[0]
+                    if step.get("status") != "completed" or step.get("conclusion") != "success":
+                        raise ValueError("Required critical step did not complete successfully: " + step_name)
             if path == ".github/workflows/ci.yml":
                 evidence = fetch_evidence(run)
                 validate_native_evidence(

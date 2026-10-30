@@ -92,6 +92,27 @@ class FingerprintTests(unittest.TestCase):
         self.write(".github/workflows/mp-10c-scale.yml", workflow)
         self.assertEqual(before, self.fp())
 
+
+    def test_metadata_text_inside_scale_execution_command_is_not_excluded(self):
+        workflow = self.root.joinpath(".github/workflows/mp-10c-scale.yml").read_text()
+        workflow = workflow.replace(
+            "      - run: cargo test full\n",
+            "      - run: |\n          echo PR_HEAD_REPOSITORY: original/repo\n")
+        self.write(".github/workflows/mp-10c-scale.yml", workflow)
+        before = self.fp()
+        workflow = self.root.joinpath(".github/workflows/mp-10c-scale.yml").read_text()
+        self.write(".github/workflows/mp-10c-scale.yml", workflow.replace(
+            "PR_HEAD_REPOSITORY: original/repo",
+            "PR_HEAD_REPOSITORY: changed/repo"))
+        self.assertNotEqual(before, self.fp())
+
+    def test_verified_original_workload_v2_fingerprint_is_preserved(self):
+        repository_root = Path(__file__).resolve().parents[2]
+        self.assertEqual(
+            gate.fingerprint(str(repository_root)),
+            "58b9293787c3d1782e05ed346bb1a1bc539827d6ba45b887cc39be4a36ea8649",
+        )
+
     def test_validator_only_and_coordination_only_edits_do_not_reindex(self):
         before = self.fp()
         self.write("scripts/mp10c_ci_gate.py", "new strict parser")

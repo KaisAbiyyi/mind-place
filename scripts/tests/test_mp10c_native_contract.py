@@ -40,7 +40,7 @@ def native_run(cand=None, *, run_id=10, attempt=1, path=".github/workflows/ci.ym
         "id": run_id, "run_attempt": attempt, "path": path, "event": event,
         "status": status, "conclusion": conclusion,
         "head_sha": c["head"], "head_branch": c["branch"],
-        "repository": {"full_name": "owner/repo", "id": 1},
+        "repository": {"full_name": c["base_repo"], "id": c["base_repo_id"]},
         "head_repository": {"full_name": c["head_repo"], "id": c["head_repo_id"]},
         "pull_requests": [{
             "number": c["pr"],
@@ -52,9 +52,10 @@ def native_run(cand=None, *, run_id=10, attempt=1, path=".github/workflows/ci.ym
     }
 
 
-def job(name, steps, conclusion="success"):
+def job(name, steps, conclusion="success", labels=("ubuntu-latest",), run_attempt=1):
     return {
         "name": name, "status": "completed", "conclusion": conclusion,
+        "run_attempt": run_attempt, "labels": list(labels),
         "steps": [{"name": step, "status": "completed", "conclusion": "success"}
                   for step in steps],
     }
@@ -65,10 +66,11 @@ def ci_jobs():
         job("Fast developer feedback", (
             "Install dependencies", "Verify repository contract", "Typecheck",
             "Test reader and browser contracts", "Build reader",
-            "Validate document qualification gate policy")),
+            "Validate document qualification gate policy"), labels=("ubuntu-latest",)),
         job("Fast Rust compile and vault feedback", (
             "Install pinned Rust 1.90", "Rust format", "Compile production core crates",
-            "Compile available SQLCipher and vault features", "Focused security tests")),
+            "Compile available SQLCipher and vault features", "Focused security tests"),
+            labels=("ubuntu-24.04",)),
         job("Verify Windows product", (
             "Setup Node.js", "Setup Rust 1.90", "Install dependencies",
             "Check Rust formatting", "Verify repository contract", "Typecheck",
@@ -76,17 +78,18 @@ def ci_jobs():
             "Test", "Stage capture sidecar for native desktop tests",
             "Qualify Phase 3E simulated MCP and revocation boundary",
             "Test hosted tunnel desktop boundaries", "Build desktop app",
-            "Verify portable MIT license and third-party notices")),
+            "Verify portable MIT license and third-party notices"), labels=("windows-latest",)),
         job("Native execution evidence", (
-            "Capture native execution provenance", "Upload native execution evidence")),
+            "Capture native execution provenance", "Upload native execution evidence"),
+            labels=("ubuntu-latest",)),
     ]
 
 
 def native_evidence(cand, run, fingerprint=CONTRACT, vault=False):
-    kind, _ = native_contract.candidate_requirement("owner/repo", cand["pr"])
+    kind, _ = native_contract.candidate_requirement(cand["base_repo"], cand["pr"])
     return {
         "schema": native_contract.EVIDENCE_SCHEMA,
-        "repository": "owner/repo", "event": "pull_request",
+        "repository": cand["base_repo"], "event": "pull_request",
         "workflow_path": ".github/workflows/ci.yml", "pr_number": cand["pr"],
         "head_repository": cand["head_repo"], "head_branch": cand["branch"],
         "head_sha": cand["head"], "base_repository": cand["base_repo"],
@@ -95,7 +98,7 @@ def native_evidence(cand, run, fingerprint=CONTRACT, vault=False):
         "sqlcipher_required": vault, "native_contract_policy": native_contract.POLICY,
         "native_contract_fingerprint": fingerprint,
         "workflow_run_id": run["id"], "workflow_run_attempt": run["run_attempt"],
-        "head_repository_id": 1, "base_repository_id": 1,
+        "head_repository_id": cand["head_repo_id"], "base_repository_id": cand["base_repo_id"],
     }
 
 
@@ -159,6 +162,115 @@ class NativeContractFingerprintTests(unittest.TestCase):
         path.write_text(path.read_text().replace("actions/checkout@v5", "actions/checkout@v4"))
         self.commit()
         self.assertNotEqual(before, self.fp())
+
+
+    def test_native_workflow_fingerprint_binds_timeout_dependencies_env_and_required_steps(self):
+        path = self.root / ".github/workflows/ci.yml"
+        before = self.fp()
+        text = path.read_text()
+        path.write_text(text.replace(
+            "    runs-on: windows-latest\n",
+            "    runs-on: windows-latest\n    timeout-minutes: 30\n"))
+        self.commit()
+        self.assertNotEqual(before, self.fp())
+
+        before = self.fp()
+        text = path.read_text()
+        path.write_text(text.replace(
+            "    timeout-minutes: 30\n",
+            "    timeout-minutes: 30\n    needs: prepare\n"))
+        self.commit()
+        self.assertNotEqual(before, self.fp())
+
+        before = self.fp()
+        text = path.read_text()
+        path.write_text(text.replace(
+            "    needs: prepare\n",
+            "    needs: prepare\n    env:\n      BUILD_PROFILE: release\n"))
+        self.commit()
+        self.assertNotEqual(before, self.fp())
+
+        before = self.fp()
+        text = path.read_text()
+        path.write_text(text.replace(
+            "      - run: cargo test --locked\n",
+            "      - name: Required native verification step\n        run: cargo test --locked\n"))
+        self.commit()
+        self.assertNotEqual(before, self.fp())
+
+    def test_native_workflow_fingerprint_ignores_yaml_formatting_and_comments(self):
+        before = self.fp()
+        self.write(".github/workflows/ci.yml", (
+            "# formatting-only rewrite\n"
+            "jobs: # job map\n"
+            " verify:\n"
+            "  runs-on: 'windows-latest' # same runner\n"
+            "  steps:\n"
+            "   - uses: 'actions/checkout@v5'\n"
+            "   - run: 'cargo test --locked'\n"
+        ))
+        self.commit()
+        self.assertEqual(before, self.fp())
+
+    def test_identity_metadata_inside_command_is_not_globally_excluded(self):
+        path = self.root / ".github/workflows/ci.yml"
+        text = path.read_text().replace(
+            "      - run: cargo test --locked\n",
+            "      - run: |\n          echo PR_HEAD_REPOSITORY: original/repo\n")
+        self.write(".github/workflows/ci.yml", text)
+        self.commit()
+        before = self.fp()
+        self.write(".github/workflows/ci.yml", path.read_text().replace(
+            "PR_HEAD_REPOSITORY: original/repo",
+            "PR_HEAD_REPOSITORY: changed/repo"))
+        self.commit()
+        self.assertNotEqual(before, self.fp())
+
+    def test_identity_metadata_in_unrelated_job_is_not_globally_excluded(self):
+        path = self.root / ".github/workflows/ci.yml"
+        text = path.read_text() + (
+            "\n  unrelated:\n"
+            "    name: Unrelated job\n"
+            "    runs-on: ubuntu-latest\n"
+            "    env:\n"
+            "      PR_HEAD_REPOSITORY: original/repo\n"
+            "    steps:\n"
+            "      - run: echo unrelated\n"
+        )
+        self.write(".github/workflows/ci.yml", text)
+        self.commit()
+        before = self.fp()
+        self.write(".github/workflows/ci.yml", path.read_text().replace(
+            "PR_HEAD_REPOSITORY: original/repo",
+            "PR_HEAD_REPOSITORY: changed/repo"))
+        self.commit()
+        self.assertNotEqual(before, self.fp())
+
+    def test_runner_contract_is_derived_from_authoritative_workflow(self):
+        source = (
+            "jobs:\n"
+            "  linux:\n"
+            "    name: Linux native\n"
+            "    runs-on: ubuntu-24.04\n"
+            "    steps:\n"
+            "      - run: cargo test\n"
+            "  windows:\n"
+            "    name: Windows native\n"
+            "    runs-on: windows-2022\n"
+            "    steps:\n"
+            "      - run: cargo test\n"
+        )
+        linux = native_contract.workflow_job_runner_requirements(source, "Linux native")
+        windows = native_contract.workflow_job_runner_requirements(source, "Windows native")
+        self.assertEqual((linux["labels"], linux["platform"]), (["ubuntu-24.04"], "linux"))
+        self.assertEqual((windows["labels"], windows["platform"]), (["windows-2022"], "windows"))
+        native_contract.validate_runner_labels(
+            {"labels": ["ubuntu-24.04", "linux", "x64"]}, linux)
+        native_contract.validate_runner_labels(
+            {"labels": ["windows-2022", "windows", "x64"]}, windows)
+        for labels in (["ubuntu-24.04", "windows"], None, "ubuntu-24.04", ["windows-2022", 7]):
+            with self.subTest(labels=labels), self.assertRaises(ValueError):
+                native_contract.validate_runner_labels({"labels": labels}, windows)
 
     def test_native_test_and_dependency_lock_changes_invalidate_contract(self):
         before = self.fp()
@@ -229,7 +341,7 @@ class NativeContractFingerprintTests(unittest.TestCase):
         self.assertEqual((evidence["pr_number"], evidence["head_sha"], evidence["base_sha"]),
                          (129, head, base))
         self.assertEqual((evidence["workflow_run_id"], evidence["workflow_run_attempt"]), (700, 2))
-        self.assertEqual(evidence["native_contract_policy"], "mp-native-contract/v1")
+        self.assertEqual(evidence["native_contract_policy"], "mp-native-contract/v2")
         bad = json.loads(json.dumps(payload))
         bad["pull_request"]["base"]["sha"] = "e" * 40
         with self.assertRaises(ValueError):
@@ -253,10 +365,14 @@ class NativeIdentityAndPrerequisiteTests(unittest.TestCase):
         self.run = native_run(self.candidate)
         self.jobs = ci_jobs()
         self.evidence = native_evidence(self.candidate, self.run)
+        ci_source = Path(__file__).resolve().parents[2].joinpath(
+            ".github/workflows/ci.yml").read_bytes()
+        self.workflow_sources = {native_contract.CI_WORKFLOW: ci_source}
         self.args = {
             "repo": "owner/repo", "vault": False, "contract_fingerprint": CONTRACT,
             "fetch_jobs": lambda _: {"total_count": len(self.jobs), "jobs": self.jobs},
             "fetch_evidence": lambda _: self.evidence,
+            "workflow_sources": self.workflow_sources,
         }
 
     def require(self, runs=None, candidate_value=None):
@@ -330,6 +446,115 @@ class NativeIdentityAndPrerequisiteTests(unittest.TestCase):
         self.evidence["workflow_run_attempt"] = 2
         with self.assertRaises(ValueError):
             self.require()
+
+
+    def test_wrong_windows_runner_platform_is_rejected(self):
+        for labels in (["ubuntu-latest"], ["macos-latest"]):
+            with self.subTest(labels=labels):
+                self.jobs[2]["labels"] = labels
+                with self.assertRaises(ValueError):
+                    self.require()
+        self.jobs[2]["labels"] = ["windows-latest"]
+
+    def test_missing_or_malformed_runner_labels_are_rejected(self):
+        original = self.jobs[2].get("labels")
+        for labels in (None, "windows-latest", [], ["windows-latest", None], ["windows-latest", "windows-latest"]):
+            with self.subTest(labels=labels):
+                self.jobs[2]["labels"] = labels
+                with self.assertRaises(ValueError):
+                    self.require()
+        self.jobs[2]["labels"] = original
+
+    def test_duplicate_required_jobs_are_rejected_even_with_one_success(self):
+        original = self.jobs[2]
+        for conclusion in ("failure", "skipped", "success"):
+            duplicate = json.loads(json.dumps(original))
+            duplicate["conclusion"] = conclusion
+            self.jobs.append(duplicate)
+            with self.subTest(duplicate_conclusion=conclusion), self.assertRaises(ValueError):
+                self.require()
+            self.jobs.pop()
+
+    def test_duplicate_critical_step_is_rejected(self):
+        duplicate = json.loads(json.dumps(self.jobs[2]["steps"][0]))
+        self.jobs[2]["steps"].append(duplicate)
+        with self.assertRaises(ValueError):
+            self.require()
+
+    def test_native_job_attempt_must_match_workflow_run_attempt(self):
+        self.jobs[2]["run_attempt"] = 2
+        with self.assertRaises(ValueError):
+            self.require()
+
+    def test_incomplete_github_job_listing_is_rejected(self):
+        self.args["fetch_jobs"] = lambda _: {
+            "total_count": len(self.jobs) + 1, "jobs": self.jobs,
+        }
+        with self.assertRaises(ValueError):
+            self.require()
+
+    def _require_sqlcipher_with_runner_labels(self, ubuntu_labels, windows_labels):
+        cand = candidate(127, head_repo=REPO, base_repo=REPO)
+        ci_run = native_run(cand, run_id=110)
+        sql_run = native_run(cand, run_id=111, path=native_contract.SQLCIPHER_WORKFLOW)
+        sql_steps = (
+            "Check Rust formatting", "Encrypted state/index and FTS regression",
+            "Keyed MCP synthetic authorization and revocation",
+            "Vault and backup adversarial regression",
+        )
+        sql_jobs = [
+            job("SQLCipher / ubuntu-24.04", sql_steps, labels=ubuntu_labels),
+            job("SQLCipher / windows-2022", sql_steps, labels=windows_labels),
+        ]
+        by_run = {ci_run["id"]: self.jobs, sql_run["id"]: sql_jobs}
+        sql_source = (
+            "jobs:\n"
+            "  sqlcipher-ubuntu:\n"
+            "    name: SQLCipher / ubuntu-24.04\n"
+            "    runs-on: ubuntu-24.04\n"
+            "    steps:\n"
+            "      - name: Check Rust formatting\n"
+            "        run: cargo fmt --all -- --check\n"
+            "      - name: Encrypted state/index and FTS regression\n"
+            "        run: cargo test\n"
+            "      - name: Keyed MCP synthetic authorization and revocation\n"
+            "        run: cargo test\n"
+            "      - name: Vault and backup adversarial regression\n"
+            "        run: cargo test\n"
+            "  sqlcipher-windows:\n"
+            "    name: SQLCipher / windows-2022\n"
+            "    runs-on: windows-2022\n"
+            "    steps:\n"
+            "      - name: Check Rust formatting\n"
+            "        run: cargo fmt --all -- --check\n"
+            "      - name: Encrypted state/index and FTS regression\n"
+            "        run: cargo test\n"
+            "      - name: Keyed MCP synthetic authorization and revocation\n"
+            "        run: cargo test\n"
+            "      - name: Vault and backup adversarial regression\n"
+            "        run: cargo test\n"
+        )
+        sources = dict(self.workflow_sources)
+        sources[native_contract.SQLCIPHER_WORKFLOW] = sql_source
+        args = {
+            "repo": REPO, "vault": True, "contract_fingerprint": CONTRACT,
+            "fetch_jobs": lambda run: {
+                "total_count": len(by_run[run["id"]]), "jobs": by_run[run["id"]],
+            },
+            "fetch_evidence": lambda _: native_evidence(cand, ci_run, vault=True),
+            "workflow_sources": sources,
+        }
+        gate.require_prerequisites([ci_run, sql_run], cand, **args)
+
+    def test_sqlcipher_windows_job_on_ubuntu_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self._require_sqlcipher_with_runner_labels(
+                ["ubuntu-24.04"], ["ubuntu-24.04"])
+
+    def test_sqlcipher_ubuntu_job_on_windows_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self._require_sqlcipher_with_runner_labels(
+                ["windows-2022"], ["windows-2022"])
 
     def test_skipped_native_job_and_skipped_critical_step_are_rejected(self):
         self.jobs[2]["conclusion"] = "skipped"
