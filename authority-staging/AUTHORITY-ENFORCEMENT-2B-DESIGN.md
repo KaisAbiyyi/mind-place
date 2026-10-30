@@ -531,7 +531,7 @@ Every field must be read from authoritative GitHub/API or policy-service state, 
 6. Build an immutable broker-owned promotion PR for the approved source tree. The first prototype must use an unstacked PR; stacked PRs require the asynchronous merge API and are excluded from the initial admission path.
 7. Re-read source, base, PR and policy state. Reject if anything changed.
 8. Obtain a one-use authorization while holding the same per-base transaction lock used by revocation.
-9. Use the direct merge API with `sha=<expected PR head SHA>`, `bypass_rules=false`. The broker must not unlock the branch or disable any protection.
+9. Use synchronous `PUT /pulls/{number}/merge` with `sha=<expected PR head SHA>`. This endpoint does not expose `bypass_rules`; do not send it. It relies on normal GitHub rules enforcement and the configured actor-specific ruleset bypass behavior: the Broker's PR-only bypass applies to Ruleset A, while Rulesets B and C remain independently enforced. This behavior must be live-proven before the initial unstacked prototype is accepted. The broker must not unlock the branch or disable any protection.
 10. Read back the merge result, resulting base SHA and PR state. Record the result in an append-only journal before releasing the lock.
 
 **Required GitHub-side single-writer posture**
@@ -620,11 +620,11 @@ To claim technical containment in a future separately authorized activation, an 
 
 If the owner requires normal merges, C is the preferred architecture to prototype after separate approval:
 
-1. Transfer the repository to an Organization if the owner wants the documented App-only branch-push restriction and/or merge queue eligibility.
+1. Prefer a repository-level Rulesets Restrict updates candidate for the existing public personal-account repository, with the Broker Integration as the sole `pull_request` bypass actor. Organization transfer is optional for Organization-level governance, inherited rulesets or merge-queue eligibility; it is not required for this candidate. Classic branch protection's push restriction is not the preferred single-writer mechanism because of its administrator exception.
 2. Establish a separate policy repository and independent authority service.
 3. Split Checker App and Merge Broker App.
 4. Make the broker the only ordinary permitted updater through PR-only branch restrictions; no temporary unlock.
-5. Keep branch protection and required checks enforced for administrators.
+5. Do not configure repository administrators as bypass actors; while the intended ruleset remains active, they should be denied destination updates, subject to live proof. Administrators can modify or delete repository rulesets, and the account owner remains the root of trust. Keep the separate required-check and integrity rulesets enforced.
 6. Use a broker-owned promotion PR and prohibit stacked admission in the first version.
 7. Serialize all merges and revocations with one durable per-base lock and an append-only journal.
 8. Define revocation as effective only after any already in-flight merge transaction is resolved. If the owner requires revocation to take effect at the instant it is requested, this architecture cannot guarantee that property with GitHub's merge API.
@@ -817,7 +817,7 @@ sequenceDiagram
 
 ## 9. Failure-injection and adversarial test matrix
 
-Synthetic tests are necessary for state-machine and parser correctness, but they do not prove GitHub enforcement. Every GitHub-side denial must be demonstrated on a disposable Organization-owned test repository before production authorization. No test may temporarily unlock a production branch.
+Synthetic tests are necessary for state-machine and parser correctness, but they do not prove GitHub enforcement. Before production authorization, demonstrate the repository-level Restrict updates and Integration/pull_request bypass allow/deny paths on a disposable public personal-account repository. Use a separate disposable Organization-owned repository only for Organization inheritance and merge-queue qualification. No test may temporarily unlock a production branch.
 
 | # | Injection | Expected result | Evidence required |
 |---:|---|---|---|
@@ -1148,4 +1148,4 @@ The preferred future single-writer candidate is a repository-level Restrict upda
 
 The Broker is a TCB. If Broker compromise is in scope, invariant #2 is not guaranteed and the useful-merge candidate is NO-GO for that threat model: GitHub may accept a merge using an existing eligible green required check without the external authority query.
 
-**P0 stale-success enforcement remains OPEN. Checkpoint 2B is not accepted. Production activation remains NO-GO. No implementation or privileged GitHub action is authorized by this document.****
+**P0 stale-success enforcement remains OPEN. Checkpoint 2B is not accepted. Production activation remains NO-GO. No implementation or privileged GitHub action is authorized by this document.**
