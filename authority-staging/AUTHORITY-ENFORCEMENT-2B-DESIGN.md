@@ -118,6 +118,7 @@ At the supplied HEAD:
 
 - `.github/workflows/ci.yml` triggers on `push` to `main`, `pull_request`, and manual dispatch. It has no `merge_group` trigger.
 - `.github/workflows/windows-product.yml` triggers on `pull_request`, `push` to `main`, and manual dispatch. It has no `merge_group` trigger.
+- The Windows Product workflow's `Windows Product / candidate result` job is deliberately successful for Draft PRs while its native verification job is skipped and its summary says qualification is PENDING. This is a development-status UX signal, not a native-acceptance or authority check.
 - `.github/workflows/mp-2a-security-staging.yml` is limited to the 2A staging branch and tests the staging package.
 - `authority-staging/.github/windows-policy/verifier.yml` is an unpromoted template scheduled every five minutes plus manual dispatch. It does not handle `merge_group`.
 - The template's proposed target App permissions are Contents read, Actions read, Pull requests read, Administration read and Checks write. It does not have Contents write or a merge permission.
@@ -194,6 +195,8 @@ This section separates **documented behavior** from **repository observations** 
 **Security consequence:**
 
 The internal 600-second lease is invisible to branch protection. If a successful check is still within GitHub's seven-day freshness window and is attached to the required SHA/context/source, it can continue to satisfy the required check after the controller's own lease expires or its policy changes.
+
+GitHub also treats `success`, `skipped` and `neutral` as successful required-check states. A required authority context must therefore never be a job that can be skipped or return neutral while validation is pending, draft-only or unavailable. The current Draft-success candidate jobs described in Section 2.3 are not authority signals and must not be selected as the sole required authority check. Use a distinct, uniquely named Checker App check whose only SUCCESS path is complete validation; unknown/pending/unavailable state must remain non-successful. Avoid duplicate check/status contexts with the same name.
 
 The check may remain visible in history after it stops satisfying the seven-day rule. Thus:
 
