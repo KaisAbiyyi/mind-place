@@ -218,7 +218,7 @@ class DispatchTargetTests(unittest.TestCase):
 
 
 class AttestationCliTests(unittest.TestCase):
-    def test_real_cli_binds_dispatch_and_preserves_scale_attempt_without_indexing(self):
+    def test_real_cli_rejects_branch_only_dispatch_attestation(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             git(root, "init", "-q")
@@ -232,26 +232,21 @@ class AttestationCliTests(unittest.TestCase):
             receipt, event, output = root/"raw.json", root/"event.json", root/"proof.json"
             receipt.write_text(json.dumps(raw_receipt()))
             event.write_text(json.dumps({"inputs": {"pr_number": "127"}}))
-            env = dict(os.environ, GITHUB_EVENT_NAME="workflow_dispatch", GITHUB_REPOSITORY="owner/repo",
-                       GITHUB_SHA=source, GITHUB_REF="refs/heads/qualification", GITHUB_EVENT_PATH=str(event),
-                       GITHUB_RUN_ID="77", GITHUB_RUN_ATTEMPT="2", SCALE_RUN_ATTEMPT="1", PR_NUMBER="127",
-                       PR_HEAD_SHA=source, PR_HEAD_REF="qualification", EXPECTED_FINGERPRINT=fp)
-            command = [sys.executable, str(Path(gate.__file__).resolve()), "attest", "--receipt", str(receipt), "--output", str(output)]
-            good = subprocess.run(command, cwd=root, env=env, capture_output=True, text=True)
-            self.assertEqual(good.returncode, 0, good.stderr)
-            proof = json.loads(output.read_bytes())
-            self.assertEqual((proof["event"], proof["pr_number"], proof["source_sha"], proof["checkout_sha"]),
-                             ("workflow_dispatch", 127, source, source))
-            self.assertEqual((proof["run_attempt"], proof["scale_run_attempt"]), (2, 1))
-            for change in ({"PR_NUMBER": "0"}, {"PR_HEAD_SHA": "0"*40},
-                           {"PR_HEAD_REF": "main"}, {"EXPECTED_FINGERPRINT": "0"*64}):
-                with self.subTest(change=change):
-                    output.unlink()
-                    failed = subprocess.run(command, cwd=root, env=dict(env, **change), capture_output=True)
-                    self.assertNotEqual(failed.returncode, 0)
-                    self.assertFalse(output.exists())
-                    # Restore a successful output for the next independent case.
-                    self.assertEqual(subprocess.run(command, cwd=root, env=env, capture_output=True).returncode, 0)
+            env = dict(os.environ, GITHUB_EVENT_NAME="workflow_dispatch",
+                       GITHUB_REPOSITORY="owner/repo", GITHUB_SHA=source,
+                       GITHUB_REF="refs/heads/qualification", GITHUB_EVENT_PATH=str(event),
+                       GITHUB_RUN_ID="77", GITHUB_RUN_ATTEMPT="2",
+                       SCALE_RUN_ATTEMPT="1", PR_NUMBER="127",
+                       PR_HEAD_SHA=source, PR_HEAD_REF="qualification",
+                       EXPECTED_FINGERPRINT=fp)
+            command = [sys.executable, str(Path(gate.__file__).resolve()), "attest",
+                       "--receipt", str(receipt), "--output", str(output)]
+            rejected = subprocess.run(command, cwd=root, env=env, capture_output=True, text=True)
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn("PR_HEAD_REPOSITORY", rejected.stderr)
+            self.assertFalse(output.exists())
+
+
 class PriorProofTests(unittest.TestCase):
     def setUp(self):
         self.repo, self.pr = "owner/repo", 128

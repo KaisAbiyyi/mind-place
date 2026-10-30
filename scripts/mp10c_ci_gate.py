@@ -22,6 +22,8 @@ import urllib.parse
 import urllib.request
 import zipfile
 
+import mp10c_native_contract as native_contract
+
 SCHEMA = "mind-place-mp10c-qualification/v2"
 WORKLOAD_POLICY = "mp10c-workload/v2"  # Verified native scale semantics + production inputs.
 ARTIFACT = "mp10c-qualified-100000"
