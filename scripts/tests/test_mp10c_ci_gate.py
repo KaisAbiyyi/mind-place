@@ -216,6 +216,82 @@ class DecisionTests(unittest.TestCase):
         self.assertFalse(gate.native_contract.requires_sqlcipher("KaisAbiyyi/mind-place", 9001))
 
 
+class AcceptancePrerequisiteTests(unittest.TestCase):
+    def test_cached_100k_proof_reuse_requires_current_native_coordination_success(self):
+        cached = {"run_id": 77, "artifact_id": 12}
+        accepted, fresh = gate.select_acceptance_evidence(
+            native_result="success", fresh=None, previous=cached,
+            event="pull_request", mode="auto")
+        self.assertIs(accepted, cached)
+        self.assertFalse(fresh)
+        for result in ("skipped", "failure", "cancelled", "neutral", "", None):
+            with self.subTest(native_result=result), self.assertRaises(ValueError):
+                gate.select_acceptance_evidence(
+                    native_result=result, fresh=None, previous=cached,
+                    event="pull_request", mode="auto")
+
+    def test_fresh_100k_proof_also_requires_current_native_coordination_success(self):
+        fresh = {"run_id": 88, "artifact_id": 22}
+        accepted, is_fresh = gate.select_acceptance_evidence(
+            native_result="success", fresh=fresh, previous=None,
+            event="pull_request", mode="final")
+        self.assertIs(accepted, fresh)
+        self.assertTrue(is_fresh)
+        with self.assertRaises(ValueError):
+            gate.select_acceptance_evidence(
+                native_result="skipped", fresh=fresh, previous=None,
+                event="pull_request", mode="final")
+
+    def test_workflow_keeps_cached_reuse_separate_from_native_coordination(self):
+        root = Path(__file__).resolve().parents[2]
+        source = (root / ".github/workflows/mp-10c-scale.yml").read_text()
+        coordinator = source.split("  prerequisite-coordination:\n", 1)[1].split(
+            "\n  document-scale:\n", 1)[0]
+        coordinator_if = next(
+            line.strip() for line in coordinator.splitlines()
+            if line.strip().startswith("if:"))
+        self.assertNotIn("run-heavy", coordinator_if)
+        self.assertIn("workflow_dispatch", coordinator_if)
+        self.assertIn("draft == false", coordinator_if)
+
+        scale = source.split("  document-scale:\n", 1)[1].split(
+            "\n  provenance:\n", 1)[0]
+        self.assertIn("run-heavy == 'true'", scale)
+        self.assertIn("needs.prerequisite-coordination.result == 'success'", scale)
+
+        accepted = source.split("  qualification-accepted:\n", 1)[1]
+        self.assertIn("prerequisite-coordination", accepted.splitlines()[1])
+        self.assertIn("NATIVE_PREREQUISITE_RESULT: ${{ needs.prerequisite-coordination.result }}", accepted)
+        self.assertIn('test "$PREREQUISITE_RESULT" = success', accepted)
+
+        draft = source.split("  draft-qualification-pending:\n", 1)[1].split(
+            "\n  qualification-accepted:\n", 1)[0]
+        draft_if = next(line.strip() for line in draft.splitlines() if line.strip().startswith("if:"))
+        self.assertIn("draft == true", draft_if)
+        self.assertNotIn("run-heavy", draft_if)
+
+    def test_manual_operator_sequence_requires_ci_dispatch_before_mp10c(self):
+        root = Path(__file__).resolve().parents[2]
+        ci = (root / ".github/workflows/ci.yml").read_text()
+        dispatch = ci.split("  workflow_dispatch:\n", 1)[1].split("\npermissions:", 1)[0]
+        for field in ("pr_number", "head_sha", "base_sha"):
+            with self.subTest(field=field):
+                self.assertIn(field + ":", dispatch)
+                self.assertIn("required: true", dispatch)
+        self.assertIn("refs/pull/{0}/merge", ci)
+        self.assertIn("github.event_name == 'workflow_dispatch'", ci)
+
+        docs = (root / "docs/implementation-plan/mp-ci-100k-01-qualification-gate.md").read_text()
+        sequence = docs.split("### Mandatory operator sequence: native CI first, MP-10C second", 1)[1]
+        self.assertLess(sequence.index("Dispatch the CI workflow"), sequence.index("Dispatch MP-10C"))
+        self.assertIn("does not automatically dispatch CI", sequence)
+        self.assertIn("native contract fingerprint", sequence)
+        self.assertIn("explicitly PR-bound workflow_dispatch", docs)
+        self.assertNotIn("workflow_dispatch runs are never accepted", docs)
+        self.assertIn("manual", sequence)
+        self.assertIn("final", sequence)
+
+
 class DispatchTargetTests(unittest.TestCase):
     def setUp(self):
         self.pull = {"number": 127, "state": "open",

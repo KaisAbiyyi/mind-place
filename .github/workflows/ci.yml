@@ -6,9 +6,23 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Open same-repository PR number for this exact candidate branch
+        type: string
+        required: true
+      head_sha:
+        description: Exact PR head SHA frozen before dispatch
+        type: string
+        required: true
+      base_sha:
+        description: Exact PR base SHA frozen before dispatch
+        type: string
+        required: true
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   fast:
@@ -17,6 +31,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/pull/{0}/merge', inputs.pr_number) || github.sha }}
       - uses: actions/setup-node@v5
         with:
           node-version: 24
@@ -48,6 +64,8 @@ jobs:
       CARGO_BUILD_JOBS: 2
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/pull/{0}/merge', inputs.pr_number) || github.sha }}
       - name: Install pinned Rust 1.90
         run: |
           rustup toolchain install 1.90.0 --profile minimal --component rustfmt --no-self-update
@@ -101,6 +119,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/pull/{0}/merge', inputs.pr_number) || github.sha }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
@@ -160,13 +180,17 @@ jobs:
 
   native-evidence:
     name: Native execution evidence
-    if: always() && github.event_name == 'pull_request'
+    if: always() && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch')
     needs: [fast, rust-fast, verify]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/pull/{0}/merge', inputs.pr_number) || github.sha }}
       - name: Capture native execution provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: python3 scripts/mp10c_native_contract.py attest --output qualification/native-contract.json
       - name: Upload native execution evidence
         uses: actions/upload-artifact@v4

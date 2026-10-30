@@ -10,6 +10,7 @@ import re
 from pathlib import Path
 import subprocess
 import sys
+import urllib.request
 
 POLICY = "mp-native-contract/v2"
 EVIDENCE_SCHEMA = "mind-place-native-evidence/v1"
@@ -588,6 +589,22 @@ def _validate_sha(value: object, name: str) -> str:
     return value
 
 
+def api_json(url: str, token: str) -> dict:
+    if not isinstance(token, str) or not token:
+        raise ValueError("Missing GitHub token for exact PR-bound native dispatch")
+    request = urllib.request.Request(url, headers={
+        "Authorization": "Bearer " + token,
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "mind-place-native-contract",
+    })
+    with urllib.request.urlopen(request, timeout=30) as response:
+        result = json.load(response)
+    if not isinstance(result, dict):
+        raise ValueError("Malformed GitHub PR response")
+    return result
+
+
 def _verify_merge_checkout(root: str, checkout_sha: str, base_sha: str, head_sha: str) -> None:
     actual = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
     if actual != checkout_sha:
@@ -602,18 +619,40 @@ def _verify_merge_checkout(root: str, checkout_sha: str, base_sha: str, head_sha
 def capture_native_evidence(root: str = ".", payload: dict | None = None, *,
                             repo: str, run_id: int, attempt: int,
                             event_name: str = "pull_request",
-                            github_sha: str | None = None) -> dict:
-    if event_name != "pull_request" or not isinstance(payload, dict):
-        raise ValueError("Only pull_request events can mint native prerequisite evidence")
-    pull = payload.get("pull_request")
-    if not isinstance(pull, dict):
-        raise ValueError("Missing pull_request event identity")
-    pr = payload.get("number")
-    if type(pr) is not int or pr <= 0 or pull.get("number", pr) != pr:
-        raise ValueError("Ambiguous or invalid PR number")
+                            github_sha: str | None = None,
+                            github_ref: str | None = None,
+                            token: str | None = None) -> dict:
+    if not isinstance(payload, dict):
+        raise ValueError("Missing native workflow event payload")
+    if event_name == "pull_request":
+        pull = payload.get("pull_request")
+        if not isinstance(pull, dict):
+            raise ValueError("Missing pull_request event identity")
+        pr = payload.get("number")
+        if type(pr) is not int or pr <= 0 or pull.get("number", pr) != pr:
+            raise ValueError("Ambiguous or invalid PR number")
+    elif event_name == "workflow_dispatch":
+        inputs = payload.get("inputs")
+        if not isinstance(inputs, dict):
+            raise ValueError("Missing explicit native dispatch PR inputs")
+        raw_pr = inputs.get("pr_number")
+        if not isinstance(raw_pr, str) or not re.fullmatch(r"[1-9][0-9]*", raw_pr):
+            raise ValueError("Native dispatch requires a positive pr_number")
+        pr = int(raw_pr)
+        expected_head = _validate_sha(inputs.get("head_sha"), "dispatch PR head SHA")
+        expected_base = _validate_sha(inputs.get("base_sha"), "dispatch PR base SHA")
+        if not isinstance(github_ref, str) or not github_ref.startswith("refs/heads/"):
+            raise ValueError("Native dispatch must select the PR head branch")
+        selected_branch = github_ref.removeprefix("refs/heads/")
+        pull = api_json(f"https://api.github.com/repos/{repo}/pulls/{pr}", token or "")
+        if pull.get("number") != pr or pull.get("state") != "open":
+            raise ValueError("Native dispatch target PR is not open")
+    else:
+        raise ValueError("Only PR-bound pull_request or workflow_dispatch events can mint native evidence")
+
     head, base = pull.get("head"), pull.get("base")
     if not isinstance(head, dict) or not isinstance(base, dict):
-        raise ValueError("Missing PR head/base event identity")
+        raise ValueError("Missing PR head/base identity")
     head_repo, base_repo = head.get("repo") or {}, base.get("repo") or {}
     head_repo_name, base_repo_name = head_repo.get("full_name"), base_repo.get("full_name")
     head_repo_id, base_repo_id = head_repo.get("id"), base_repo.get("id")
@@ -628,14 +667,22 @@ def capture_native_evidence(root: str = ".", payload: dict | None = None, *,
     if (not isinstance(head_ref, str) or not head_ref
             or not isinstance(base_ref, str) or not base_ref):
         raise ValueError("Missing PR head/base branch")
+    if event_name == "workflow_dispatch":
+        if (head_sha != expected_head or base_sha != expected_base
+                or head_ref != selected_branch
+                or github_ref != "refs/heads/" + head_ref
+                or github_sha != head_sha):
+            raise ValueError("Native dispatch branch/head/base does not match the live frozen PR")
     if type(run_id) is not int or run_id <= 0 or type(attempt) is not int or attempt <= 0:
         raise ValueError("Missing workflow run identity")
     checkout_sha = _validate_sha(
         subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip(),
         "native checkout SHA",
     )
-    if github_sha and github_sha != checkout_sha:
+    if event_name == "pull_request" and github_sha and github_sha != checkout_sha:
         raise ValueError("Native checkout does not match GITHUB_SHA")
+    if event_name == "workflow_dispatch" and github_sha != head_sha:
+        raise ValueError("Native dispatch GITHUB_SHA is not the exact PR head")
     _verify_merge_checkout(root, checkout_sha, base_sha, head_sha)
     kind, sqlcipher_required = candidate_requirement(repo, pr)
     return {
@@ -671,6 +718,8 @@ def main() -> int:
         attempt=int(os.environ["GITHUB_RUN_ATTEMPT"]),
         event_name=os.environ.get("GITHUB_EVENT_NAME", ""),
         github_sha=os.environ.get("GITHUB_SHA"),
+        github_ref=os.environ.get("GITHUB_REF"),
+        token=os.environ.get("GH_TOKEN"),
     )
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)

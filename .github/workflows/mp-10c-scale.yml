@@ -8,15 +8,15 @@ on:
   workflow_dispatch:
     inputs:
       pr_number:
-        description: Open same-repository PR to qualify (select its current head branch above)
+        description: Open same-repository PR; dispatch native CI separately first on this exact head branch
         type: string
         required: true
       head_sha:
-        description: Exact PR head SHA observed when the candidate was frozen
+        description: Exact PR head SHA; must match the separately dispatched native CI run
         type: string
         required: true
       base_sha:
-        description: Exact PR base SHA observed when the candidate was frozen
+        description: Exact PR base SHA; must match the separately dispatched native CI run
         type: string
         required: true
       qualification:
@@ -119,7 +119,9 @@ jobs:
   prerequisite-coordination:
     name: Wait for exact-source native prerequisites (Ubuntu, NOT 100K)
     needs: [effective-input-gate, document-smoke]
-    if: needs.effective-input-gate.outputs.run-heavy == 'true' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.draft == false))
+    # Current native qualification is mandatory even when an authenticated 100K proof is reused.
+    # Draft PRs remain deferred; explicit dispatch and every Ready PR are coordinated.
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.draft == false)
     runs-on: ubuntu-24.04
     timeout-minutes: 85
     concurrency:
@@ -286,7 +288,7 @@ jobs:
   draft-qualification-pending:
     name: Draft development / qualification PENDING (NOT 100K PASS)
     needs: effective-input-gate
-    if: github.event_name == 'pull_request' && github.event.pull_request.draft == true && needs.effective-input-gate.outputs.run-heavy == 'true'
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft == true
     runs-on: ubuntu-latest
     steps:
       - run: |
@@ -295,7 +297,7 @@ jobs:
 
   qualification-accepted:
     name: 100K qualification accepted
-    needs: [effective-input-gate, document-smoke, document-scale, provenance]
+    needs: [effective-input-gate, document-smoke, document-scale, provenance, prerequisite-coordination]
     if: always() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -304,12 +306,14 @@ jobs:
       PR_NUMBER: ${{ needs.effective-input-gate.outputs.pr-number }}
       EXPECTED_FINGERPRINT: ${{ needs.effective-input-gate.outputs.fingerprint }}
       QUALIFICATION_MODE: ${{ inputs.qualification || 'auto' }}
+      NATIVE_PREREQUISITE_RESULT: ${{ needs.prerequisite-coordination.result }}
     steps:
-      - name: Deny final acceptance when development prerequisites failed
+      - name: Deny final acceptance when development or native prerequisites failed
         env:
           SOURCE_GATE_RESULT: ${{ needs.effective-input-gate.result }}
           SMOKE_RESULT: ${{ needs.document-smoke.result }}
-        run: test "$SOURCE_GATE_RESULT" = success && test "$SMOKE_RESULT" = success
+          PREREQUISITE_RESULT: ${{ needs.prerequisite-coordination.result }}
+        run: test "$SOURCE_GATE_RESULT" = success && test "$SMOKE_RESULT" = success && test "$PREREQUISITE_RESULT" = success
       - uses: actions/checkout@v5
         with:
           ref: ${{ needs.effective-input-gate.outputs.checkout-sha }}

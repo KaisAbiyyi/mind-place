@@ -393,7 +393,8 @@ def require_live_candidate(repo: str, candidate: dict, token: str) -> None:
 
 def validate_native_run_identity(run: dict, candidate: dict, repo: str,
                                  workflow_path: str = ".github/workflows/ci.yml") -> None:
-    if (run.get("event") != "pull_request"
+    event = run.get("event")
+    if (event not in {"pull_request", "workflow_dispatch"}
             or run.get("path") != workflow_path
             or run.get("repository", {}).get("full_name") != repo
             or run.get("head_repository", {}).get("full_name") != candidate["head_repo"]
@@ -403,16 +404,28 @@ def validate_native_run_identity(run: dict, candidate: dict, repo: str,
             or run.get("head_sha") != candidate["head"]):
         raise ValueError("Native run repository/event/head identity mismatch")
     associated = run.get("pull_requests")
-    if not isinstance(associated, list) or len(associated) != 1:
-        raise ValueError("Native run has missing or ambiguous PR association")
-    context = associated[0]
-    head, base = context.get("head", {}), context.get("base", {})
-    if (context.get("number") != candidate["pr"]
-            or head.get("repo", {}).get("id") != candidate["head_repo_id"]
-            or head.get("ref") != candidate["branch"] or head.get("sha") != candidate["head"]
-            or base.get("repo", {}).get("id") != candidate["base_repo_id"]
-            or base.get("ref") != candidate["base_branch"] or base.get("sha") != candidate["base_sha"]):
-        raise ValueError("Native run is associated with another PR or base/head revision")
+    if event == "pull_request":
+        if not isinstance(associated, list) or len(associated) != 1:
+            raise ValueError("Native pull_request run has missing or ambiguous PR association")
+        contexts = associated
+    elif associated in (None, []):
+        # A workflow_dispatch run has no GitHub PR association; its same-run
+        # native-contract artifact must bind the explicit, live-verified inputs.
+        contexts = []
+    elif isinstance(associated, list) and len(associated) == 1:
+        contexts = associated
+    else:
+        raise ValueError("Native dispatch run has ambiguous PR association")
+    for context in contexts:
+        if not isinstance(context, dict):
+            raise ValueError("Malformed native PR association")
+        head, base = context.get("head", {}), context.get("base", {})
+        if (context.get("number") != candidate["pr"]
+                or head.get("repo", {}).get("id") != candidate["head_repo_id"]
+                or head.get("ref") != candidate["branch"] or head.get("sha") != candidate["head"]
+                or base.get("repo", {}).get("id") != candidate["base_repo_id"]
+                or base.get("ref") != candidate["base_branch"] or base.get("sha") != candidate["base_sha"]):
+            raise ValueError("Native run is associated with another PR or base/head revision")
 
 
 def fetch_native_evidence(run: dict, *, repo: str, token: str) -> dict:
@@ -437,7 +450,7 @@ def validate_native_evidence(evidence: dict, run: dict, candidate: dict, *,
     kind, policy_vault = native_contract.candidate_requirement(repo, candidate["pr"])
     expected = {
         "schema": native_contract.EVIDENCE_SCHEMA, "repository": repo,
-        "event": "pull_request", "workflow_path": ".github/workflows/ci.yml",
+        "event": run.get("event"), "workflow_path": ".github/workflows/ci.yml",
         "pr_number": candidate["pr"],
         "head_repository": candidate["head_repo"],
         "head_repository_id": candidate["head_repo_id"],
@@ -459,8 +472,7 @@ def validate_native_evidence(evidence: dict, run: dict, candidate: dict, *,
         if evidence["head_repository_id"] != run.get("head_repository", {}).get("id"):
             raise ValueError("Native provenance head repository ID mismatch")
     if evidence.get("base_repository_id") is not None:
-        base = run["pull_requests"][0].get("base", {}).get("repo", {})
-        if evidence["base_repository_id"] != base.get("id"):
+        if evidence["base_repository_id"] != run.get("repository", {}).get("id"):
             raise ValueError("Native provenance base repository ID mismatch")
 
 
@@ -641,6 +653,26 @@ def decision(event: str, mode: str, previous: dict | None) -> tuple[bool, str]:
     if previous is None:
         return True, "No verifiable successful 100K proof for identical effective inputs"
     return False, "Identical effective inputs; prior full qualification reused (NOT a new PASS)"
+
+
+def require_native_coordination_result(result: object) -> None:
+    """A workload receipt never substitutes for current exact-source native PASS."""
+    if result != "success":
+        rendered = result if isinstance(result, str) and result else "missing"
+        raise ValueError(
+            "Current exact-source native prerequisite coordination is not successful: "
+            + rendered)
+
+
+def select_acceptance_evidence(*, native_result: object, fresh: dict | None,
+                               previous: dict | None, event: str, mode: str) -> tuple[dict, bool]:
+    """Select proof only after current native coordination has independently passed."""
+    require_native_coordination_result(native_result)
+    if fresh is not None:
+        return fresh, True
+    if event == "pull_request" and mode == "auto" and previous is not None:
+        return previous, False
+    raise ValueError("Final 100K qualification REQUIRED: no authenticated matching evidence")
 
 
 def require_prerequisites(runs: list[dict], candidate: dict, *, repo: str,
@@ -838,15 +870,19 @@ def main() -> int:
     if args.command == "accept":
         if os.environ.get("EXPECTED_FINGERPRINT") != fp:
             raise ValueError("Acceptance checkout differs from gate inputs")
+        native_result = os.environ.get("NATIVE_PREREQUISITE_RESULT")
+        require_native_coordination_result(native_result)
         token, pr, run_id = os.environ["GH_TOKEN"], int(os.environ["PR_NUMBER"]), int(os.environ["GITHUB_RUN_ID"])
         current = api_json(f"https://api.github.com/repos/{repo}/actions/runs/{run_id}", token)
-        accepted = validated_candidate(current, token=token, repo=repo, pr=pr, desired=fp,
-                                       active_run_id=run_id)
-        fresh = accepted is not None
-        if not fresh and event == "pull_request" and os.environ.get("QUALIFICATION_MODE", "auto") == "auto":
-            accepted = find_accepted(token=token, repo=repo, pr=pr, desired=fp)
-        if not accepted:
-            raise ValueError("Final 100K qualification REQUIRED: no authenticated matching evidence")
+        fresh_candidate = validated_candidate(current, token=token, repo=repo, pr=pr, desired=fp,
+                                              active_run_id=run_id)
+        previous = None
+        mode = os.environ.get("QUALIFICATION_MODE", "auto")
+        if fresh_candidate is None and event == "pull_request" and mode == "auto":
+            previous = find_accepted(token=token, repo=repo, pr=pr, desired=fp)
+        accepted, fresh = select_acceptance_evidence(
+            native_result=native_result, fresh=fresh_candidate, previous=previous,
+            event=event, mode=mode)
         report = ("Fresh full 100K qualification accepted" if fresh else
                   "Prior full 100K proof reused for identical inputs; NOT a new 100K PASS")
         print(report, json.dumps(accepted, sort_keys=True))

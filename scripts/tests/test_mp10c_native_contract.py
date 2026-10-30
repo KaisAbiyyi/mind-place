@@ -89,7 +89,7 @@ def native_evidence(cand, run, fingerprint=CONTRACT, vault=False):
     kind, _ = native_contract.candidate_requirement(cand["base_repo"], cand["pr"])
     return {
         "schema": native_contract.EVIDENCE_SCHEMA,
-        "repository": cand["base_repo"], "event": "pull_request",
+        "repository": cand["base_repo"], "event": run["event"],
         "workflow_path": ".github/workflows/ci.yml", "pr_number": cand["pr"],
         "head_repository": cand["head_repo"], "head_branch": cand["branch"],
         "head_sha": cand["head"], "base_repository": cand["base_repo"],
@@ -348,6 +348,63 @@ class NativeContractFingerprintTests(unittest.TestCase):
         self.commit()
         self.assertNotEqual(before, self.fp(127))
 
+    def test_manual_native_dispatch_requires_exact_live_pr_inputs_and_merge_checkout(self):
+        base = git(self.root, "rev-parse", "HEAD").decode().strip()
+        git(self.root, "branch", "fixture-base", base)
+        git(self.root, "checkout", "-qb", "feature/native-dispatch")
+        path = self.root / "crates/security-core/src/lib.rs"
+        path.write_text("pub fn security() { assert!(true); }\n")
+        git(self.root, "add", ".")
+        git(self.root, "commit", "-qm", "manual dispatch candidate")
+        head = git(self.root, "rev-parse", "HEAD").decode().strip()
+        git(self.root, "checkout", "-q", "fixture-base")
+        git(self.root, "merge", "--no-ff", "-qm", "synthetic PR merge", "feature/native-dispatch")
+        checkout = git(self.root, "rev-parse", "HEAD").decode().strip()
+        pull = {
+            "number": 129, "state": "open",
+            "head": {"sha": head, "ref": "feature/native-dispatch",
+                     "repo": {"full_name": REPO, "id": 77}},
+            "base": {"sha": base, "ref": "fixture-base",
+                     "repo": {"full_name": REPO, "id": 77}},
+        }
+        payload = {"inputs": {"pr_number": "129", "head_sha": head, "base_sha": base}}
+        with patch.object(native_contract, "api_json", return_value=pull):
+            evidence = native_contract.capture_native_evidence(
+                str(self.root), payload, repo=REPO, run_id=701, attempt=1,
+                event_name="workflow_dispatch", github_sha=head,
+                github_ref="refs/heads/feature/native-dispatch", token="synthetic")
+        self.assertEqual(evidence["event"], "workflow_dispatch")
+        self.assertEqual((evidence["pr_number"], evidence["head_sha"], evidence["base_sha"]), (129, head, base))
+        self.assertEqual(evidence["checkout_sha"], checkout)
+        self.assertEqual(evidence["workflow_run_id"], 701)
+
+        invalid_payloads = (
+            {"inputs": {"pr_number": "129", "head_sha": "e"*40, "base_sha": base}},
+            {"inputs": {"pr_number": "129", "head_sha": head, "base_sha": "f"*40}},
+            {"inputs": {"pr_number": "0", "head_sha": head, "base_sha": base}},
+            {"inputs": {"pr_number": "129", "head_sha": head}},
+        )
+        for invalid in invalid_payloads:
+            with self.subTest(inputs=invalid), patch.object(native_contract, "api_json", return_value=pull):
+                with self.assertRaises(ValueError):
+                    native_contract.capture_native_evidence(
+                        str(self.root), invalid, repo=REPO, run_id=701, attempt=1,
+                        event_name="workflow_dispatch", github_sha=head,
+                        github_ref="refs/heads/feature/native-dispatch", token="synthetic")
+        with patch.object(native_contract, "api_json", return_value=pull):
+            with self.assertRaises(ValueError):
+                native_contract.capture_native_evidence(
+                    str(self.root), payload, repo=REPO, run_id=701, attempt=1,
+                    event_name="workflow_dispatch", github_sha=head,
+                    github_ref="refs/heads/main", token="synthetic")
+        closed = dict(pull, state="closed")
+        with patch.object(native_contract, "api_json", return_value=closed):
+            with self.assertRaises(ValueError):
+                native_contract.capture_native_evidence(
+                    str(self.root), payload, repo=REPO, run_id=701, attempt=1,
+                    event_name="workflow_dispatch", github_sha=head,
+                    github_ref="refs/heads/feature/native-dispatch", token="synthetic")
+
     def test_native_evidence_captures_exact_base_head_and_run_attempt(self):
         base = git(self.root, "rev-parse", "HEAD").decode().strip()
         git(self.root, "branch", "base")
@@ -414,6 +471,24 @@ class NativeIdentityAndPrerequisiteTests(unittest.TestCase):
 
     def test_exact_run_and_same_run_fingerprint_evidence_are_accepted(self):
         self.require()
+
+    def test_exact_manual_dispatch_native_run_with_same_run_evidence_is_accepted(self):
+        dispatched = native_run(self.candidate, event="workflow_dispatch")
+        dispatched.pop("pull_requests")
+        evidence = native_evidence(self.candidate, dispatched)
+        self.args["fetch_evidence"] = lambda _: evidence
+        self.require([dispatched])
+
+    def test_manual_dispatch_run_with_stale_head_or_unbound_evidence_is_rejected(self):
+        dispatched = native_run(self.candidate, event="workflow_dispatch")
+        dispatched.pop("pull_requests")
+        dispatched["head_sha"] = "e" * 40
+        with self.assertRaises(ValueError):
+            self.require([dispatched])
+        dispatched["head_sha"] = self.candidate["head"]
+        self.args["fetch_evidence"] = lambda _: {}
+        with self.assertRaises(ValueError):
+            self.require([dispatched])
 
     def test_foreign_pr_and_same_head_different_pr_are_rejected(self):
         for altered in (
@@ -579,10 +654,11 @@ class NativeIdentityAndPrerequisiteTests(unittest.TestCase):
             self._require_sqlcipher_with_runner_labels(
                 ["windows-2022"], ["windows-2022"])
 
-    def test_skipped_native_job_and_skipped_critical_step_are_rejected(self):
-        self.jobs[2]["conclusion"] = "skipped"
-        with self.assertRaises(ValueError):
-            self.require()
+    def test_skipped_failed_cancelled_native_product_and_skipped_step_are_rejected(self):
+        for conclusion in ("skipped", "failure", "cancelled"):
+            self.jobs[2]["conclusion"] = conclusion
+            with self.subTest(conclusion=conclusion), self.assertRaises(ValueError):
+                self.require()
         self.jobs[2]["conclusion"] = "success"
         self.jobs[2]["steps"][0]["conclusion"] = "skipped"
         with self.assertRaises(ValueError):
@@ -606,6 +682,46 @@ class NativeIdentityAndPrerequisiteTests(unittest.TestCase):
     def test_optional_sqlcipher_workflow_absence_does_not_disable_non_vault_native_check(self):
         self.require()
         # No SQLCipher run is supplied; the explicit PR 129 policy makes it optional.
+
+    def test_cached_proof_selection_still_requires_current_exact_native_evidence(self):
+        cached = {"run_id": 77, "artifact_id": 12}
+        self.require()
+        accepted, fresh = gate.select_acceptance_evidence(
+            native_result="success", fresh=None, previous=cached,
+            event="pull_request", mode="auto")
+        self.assertIs(accepted, cached)
+        self.assertFalse(fresh)
+
+        self.jobs[2]["labels"] = ["ubuntu-latest"]
+        with self.assertRaises(ValueError):
+            self.require()
+        with self.assertRaises(ValueError):
+            gate.select_acceptance_evidence(
+                native_result="failure", fresh=None, previous=cached,
+                event="pull_request", mode="auto")
+
+        self.jobs[2]["labels"] = ["windows-latest"]
+        self.evidence["native_contract_fingerprint"] = "e" * 64
+        with self.assertRaises(ValueError):
+            self.require()
+        with self.assertRaises(ValueError):
+            gate.select_acceptance_evidence(
+                native_result="failure", fresh=None, previous=cached,
+                event="pull_request", mode="auto")
+
+    def test_missing_native_workflow_times_out_and_cannot_accept_cached_proof(self):
+        state, reason = coordinator.classify(
+            [], self.candidate, "owner/repo", False, CONTRACT,
+            self.args["fetch_jobs"], self.args["fetch_evidence"])
+        self.assertEqual(state, "pending")
+        with self.assertRaises(TimeoutError):
+            coordinator.wait(
+                "owner/repo", self.candidate, "token", False, CONTRACT,
+                timeout=0, inspect=lambda *_: (state, reason))
+        with self.assertRaises(ValueError):
+            gate.select_acceptance_evidence(
+                native_result="skipped", fresh=None,
+                previous={"run_id": 77}, event="pull_request", mode="auto")
 
     def test_coordinator_pending_then_success_and_failed_or_missing_prerequisites(self):
         in_progress = dict(self.run, status="in_progress", conclusion=None)
