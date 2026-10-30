@@ -1,9 +1,9 @@
 # Mind Place P0 Checkpoint 2B — Actual Enforcement Architecture
 
-**Status: DESIGN ONLY — NOT IMPLEMENTATION AUTHORIZATION**  
-**Decision: NO-GO for production activation or useful merge admission.**  
-**Baseline:** `codex/mp-p0-authority-2a` at `c861bc14c2179407ad71959fec836bf3bf77da0c`  
-**Tracking:** [Issue #134](https://github.com/KaisAbiyyi/mind-place/issues/134)  
+**Status: DESIGN ONLY — NOT IMPLEMENTATION AUTHORIZATION**
+**Decision: NO-GO for production activation or useful merge admission.**
+**Baseline:** `codex/mp-p0-authority-2a` at `c861bc14c2179407ad71959fec836bf3bf77da0c`
+**Tracking:** [Issue #134](https://github.com/KaisAbiyyi/mind-place/issues/134)
 **Design branch:** `codex/mp-p0-authority-2b-design`
 
 ---
@@ -544,7 +544,7 @@ The design reduces the race using a single writer, per-base serialization, bot-o
 
 <badge color="warning">Strongest useful-admission candidate; not a complete GitHub-native guarantee</badge>
 
-**Can stale SUCCESS still independently authorize a merge? No, if the broker is the only enforced update actor and it never treats SUCCESS as sufficient.**  
+**Can stale SUCCESS still independently authorize a merge? No, if the broker is the only enforced update actor and it never treats SUCCESS as sufficient.**
 **Can GitHub alone guarantee immediate revocation across an already in-flight merge? No.** The broker design has a transaction boundary and residual root-of-trust assumptions. P0 must remain open until the owner accepts the stated revocation semantics and independent live tests prove the single-writer path.
 
 ---
