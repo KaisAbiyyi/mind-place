@@ -295,6 +295,14 @@ class NativeContractFingerprintTests(unittest.TestCase):
         self.assertEqual((windows["labels"], windows["platform"], windows["matrix"]["os"]),
                          (["windows-2022"], "windows", "windows-2022"))
 
+        mismatched = source.replace(
+            "    runs-on: ${{ matrix.os }}\n",
+            "    runs-on: ubuntu-24.04\n")
+        with self.assertRaises(ValueError):
+            native_contract.workflow_job_runner_requirements(
+                mismatched, "SQLCipher / windows-2022")
+
+
     def test_native_test_and_dependency_lock_changes_invalidate_contract(self):
         before = self.fp()
         path = self.root / "crates/security-core/tests/security.rs"

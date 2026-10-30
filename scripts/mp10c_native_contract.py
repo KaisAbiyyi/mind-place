@@ -402,6 +402,17 @@ def _workflow_matrix_combinations(config: dict, job_name: str) -> list[dict]:
     return combinations
 
 
+def _matrix_expression_axes(value) -> set[str]:
+    if isinstance(value, str):
+        return set(re.findall(
+            r"[$][{][{]\s*matrix\.([A-Za-z0-9_-]+)\s*[}][}]", value))
+    if isinstance(value, list):
+        return set().union(*(_matrix_expression_axes(item) for item in value))
+    if isinstance(value, dict):
+        return set().union(*(_matrix_expression_axes(item) for item in value.values()))
+    return set()
+
+
 def workflow_job_runner_requirements(contents: bytes | str, job_name: str) -> dict:
     """Derive configured runner labels/platform, including explicit matrix expansions."""
     document = parse_workflow_yaml(contents)
@@ -415,6 +426,10 @@ def workflow_job_runner_requirements(contents: bytes | str, job_name: str) -> di
         template_name = config.get("name", job_id)
         if not isinstance(template_name, str):
             raise ValueError("Malformed workflow job name: " + str(job_id))
+        name_axes = _matrix_expression_axes(template_name)
+        runner_axes = _matrix_expression_axes(config.get("runs-on"))
+        if name_axes and not name_axes.issubset(runner_axes):
+            raise ValueError("Matrix job name is not bound to its configured runner: " + job_name)
         for combination in _workflow_matrix_combinations(config, job_name):
             resolved_name = _resolve_matrix_expression(template_name, combination)
             if resolved_name == job_name:
