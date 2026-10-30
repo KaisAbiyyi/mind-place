@@ -272,6 +272,29 @@ class NativeContractFingerprintTests(unittest.TestCase):
             with self.subTest(labels=labels), self.assertRaises(ValueError):
                 native_contract.validate_runner_labels({"labels": labels}, windows)
 
+
+    def test_matrix_runner_requirements_resolve_each_expanded_sqlcipher_job(self):
+        source = (
+            "jobs:\n"
+            "  sqlcipher:\n"
+            "    name: SQLCipher / ${{ matrix.os }}\n"
+            "    strategy:\n"
+            "      fail-fast: false\n"
+            "      matrix:\n"
+            "        os: [ubuntu-24.04, windows-2022]\n"
+            "    runs-on: ${{ matrix.os }}\n"
+            "    steps:\n"
+            "      - run: cargo test\n"
+        )
+        linux = native_contract.workflow_job_runner_requirements(
+            source, "SQLCipher / ubuntu-24.04")
+        windows = native_contract.workflow_job_runner_requirements(
+            source, "SQLCipher / windows-2022")
+        self.assertEqual((linux["labels"], linux["platform"], linux["matrix"]["os"]),
+                         (["ubuntu-24.04"], "linux", "ubuntu-24.04"))
+        self.assertEqual((windows["labels"], windows["platform"], windows["matrix"]["os"]),
+                         (["windows-2022"], "windows", "windows-2022"))
+
     def test_native_test_and_dependency_lock_changes_invalidate_contract(self):
         before = self.fp()
         path = self.root / "crates/security-core/tests/security.rs"
@@ -509,21 +532,13 @@ class NativeIdentityAndPrerequisiteTests(unittest.TestCase):
         by_run = {ci_run["id"]: self.jobs, sql_run["id"]: sql_jobs}
         sql_source = (
             "jobs:\n"
-            "  sqlcipher-ubuntu:\n"
-            "    name: SQLCipher / ubuntu-24.04\n"
-            "    runs-on: ubuntu-24.04\n"
-            "    steps:\n"
-            "      - name: Check Rust formatting\n"
-            "        run: cargo fmt --all -- --check\n"
-            "      - name: Encrypted state/index and FTS regression\n"
-            "        run: cargo test\n"
-            "      - name: Keyed MCP synthetic authorization and revocation\n"
-            "        run: cargo test\n"
-            "      - name: Vault and backup adversarial regression\n"
-            "        run: cargo test\n"
-            "  sqlcipher-windows:\n"
-            "    name: SQLCipher / windows-2022\n"
-            "    runs-on: windows-2022\n"
+            "  sqlcipher:\n"
+            "    name: SQLCipher / ${{ matrix.os }}\n"
+            "    strategy:\n"
+            "      fail-fast: false\n"
+            "      matrix:\n"
+            "        os: [ubuntu-24.04, windows-2022]\n"
+            "    runs-on: ${{ matrix.os }}\n"
             "    steps:\n"
             "      - name: Check Rust formatting\n"
             "        run: cargo fmt --all -- --check\n"

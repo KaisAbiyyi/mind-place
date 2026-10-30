@@ -356,20 +356,74 @@ def _runner_platform(label: str) -> str | None:
     return None
 
 
+def _resolve_matrix_expression(value, combination: dict):
+    """Resolve only explicit GitHub matrix expressions from a selected matrix row."""
+    if isinstance(value, str):
+        def replace(match):
+            axis = match.group(1)
+            if axis not in combination:
+                raise ValueError("Unresolved workflow matrix axis: " + axis)
+            return str(combination[axis])
+        resolved = re.sub(
+            r"[$][{][{]\s*matrix\.([A-Za-z0-9_-]+)\s*[}][}]", replace, value)
+        if "$" + "{{" in resolved or "}}" in resolved:
+            raise ValueError("Unsupported dynamic workflow runner expression")
+        return resolved
+    if isinstance(value, list):
+        return [_resolve_matrix_expression(item, combination) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: _resolve_matrix_expression(item, combination)
+            for key, item in value.items()
+        }
+    return value
+
+
+def _workflow_matrix_combinations(config: dict, job_name: str) -> list[dict]:
+    strategy = config.get("strategy", {})
+    if not isinstance(strategy, dict):
+        raise ValueError("Malformed workflow strategy for " + job_name)
+    matrix = strategy.get("matrix", {})
+    if matrix is None:
+        matrix = {}
+    if not isinstance(matrix, dict):
+        raise ValueError("Malformed workflow matrix for " + job_name)
+    combinations = [{}]
+    for axis, values in matrix.items():
+        if axis in {"include", "exclude"}:
+            raise ValueError("Unsupported include/exclude workflow matrix for " + job_name)
+        if (not isinstance(values, list) or not values
+                or any(isinstance(value, (dict, list)) or value is None for value in values)):
+            raise ValueError("Malformed workflow matrix axis: " + str(axis))
+        combinations = [
+            {**combination, axis: value}
+            for combination in combinations for value in values
+        ]
+    return combinations
+
+
 def workflow_job_runner_requirements(contents: bytes | str, job_name: str) -> dict:
-    """Derive configured runner labels/platform from a named workflow job."""
+    """Derive configured runner labels/platform, including explicit matrix expansions."""
     document = parse_workflow_yaml(contents)
     jobs = document.get("jobs")
     if not isinstance(jobs, dict):
         raise ValueError("Workflow has no jobs mapping")
-    matches = [
-        (job_id, job) for job_id, job in jobs.items()
-        if isinstance(job, dict) and job.get("name", job_id) == job_name
-    ]
+    matches = []
+    for job_id, config in jobs.items():
+        if not isinstance(config, dict):
+            continue
+        template_name = config.get("name", job_id)
+        if not isinstance(template_name, str):
+            raise ValueError("Malformed workflow job name: " + str(job_id))
+        for combination in _workflow_matrix_combinations(config, job_name):
+            resolved_name = _resolve_matrix_expression(template_name, combination)
+            if resolved_name == job_name:
+                resolved_runs_on = _resolve_matrix_expression(
+                    config.get("runs-on"), combination)
+                matches.append((job_id, config, resolved_runs_on, combination))
     if len(matches) != 1:
         raise ValueError("Workflow job name is missing or ambiguous: " + job_name)
-    job_id, config = matches[0]
-    runs_on = config.get("runs-on")
+    job_id, config, runs_on, combination = matches[0]
     group = None
     if isinstance(runs_on, str):
         labels = [runs_on]
@@ -397,6 +451,7 @@ def workflow_job_runner_requirements(contents: bytes | str, job_name: str) -> di
     return {
         "job_id": job_id, "labels": normalized,
         "platform": next(iter(platforms)), "group": group,
+        "matrix": combination,
     }
 
 
