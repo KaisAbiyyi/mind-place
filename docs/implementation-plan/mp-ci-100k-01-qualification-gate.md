@@ -12,7 +12,7 @@ Every native CI pull-request run uploads native-contract.json in the same workfl
 
 The coordinator rechecks the live PR before and after evidence inspection. A changed head, base repository, base branch or base SHA invalidates the frozen candidate. It runs on Ubuntu; the expensive Windows indexing job cannot start until exact native evidence passes. Draft CI may upload provenance, but a skipped Windows Product job cannot satisfy the prerequisite.
 
-mp10c-workload/v2 and the prior 100K receipt policy are unchanged. Native-only files and workflows remain excluded from the workload fingerprint. No new full-scale indexing or manual/final qualification is part of this correction.
+mp10c-workload/v2 and the prior 100K receipt policy are unchanged. Native-only files and workflows remain excluded from the workload fingerprint. The scale signature continues to bind the actual Windows runner, commands, flags, indexing steps and receipt assertions, while explicitly normalizing only the new PR/base repository identity and native-contract environment keys from the document-scale job. This keeps evidence-binding metadata changes from forcing a 100K reindex. Regression coverage asserts that adding those identity keys leaves the workload fingerprint unchanged. No new full-scale indexing or manual/final qualification is part of this correction.
 
 ## 2026-10-29 cloud recovery: versioned workload identity and Ubuntu gate
 

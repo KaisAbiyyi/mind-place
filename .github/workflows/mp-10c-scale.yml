@@ -196,18 +196,6 @@ jobs:
         if: steps.recheck.outputs.run-heavy == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ needs.effective-input-gate.outputs.pr-number }}
-          PR_HEAD_SHA: ${{ needs.effective-input-gate.outputs.source-sha }}
-          PR_HEAD_REF: ${{ needs.effective-input-gate.outputs.source-ref }}
-          PR_HEAD_REPOSITORY: ${{ needs.effective-input-gate.outputs.head-repository }}
-          PR_HEAD_REPOSITORY_ID: ${{ needs.effective-input-gate.outputs.head-repository-id }}
-          PR_BASE_REPOSITORY: ${{ needs.effective-input-gate.outputs.base-repository }}
-          PR_BASE_REPOSITORY_ID: ${{ needs.effective-input-gate.outputs.base-repository-id }}
-          PR_BASE_REF: ${{ needs.effective-input-gate.outputs.base-ref }}
-          PR_BASE_SHA: ${{ needs.effective-input-gate.outputs.base-sha }}
-          PR_NATIVE_CHECKOUT_SHA: ${{ needs.effective-input-gate.outputs.native-checkout-sha }}
-          NATIVE_CONTRACT_POLICY: ${{ needs.effective-input-gate.outputs.native-contract-policy }}
-          NATIVE_CONTRACT_FINGERPRINT: ${{ needs.effective-input-gate.outputs.native-contract-fingerprint }}
         run: python scripts/mp10c_ci_gate.py preflight
       - name: Pinned Rust 1.90
         if: steps.recheck.outputs.run-heavy == 'true'

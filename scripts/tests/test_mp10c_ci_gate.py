@@ -76,6 +76,22 @@ class FingerprintTests(unittest.TestCase):
                 self.write(path, (self.root.joinpath(path).read_text() if self.root.joinpath(path).exists() else "") + "!")
                 self.assertNotEqual(before, self.fp())
 
+    def test_native_candidate_identity_environment_does_not_reindex(self):
+        workflow = self.root.joinpath(".github/workflows/mp-10c-scale.yml").read_text()
+        workflow = workflow.replace(
+            "  document-scale:\n    runs-on: windows-latest\n",
+            "  document-scale:\n    runs-on: windows-latest\n    env:\n      CARGO_INCREMENTAL: '0'\n")
+        self.write(".github/workflows/mp-10c-scale.yml", workflow)
+        before = self.fp()
+        workflow = workflow.replace(
+            "      CARGO_INCREMENTAL: '0'\n",
+            "      CARGO_INCREMENTAL: '0'\n"
+            "      PR_HEAD_REPOSITORY: owner/repo\n"
+            "      PR_BASE_SHA: " + "b"*40 + "\n"
+            "      NATIVE_CONTRACT_FINGERPRINT: " + "c"*64 + "\n")
+        self.write(".github/workflows/mp-10c-scale.yml", workflow)
+        self.assertEqual(before, self.fp())
+
     def test_validator_only_and_coordination_only_edits_do_not_reindex(self):
         before = self.fp()
         self.write("scripts/mp10c_ci_gate.py", "new strict parser")

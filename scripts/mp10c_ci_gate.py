@@ -77,6 +77,20 @@ def scale_workflow_signature(contents: bytes) -> bytes:
         contract = body[runner.start():].rstrip()
         if not re.search(r"(?m)^    steps:\s*$", contract):
             raise ValueError("Missing Windows scale steps: " + name)
+        if name == "document-scale":
+            # Candidate identity/native-contract metadata is deliberately not a
+            # 100K workload input. Keep the real runner, commands, flags and
+            # indexing steps bound while excluding only these orchestration keys.
+            identity_only = {
+                "PR_HEAD_REPOSITORY", "PR_HEAD_REPOSITORY_ID",
+                "PR_BASE_REPOSITORY", "PR_BASE_REPOSITORY_ID",
+                "PR_BASE_REF", "PR_BASE_SHA", "PR_NATIVE_CHECKOUT_SHA",
+                "NATIVE_CONTRACT_POLICY", "NATIVE_CONTRACT_FINGERPRINT",
+            }
+            contract = "\n".join(
+                line for line in contract.splitlines()
+                if line.strip().split(":", 1)[0] not in identity_only
+            )
         digest.update(name.encode() + b"\0" + contract.encode() + b"\0")
     return digest.digest()
 
