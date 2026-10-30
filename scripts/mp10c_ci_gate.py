@@ -48,7 +48,9 @@ def excluded(path: str, *, legacy: bool = False) -> bool:
                   path != ".github/workflows/mp-10c-scale.yml"))
     return common or (not legacy and path in {
         "scripts/mp10c_ci_gate.py", "scripts/tests/test_mp10c_ci_gate.py",
-        "scripts/mp10c_prerequisite_wait.py", ".github/workflows/mp-10c-scale.yml"})
+        "scripts/tests/test_mp10c_native_contract.py",
+        "scripts/mp10c_prerequisite_wait.py", "scripts/mp10c_native_contract.py",
+        ".github/workflows/mp-10c-scale.yml"})
 
 
 def scale_workflow_signature(contents: bytes) -> bytes:
@@ -245,35 +247,175 @@ def artifact_name(name: str, attempt: int) -> str:
 
 def resolve_target(*, event: str, payload: dict, repo: str, sha: str,
                    ref: str, token: str) -> dict:
-    """Bind manual qualification to an open, same-repository PR at dispatch.
-
-    A dispatch runs on the PR's own branch, tests its exact immutable head,
-    and never silently qualifies the default branch or PR zero.
-    """
+    """Freeze every PR identity dimension from the event/API snapshot."""
     if event == "push":
         if not ref.startswith("refs/tags/") or not HEX40.fullmatch(sha):
             raise ValueError("Only a release tag may qualify without a PR")
-        return {"pr": 0, "head": sha, "branch": ref.removeprefix("refs/tags/")}
+        return {
+            "pr": 0, "head": sha, "branch": ref.removeprefix("refs/tags/"),
+            "head_repo": repo, "head_repo_id": None, "base_repo": repo,
+            "base_repo_id": None, "base_branch": "", "base_sha": "0" * 40,
+        }
     if event == "pull_request":
-        pull = payload["pull_request"]
+        pull = payload.get("pull_request")
+        if not isinstance(pull, dict) or type(payload.get("number")) is not int:
+            raise ValueError("Missing or ambiguous pull_request event identity")
+        if pull.get("number", payload["number"]) != payload["number"]:
+            raise ValueError("Pull request event number mismatch")
     elif event == "workflow_dispatch":
-        number = payload.get("inputs", {}).get("pr_number", "")
+        inputs = payload.get("inputs", {})
+        number = inputs.get("pr_number", "")
+        expected_head = inputs.get("head_sha", "")
+        expected_base = inputs.get("base_sha", "")
         if not isinstance(number, str) or not re.fullmatch(r"[1-9][0-9]*", number):
             raise ValueError("Manual/final qualification requires pr_number")
+        if not HEX40.fullmatch(expected_head or "") or not HEX40.fullmatch(expected_base or ""):
+            raise ValueError("Manual/final qualification requires explicit head_sha and base_sha")
         pull = api_json(f"https://api.github.com/repos/{repo}/pulls/{number}", token)
         if pull.get("number") != int(number) or pull.get("state") != "open":
             raise ValueError("Manual target PR is not open")
-        if pull.get("head", {}).get("sha") != sha or ref != "refs/heads/" + pull.get("head", {}).get("ref", ""):
-            raise ValueError("Dispatch must select the current target PR head branch")
+        if (pull.get("head", {}).get("sha") != expected_head
+                or pull.get("base", {}).get("sha") != expected_base
+                or sha != expected_head
+                or ref != "refs/heads/" + pull.get("head", {}).get("ref", "")):
+            raise ValueError("Dispatch must select the exact current PR head and base")
     else:
         raise ValueError("Unsupported qualification event")
-    if (pull.get("head", {}).get("repo", {}).get("full_name") != repo
-            or pull.get("base", {}).get("repo", {}).get("full_name") != repo):
-        raise ValueError("Cross-repository qualification is not authorized")
-    number, head, branch = pull.get("number"), pull["head"].get("sha"), pull["head"].get("ref")
-    if type(number) is not int or number <= 0 or not HEX40.fullmatch(head or "") or not branch:
-        raise ValueError("Invalid PR source identity")
-    return {"pr": number, "head": head, "branch": branch}
+
+    head, base = pull.get("head", {}), pull.get("base", {})
+    head_repo, base_repo = head.get("repo") or {}, base.get("repo") or {}
+    head_repo_name, base_repo_name = head_repo.get("full_name"), base_repo.get("full_name")
+    number, head_sha, head_ref = pull.get("number"), head.get("sha"), head.get("ref")
+    base_sha, base_ref = base.get("sha"), base.get("ref")
+    if (head_repo_name != repo or base_repo_name != repo
+            or type(head_repo.get("id")) is not int or head_repo["id"] <= 0
+            or type(base_repo.get("id")) is not int or base_repo["id"] <= 0
+            or head_repo["id"] != base_repo["id"]
+            or type(number) is not int or number <= 0
+            or not HEX40.fullmatch(head_sha or "") or not HEX40.fullmatch(base_sha or "")
+            or not isinstance(head_ref, str) or not head_ref
+            or not isinstance(base_ref, str) or not base_ref):
+        raise ValueError("Invalid, forked, or cross-repository PR identity")
+    return {
+        "pr": number, "head": head_sha, "branch": head_ref,
+        "head_repo": head_repo_name, "head_repo_id": head_repo["id"],
+        "base_repo": base_repo_name, "base_repo_id": base_repo["id"],
+        "base_branch": base_ref, "base_sha": base_sha,
+    }
+
+
+def candidate_from_env() -> dict:
+    def required(name: str) -> str:
+        value = os.environ.get(name, "")
+        if not value:
+            raise ValueError("Missing frozen candidate field: " + name)
+        return value
+    pr = int(required("PR_NUMBER"))
+    candidate = {
+        "pr": pr, "head": required("PR_HEAD_SHA"),
+        "branch": required("PR_HEAD_REF"),
+        "head_repo": required("PR_HEAD_REPOSITORY"),
+        "head_repo_id": int(required("PR_HEAD_REPOSITORY_ID")),
+        "base_repo": required("PR_BASE_REPOSITORY"),
+        "base_repo_id": int(required("PR_BASE_REPOSITORY_ID")),
+        "base_branch": required("PR_BASE_REF"),
+        "base_sha": required("PR_BASE_SHA"),
+        "checkout_sha": required("PR_NATIVE_CHECKOUT_SHA"),
+    }
+    if (pr <= 0 or candidate["head_repo_id"] <= 0 or candidate["base_repo_id"] <= 0
+            or candidate["head_repo_id"] != candidate["base_repo_id"]
+            or any(not HEX40.fullmatch(candidate[k]) for k in ("head", "base_sha", "checkout_sha"))):
+        raise ValueError("Invalid frozen candidate SHA/PR/repository identity")
+    if (candidate["head_repo"] != os.environ.get("GITHUB_REPOSITORY")
+            or candidate["base_repo"] != os.environ.get("GITHUB_REPOSITORY")):
+        raise ValueError("Frozen candidate repository identity mismatch")
+    return candidate
+
+
+def require_live_candidate(repo: str, candidate: dict, token: str) -> None:
+    pull = api_json(f"https://api.github.com/repos/{repo}/pulls/{candidate['pr']}", token)
+    head, base = pull.get("head", {}), pull.get("base", {})
+    if (pull.get("number") != candidate["pr"] or pull.get("state") != "open"
+            or head.get("repo", {}).get("full_name") != candidate["head_repo"]
+            or head.get("repo", {}).get("id") != candidate["head_repo_id"]
+            or head.get("ref") != candidate["branch"] or head.get("sha") != candidate["head"]
+            or base.get("repo", {}).get("full_name") != candidate["base_repo"]
+            or base.get("repo", {}).get("id") != candidate["base_repo_id"]
+            or base.get("ref") != candidate["base_branch"] or base.get("sha") != candidate["base_sha"]):
+        raise ValueError("Frozen PR candidate head/base identity was superseded or closed")
+
+
+def validate_native_run_identity(run: dict, candidate: dict, repo: str,
+                                 workflow_path: str = ".github/workflows/ci.yml") -> None:
+    if (run.get("event") != "pull_request"
+            or run.get("path") != workflow_path
+            or run.get("repository", {}).get("full_name") != repo
+            or run.get("head_repository", {}).get("full_name") != candidate["head_repo"]
+            or run.get("head_repository", {}).get("id") != candidate["head_repo_id"]
+            or run.get("repository", {}).get("id") != candidate["base_repo_id"]
+            or run.get("head_branch") != candidate["branch"]
+            or run.get("head_sha") != candidate["head"]):
+        raise ValueError("Native run repository/event/head identity mismatch")
+    associated = run.get("pull_requests")
+    if not isinstance(associated, list) or len(associated) != 1:
+        raise ValueError("Native run has missing or ambiguous PR association")
+    context = associated[0]
+    head, base = context.get("head", {}), context.get("base", {})
+    if (context.get("number") != candidate["pr"]
+            or head.get("repo", {}).get("id") != candidate["head_repo_id"]
+            or head.get("ref") != candidate["branch"] or head.get("sha") != candidate["head"]
+            or base.get("repo", {}).get("id") != candidate["base_repo_id"]
+            or base.get("ref") != candidate["base_branch"] or base.get("sha") != candidate["base_sha"]):
+        raise ValueError("Native run is associated with another PR or base/head revision")
+
+
+def fetch_native_evidence(run: dict, *, repo: str, token: str) -> dict:
+    run_id, attempt = run.get("id"), run.get("run_attempt")
+    if type(run_id) is not int or type(attempt) is not int or run_id <= 0 or attempt <= 0:
+        raise ValueError("Invalid native workflow run identity")
+    response = api_json(
+        f"https://api.github.com/repos/{repo}/actions/runs/{run_id}/artifacts?per_page=100", token)
+    artifacts = response.get("artifacts", [])
+    if not isinstance(artifacts, list) or response.get("total_count") != len(artifacts):
+        raise ValueError("Incomplete native evidence artifact listing")
+    name = f"mp-native-contract-attempt-{attempt}"
+    matches = [item for item in artifacts if item.get("name") == name]
+    if len(matches) != 1:
+        raise ValueError("Missing or ambiguous same-run native evidence artifact")
+    bundle = read_verified_artifact(matches[0], {"native-contract.json"}, run_id=run_id, token=token)
+    return json.loads(bundle["native-contract.json"])
+
+
+def validate_native_evidence(evidence: dict, run: dict, candidate: dict, *,
+                             repo: str, contract_fingerprint: str, vault: bool) -> None:
+    kind, policy_vault = native_contract.candidate_requirement(repo, candidate["pr"])
+    expected = {
+        "schema": native_contract.EVIDENCE_SCHEMA, "repository": repo,
+        "event": "pull_request", "workflow_path": ".github/workflows/ci.yml",
+        "pr_number": candidate["pr"],
+        "head_repository": candidate["head_repo"],
+        "head_repository_id": candidate["head_repo_id"],
+        "head_branch": candidate["branch"], "head_sha": candidate["head"],
+        "base_repository": candidate["base_repo"],
+        "base_repository_id": candidate["base_repo_id"],
+        "base_branch": candidate["base_branch"], "base_sha": candidate["base_sha"],
+        "checkout_sha": candidate["checkout_sha"], "candidate_kind": kind,
+        "sqlcipher_required": vault, "native_contract_policy": native_contract.POLICY,
+        "native_contract_fingerprint": contract_fingerprint,
+        "workflow_run_id": run["id"], "workflow_run_attempt": run["run_attempt"],
+    }
+    if policy_vault is not vault or not HEX64.fullmatch(contract_fingerprint or ""):
+        raise ValueError("Invalid candidate SQLCipher policy or native contract fingerprint")
+    for key, value in expected.items():
+        if evidence.get(key) != value:
+            raise ValueError("Native provenance mismatch: " + key)
+    if evidence.get("head_repository_id") is not None:
+        if evidence["head_repository_id"] != run.get("head_repository", {}).get("id"):
+            raise ValueError("Native provenance head repository ID mismatch")
+    if evidence.get("base_repository_id") is not None:
+        base = run["pull_requests"][0].get("base", {}).get("repo", {})
+        if evidence["base_repository_id"] != base.get("id"):
+            raise ValueError("Native provenance base repository ID mismatch")
 
 
 def api_json(url: str, token: str) -> dict:
@@ -455,34 +597,55 @@ def decision(event: str, mode: str, previous: dict | None) -> tuple[bool, str]:
     return False, "Identical effective inputs; prior full qualification reused (NOT a new PASS)"
 
 
-def require_prerequisites(runs: list[dict], source: str, *, vault: bool, fetch_jobs) -> None:
-    # A workflow can be green while its native job was skipped on a Draft PR.
-    # Inspect the exact run attempt's required jobs AND their critical steps.
-    product_steps = ("Test", "Test hosted tunnel desktop boundaries", "Build desktop app")
-    if vault:
-        product_steps += ("Qualify native capture encrypted IPC and revoked owner epoch",)
+def require_prerequisites(runs: list[dict], candidate: dict, *, repo: str,
+                          vault: bool, contract_fingerprint: str, fetch_jobs,
+                          fetch_evidence) -> None:
+    """Accept only exact PR/base/head-bound native runs with same-run provenance."""
+    if native_contract.requires_sqlcipher(repo, candidate["pr"]) is not vault:
+        raise ValueError("Candidate SQLCipher policy mismatch")
     required = {
         ".github/workflows/ci.yml": {
+            "Fast developer feedback": (
+                "Install dependencies", "Verify repository contract", "Typecheck",
+                "Test reader and browser contracts", "Build reader",
+                "Validate document qualification gate policy"),
             "Fast Rust compile and vault feedback": (
-                "Rust format", "Compile production core crates",
+                "Install pinned Rust 1.90", "Rust format", "Compile production core crates",
                 "Compile available SQLCipher and vault features", "Focused security tests"),
-            "Verify Windows product": product_steps
+            "Verify Windows product": (
+                "Setup Node.js", "Setup Rust 1.90", "Install dependencies",
+                "Check Rust formatting", "Verify repository contract", "Typecheck",
+                "Visual Settings scroll and footer regression", "Qualify bundled SQLite runtime",
+                "Test", "Stage capture sidecar for native desktop tests",
+                "Qualify Phase 3E simulated MCP and revocation boundary",
+                "Test hosted tunnel desktop boundaries", "Build desktop app",
+                "Verify portable MIT license and third-party notices"),
+            "Native execution evidence": (
+                "Capture native execution provenance", "Upload native execution evidence"),
         }
     }
     if vault:
         required[".github/workflows/mp9b-sqlcipher-qualification.yml"] = {
-            "SQLCipher / ubuntu-24.04": ("Encrypted state/index and FTS regression",
-                                          "Keyed MCP synthetic authorization and revocation",
-                                          "Vault and backup adversarial regression"),
-            "SQLCipher / windows-2022": ("Encrypted state/index and FTS regression",
-                                         "Keyed MCP synthetic authorization and revocation",
-                                         "Vault and backup adversarial regression"),
+            "SQLCipher / ubuntu-24.04": (
+                "Check Rust formatting", "Encrypted state/index and FTS regression",
+                "Keyed MCP synthetic authorization and revocation",
+                "Vault and backup adversarial regression"),
+            "SQLCipher / windows-2022": (
+                "Check Rust formatting", "Encrypted state/index and FTS regression",
+                "Keyed MCP synthetic authorization and revocation",
+                "Vault and backup adversarial regression"),
         }
+
     for path, expected_jobs in required.items():
-        verified = False
+        accepted = False
         for run in runs:
-            if (run.get("path") != path or run.get("head_sha") != source
-                    or run.get("status") != "completed" or run.get("conclusion") != "success"
+            if run.get("path") != path:
+                continue
+            try:
+                validate_native_run_identity(run, candidate, repo, workflow_path=path)
+            except (KeyError, TypeError, ValueError):
+                continue
+            if (run.get("status") != "completed" or run.get("conclusion") != "success"
                     or type(run.get("id")) is not int or run["id"] <= 0
                     or type(run.get("run_attempt")) is not int or run["run_attempt"] <= 0):
                 continue
@@ -490,16 +653,30 @@ def require_prerequisites(runs: list[dict], source: str, *, vault: bool, fetch_j
             jobs = response.get("jobs", [])
             if (not isinstance(jobs, list) or type(response.get("total_count")) is not int
                     or response["total_count"] != len(jobs)):
-                continue  # incomplete/paginated evidence is not acceptance
-            if all(sum(job.get("name") == name and job.get("status") == "completed"
-                       and job.get("conclusion") == "success" and all(
-                           sum(step.get("name") == step_name and step.get("conclusion") == "success"
-                               for step in job.get("steps", [])) == 1 for step_name in steps)
-                       for job in jobs) == 1 for name, steps in expected_jobs.items()):
-                verified = True
-                break
-        if not verified:
-            raise ValueError("Frozen source lacks a successful native Windows Product or SQLCipher job/step prerequisite")
+                raise ValueError("Incomplete native prerequisite job listing")
+            def succeeded(job: dict, name: str, steps: tuple[str, ...]) -> bool:
+                if (job.get("name") != name or job.get("status") != "completed"
+                        or job.get("conclusion") != "success"):
+                    return False
+                for step_name in steps:
+                    matching = [step for step in job.get("steps", [])
+                                if step.get("name") == step_name]
+                    if (len(matching) != 1 or matching[0].get("conclusion") != "success"
+                            or matching[0].get("status", "completed") != "completed"):
+                        return False
+                return True
+            if not all(sum(succeeded(job, name, steps) for job in jobs) == 1
+                       for name, steps in expected_jobs.items()):
+                continue
+            if path == ".github/workflows/ci.yml":
+                evidence = fetch_evidence(run)
+                validate_native_evidence(
+                    evidence, run, candidate, repo=repo,
+                    contract_fingerprint=contract_fingerprint, vault=vault)
+            accepted = True
+            break
+        if not accepted:
+            raise ValueError("Frozen candidate lacks exact successful native workflow jobs/steps: " + path)
 
 
 def write_output(path: str, values: dict[str, str]) -> None:
@@ -523,30 +700,76 @@ def main() -> int:
     event = os.environ["GITHUB_EVENT_NAME"]
     repo = os.environ["GITHUB_REPOSITORY"]
     checkout = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+
     if args.command == "preflight":
         if os.environ.get("EXPECTED_FINGERPRINT") != fp:
-            raise ValueError("Preflight input fingerprint changed")
-        source = os.environ["PR_HEAD_SHA"]
-        if not HEX40.fullmatch(source):
-            raise ValueError("Invalid prerequisite source")
+            raise ValueError("Preflight workload fingerprint changed")
         token = os.environ["GH_TOKEN"]
-        pr = int(os.environ.get("PR_NUMBER") or "0")
-        if pr:
-            pull = api_json(f"https://api.github.com/repos/{repo}/pulls/{pr}", token)
-            if (pull.get("state") != "open"
-                    or pull.get("head", {}).get("sha") != source
-                    or pull.get("head", {}).get("repo", {}).get("full_name") != repo):
-                raise ValueError("Frozen PR head was superseded before expensive indexing")
-        runs = api_json(f"https://api.github.com/repos/{repo}/actions/runs?head_sha={source}&per_page=100",
-                        token).get("workflow_runs", [])
+        candidate = candidate_from_env()
+        if event == "pull_request":
+            check_merge_source(expected_source=candidate["head"], expected_base=candidate["base_sha"])
+            native_revision = "HEAD"
+            native_checkout = checkout
+        elif event == "workflow_dispatch":
+            payload = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_bytes())
+            target = resolve_target(event=event, payload=payload, repo=repo,
+                                    sha=os.environ["GITHUB_SHA"], ref=os.environ["GITHUB_REF"],
+                                    token=token)
+            if any(target[k] != candidate[v] for k, v in (
+                ("pr", "pr"), ("head", "head"), ("branch", "branch"),
+                ("head_repo", "head_repo"), ("base_repo", "base_repo"),
+                ("base_branch", "base_branch"), ("base_sha", "base_sha"))):
+                raise ValueError("Dispatch candidate differs from frozen PR identity")
+            subprocess.check_call(["git", "fetch", "--no-tags", "origin",
+                                   f"refs/pull/{candidate['pr']}/merge"])
+            check_merge_source(expected_source=candidate["head"],
+                               expected_base=candidate["base_sha"], revision="FETCH_HEAD")
+            native_revision = "FETCH_HEAD"
+            native_checkout = subprocess.check_output(
+                ["git", "rev-parse", native_revision], text=True).strip()
+        else:
+            raise ValueError("Native prerequisites require an explicitly bound PR candidate")
+        if native_checkout != candidate["checkout_sha"]:
+            raise ValueError("Native merge checkout differs from frozen candidate")
+        vault = native_contract.requires_sqlcipher(repo, candidate["pr"])
+        contract_fp = native_contract.native_contract_fingerprint(
+            ".", repo, candidate["pr"], revision=native_revision)
+        if (os.environ.get("NATIVE_CONTRACT_FINGERPRINT") != contract_fp
+                or os.environ.get("NATIVE_CONTRACT_POLICY") != native_contract.POLICY):
+            raise ValueError("Native execution contract fingerprint changed")
+        require_live_candidate(repo, candidate, token)
+        runs = []
+        expected_total = None
+        for page in range(1, 4):
+            response = api_json(
+                f"https://api.github.com/repos/{repo}/actions/runs?head_sha={candidate['head']}&per_page=100&page={page}",
+                token)
+            page_runs = response.get("workflow_runs", [])
+            total = response.get("total_count")
+            if (not isinstance(page_runs, list) or type(total) is not int
+                    or (expected_total is not None and total != expected_total)):
+                raise ValueError("Malformed/inconsistent native workflow run listing")
+            expected_total = total
+            runs.extend(page_runs)
+            if len(page_runs) < 100:
+                break
+            if page == 3:
+                raise ValueError("Native workflow run pagination exceeded bounded evidence window")
+        if expected_total != len(runs):
+            raise ValueError("Incomplete native workflow run listing")
         def fetch_prerequisite_jobs(run):
-            return api_json(f"https://api.github.com/repos/{repo}/actions/runs/{run['id']}"
-                            f"/attempts/{run['run_attempt']}/jobs?per_page=100", token)
-        require_prerequisites(runs, source,
-                              vault=Path(".github/workflows/mp9b-sqlcipher-qualification.yml").is_file(),
-                              fetch_jobs=fetch_prerequisite_jobs)
-        print("Frozen source cheap CI prerequisites verified; full qualification may start")
+            return api_json(
+                f"https://api.github.com/repos/{repo}/actions/runs/{run['id']}"
+                f"/attempts/{run['run_attempt']}/jobs?per_page=100", token)
+        def fetch_evidence(run):
+            return fetch_native_evidence(run, repo=repo, token=token)
+        require_prerequisites(
+            runs, candidate, repo=repo, vault=vault, contract_fingerprint=contract_fp,
+            fetch_jobs=fetch_prerequisite_jobs, fetch_evidence=fetch_evidence)
+        require_live_candidate(repo, candidate, token)
+        print("Exact frozen PR/base/head identity and native execution prerequisites verified; full qualification may start")
         return 0
+
     if args.command == "accept":
         if os.environ.get("EXPECTED_FINGERPRINT") != fp:
             raise ValueError("Acceptance checkout differs from gate inputs")
@@ -567,10 +790,45 @@ def main() -> int:
             with open(summary, "a", encoding="utf-8") as stream:
                 stream.write(f"## {report}\n\nRun: {accepted['run_url']}\n")
         return 0
+
     if args.command == "attest":
         if not args.receipt or not args.output:
             p.error("attest requires --receipt and --output")
         receipt = Path(args.receipt).read_bytes()
+        candidate = candidate_from_env()
+        token = os.environ["GH_TOKEN"]
+        require_live_candidate(repo, candidate, token)
+        if event == "pull_request":
+            check_merge_source(expected_source=candidate["head"],
+                               expected_base=candidate["base_sha"])
+            native_revision = "HEAD"
+            native_checkout = checkout
+        elif event == "workflow_dispatch":
+            payload = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_bytes())
+            target = resolve_target(event=event, payload=payload, repo=repo,
+                                    sha=os.environ["GITHUB_SHA"], ref=os.environ["GITHUB_REF"],
+                                    token=token)
+            if any(target[k] != candidate[v] for k, v in (
+                ("pr", "pr"), ("head", "head"), ("branch", "branch"),
+                ("head_repo", "head_repo"), ("base_repo", "base_repo"),
+                ("base_branch", "base_branch"), ("base_sha", "base_sha"))):
+                raise ValueError("Attestation candidate differs from frozen PR identity")
+            subprocess.check_call(["git", "fetch", "--no-tags", "origin",
+                                   f"refs/pull/{candidate['pr']}/merge"])
+            check_merge_source(expected_source=candidate["head"],
+                               expected_base=candidate["base_sha"], revision="FETCH_HEAD")
+            native_revision = "FETCH_HEAD"
+            native_checkout = subprocess.check_output(
+                ["git", "rev-parse", native_revision], text=True).strip()
+        else:
+            raise ValueError("100K provenance requires an explicitly bound PR candidate")
+        if native_checkout != candidate["checkout_sha"]:
+            raise ValueError("Attestation native merge checkout differs from frozen candidate")
+        contract_fp = native_contract.native_contract_fingerprint(
+            ".", repo, candidate["pr"], revision=native_revision)
+        if (os.environ.get("NATIVE_CONTRACT_FINGERPRINT") != contract_fp
+                or os.environ.get("NATIVE_CONTRACT_POLICY") != native_contract.POLICY):
+            raise ValueError("Native execution contract changed before provenance attestation")
         proof = make_proof(
             receipt=receipt, source=checkout,
             run_id=int(os.environ["GITHUB_RUN_ID"]),
@@ -579,31 +837,42 @@ def main() -> int:
             repo=repo, event=event,
             effective=fp, head_sha=os.environ["PR_HEAD_SHA"], head_ref=os.environ["PR_HEAD_REF"],
             scale_attempt=int(os.environ["SCALE_RUN_ATTEMPT"]))
-        if event == "pull_request":
-            check_merge_source(expected_source=proof["source_sha"])
-        elif event == "workflow_dispatch":
-            payload = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_bytes())
-            if (payload.get("inputs", {}).get("pr_number") != str(proof["pr_number"])
-                    or proof["source_sha"] != os.environ["GITHUB_SHA"]
-                    or checkout != proof["source_sha"]
-                    or os.environ["GITHUB_REF"] != "refs/heads/" + proof["source_ref"]):
-                raise ValueError("Dispatch event, PR and tested checkout disagree")
-        expected = os.environ.get("EXPECTED_FINGERPRINT")
-        if expected != fp:
+        if os.environ.get("EXPECTED_FINGERPRINT") != fp:
             raise ValueError("Checkout/input TOCTOU mismatch: gate and full job differ")
+        require_live_candidate(repo, candidate, token)
         Path(args.output).write_text(json.dumps(proof, indent=2, sort_keys=True) + "\n")
         print("Verified full 100K receipt and minted provenance:", json.dumps(proof, sort_keys=True))
         return 0
+
     if not args.output:
         p.error("decide requires --output")
     payload = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_bytes())
     target = resolve_target(event=event, payload=payload, repo=repo,
                             sha=os.environ["GITHUB_SHA"], ref=os.environ["GITHUB_REF"],
                             token=os.environ["GH_TOKEN"])
+    native_contract_fp = ""
+    native_checkout = ""
     if event == "pull_request":
-        check_merge_source(expected_source=target["head"])
-    elif event == "workflow_dispatch" and checkout != target["head"]:
-        raise ValueError("Manual checkout is not the resolved target PR head")
+        check_merge_source(expected_source=target["head"], expected_base=target["base_sha"])
+        native_checkout = checkout
+        native_revision = "HEAD"
+    elif event == "workflow_dispatch":
+        if checkout != target["head"]:
+            raise ValueError("Manual qualification checkout is not the exact PR head")
+        subprocess.check_call(["git", "fetch", "--no-tags", "origin",
+                               f"refs/pull/{target['pr']}/merge"])
+        check_merge_source(expected_source=target["head"],
+                           expected_base=target["base_sha"], revision="FETCH_HEAD")
+        native_revision = "FETCH_HEAD"
+        native_checkout = subprocess.check_output(
+            ["git", "rev-parse", native_revision], text=True).strip()
+    elif event == "push":
+        native_revision = "HEAD"
+    else:
+        raise ValueError("Unsupported qualification event")
+    if target["pr"] > 0:
+        native_contract_fp = native_contract.native_contract_fingerprint(
+            ".", repo, target["pr"], revision=native_revision)
     mode = os.environ.get("QUALIFICATION_MODE", "auto")
     previous = None
     fault = ""
@@ -623,20 +892,29 @@ def main() -> int:
         "qualified-artifact": str(previous["artifact_id"] if previous else ""),
         "pr-number": str(target["pr"]), "source-sha": target["head"],
         "source-ref": target["branch"], "checkout-sha": checkout,
+        "head-repository": target["head_repo"],
+        "head-repository-id": str(target["head_repo_id"] or ""),
+        "base-repository": target["base_repo"],
+        "base-repository-id": str(target["base_repo_id"] or ""),
+        "base-ref": target["base_branch"], "base-sha": target["base_sha"],
+        "native-contract-policy": native_contract.POLICY if native_contract_fp else "",
+        "native-contract-fingerprint": native_contract_fp,
+        "native-checkout-sha": native_checkout,
     })
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         lines = [
             "## MP-10C 100K input gate",
-            f"- Effective input fingerprint: `{fp}`",
-            f"- Full 100K test on this run: **{'REQUIRED' if run_full else 'NOT RUN'}**",
+            f"- Effective workload fingerprint: {fp}",
+            f"- Native execution contract: {native_contract_fp or 'NOT APPLICABLE'}",
+            f"- Full 100K test on this run: {'REQUIRED' if run_full else 'NOT RUN'}",
             f"- Decision: {reason}",
         ]
         if previous and not run_full:
             lines.extend([
-                f"- Previously qualified checkout SHA: `{previous['qualified_sha']}`",
+                f"- Previously qualified checkout SHA: {previous['qualified_sha']}",
                 f"- Prior successful Windows 100K run: {previous['run_url']}",
-                f"- Artifact ID: `{previous['artifact_id']}`; SHA256: `{previous['artifact_digest']}`",
+                f"- Artifact ID: {previous['artifact_id']}; SHA256: {previous['artifact_digest']}",
                 "- **This head is not newly 100K-qualified.** The proof covers identical effective inputs only.",
             ])
         Path(summary).open("a", encoding="utf-8").write("\n".join(lines) + "\n")

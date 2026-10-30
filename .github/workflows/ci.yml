@@ -32,7 +32,7 @@ jobs:
       - name: Build reader
         run: npm run build:web
       - name: Validate document qualification gate policy
-        run: python3 -m unittest discover -s scripts/tests -p 'test_mp10c_ci_gate.py' -q
+        run: python3 -m unittest discover -s scripts/tests -p 'test_mp10c_*.py' -q
       - name: Report draft acceptance boundary
         if: github.event_name == 'pull_request' && github.event.pull_request.draft == true
         run: |
@@ -156,3 +156,22 @@ jobs:
 
       - name: Verify portable MIT license and third-party notices
         run: npm run verify:distribution-license
+
+
+  native-evidence:
+    name: Native execution evidence
+    if: always() && github.event_name == 'pull_request'
+    needs: [fast, rust-fast, verify]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - name: Capture native execution provenance
+        run: python3 scripts/mp10c_native_contract.py attest --output qualification/native-contract.json
+      - name: Upload native execution evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: mp-native-contract-attempt-${{ github.run_attempt }}
+          path: qualification/native-contract.json
+          if-no-files-found: error
+          retention-days: 30

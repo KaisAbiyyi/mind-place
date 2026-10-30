@@ -1,3 +1,19 @@
+## 2026-10-30 native execution identity and contract binding
+
+The independent native contract is mp-native-contract/v1, SHA-256 over canonical JSON with sorted input paths, file modes and per-file SHA-256 digests. It is separate from WORKLOAD_POLICY = mp10c-workload/v2; changing native CI, native tests, or native verifier inputs does not by itself requalify the 100K indexing workload.
+
+Included inputs: the complete .github/workflows/ci.yml and, only for a candidate explicitly classified as an MP-9B vault candidate, .github/workflows/mp9b-sqlcipher-qualification.yml; Cargo.toml, Cargo.lock, package.json, package-lock.json, src-tauri/Cargo.toml, src-tauri/tauri.conf.json; optional .cargo/config.toml, .npmrc, .nvmrc, Rust toolchain files, root build/config files; and every tracked file under .github/actions/, crates/, src/, src-tauri/, test/, scripts/, extension/, .cargo/ and public/. This covers runner/OS and action references, toolchain setup, commands/flags, native build scripts, dependency locks, security/storage/native test definitions and referenced scripts.
+
+Exclusions: documentation, .github/workflows/mp-10c-scale.yml and unrelated workflow files are not native execution inputs. The MP-10C workload policy independently excludes CI scheduling, verifier/coordinator scripts and documentation. There is no YAML-name-only interpretation: the complete relevant workflow files are hashed as content, and missing required inputs fail closed.
+
+Candidate requirements are explicit: PR #127 is mp9b-vault and requires the SQLCipher workflow; PR #129 is mp-ci-100k-infrastructure and does not. Other ordinary PRs use the explicit non-vault default. File existence never decides whether SQLCipher is mandatory. A missing SQLCipher workflow for a vault candidate is a hard failure.
+
+Every native CI pull-request run uploads native-contract.json in the same workflow run/attempt. It records repository, PR, head repository/branch/SHA, base repository/branch/SHA, merge checkout SHA, contract policy/fingerprint, candidate requirement and run ID/attempt. The coordinator requires the run's exact PR association and API head/base metadata to match this artifact, then checks the actual required jobs and critical steps. workflow_dispatch runs are never accepted as native prerequisite evidence. Dispatching MP-10C itself requires explicit pr_number, head_sha and base_sha; its native contract is recomputed from the exact current PR merge ref.
+
+The coordinator rechecks the live PR before and after evidence inspection. A changed head, base repository, base branch or base SHA invalidates the frozen candidate. It runs on Ubuntu; the expensive Windows indexing job cannot start until exact native evidence passes. Draft CI may upload provenance, but a skipped Windows Product job cannot satisfy the prerequisite.
+
+mp10c-workload/v2 and the prior 100K receipt policy are unchanged. Native-only files and workflows remain excluded from the workload fingerprint. No new full-scale indexing or manual/final qualification is part of this correction.
+
 ## 2026-10-29 cloud recovery: versioned workload identity and Ubuntu gate
 
 CI now separates the **v2 workload identity** (Rust source, dependencies, security/authority, native Windows smoke/100K execution contract) from **evidence verifier policy** (Python receipt parser, GitHub job/step verification and coordinator). The v2 fingerprint hashes Git tree mode/blob tuples plus a SHA256 of the Windows smoke/scale job runner-through-steps content. Scheduling/dependency edits above `runs-on`, verifier-only edits and docs no longer invalidate a successful identical workload. Any changed Windows step, receipt assertion, toolchain command, runner or production/test/security file still requires new scale work.

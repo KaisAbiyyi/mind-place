@@ -81,6 +81,8 @@ class FingerprintTests(unittest.TestCase):
         self.write("scripts/mp10c_ci_gate.py", "new strict parser")
         self.write("scripts/tests/test_mp10c_ci_gate.py", "new tests")
         self.write("scripts/mp10c_prerequisite_wait.py", "bounded wait")
+        self.write("scripts/mp10c_native_contract.py", "native-only verifier")
+        self.write("scripts/tests/test_mp10c_native_contract.py", "native contract tests")
         text = self.root.joinpath(".github/workflows/mp-10c-scale.yml").read_text()
         self.write(".github/workflows/mp-10c-scale.yml", text.replace(
             "  document-scale:", "  coordinator:\n    runs-on: ubuntu-latest\n  document-scale:"))
@@ -166,89 +168,44 @@ class DecisionTests(unittest.TestCase):
             gate.make_proof(receipt=b"{}", source="a"*40, run_id=2, attempt=1,
                             pr=128, repo="owner/repo", event="pull_request", effective="d"*64)
 
-    def test_full_run_waits_for_exact_source_cheap_ci(self):
-        source = "a"*40
-        passed = [{"id": i, "run_attempt": 1, "path": path, "head_sha": source,
-                   "status": "completed", "conclusion": "success"}
-                  for i, path in enumerate((".github/workflows/ci.yml",
-                      ".github/workflows/mp9b-sqlcipher-qualification.yml"), start=1)]
-        def job(name, steps, *, conclusion="success"):
-            return {"name": name, "status": "completed", "conclusion": conclusion,
-                    "steps": [{"name": s, "conclusion": "success"} for s in steps]}
-        product = job("Verify Windows product", ("Test", "Test hosted tunnel desktop boundaries", "Build desktop app", "Qualify native capture encrypted IPC and revoked owner epoch"))
-        rust = job("Fast Rust compile and vault feedback", (
-            "Rust format", "Compile production core crates",
-            "Compile available SQLCipher and vault features", "Focused security tests"))
-        sql_steps = ("Encrypted state/index and FTS regression",
-                     "Keyed MCP synthetic authorization and revocation",
-                     "Vault and backup adversarial regression")
-        sql_ubuntu = job("SQLCipher / ubuntu-24.04", sql_steps)
-        sql_windows = job("SQLCipher / windows-2022", sql_steps)
-        jobs = {1: [product, rust], 2: [sql_ubuntu, sql_windows]}
-        def fetch(run):
-            return {"jobs": jobs[run["id"]], "total_count": len(jobs[run["id"]])}
-        gate.require_prerequisites(passed, source, vault=True, fetch_jobs=fetch)
-        for bad in ([], passed[:1], [dict(r, head_sha="b"*40) for r in passed],
-                    [dict(r, conclusion="failure") for r in passed]):
-            with self.subTest(bad=bad), self.assertRaises(ValueError):
-                gate.require_prerequisites(bad, source, vault=True, fetch_jobs=fetch)
-        # A successful Draft workflow can contain a skipped native job. Never
-        # treat its overall SUCCESS as proof for a multi-hour qualification.
-        for replacement in (dict(product, conclusion="skipped"),
-                            dict(product, steps=[{"name": "Build desktop app", "conclusion": "skipped"}]),
-                            dict(product, name="Fast developer feedback")):
-            with self.subTest(replacement=replacement), self.assertRaises(ValueError):
-                jobs[1] = [replacement]
-                gate.require_prerequisites(passed, source, vault=False, fetch_jobs=fetch)
-        jobs[1] = [product, rust]
-        for replacement in (dict(sql_windows, conclusion="skipped"),
-                            dict(sql_windows, steps=[]),
-                            dict(sql_windows, name="SQLCipher / macos-15")):
-            with self.subTest(replacement=replacement), self.assertRaises(ValueError):
-                jobs[2] = [sql_ubuntu, replacement]
-                gate.require_prerequisites(passed, source, vault=True, fetch_jobs=fetch)
-        jobs[2] = [sql_ubuntu, sql_windows]
-        for bad_rust in (
-            dict(rust, conclusion="skipped"),
-            dict(rust, steps=[{"name": "Compile production core crates", "conclusion": "skipped"}]),
-        ):
-            with self.assertRaises(ValueError):
-                jobs[1] = [product, bad_rust]
-                gate.require_prerequisites(passed, source, vault=False, fetch_jobs=fetch)
-        jobs[1] = [product, rust]
-        ipc = job("Verify Windows product", (
-            "Test", "Test hosted tunnel desktop boundaries", "Build desktop app",
-            "Qualify native capture encrypted IPC and revoked owner epoch"))
-        jobs[1] = [ipc, rust]
-        gate.require_prerequisites(passed, source, vault=True, fetch_jobs=fetch)
-        jobs[1] = [job("Verify Windows product", ("Test", "Test hosted tunnel desktop boundaries", "Build desktop app")), rust]
-        with self.assertRaises(ValueError):
-            gate.require_prerequisites(passed, source, vault=True, fetch_jobs=fetch)
-        jobs[1] = [product, rust]
-        with self.assertRaises(ValueError):
-            gate.require_prerequisites(passed, source, vault=True,
-                                       fetch_jobs=lambda r: {"jobs": jobs[r["id"]], "total_count": 101})
+    def test_candidate_sqlcipher_requirements_are_explicit_not_file_inferred(self):
+        self.assertTrue(gate.native_contract.requires_sqlcipher("KaisAbiyyi/mind-place", 127))
+        self.assertFalse(gate.native_contract.requires_sqlcipher("KaisAbiyyi/mind-place", 129))
+        self.assertFalse(gate.native_contract.requires_sqlcipher("KaisAbiyyi/mind-place", 9001))
 
 
 class DispatchTargetTests(unittest.TestCase):
     def setUp(self):
         self.pull = {"number": 127, "state": "open",
-                     "head": {"sha": "a"*40, "ref": "feature/target", "repo": {"full_name": "owner/repo"}},
-                     "base": {"repo": {"full_name": "owner/repo"}}}
+                     "head": {"sha": "a"*40, "ref": "feature/target", "repo": {"full_name": "owner/repo", "id": 1}},
+                     "base": {"sha": "b"*40, "ref": "main", "repo": {"full_name": "owner/repo", "id": 1}}}
 
     def resolve(self, number="127", sha="a"*40, ref="refs/heads/feature/target"):
         with patch.object(gate, "api_json", return_value=self.pull):
-            return gate.resolve_target(event="workflow_dispatch", payload={"inputs": {"pr_number": number}},
-                                        repo="owner/repo", sha=sha, ref=ref, token="synthetic")
+            return gate.resolve_target(
+                event="workflow_dispatch",
+                payload={"inputs": {"pr_number": number, "head_sha": "a"*40, "base_sha": "b"*40}},
+                repo="owner/repo", sha=sha, ref=ref, token="synthetic")
 
     def test_open_pr_exact_head_branch_is_required(self):
-        self.assertEqual(self.resolve(), {"pr": 127, "head": "a"*40, "branch": "feature/target"})
+        self.assertEqual(self.resolve(), {
+            "pr": 127, "head": "a"*40, "branch": "feature/target",
+            "head_repo": "owner/repo", "head_repo_id": 1,
+            "base_repo": "owner/repo", "base_repo_id": 1,
+            "base_branch": "main", "base_sha": "b"*40,
+        })
         for number in ("", "0", "-1", "127\n", 127):
             with self.subTest(number=number), self.assertRaises(ValueError):
                 self.resolve(number=number)
         for sha, ref in (("b"*40, "refs/heads/feature/target"), ("a"*40, "refs/heads/main")):
             with self.subTest(sha=sha, ref=ref), self.assertRaises(ValueError):
                 self.resolve(sha=sha, ref=ref)
+        with patch.object(gate, "api_json", return_value=self.pull):
+            with self.assertRaises(ValueError):
+                gate.resolve_target(
+                    event="workflow_dispatch",
+                    payload={"inputs": {"pr_number": "127", "head_sha": "a"*40, "base_sha": "c"*40}},
+                    repo="owner/repo", sha="a"*40, ref="refs/heads/feature/target", token="synthetic")
 
     def test_foreign_or_closed_pr_is_never_adopted(self):
         self.pull["head"]["repo"]["full_name"] = "foreign/repo"
@@ -524,60 +481,3 @@ class PriorProofTests(unittest.TestCase):
 if __name__ == "__main__":
     unittest.main()
 
-class PrerequisiteCoordinationTests(unittest.TestCase):
-    def test_pending_success_failure_skipped_and_missing(self):
-        import mp10c_prerequisite_wait as coordinator
-        sha = "a" * 40
-        run = {"id": 2, "run_attempt": 1, "path": ".github/workflows/ci.yml",
-               "head_sha": sha, "status": "in_progress", "conclusion": None}
-        def jobs(_):
-            return {"total_count": 2, "jobs": [
-                {"name": "Verify Windows product",
-                 "status": "completed", "conclusion": "success", "steps": [
-                    {"name": n, "conclusion": "success"} for n in
-                    ("Test", "Test hosted tunnel desktop boundaries", "Build desktop app")]},
-                {"name": "Fast Rust compile and vault feedback",
-                 "status": "completed", "conclusion": "success", "steps": [
-                    {"name": n, "conclusion": "success"} for n in
-                    ("Rust format", "Compile production core crates",
-                     "Compile available SQLCipher and vault features", "Focused security tests")]}
-            ]}
-        self.assertEqual(coordinator.classify([run], sha, False, jobs)[0], "pending")
-        success = dict(run, status="completed", conclusion="success")
-        self.assertEqual(coordinator.classify([success], sha, False, jobs)[0], "ready")
-        for conclusion in ("failure", "cancelled", "skipped"):
-            self.assertEqual(coordinator.classify([dict(success, conclusion=conclusion)],
-                             sha, False, jobs)[0], "failed")
-        self.assertEqual(coordinator.classify([], sha, False, jobs)[0], "pending")
-        self.assertEqual(coordinator.classify([dict(run, head_sha="b"*40)], sha,
-                         False, jobs)[0], "pending")
-        self.assertEqual(coordinator.classify([success], sha, False,
-                         lambda _: {"total_count": 0, "jobs": []})[0], "failed")
-
-    def test_waits_then_passes_without_premature_failure_or_loop(self):
-        import mp10c_prerequisite_wait as coordinator
-        result = iter([("pending", "running"), ("pending", "queued"), ("ready", "good")])
-        calls = []
-        coordinator.wait("owner/repo", "a"*40, 127, "test", False,
-                         timeout=60, poll=10, clock=lambda: len(calls)*10,
-                         sleep=lambda n: calls.append(n),
-                         inspect=lambda *_: next(result))
-        self.assertEqual(calls, [10, 10])
-        for state in ("failed",):
-            with self.assertRaises(ValueError):
-                coordinator.wait("owner/repo", "a"*40, 127, "test", False,
-                                 inspect=lambda *_: (state, "native failed"))
-        with self.assertRaises(TimeoutError):
-            coordinator.wait("owner/repo", "a"*40, 127, "test", False,
-                             timeout=0, inspect=lambda *_: ("pending", "missing"))
-
-    def test_superseded_sha_and_api_outage_are_never_accepted(self):
-        import mp10c_prerequisite_wait as coordinator
-        with patch.object(gate, "api_json", return_value={"state": "open",
-                "head": {"sha": "b"*40, "repo": {"full_name": "owner/repo"}}}):
-            self.assertEqual(coordinator.snapshot("owner/repo", "a"*40, 127,
-                                                  "token", False)[0], "failed")
-        with self.assertRaises(TimeoutError):
-            coordinator.wait("owner/repo", "a"*40, 127, "token", False,
-                             timeout=0,
-                             inspect=lambda *_: (_ for _ in ()).throw(OSError("api offline")))

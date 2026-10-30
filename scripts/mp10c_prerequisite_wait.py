@@ -1,83 +1,122 @@
 #!/usr/bin/env python3
-"""Bounded, cheap Ubuntu coordination before MP-10C's expensive Windows tier.
-
-Status is based on exact SHA and successful *jobs and steps*, never overall
-green workflow alone. Missing checks are pending until deadline, not an early
-false failure. Only immutable synthetic source identities are read.
-"""
+"""Bounded Ubuntu coordination for exact PR/base/head-bound native evidence."""
 from __future__ import annotations
+
 import argparse
 import os
 import time
-from pathlib import Path
 import urllib.error
 
 import mp10c_ci_gate as gate
+import mp10c_native_contract as native_contract
 
-NATIVE_PATHS = (".github/workflows/ci.yml",
-                ".github/workflows/mp9b-sqlcipher-qualification.yml")
+NATIVE_PATHS = (
+    ".github/workflows/ci.yml",
+    ".github/workflows/mp9b-sqlcipher-qualification.yml",
+)
 
 
-def classify(runs, source, vault, fetch_jobs):
-    """Return (ready|pending|failed, reason), without accepting skipped jobs."""
+def required_paths(vault: bool) -> tuple[str, ...]:
+    return NATIVE_PATHS if vault else NATIVE_PATHS[:1]
+
+
+def classify(runs, candidate, repo, vault, contract_fingerprint, fetch_jobs, fetch_evidence):
+    """Return ready/pending/failed; only exact candidate runs can count."""
     try:
-        gate.require_prerequisites(runs, source, vault=vault, fetch_jobs=fetch_jobs)
-        return "ready", "Actual exact-source native jobs and steps succeeded"
-    except ValueError:
-        pass
-    required = NATIVE_PATHS if vault else NATIVE_PATHS[:1]
-    missing = []
-    pending = []
-    failed = []
-    for path in required:
-        same = [r for r in runs if r.get("path") == path and r.get("head_sha") == source]
-        if not same:
-            missing.append(path)
-        elif any(r.get("status") in ("queued", "in_progress", "requested", "waiting", "pending")
-                 for r in same):
-            pending.append(path)
-        else:
-            failed.append(path)
-    if failed:
-        return "failed", "Completed native prerequisite lacks successful required jobs/steps: " + ", ".join(failed)
-    return "pending", "Native prerequisite queued/running/missing: " + ", ".join(pending + missing)
+        gate.require_prerequisites(
+            runs, candidate, repo=repo, vault=vault,
+            contract_fingerprint=contract_fingerprint,
+            fetch_jobs=fetch_jobs, fetch_evidence=fetch_evidence)
+        return "ready", "Exact PR/base/head native jobs and contract evidence succeeded"
+    except ValueError as error:
+        pending = []
+        failed = []
+        for path in required_paths(vault):
+            matching = []
+            for run in runs:
+                if run.get("path") != path:
+                    continue
+                try:
+                    gate.validate_native_run_identity(run, candidate, repo, workflow_path=path)
+                except (KeyError, TypeError, ValueError):
+                    continue
+                matching.append(run)
+            if not matching:
+                pending.append(path)
+                continue
+            if any(run.get("status") in (
+                    "queued", "in_progress", "requested", "waiting", "pending")
+                   for run in matching):
+                pending.append(path)
+            elif any(run.get("status") == "completed" for run in matching):
+                failed.append(path)
+            else:
+                pending.append(path)
+        if failed:
+            return "failed", (
+                "Completed exact-candidate native prerequisite failed or lacked required "
+                "jobs/steps/provenance: " + ", ".join(failed) + f" ({error})")
+        return "pending", "Exact-candidate native prerequisite queued/running/missing: " + ", ".join(pending)
 
 
-def snapshot(repo, source, pr, token, vault):
-    if pr > 0:
-        pull = gate.api_json(f"https://api.github.com/repos/{repo}/pulls/{pr}", token)
-        if (pull.get("state") != "open" or pull.get("head", {}).get("sha") != source
-                or pull.get("head", {}).get("repo", {}).get("full_name") != repo):
-            return "failed", "Candidate superseded or PR closed"
+def snapshot(repo, candidate, token, vault, contract_fingerprint):
+    try:
+        gate.require_live_candidate(repo, candidate, token)
+    except ValueError as error:
+        return "failed", str(error)
     runs = []
-    # The first three pages bound API cost while preventing first-page truncation.
+    expected_total = None
+    base = f"https://api.github.com/repos/{repo}/actions/runs"
     for page in range(1, 4):
         response = gate.api_json(
-            f"https://api.github.com/repos/{repo}/actions/runs?head_sha={source}&per_page=100&page={page}", token)
+            base + f"?head_sha={candidate['head']}&per_page=100&page={page}", token)
         page_runs = response.get("workflow_runs", [])
-        if not isinstance(page_runs, list):
-            return "failed", "Malformed workflow list"
+        total = response.get("total_count")
+        if (not isinstance(page_runs, list) or type(total) is not int
+                or (expected_total is not None and total != expected_total)):
+            return "failed", "Malformed/inconsistent workflow run listing"
+        expected_total = total
         runs.extend(page_runs)
         if len(page_runs) < 100:
             break
+        if page == 3:
+            return "failed", "Native workflow run pagination exceeded the bounded evidence window"
+    if expected_total != len(runs):
+        return "failed", "Incomplete workflow run listing"
+
     def jobs(run):
         return gate.api_json(
             f"https://api.github.com/repos/{repo}/actions/runs/{run['id']}"
             f"/attempts/{run['run_attempt']}/jobs?per_page=100", token)
-    return classify(runs, source, vault, jobs)
+
+    def evidence(run):
+        return gate.fetch_native_evidence(run, repo=repo, token=token)
+
+    state, reason = classify(
+        runs, candidate, repo, vault, contract_fingerprint, jobs, evidence)
+    try:
+        gate.require_live_candidate(repo, candidate, token)
+    except ValueError as error:
+        return "failed", str(error)
+    return state, reason
 
 
-def wait(repo, source, pr, token, vault, timeout=4800, poll=30, clock=time.monotonic,
-         sleep=time.sleep, inspect=snapshot):
-    if not gate.HEX40.fullmatch(source) or not repo or pr < 0:
-        raise ValueError("Invalid frozen candidate identity")
+def wait(repo, candidate, token, vault, contract_fingerprint, timeout=4800, poll=30,
+         clock=time.monotonic, sleep=time.sleep, inspect=snapshot):
+    if (not repo or not isinstance(candidate, dict)
+            or type(candidate.get("pr")) is not int or candidate["pr"] <= 0
+            or not gate.HEX40.fullmatch(candidate.get("head", ""))
+            or not gate.HEX40.fullmatch(candidate.get("base_sha", ""))
+            or not gate.HEX40.fullmatch(candidate.get("checkout_sha", ""))
+            or not gate.HEX64.fullmatch(contract_fingerprint or "")
+            or native_contract.requires_sqlcipher(repo, candidate["pr"]) is not vault):
+        raise ValueError("Invalid frozen native candidate identity/contract")
     deadline = clock() + timeout
     while True:
         try:
-            state, reason = inspect(repo, source, pr, token, vault)
-        except (OSError, ValueError, KeyError, TypeError, urllib.error.URLError) as err:
-            # API failures cannot certify evidence; bounded recheck while time remains.
-            state, reason = "pending", f"API verification unavailable: {type(err).__name__}"
+            state, reason = inspect(repo, candidate, token, vault, contract_fingerprint)
+        except (OSError, ValueError, KeyError, TypeError, AttributeError, urllib.error.URLError, TimeoutError) as err:
+            state, reason = "pending", f"API/evidence verification unavailable: {type(err).__name__}"
         print(f"MP-10C native coordination: {state} — {reason}", flush=True)
         if state == "ready":
             return
@@ -94,9 +133,13 @@ def main():
     args = parser.parse_args()
     if not 0 <= args.timeout_seconds <= 4800:
         parser.error("Invalid bounded deadline")
-    wait(os.environ["GITHUB_REPOSITORY"], os.environ["PR_HEAD_SHA"],
-         int(os.environ.get("PR_NUMBER") or 0), os.environ["GH_TOKEN"],
-         Path(".github/workflows/mp9b-sqlcipher-qualification.yml").is_file(),
+    repo = os.environ["GITHUB_REPOSITORY"]
+    candidate = gate.candidate_from_env()
+    vault = native_contract.requires_sqlcipher(repo, candidate["pr"])
+    contract_fingerprint = os.environ.get("NATIVE_CONTRACT_FINGERPRINT", "")
+    if os.environ.get("NATIVE_CONTRACT_POLICY") != native_contract.POLICY:
+        raise ValueError("Missing or unsupported native contract policy")
+    wait(repo, candidate, os.environ["GH_TOKEN"], vault, contract_fingerprint,
          timeout=args.timeout_seconds)
 
 
