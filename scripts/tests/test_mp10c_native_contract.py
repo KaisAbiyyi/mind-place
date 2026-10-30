@@ -310,10 +310,10 @@ class NativeContractFingerprintTests(unittest.TestCase):
         # PR 127 is a vault candidate: absence of its mandatory workflow fails closed.
         with self.assertRaises(ValueError):
             self.fp(127)
-        self.write(native_contract.SQLCIPHER_WORKFLOW, "jobs:\n  sqlcipher: {}\n")
+        self.write(native_contract.SQLCIPHER_WORKFLOW, "jobs:\n  sqlcipher:\n    runs-on: ubuntu-24.04\n    steps:\n      - run: cargo test\n")
         self.commit()
         before = self.fp(127)
-        self.write(native_contract.SQLCIPHER_WORKFLOW, "jobs:\n  sqlcipher:\n    runs-on: windows-2022\n")
+        self.write(native_contract.SQLCIPHER_WORKFLOW, "jobs:\n  sqlcipher:\n    runs-on: windows-2022\n    steps:\n      - run: cargo test\n")
         self.commit()
         self.assertNotEqual(before, self.fp(127))
 
