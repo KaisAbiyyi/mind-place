@@ -14,24 +14,25 @@
 
 GitHub-native required checks, App-bound check identities and merge queues do **not** provide an atomic, live-revocable merge authorization primitive.
 
-A completed SUCCESS can remain a successful historical check after:
+A completed check-run SUCCESS is not a live authorization. It can continue satisfying a required-check rule while the check remains eligible under GitHub's **seven-day freshness rule**, even after:
 
-- the controller's internal lease expires;
+- the controller's internal 600-second authority lease expires;
 - the approved policy fingerprint is revoked;
 - the policy revision changes;
 - the GitHub App is suspended or uninstalled;
 - the controller or authority service becomes unavailable.
 
-GitHub's required-check freshness rule limits how old a successful required check may be: it must have completed successfully within the previous **seven days**. That is not a custom lease, is not immediate revocation, and is far longer than the existing 600-second controller lease. A success inside that window can continue satisfying the required check unless it is superseded, becomes stale under GitHub's rules, or is actively changed.
+This is a merge-eligibility window, not a promise that the check record is retained indefinitely. Since **October 1, 2026**, GitHub check suites, check runs and commit statuses are subject to the configured Actions check/workflow/status retention period. The documented default is 90 days; public repositories can configure 1–90 days. The retention value configured for this repository has not been verified. Retention controls data visibility/deletion, not authority validity.
+
+GitHub's required-check freshness rule requires a successful check within the previous **seven days**. The existing 600-second lease is internal to the controller and is not consumed by GitHub. A check younger than seven days can therefore remain eligible after that shorter lease or external approval expires.
 
 Therefore:
 
 1. **A — PR-head checks:** necessary evidence, insufficient as merge authorization.
 2. **B — mandatory merge queue:** materially improves source/base/queue-tree freshness, insufficient for live policy revocation after a successful merge-group check.
-3. **C — App-mediated merge authorization:** the strongest candidate for a useful merge path because the broker can independently revalidate live authority and be the only permitted branch updater. It still depends on external coordination, GitHub settings and a trusted privileged App. GitHub does not atomically commit the external authorization decision with the merge.
-4. **Safest currently supportable posture:** permanent-lock / no-admission containment. No stale check can authorize a merge if GitHub actually denies every merge/update path and the lock remains enforced. This posture sacrifices availability and still trusts the account owner not to remove the lock.
-
-**Checkpoint 2B design verdict: GO for independent review of this document only. NO-GO for implementation, App installation, settings changes, production activation or merging.**
+3. **C — App-mediated merge authorization:** the strongest useful-admission candidate only if the Merge Broker is trusted and its sole-writer ruleset is live-proven. A compromised broker or stolen broker token can invoke the merge API against an otherwise-green required check without consulting the external authority service. GitHub does not independently enforce that service.
+4. **Current containment:** permanent-lock / no-admission is a recommended operating policy, **not an established GitHub control**. Main and the stacked base are currently reported unprotected and no active rulesets were returned. Containment is **NOT VERIFIED**.
+5. **Checkpoint 2B design verdict:** GO for independent review of this corrective document only. NO-GO for implementation, App installation, settings changes, production activation or merging.
 
 ### 1.2 What is and is not guaranteed
 
@@ -39,7 +40,10 @@ Therefore:
 |---|---|---|
 | Required check came from a selected GitHub App | Yes, when the expected source is configured and enforced | Binds producer identity, not current authority |
 | Required check applies to latest commit SHA | Yes, subject to required-check configuration | Does not bind a mutable policy revision to the same SHA |
-| Required check must be recent | Yes: completed successfully within the past seven days | Not a 600-second lease or immediate revocation |
+| Required check must be recent | Yes: completed successfully within the past seven days | Merge eligibility, not retention or a 600-second lease |
+| Check-data retention | Yes: check suites, check runs and statuses follow configured Actions retention from October 1, 2026 | Default 90 days; public repositories 1–90 days; this repository's configured value is unverified |
+| Internal authority lease | No GitHub-native enforcement | The 600-second lease is controller state; GitHub does not consume it |
+| Current permanent lock | No | Main and stacked base report unprotected; ruleset inventory is empty; containment is NOT VERIFIED |
 | Merge-group checks bind the current queue group | Yes, for the group SHA GitHub creates | Improves code/base freshness, not authority liveness |
 | App suspension revokes old SUCCESS | No documented automatic behavior | Treat old SUCCESS as still valid until GitHub readback proves otherwise |
 | Controller outage invalidates old SUCCESS | No | No automatic lease-to-check coupling |
@@ -106,11 +110,13 @@ Evidence endpoints:
 - [2A branch summary](https://api.github.com/repos/KaisAbiyyi/mind-place/branches/codex%2Fmp-p0-authority-2a)
 - [ruleset inventory including parents](https://api.github.com/repos/KaisAbiyyi/mind-place/rulesets?includes_parents=true)
 
-The explicit branch-protection endpoint returned HTTP 403 to the connected inspection integration. The public branch summaries nevertheless report `protected=false` and `protection.enabled=false`. This document does not claim to have inspected every privileged settings field or every account-level setting.
+The current branch-list API read also reports `protected=false` for both `main` and `codex/mp-ci-100k-01-20261027`. The repository ruleset inventory with `includes_parents=true` returned an empty array. The explicit classic branch-protection endpoint for `main` returned HTTP 403 to the connected inspection integration, so privileged protection settings were not independently readable through that endpoint. The public branch-list evidence still reports the two destination branches as unprotected.
+
+**Containment status: NOT VERIFIED / NOT ESTABLISHED.** No live permanent lock has been established on `main` or the stacked base. The recommendation for permanent-lock/no-admission elsewhere in this document is an operating-policy recommendation, not a statement that GitHub currently enforces a lock. The current GitHub evidence shows no active repository rulesets and reports both relevant branches unprotected.
+
+Containment may only be reported as established after an authorized settings operator independently reads back the effective classic branch protection and every applicable repository/parent ruleset, including all bypass actors, and successful negative merge/update probes demonstrate that otherwise-green unauthorized updates are denied across supported paths. A branch-list summary or a synthetic test alone is insufficient. Until then, current containment remains **NOT VERIFIED** and production enforcement remains NO-GO.
 
 Because the repository is currently user-owned, Organization-level inherited rulesets are not currently in scope. If the repository is transferred to an Organization or enterprise, inherited Organization/enterprise rulesets become a new mandatory inspection gate. The empty repository ruleset inventory is not a substitute for future owner/admin inspection of every applicable scope.
-
-**Current conclusion:** no production merge enforcement has been established. Existing destination branches are not protected in the observed GitHub branch summaries. Production enforcement remains NO-GO.
 
 ### 2.3 Existing workflows and authority template
 
@@ -198,12 +204,17 @@ The internal 600-second lease is invisible to branch protection. If a successful
 
 GitHub also treats `success`, `skipped` and `neutral` as successful required-check states. A required authority context must therefore never be a job that can be skipped or return neutral while validation is pending, draft-only or unavailable. The current Draft-success candidate jobs described in Section 2.3 are not authority signals and must not be selected as the sole required authority check. Use a distinct, uniquely named Checker App check whose only SUCCESS path is complete validation; unknown/pending/unavailable state must remain non-successful. Avoid duplicate check/status contexts with the same name.
 
-The check may remain visible in history after it stops satisfying the seven-day rule. Thus:
+**Keep four different clocks and states separate:**
 
-- "SUCCESS remains in history indefinitely" and
-- "SUCCESS satisfies a required check indefinitely"
+1. **Configured check-data retention:** From October 1, 2026, GitHub retains check suites, check runs and commit statuses according to the repository/Organization/enterprise Actions retention setting. GitHub documents a 90-day default and a 1–90-day range for public repositories. A custom value is subject to higher-level caps and applies to new records; changing it does not retroactively rewrite existing records. The current Mind Place setting has not been verified. Check data from third-party Apps is included.
+2. **Seven-day required-check freshness:** a required status check must have completed successfully in the chosen repository within the previous seven days. This determines whether the check can satisfy the required-check rule; it does not determine how long the record remains stored.
+3. **Internal 600-second authority lease:** this is controller/authority-service state. GitHub branch protection and rulesets do not read or enforce it.
+4. **Historical visibility versus merge eligibility:** a check record may remain visible after it is no longer eligible to satisfy the seven-day requirement, until configured retention deletes it. After retention, the check data is permanently deleted. Neither historical visibility nor deletion is a revocation protocol. Do not claim that SUCCESS remains visible indefinitely or that retention itself revokes a merge authorization.
 
-are different claims. The first is not a merge authorization rule; the second is false because of the seven-day requirement.
+References:
+- [GitHub changelog: Actions retention now covers checks, runs and statuses (October 1, 2026)](https://github.blog/changelog/2026-10-01-actions-retention-now-covers-checks-runs-and-statuses/)
+- [GitHub check-data retention documentation](https://docs.github.com/en/rest/guides/using-the-rest-api-to-interact-with-checks)
+- [Required status-check freshness](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks)
 
 **Revocation consequence:**
 
@@ -327,27 +338,51 @@ References:
 
 ### 4.6 Branch protection, rulesets and bypass
 
-**Documented:**
+**Documented platform behavior:**
 
-- Classic branch protection does not apply to administrators and custom roles with bypass permission by default; the owner can enable "Do not allow bypassing the above settings."
-- Rulesets can define bypass actors. Eligible actors include repository administrators, Organization owners, enterprise owners, roles, teams, GitHub Apps and Dependabot.
-- A ruleset can restrict updates so only bypass actors can push.
-- Organization-level rulesets aggregate with repository rulesets. Repository rulesets can make the result more restrictive; they cannot make an Organization-level rule less restrictive.
-- Organization-level rulesets are managed by Organization owners; repository administrators cannot edit the inherited Organization ruleset itself.
-- The repository/account owner can still change account/repository configuration or transfer/delete the repository.
+- **Classic branch protection has an administrator exception.** By default, branch-protection restrictions do not apply to repository administrators or custom roles with the bypass-branch-protections permission. The "Do not allow bypassing the above settings" option can apply branch-protection restrictions to those actors. However, GitHub's specific documentation for **Restrict who can push to matching branches** states that people and Apps with repository admin permissions are always able to push to a protected branch. Do not claim that classic branch protection's push restriction makes the Merge Broker the sole writer, and do not assume the general bypass checkbox removes this explicit push exception.
+- **Repository-level branch rulesets are available on public personal repositories.** GitHub documents rulesets for public repositories on GitHub Free (and higher eligible plans). The feature is not restricted to Organization-owned repositories.
+- **Restrict updates** means only users with bypass permission can push to the matching branch/tag.
+- **GitHub App bypass actors are supported.** The repository-ruleset REST schema supports actor type `Integration` with an actor ID. It supports bypass mode `pull_request` for branch rulesets; that mode means the actor can bypass the rules only through a pull request. The schema says `OrganizationAdmin`, `EnterpriseOwner` and `EnterpriseRole` are not applicable to personal repositories; it does not exclude the `Integration` actor.
+- **Ruleset bypass is per ruleset.** Applicable rulesets are aggregated and all applicable rules are enforced. A bypass actor configured on one ruleset must not be assumed to bypass a different ruleset.
+- **Ruleset administration is privileged.** People with repository admin access or a custom role with `edit repository rules` can create, edit and delete repository rulesets. A repository owner/admin may therefore change, disable or remove the control even if that person is not a bypass actor.
+- Organization-level and enterprise-level rulesets are additional policy scopes only when the repository belongs to those scopes. A future transfer to an Organization introduces inherited rulesets that must be inspected; it is not a prerequisite for a repository-level ruleset on the current public personal repository.
 
-**Security consequence:**
+**Security consequence and preferred repository-level candidate:**
 
-A bypass list is part of the security policy, not harmless administration metadata. An App or role on a bypass list can create an alternate update path. A rule that requires a specific App check is insufficient if another actor can bypass that rule.
+The classic "Restrict who can push" setting is not a single-writer control because administrators can still push. The stronger candidate for this repository is a **repository-level branch ruleset using Restrict updates**, with the Merge Broker App as the only bypass actor in pull-request-only mode. This is documented as feature-eligible for a public personal-account repository; actual merge-path behavior remains unverified until live disposable-repository testing.
 
-For an Organization-owned deployment, the desired posture is no human, role, team or unrelated App bypass actor on the enforcement ruleset; branch protection should include administrators; organization-level rulesets should be used where the plan supports them to keep repository admins from weakening inherited policy.
+Use separate active rulesets for distinct authority domains:
 
-No GitHub configuration can prevent the ultimate account/Organization/enterprise owner from changing the controls they administer. That owner is a root of trust. External governance and audit alerts can make changes accountable, but they do not create an unchangeable GitHub lock.
+1. **Update-restriction ruleset:** target every protected destination branch; include the Restrict updates rule; configure exactly one bypass actor: the Merge Broker GitHub App (`actor_type=Integration`, the App's integration ID, `bypass_mode=pull_request`). Do not include a user, repository role, team, other App, Dependabot, deploy key or other bypass actor. Do not put required-check or deletion rules into this ruleset, because the Broker's bypass applies to every rule contained in this same ruleset.
+2. **Required-check ruleset:** target the same destination branches; require pull requests and the exact Checker App required status/check context; use strict/latest-base policy. Configure an empty bypass-actor list. The Broker App is not a bypass actor for this ruleset, so its update-rule bypass must not exempt the required checks.
+3. **Branch-integrity ruleset:** where needed, keep deletion and non-fast-forward/force-push restrictions in a separate active ruleset with no bypass actors. Do not place these rules in the Broker-bypass ruleset.
+
+The update ruleset should not allow fork fetch-and-merge updates. Target all actual destination refs, including `main`, the stacked base and any future protected base. No temporary unlock or protection-removal window is part of this design.
+
+**Actor authority under the proposed configuration (not yet live-proven):**
+
+| Actor | Update/merge destination | Bypass authority | Modify enforcement |
+|---|---|---|---|
+| PR author or ordinary contributor | May create/update a source branch and open a PR; cannot update/merge the protected destination | None | No, unless separately granted repository admin or edit-repository-rules permission |
+| Human reviewer / ordinary write collaborator | May review and approve; cannot merge or update the protected destination | None | No, unless separately granted privileged repository role |
+| Checker App | Publishes the required check; no Contents write and no target update | None | No |
+| Merge Broker App | Sole intended actor to merge a PR into a protected destination; direct push must remain denied | Only the update-restriction ruleset, only through a PR | No Administration write; no ruleset-edit permission |
+| Other Apps, Actions tokens, bots and Dependabot | Cannot update/merge protected destination | None unless explicitly added (which activation must reject) | No, absent privileged repository role |
+| Repository administrator / custom edit-rules role | Must be denied direct update/merge while the active ruleset remains unchanged; this denial requires live proof | None by default in the proposed list | Can create/edit/delete repository rulesets and can therefore weaken or remove enforcement |
+| Personal repository owner | Same ruleset behavior as other non-bypass actors while it remains active; owner remains the ultimate configuration authority | None unless explicitly configured | Can change repository settings, rulesets and App installation; root of trust |
+
+**Critical live-proof requirement:** the GitHub documentation defines the ruleset and bypass-mode primitives, but it does not replace an end-to-end test proving that a merge request authenticated as the Merge Broker App is recognized as the sole pull-request bypass actor, that a direct push using the same App token is rejected, and that human/admin/API/GraphQL/UI/CLI/auto-merge paths are denied while the ruleset remains active. The exact App identity, branch patterns, bypass list and effective rules must be read back with sufficient permission. GitHub's ruleset API omits `bypass_actors` from a detail response when the caller lacks write access to that ruleset; a missing field must not be interpreted as an empty list.
+
+**Personal-account feasibility verdict:** a repository-level `Restrict updates` ruleset with an `Integration` actor and `pull_request` bypass is a documented candidate on the existing public personal-account repository. **Organization transfer is not mandatory for this ruleset-based single-writer experiment.** Transfer is a separate owner decision if Organization-level rulesets, Organization governance or merge-queue eligibility are wanted. The classic branch-protection push restriction remains Organization/plan-gated and is not the preferred sole-writer mechanism.
+
+No GitHub configuration can prevent the ultimate personal-account owner from changing repository settings, removing the ruleset or revoking the App. That owner remains a root of trust.
 
 References:
-- [About protected branches](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches)
-- [Available rules for rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets)
-- [Creating rulesets for repositories in your organization](https://docs.github.com/en/organizations/managing-organization-settings/creating-rulesets-for-repositories-in-your-organization)
+- [About protected branches — administrator exception and push restriction](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches)
+- [About rulesets — availability and administration](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets)
+- [Available rules for rulesets — Restrict updates](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets)
+- [REST API endpoints for repository rules — Integration and pull_request bypass mode](https://docs.github.com/en/enterprise-cloud@latest/rest/repos/rules)
 
 ---
 
@@ -443,11 +478,22 @@ The queue substantially reduces code/base TOCTOU: it validates the actual merge 
 Separate the checker from the merge actor:
 
 - **Checker App:** validates source/evidence and publishes an App-bound check. It has no Contents write or merge capability.
-- **Merge Broker App:** performs the only permitted merge path. It cannot publish the checker App's required check and cannot change repository settings.
+- **Merge Broker App:** performs the intended merge path and has Contents write authority. It cannot publish the Checker App's required check or change repository settings.
 - **External authority service:** stores current policy epoch, approved fingerprint, approval identity, revocation state and a durable per-base merge journal.
 - **Protected policy repository:** owns the controller and policy configuration separately from the target repository.
 
-The broker must not treat check SUCCESS as authorization. It must independently query the current authority service and validate the complete admission tuple immediately before requesting a merge.
+**The Merge Broker is part of the Trusted Computing Base (TCB).** This is not merely an orchestration detail. A compromised Broker process or stolen Broker installation token can invoke GitHub's merge API using its Contents-write authority. If the target PR already has a required Checker App check that GitHub still considers successful, the attacker can attempt to merge it without consulting the external authority service. The required-check ruleset only verifies that the required check is passing; it does not ask the external authority service whether the approval/fingerprint is still current. The update-restriction ruleset recognizes the Broker's App identity, not whether the caller is the genuine Broker process.
+
+GitHub does not independently enforce the external authority check against a compromised Broker. Splitting Checker and Broker Apps prevents the Checker from merging, but it does not make the Broker compromise-resistant. A stolen Broker token is equivalent to compromise of the Broker's GitHub authority for the duration of that credential's validity.
+
+**Distinguish two failure classes:**
+
+- **Controller/authority outage with an intact Broker:** the honest Broker must fail closed and refuse a new merge if it cannot obtain current authority. An already-sent GitHub merge can still complete, as documented elsewhere.
+- **Broker compromise or stolen Broker token:** the attacker can skip the Broker's external-authority logic and call GitHub directly. An existing green required check may be enough for GitHub to accept the merge. Controller availability, lease expiry and policy revocation do not protect against this attacker.
+
+Accordingly, invariant #2 (stale SUCCESS cannot independently authorize a merge) is **conditional on Broker integrity and exclusive custody of its installation credentials**. If the threat model includes a compromised Broker or stolen Broker token, this useful-merge candidate does not satisfy invariant #2: stale SUCCESS can be exploited through the compromised TCB. This residual is acceptable only if the owner explicitly accepts the Broker as a trusted principal and accepts the residual risk. If Broker compromise must be resisted, do not authorize this useful-merge architecture; retain no-admission or require a different independently enforced mechanism that has not been established in this design.
+
+The honest Broker must not treat check SUCCESS as authorization. It must independently query the current authority service and validate the complete admission tuple immediately before requesting a merge.
 
 **Proposed admission tuple**
 
@@ -490,31 +536,26 @@ Every field must be read from authoritative GitHub/API or policy-service state, 
 
 **Required GitHub-side single-writer posture**
 
-The broker can only provide useful security if ordinary actors cannot update the target branch outside it.
+The preferred candidate is the repository-level ruleset design in Section 4.6; it does **not** require an Organization migration for this public personal-account repository.
 
-Preferred candidate after an Organization migration:
+- Use an active update-only branch ruleset with Restrict updates and exactly one Integration bypass actor: the Merge Broker App in pull-request-only mode.
+- Use a separate active required-check ruleset with no bypass actors; require PRs and the exact Checker App check.
+- Keep deletion/force-push protection in a separate no-bypass integrity ruleset.
+- Do not use classic branch protection's "Restrict who can push" as the single-writer primitive: GitHub explicitly says repository admins and Apps with admin permissions can always push under that setting.
+- No human, team, role, unrelated App, Actions token or Dependabot bypass actor may be configured.
+- No auto-merge or merge-queue path may become an alternate merge authority in the direct-broker mode.
+- Limit repository write access; keep the bot-owned promotion PR immutable/retarget-resistant to ordinary contributors.
+- Keep repository settings administration separate from the Broker App.
 
-- Require pull requests.
-- Require strict required checks, including the exact Checker App identity.
-- Enable administrator enforcement / "Do not allow bypassing the above settings".
-- Restrict who can push to the Merge Broker App only.
-- Block force pushes and deletions; disable fork syncing for protected destinations.
-- No human, team, role, unrelated App or Dependabot bypass actor.
-- No auto-merge or merge-queue path for the broker-controlled direct-merge mode.
-- Limit repository write access; the bot-owned promotion PR must not be editable/retargetable by ordinary contributors.
-- Keep repository settings administration separate from the broker App.
+The documented plan/API eligibility supports this repository-level ruleset candidate on a public personal repository. That is not proof that the App merge identity is enforced as intended. Live disposable-repository proof remains mandatory before calling it single-writer.
 
-GitHub documents the "restrict who can push" setting for public repositories owned by a GitHub Free Organization and for Organization-owned repositories on Team/Enterprise plans. The current repository is personal-account-owned, so this setting is not currently available in the documented eligible configurations. A transfer to an Organization is therefore an owner decision/dependency for this preferred design.
+**Conditional guarantees if correctly implemented and live-proven**
 
-A ruleset `restrict updates` rule with the broker App as its only pull-request-only bypass actor is a possible alternative, but it makes the broker a bypass actor for that ruleset. It must be isolated from the separate required-check ruleset and proven on a disposable repository before consideration. Do not put the broker in a bypass list for the same ruleset that carries required checks.
-
-**Guarantees if correctly implemented and live-proven**
-
-- A stale SUCCESS alone cannot cause a merge because the broker independently checks live authority.
-- Controller/authority outage before a new authorization causes the broker to refuse new merge requests.
+- While the Broker is intact and is the only enforced updater, stale SUCCESS is not sufficient by itself: the honest Broker must revalidate live authority. This guarantee is conditional on Broker integrity and token custody; it does not survive Broker compromise.
+- Controller/authority outage before a new authorization causes an intact Broker to refuse new merge requests. This is outage protection, not compromise protection.
 - A source-head change is guarded by the merge API's expected-head SHA.
-- Base updates by competing writers can be prevented if GitHub continuously enforces the broker as the only permitted updater and the broker serializes all merges to that base.
-- Approval revocation and merge requests can be serialized by one durable authority transaction.
+- Base updates by competing writers can be prevented only if the repository-level update ruleset continuously recognizes the Broker as the sole PR bypass actor and live tests prove all other update paths are denied; the Broker must serialize its own merges.
+- Approval revocation and merge requests can be serialized by one durable authority transaction only while the Broker and authority service remain trustworthy.
 - Recovery can require a new policy epoch and new authorization instead of reusing old SUCCESS.
 
 **Failure modes and hard limitations**
@@ -525,7 +566,7 @@ A ruleset `restrict updates` rule with the broker App as its only pull-request-o
 4. A merge request already sent to GitHub may complete even if the controller or authority service becomes unavailable immediately afterwards.
 5. If the merge request response is lost, the broker cannot assume failure. It must mark the transaction INDETERMINATE and stop all further merges until it reads back the PR and base state.
 6. The asynchronous merge endpoint required for stacked PRs returns a pending request UUID. No documented cancellation endpoint establishes that a pending direct merge can be revoked. The initial broker must therefore reject stacked PRs rather than claim atomic revocation.
-7. A compromised Merge Broker App or stolen Contents-write installation token can attempt a merge using any still-valid required check. GitHub does not force that App to consult the external authority service.
+7. A compromised Merge Broker App or stolen Contents-write installation token can invoke the merge API without consulting the external authority service. If an existing required Checker App check is still green and eligible, GitHub may accept the merge. The Broker is therefore TCB; this architecture does not resist Broker compromise and invariant #2 is conditional on Broker integrity.
 8. The repository owner/Organization owner can change the settings or remove the App. GitHub cannot enforce rules against the ultimate account owner.
 
 **TOCTOU**
@@ -553,25 +594,27 @@ The design reduces the race using a single writer, per-base serialization, bot-o
 
 <badge color="warning">Strongest useful-admission candidate; not a complete GitHub-native guarantee</badge>
 
-**Can stale SUCCESS still independently authorize a merge? No, if the broker is the only enforced update actor and it never treats SUCCESS as sufficient.**
-**Can GitHub alone guarantee immediate revocation across an already in-flight merge? No.** The broker design has a transaction boundary and residual root-of-trust assumptions. P0 must remain open until the owner accepts the stated revocation semantics and independent live tests prove the single-writer path.
+**Can stale SUCCESS independently authorize a merge?** Not while the Broker is intact, the repository-level update ruleset is active and live-proven, the Broker is the sole PR bypass actor, and the Broker revalidates live authority. **If the Broker is compromised or its installation token is stolen, stale SUCCESS can be exploited** because GitHub does not enforce the external authority query. Invariant #2 is therefore conditional on Broker integrity.
+**Can GitHub alone guarantee immediate revocation across an already in-flight merge? No.** The broker design has a transaction boundary and residual root-of-trust assumptions. P0 must remain open until the owner explicitly accepts the Broker TCB risk and stated revocation semantics and independent live tests prove the single-writer path.
 
 ---
 
 ## 6. Recommended architecture and rationale
 
-### 6.1 Immediate recommendation: permanent-lock / no-admission
+### 6.1 Immediate recommendation: permanent-lock / no-admission (policy recommendation only)
 
-Until the owner explicitly accepts the residuals of a useful merge broker, retain the 2A rule:
+Until the owner explicitly accepts the residuals of a useful merge broker, the recommended operating policy is no merge admission:
 
-- Keep all destination branches permanently locked.
-- No temporary unlock, exception, direct merge, auto-merge or merge-queue admission.
-- Keep required checks intact; never remove a required check to recover availability.
-- Treat every historical SUCCESS as still successful until GitHub readback proves otherwise.
-- If a lock cannot be independently read back, report containment as NOT VERIFIED and stop merges/releases operationally.
-- Do not claim that a controller restart, App key rotation or check PATCH alone restores enforcement.
+- Do not merge protected destinations, even if existing checks are green.
+- Do not use direct merge, auto-merge, merge-queue admission or human exceptions.
+- Do not temporarily unlock branches, remove required checks or remove/update enforcement rules to recover availability.
+- Treat a historical SUCCESS as evidence only; it is not current authority.
+- If a lock cannot be independently read back, report containment as NOT VERIFIED and halt merges/releases operationally.
+- Do not claim that a controller restart, App key rotation or check-run PATCH alone restores enforcement.
 
-This is the only currently supportable posture that makes stale SUCCESS irrelevant by denying all merge admission, provided the lock is actually enforced and not changed by the account owner.
+**This policy is not currently enforced by GitHub.** At the latest repository read, main and the stacked base were reported unprotected and the ruleset inventory was empty. There is no live permanent lock established. The current state is therefore **NOT VERIFIED**, not "contained".
+
+To claim technical containment in a future separately authorized activation, an owner/settings operator must establish an active deny-all update/lock control on every destination, independently read back its effective settings and bypass list, and pass negative merge/update probes with an otherwise-green PR through UI, REST, GraphQL, Git push, CLI, auto-merge and any enabled queue path. No such configuration or probe is performed by this documentation-only checkpoint.
 
 ### 6.2 Future useful-merge candidate: C with an external serialized authority
 
@@ -598,20 +641,22 @@ Do not enable both a queue and a broker without specifying exactly which one own
 
 The following table is the explicit security disposition for the ten required invariants. "Conditional" means a proposed control exists but has not been implemented or live-proven. "Not guaranteeable" means the requested absolute property is not provided by GitHub's documented primitives under the stated trust model.
 
+**Current-state warning:** the permanent-lock/no-admission policy is not currently enforced in GitHub. Main and the stacked base are reported unprotected, no active repository rulesets were returned, and no negative merge probe has established containment. The current containment state is **NOT VERIFIED**.
+
 | # | Required invariant | Permanent-lock / no-admission | App-mediated broker candidate | Platform limitation / qualification |
 |---:|---|---|---|---|
-| 1 | Fail closed when controller or authority is unavailable | Yes for new admission while the lock remains enforced | Conditional for new authorization; an already-sent/in-flight GitHub merge may complete | Immediate cancellation of an accepted merge is not guaranteed |
-| 2 | Stale SUCCESS cannot independently authorize a merge | Yes, because no merge admission exists | Yes, only if the broker is the sole enforced updater and rechecks live authority | A/B alone do not satisfy this invariant |
-| 3 | Revoked approvals/fingerprints cannot authorize future merges | Yes for admission, because all merges are denied | Conditional after serialized in-flight work is resolved and the epoch is incremented | Immediate revocation of an already accepted merge is not guaranteeable |
-| 4 | Exact source SHA, base SHA, policy fingerprint and authorization identity remain bound | No admission is issued | Conditional via signed tuple, bot-owned PR, live reads and durable journal | Merge API has expected head SHA, not expected base SHA/tree SHA |
-| 5 | PR updates during verification invalidate obsolete authorization | No admission | Conditional via expected head SHA and re-read; bot-owned PR limits ordinary retargeting | No atomic base/PR-metadata compare-and-swap exists |
-| 6 | No administrator or unintended actor silently bypasses enforcement | Conditional on the lock being enforced and not changed by the owner | Conditional for ordinary actors with no bypass and enforced App-only updates | Ultimate account/Organization/enterprise owner can change the settings; absolute protection against that root is impossible |
-| 7 | Inherited Organization rulesets are accounted for | Current repository is user-owned; future transfer requires a full parent-scope audit | Same; every repo/Organization/enterprise ruleset and effective branch rule must be re-read | Current repo has no Organization owner; future inheritance is a migration gate |
-| 8 | No temporary unlock or protection-removal window | Yes by policy; no admission | Yes by design; protection remains continuously enabled | Requires live proof that broker admission does not depend on unlocking |
-| 9 | No race-prone transition between verification and merge authorization | Yes for merge admission, because no merge occurs | Conditional mitigation through single writer, lock and head SHA | GitHub has no atomic external-authority + expected-base merge transaction; in-flight ambiguity remains |
-| 10 | Recovery never restores expired or revoked authorization | Yes; no authorization is restored | Conditional through epoch bump, journal reconciliation and fresh approval only | Must be implemented and tested; GitHub does not perform this external recovery logic |
+| 1 | Fail closed when controller or authority is unavailable | Policy says deny, but GitHub currently has no verified lock enforcing it | Conditional for new authorization while the Broker is intact; an already-sent/in-flight GitHub merge may complete | Immediate cancellation of an accepted merge is not guaranteed |
+| 2 | Stale SUCCESS cannot independently authorize a merge | Only if a deny-all lock is separately established and live-proven; not true of the current repository state | **Conditional on Broker integrity, exclusive token custody and the live-proven sole-writer ruleset. A compromised Broker/stolen token can exploit an existing green check without querying authority.** | GitHub does not enforce the external authority query against the Broker; A/B alone do not satisfy this invariant |
+| 3 | Revoked approvals/fingerprints cannot authorize future merges | Only if all admission paths are technically denied; current containment is not verified | Conditional on an intact Broker, serialized in-flight work being resolved and the epoch being incremented | Immediate revocation of an already accepted merge is not guaranteeable |
+| 4 | Exact source SHA, base SHA, policy fingerprint and authorization identity remain bound | No admission is issued only after a real deny-all control is established | Conditional via signed tuple, bot-owned PR, live reads and durable journal | Merge API has expected head SHA, not expected base SHA/tree SHA |
+| 5 | PR updates during verification invalidate obsolete authorization | No admission is issued only after a real deny-all control is established | Conditional via expected head SHA and re-read; bot-owned PR limits ordinary retargeting | No atomic base/PR-metadata compare-and-swap exists |
+| 6 | No administrator or unintended actor silently bypasses enforcement | Not established; account owner can change/remove any repository-level lock | Conditional on the exact bypass list, effective rules, admin denial probes and separate configuration governance | Repository admins/custom edit-rules roles can modify/delete repo rulesets; owner remains root of trust |
+| 7 | Inherited Organization rulesets are accounted for | Current repository is personal-account-owned; no Organization parent was returned | Same; if transferred later, every repo/Organization/enterprise ruleset and effective branch rule must be re-read | Organization transfer is not required for repository-level rulesets; it is a migration gate only for Organization-level policy/queue needs |
+| 8 | No temporary unlock or protection-removal window | Policy forbids it, but no live lock is currently established | Intended by design; the update ruleset remains continuously active and no temporary unlock is permitted | Requires live proof that PR merge works without disabling/removing protection |
+| 9 | No race-prone transition between verification and merge authorization | No merge is admitted only after a real deny-all control is established | Conditional mitigation through single writer, lock and expected-head SHA | GitHub has no atomic external-authority + expected-base merge transaction; in-flight ambiguity remains |
+| 10 | Recovery never restores expired or revoked authorization | No authorization is restored by policy; technical containment remains unverified | Conditional through epoch bump, journal reconciliation and fresh approval only | Must be implemented and tested; GitHub does not perform this external recovery logic |
 
-**Result:** no useful-merge architecture can currently be certified as satisfying all ten invariants absolutely. Permanent-lock/no-admission is the safest current posture. The broker candidate can satisfy "stale SUCCESS is not independently sufficient" but retains explicit in-flight, base-SHA and root-owner limitations. P0 therefore remains OPEN until those residuals are either accepted by the owner or eliminated by a stronger independently proven mechanism.
+**Result:** no useful-merge architecture can currently be certified as satisfying all ten invariants against a compromised Broker. The repository-level ruleset candidate may enforce a single App updater against ordinary/human actors, but only after live proof. Permanent-lock/no-admission remains the safest recommended policy, not an established current GitHub state. P0 remains OPEN.
 
 ---
 
@@ -789,7 +834,7 @@ Synthetic tests are necessary for state-machine and parser correctness, but they
 | 11 | Checker App suspended/uninstalled after SUCCESS | Historical check treated as still successful; broker denies if authority cannot be verified | App state, existing check run, broker denial |
 | 12 | Wrong App publishes same context | App-bound required check rejects it | App IDs in check runs and merge-box result |
 | 13 | Checker App credential revoked | No new check; old check not trusted as live authorization | API failure and broker denial |
-| 14 | Broker App token stolen | Branch rules and required checker App still apply; incident halt and key revocation | Disposable repo red-team test |
+| 14 | Broker App token stolen or Broker process compromised while an otherwise-green required Checker App check exists and authority is revoked/unavailable | **Unauthorized merge may succeed.** The attacker can call the merge API as the Broker App and bypass the update-only ruleset through the PR path; GitHub does not independently require the external authority query. This is an expected TCB-compromise residual, not a denial guarantee. | Disposable personal-repository test using a deliberately controlled test Broker token; record whether GitHub accepts the merge despite the revoked authority state |
 | 15 | PR head changes after verification | Expected-head SHA mismatch; reject and re-evaluate | GitHub merge API conflict |
 | 16 | PR base retargets after verification | Reject promotion PR / require fresh admission | PR base before/after and journal |
 | 17 | Base branch changes between read and merge | Only broker may update; serialization prevents competing broker update; otherwise halt | Ref history and broker lock |
@@ -812,20 +857,30 @@ Synthetic tests are necessary for state-machine and parser correctness, but they
 | 34 | API 403/404/409/422/429/5xx or malformed response | Fail closed; no guessed state | Recorded response and no merge |
 | 35 | Broker restarts with stale lock/lease | No automatic lease expiry/unlock; reconcile journal | Recovery test |
 | 36 | Account owner changes ruleset or transfers repository | Treat as root-of-trust configuration change; halt pending independent review | Audit log and settings diff |
+| 37 | Repository-level Restrict updates with sole Integration bypass actor in pull_request mode on a public personal-account repository | Broker-authenticated PR merge is accepted; direct push by the same App token and human/admin merge/update attempts are denied, if the documented candidate works as intended | Disposable public personal-account repository, exact ruleset readback and negative/positive API/UI probes |
+| 38 | Broker is bypass actor on update-only ruleset but absent from required-check and branch-integrity rulesets | Broker can bypass only the update rule; required Checker App check and no-bypass integrity rules remain enforced | Three independent ruleset detail readbacks plus attempts to merge with missing/failing required check and to delete/force-push |
+| 39 | Repository administrator attempts direct push while update ruleset is active | Denied while ruleset remains active; administrator must not be treated as an automatic bypass actor; administrator can still edit/delete the ruleset | Disposable repo using owner/admin identity; direct push/PR merge denial plus ruleset-edit capability evidence |
+| 40 | Classic branch protection Restrict who can push used as sole-writer control | Admin exception remains; do not accept as sole-writer proof | Disposable repo demonstrates documented administrator push exception |
+| 41 | Human UI, REST, GraphQL, CLI, Actions token, auto-merge or queue attempts target update while only Broker App is configured for pull_request bypass | All non-Broker update paths denied; any enabled alternate merge path is a blocker | Separate actor credentials and per-path negative receipts |
+| 42 | Broker outage with intact code/credentials versus Broker compromise/token theft | Outage: fail closed before sending a merge. Compromise: attacker may merge against an existing eligible green check without authority. These are distinct outcomes. | Paired disposable-repository tests, with an explicit test-only Broker token for the compromise simulation |
 
 ### Required live test design
 
-- Use a disposable public Organization-owned repository with the intended plan and App restrictions.
-- Use an otherwise-green PR and an App-bound check.
-- Exercise each allowed and denied path using separate identities.
-- Include a controller outage after a successful check, not only before it.
-- Include a revoked fingerprint with the same source SHA.
-- Include an App suspension with an existing SUCCESS.
+- Use a disposable **public personal-account repository** to test the repository-level Rulesets Restrict updates candidate with an Integration actor; Organization transfer is not a prerequisite for this test.
+- Use a separate disposable Organization-owned repository only for Organization-level inheritance or merge-queue tests.
+- Use an otherwise-green PR and an App-bound Checker check.
+- Exercise source-branch writes, PR creation, human merge, admin merge, Broker PR merge and Broker direct push using separate identities.
+- Confirm the Broker App can merge through a PR in pull_request bypass mode but cannot direct-push to the protected ref.
+- Confirm the Broker's bypass on the update-only ruleset does not bypass the separate required-check or branch-integrity rulesets.
+- Include a controller/authority outage after a successful check, not only before it.
+- Include a revoked fingerprint with the same source SHA and an App suspension with an existing SUCCESS.
+- Simulate Broker compromise with a deliberately controlled test installation token. The expected result is that an unauthorized merge **may succeed** if an eligible green required check exists; record this as the TCB residual, not a test failure.
+- Test repository-admin direct update denial and separately verify that the admin can alter/delete repository rulesets. Test the classic branch-protection administrator exception.
 - Test a real merge-group queue if B is retained as defense in depth.
 - Test an in-flight direct and asynchronous merge separately.
 - Never remove required checks or unlock a production branch as a test.
 - Capture exact repository ID, refs, check run IDs, App IDs, ruleset IDs, bypass actors, timestamps, API responses and post-test readback.
-- Independent reviewer must reproduce at least the critical denial paths.
+- Independent reviewer must reproduce the critical allow/deny paths and the Broker-compromise residual.
 
 ---
 
@@ -862,24 +917,47 @@ A GitHub App with Contents write is powerful. The broker is therefore a critical
 
 ### 10.3 Branch protection / rulesets
 
-For an Organization-owned future target:
+For the current public personal-account repository, the preferred candidate is three repository-level branch rulesets, all active and targeting every protected destination ref:
 
-- Require PRs for protected destination branches.
-- Require strict status checks.
-- Bind the authority check to the exact Checker App ID.
-- Require current review/approval policy and dismiss stale approvals where appropriate.
-- Enforce rules for administrators.
-- Restrict who can push to the Merge Broker App only, if eligible and live-proven.
-- Block force pushes and deletions.
-- Disable fork syncing for protected destinations.
-- Keep bypass actors empty for enforcement rules.
-- Keep any broker-only update restriction isolated from the required-check ruleset.
-- Preserve all existing required checks.
-- Protect every actual destination, including stacked bases during migration.
-- Disable auto-merge and do not require a merge queue in the direct-broker mode.
-- Audit repository, Organization and enterprise rulesets plus every effective branch rule.
+**Ruleset A — Broker update restriction**
 
-The current personal-account repository does not have the documented eligibility for the App-only "Restrict who can push" branch protection setting. A repository transfer to an Organization is an owner decision, not an implementation detail.
+- Target `main`, the current stacked base and every future destination branch.
+- Include the Restrict updates rule only.
+- Configure exactly one bypass actor: the Merge Broker GitHub App as Integration, using its App/integration ID, with bypass mode pull_request.
+- Do not include required checks, deletion or force-push rules in this ruleset; the Broker can bypass rules in the ruleset where it is listed.
+- Disable update/fetch-and-merge from upstream forks.
+- This is the only ruleset in which the Broker appears as a bypass actor.
+
+**Ruleset B — Required PR and checks**
+
+- Target the same destination refs.
+- Require pull requests and strict/latest-base status checks.
+- Require the unique Checker App context and expected App identity.
+- Set the bypass-actor list to empty. The Broker must not be able to bypass this ruleset.
+- Preserve all existing required checks; never replace them with a similarly named weaker context.
+
+**Ruleset C — Branch integrity**
+
+- Target the same destination refs.
+- Keep deletion and force-push/non-fast-forward restrictions here.
+- Set the bypass-actor list to empty.
+- Do not give the Broker deletion or force-push bypass authority.
+
+**Actor and settings authority**
+
+- PR authors and ordinary collaborators may create/update source branches and open PRs. They cannot update or merge protected destinations while Ruleset A remains active and they are not bypass actors.
+- Human reviewers may approve or request changes. Review permission does not grant destination-update or merge authority.
+- The Checker App can publish the required check but has no Contents write and is not a bypass actor.
+- The Merge Broker App is the only intended destination updater/merger, and only through a PR. Its bypass is limited to Ruleset A; Rulesets B and C remain enforced.
+- Other Apps, Actions tokens and bots have no destination-update permission unless explicitly added as a bypass actor. Activation must reject any additional actor.
+- Repository administrators and custom roles with edit repository rules are not to be configured as bypass actors. While the rulesets remain active, they must be denied destination updates in live probes; however, those privileged roles can edit/delete repository rulesets and can therefore weaken enforcement.
+- The personal-account owner can alter repository settings, rulesets and App installation. This is the ultimate configuration root of trust and cannot be constrained by the repository's own ruleset.
+
+Do not use classic branch protection's Restrict who can push as the single-writer primitive: GitHub explicitly documents that repository admins and Apps with admin permissions can always push under that setting. "Do not allow bypassing the above settings" does not erase the documented administrator exception for that push restriction.
+
+Repository-level branch rulesets and the Integration/pull_request bypass actor are documented as available for public personal-account repositories; **no Organization transfer is required for this ruleset-based experiment**. Organization transfer is an optional future decision for Organization-level rulesets, governance or merge-queue eligibility. The documented semantics are not a live guarantee: the Broker PR merge, same-App direct-push denial, human/admin denial and separate-ruleset enforcement must all be proven on a disposable personal-account repository before single-writer enforcement is claimed.
+
+The Broker App must have no Administration permission. Repository settings administration remains a separate owner/admin responsibility. No production settings change is authorized by this document.
 
 ### 10.4 Owner/admin trust
 
@@ -904,22 +982,25 @@ This is a future sequence only. It is not authorized by this design PR.
 
 ### Phase 0 — Owner decisions
 
-1. Decide whether the repository may be transferred to an Organization.
+1. Decide whether the owner explicitly accepts the Merge Broker as a Trusted Computing Base, including the possibility that a compromised Broker or stolen token can merge against an existing eligible green check. If not accepted, do not authorize a useful merge path.
 2. Decide whether the product requires a useful merge path or accepts permanent-lock/no-admission.
 3. Decide whether revocation is effective only after an in-flight transaction resolves, or whether the owner requires immediate cancellation. The latter is not guaranteed by GitHub.
 4. Decide whether stacked PRs may be prohibited at admission. The first broker design should prohibit them.
-5. Decide the trusted Organization owner/admin set and external policy-service ownership.
-6. Decide whether the GitHub plan supports Organization-level rulesets and the required branch restrictions.
+5. Decide the trusted personal-account owner/admin set and external policy-service ownership.
+6. Decide whether an Organization transfer is wanted for Organization-level rulesets/governance or merge queues. It is **not required** for the documented repository-level Rulesets Restrict updates candidate on this public personal repository.
+7. Verify the current Actions check-data retention setting; its actual repository value has not been inspected.
 
 ### Phase 1 — Independent design acceptance
 
 1. Independently review this document.
 2. Confirm every documented GitHub behavior against current official docs.
-3. Verify the proposed App-only branch update path on a disposable Organization-owned repository.
-4. Verify the checker App cannot merge.
-5. Verify the broker cannot publish the Checker App's required check.
-6. Verify admin/bypass and direct update paths.
-7. Do not change Mind Place production settings.
+3. Verify the repository-level Integration/pull_request update-restriction ruleset on a disposable public personal-account repository.
+4. Verify that the Broker App can merge a PR but cannot direct-push with the same App token.
+5. Verify the Checker App cannot merge and the Broker cannot publish the Checker App's required check.
+6. Verify that the Broker bypass in the update-only ruleset does not bypass the separate required-check or integrity rulesets.
+7. Verify human and repository-admin denial paths, and separately verify which admins can edit/delete the rulesets.
+8. Verify the classic branch-protection administrator push exception.
+9. Do not change Mind Place production settings.
 
 ### Phase 2 — Disposable implementation prototype
 
@@ -928,19 +1009,22 @@ This is a future sequence only. It is not authorized by this design PR.
 3. Implement the durable authority epoch, per-base lock and append-only transaction journal.
 4. Implement source/base/tree/fingerprint/approval binding.
 5. Implement immutable bot-owned promotion PRs.
-6. Implement synchronous direct merge only for unstacked PRs.
-7. Treat asynchronous stacked merges as unsupported until a separate decision.
-8. Implement idempotent webhook handling, API readback and INDETERMINATE recovery.
-9. Keep the actual Mind Place repository unchanged.
+6. Implement the three separate repository rulesets from Section 10.3 on the disposable public personal-account repository.
+7. Implement synchronous direct merge only for unstacked PRs.
+8. Treat asynchronous stacked merges as unsupported until a separate decision.
+9. Implement idempotent webhook handling, API readback and INDETERMINATE recovery.
+10. Keep the actual Mind Place repository unchanged.
 
 ### Phase 3 — Adversarial qualification
 
 1. Run the full matrix in Section 9 on the disposable repository.
 2. Include same-SHA revoked approvals, old SUCCESS, App suspension and API outage.
 3. Test concurrent merge/revoke and lost merge responses.
-4. Test every direct, UI, REST, GraphQL, auto-merge and queue path.
-5. Obtain independent security review of implementation and live evidence.
-6. Reject any unproven branch restriction or bypass assumption.
+4. Test human/admin/other-App denials, classic branch-protection admin exception and ruleset bypass scope.
+5. Simulate Broker compromise/token theft and record the expected unauthorized-merge residual.
+6. Test every direct, UI, REST, GraphQL, auto-merge and queue path.
+7. Obtain independent security review of implementation and live evidence.
+8. Reject any unproven branch restriction or bypass assumption.
 
 ### Phase 4 — Separate production authorization
 
@@ -964,14 +1048,17 @@ No step in this sequence is executed by Checkpoint 2B design work.
 
 ### 12.1 P0 risks
 
-1. **No GitHub-native live revocation:** check SUCCESS is not coupled to an external policy epoch.
+1. **No GitHub-native live revocation:** check SUCCESS is not coupled to an external policy epoch; seven-day freshness is not a live authority lease.
 2. **In-flight merge:** an accepted merge operation may complete after the controller/authority service becomes unavailable. GitHub does not document a cancellation primitive for a pending asynchronous merge.
 3. **Base compare-and-swap absent:** merge APIs guard PR head SHA, not expected base SHA/effective merge tree.
-4. **Ultimate owner bypass:** GitHub cannot prevent the resource owner/Organization owner/enterprise owner from changing enforcement.
-5. **Broker compromise:** the Merge Broker App has Contents write and is therefore a high-value principal.
-6. **Current repository configuration:** main and the current stacked base are reported unprotected; no active rulesets are visible in the current repository inventory.
-7. **Current account eligibility:** the repository is personal-account-owned, so the preferred App-only branch-push restriction and merge queue require an ownership/plan decision.
-8. **Stacked PRs:** the synchronous direct merge endpoint does not support stacked PRs; the asynchronous endpoint is required and introduces a pending operation with unresolved cancellation behavior.
+4. **Broker is TCB:** a compromised Merge Broker or stolen Contents-write installation token can invoke the merge API against an otherwise-green required check without consulting the external authority service. GitHub does not independently enforce the external authority check. Invariant #2 is conditional on Broker integrity; if Broker compromise is in scope, the useful-merge candidate is NO-GO for that threat model.
+5. **Single-writer is not yet proven:** the repository-level Restrict updates ruleset with a sole Integration/pull_request bypass actor is documented as eligible on this public personal repository, but the actual Broker merge identity and all denial paths require live disposable-repository proof.
+6. **Classic branch protection is insufficient for sole writer:** its Restrict who can push setting explicitly allows repository admins/Apps with admin permissions to push.
+7. **Ultimate owner/configuration authority:** repository admins or custom edit-repository-rules roles can change/delete repository rulesets; the personal-account owner can alter settings and App installation.
+8. **Current containment is NOT VERIFIED:** main and the stacked base report protected=false, the repository ruleset inventory is empty, and no live permanent lock or negative merge probe has been established.
+9. **Personal-account feature boundary:** repository-level rulesets do not require Organization ownership; merge queue and Organization-level rulesets remain separate features with their own eligibility.
+10. **Stacked PRs:** the synchronous direct merge endpoint does not support stacked PRs; the asynchronous endpoint is required and introduces a pending operation with unresolved cancellation behavior.
+11. **Check retention setting:** check records are now governed by configured Actions retention; the current repository's actual setting has not been verified.
 
 ### 12.2 P1 risks
 
@@ -986,14 +1073,15 @@ No step in this sequence is executed by Checkpoint 2B design work.
 
 | Decision | Why it matters | Safe default pending decision |
 |---|---|---|
-| Transfer repo to an Organization? | Required for the preferred App-only push restriction and merge queue eligibility | Do not activate C or B |
-| Allow any merge admission? | Permanent lock prevents useful merges | Keep permanent-lock/no-admission |
+| Transfer repo to an Organization? | Not required for repository-level Restrict updates rulesets; may be wanted for Organization-level rulesets, governance or merge queues | Do not transfer solely for single-writer enforcement |
+| Accept Merge Broker as TCB? | A compromised Broker/stolen token can merge using an existing eligible green check without external authority validation | If not accepted, do not authorize useful merges |
+| Allow any merge admission? | Current repository has no verified lock; permanent-lock/no-admission is policy only until separately enforced | Do not merge; containment remains NOT VERIFIED |
 | Accept revocation linearization after in-flight merge resolution? | Immediate cancellation is not guaranteed | Do not authorize broker merges |
 | Prohibit stacked PR admission? | Async merge introduces pending/in-flight semantics | Reject stacked PRs |
-| Who is the root settings authority? | Owners can change enforcement | Require explicit trusted-owner list and independent audit |
-| Accept a privileged Merge Broker App? | Broker compromise can cause merges | Keep Checker App read-only for merge purposes |
-| Use merge queue for integration? | Queue improves code freshness but not revocation | Do not treat queue as authorization |
-| Formal 2A acceptance record reconciled? | Issue #133's latest visible comment conflicts with the execution brief | Keep c861 as the owner-designated baseline; do not infer production acceptance |
+| Who is the root settings authority? | Admins can modify/delete repo rulesets and the owner can change settings/App installation | Require explicit trusted-owner/admin list and independent audit |
+| Use merge queue for integration? | Queue improves code freshness but not revocation and has separate eligibility | Do not treat queue as authorization |
+| Verify check-data retention setting? | Retention is configured and the current repository value is unknown | Do not claim indefinite historical visibility |
+| Formal 2A acceptance record reconciled? | Issue #133's latest visible handoff still says not to treat the implementation/CI result as 2A acceptance, despite the execution brief's accepted characterization | Preserve the discrepancy; do not claim GitHub's tracking record is reconciled |
 
 ---
 
@@ -1002,14 +1090,19 @@ No step in this sequence is executed by Checkpoint 2B design work.
 The independent reviewer must:
 
 1. Verify the exact baseline commit and all repository observations.
-2. Independently read every relevant official GitHub reference, especially seven-day status freshness, App-bound required checks, check-run update semantics, merge-group behavior, bypass actors, App suspension and merge API preconditions.
-3. Confirm the distinction between a historical SUCCESS and a SUCCESS that still satisfies required checks.
+2. Independently read every relevant official GitHub reference, especially seven-day status freshness, configured check-data retention, App-bound required checks, check-run update semantics, merge-group behavior, bypass actors, App suspension and merge API preconditions.
+3. Confirm the distinction between check-data retention, seven-day required-check freshness, the internal 600-second lease and historical visibility versus merge eligibility.
 4. Confirm that App ID binding does not prove current policy validity.
 5. Challenge the claim that a merge queue handles base/head freshness but not post-success revocation.
-6. Verify the current repository's personal-account ownership and merge-queue eligibility.
-7. Verify current branch protection/ruleset evidence and clearly retain any inaccessible privileged settings as NOT VERIFIED.
-8. Review the App-mediated design for single-writer enforcement, base-SHA TOCTOU, PR retargeting, stacked-PR asynchronous behavior, ambiguous merge results and compromised-broker risk.
-9. Reject any claim that GitHub provides an atomic external-approval-plus-merge transaction.
+6. Verify that classic branch protection's Restrict who can push setting retains the documented administrator push exception.
+7. Verify repository-level Rulesets Restrict updates availability for a public personal-account repository and the REST schema support for an Integration actor with pull_request bypass mode; do not require an Organization transfer for this candidate.
+8. Verify the proposed separation between the Broker-only update-restriction ruleset and the no-bypass required-check/integrity rulesets.
+9. Verify current branch protection/ruleset evidence and clearly retain any inaccessible privileged settings as NOT VERIFIED; confirm that current containment is NOT VERIFIED, not established.
+10. Review the actor matrix: who can open PRs, approve, update, merge, bypass each ruleset, and edit/delete enforcement.
+11. Reproduce the positive Broker PR-merge path and negative direct-push/human/admin/other-App paths on a disposable public personal-account repository.
+12. Simulate Broker compromise/stolen token. The expected residual is that an attacker may merge against an eligible green required check without querying external authority; invariant #2 is conditional on Broker integrity.
+13. Review the App-mediated design for base-SHA TOCTOU, PR retargeting, stacked-PR asynchronous behavior, ambiguous merge results and compromised-Broker risk.
+14. Reject any claim that GitHub provides an atomic external-approval-plus-merge transaction.
 10. Confirm that no temporary unlock is proposed or authorized.
 11. Confirm that recovery never replays an expired or revoked authorization.
 12. State which mandatory invariants are fully guaranteed, conditionally mitigated or impossible under the selected trust model.
@@ -1035,11 +1128,11 @@ The independent reviewer must:
 
 | Classification | Meaning | Examples in this document |
 |---|---|---|
-| **Documented platform behavior** | Explicitly stated by current GitHub documentation | Seven-day required-check freshness; expected App source; merge-group construction; merge API expected head SHA; App suspension blocks access |
-| **Repository-verified behavior** | Read from the repository/API at the supplied exact HEAD | Personal-account owner; branch summaries report unprotected; empty ruleset inventory; no merge_group triggers; disabled example config |
-| **Proposed behavior** | Design requiring implementation and independent review | Checker/Broker split; per-base lock; authority epoch; bot-owned promotion PR; one-use grant |
-| **Unverified assumption** | Requires live test or privileged readback | App-only branch restriction works with the selected installation; every alternate merge path is denied; ruleset visibility is complete; in-flight merge behavior under outage |
-| **Explicit limitation** | No supported GitHub primitive establishes the property | Atomic external revocation plus merge; expected-base-SHA compare-and-swap; prevention of ultimate owner configuration changes |
+| **Documented platform behavior** | Explicitly stated by current GitHub documentation | Seven-day required-check freshness; check-data retention from October 1, 2026; classic branch-protection administrator push exception; public personal-repository ruleset availability; Restrict updates and Integration/pull_request bypass semantics; merge-group construction; merge API expected head SHA |
+| **Repository-verified behavior** | Read from the repository/API during this corrective revision | Personal-account owner; main and stacked base report protected=false; empty repository ruleset inventory; no live lock established; no merge_group triggers; disabled example config |
+| **Proposed behavior** | Design requiring implementation and independent review | Checker/Broker split; separate update-only, required-check and branch-integrity rulesets; per-base lock; authority epoch; bot-owned promotion PR; one-use grant |
+| **Unverified assumption** | Requires live test or privileged readback | Broker App is recognized as sole PR bypass actor; same-App direct push is rejected; humans/admins/other Apps are denied; bypass list is fully visible; all alternate merge paths are denied; in-flight merge behavior under outage |
+| **Explicit limitation** | No supported GitHub primitive establishes the property | Atomic external revocation plus merge; expected-base-SHA compare-and-swap; GitHub independently enforcing external authority against a compromised Broker; prevention of ultimate owner configuration changes |
 
 ---
 
@@ -1049,6 +1142,10 @@ The independent reviewer must:
 
 The 2A read-only inspector is useful evidence collection, but it is not a merge gate. Required App checks are useful identity-bound evidence, but they are not live authority. A merge queue improves current merge-group validation, but it does not revoke an already successful check. App-mediated merging is the strongest useful-admission candidate, but GitHub does not provide the atomic base/authority transaction needed to claim every requested invariant without residuals.
 
-Until the owner accepts a bounded broker model and its explicit in-flight/root-admin limitations, the security-correct operating mode is **permanent-lock / no-admission**.
+Until the owner accepts the Broker TCB risk, in-flight limitations and root-owner assumptions, the recommended operating policy is **permanent-lock / no-admission**. This is not currently a live GitHub lock: main and the stacked base report unprotected, the ruleset inventory is empty, and containment remains **NOT VERIFIED** until effective settings readback and negative merge probes succeed.
 
-**P0 stale-success enforcement remains OPEN. Production activation remains NO-GO. No implementation or privileged GitHub action is authorized by this document.**
+The preferred future single-writer candidate is a repository-level Restrict updates branch ruleset on the existing public personal-account repository, with the Merge Broker Integration as the sole pull_request bypass actor and separate no-bypass required-check/integrity rulesets. Organization transfer is not required for that repository-level experiment. The candidate is not accepted as single-writer until live disposable-repository proof succeeds.
+
+The Broker is a TCB. If Broker compromise is in scope, invariant #2 is not guaranteed and the useful-merge candidate is NO-GO for that threat model: GitHub may accept a merge using an existing eligible green required check without the external authority query.
+
+**P0 stale-success enforcement remains OPEN. Checkpoint 2B is not accepted. Production activation remains NO-GO. No implementation or privileged GitHub action is authorized by this document.****
