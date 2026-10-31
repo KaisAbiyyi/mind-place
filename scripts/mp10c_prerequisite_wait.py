@@ -33,6 +33,16 @@ def classify(runs, candidate, repo, vault, contract_fingerprint, fetch_jobs, fet
             workflow_sources=workflow_sources)
         return "ready", "Exact PR/base/head native jobs and contract evidence succeeded"
     except ValueError as error:
+        error_text = str(error)
+        if error_text.startswith("Missing authoritative workflow source: "):
+            return "failed", error_text
+        missing_workflow_prefix = (
+            "Frozen candidate lacks exact successful native workflow jobs/steps: "
+        )
+        missing_workflow = (
+            error_text[len(missing_workflow_prefix):]
+            if error_text.startswith(missing_workflow_prefix) else None
+        )
         pending = []
         failed = []
         separated_product = native_contract.requires_separated_product(repo, candidate["pr"])
@@ -49,12 +59,22 @@ def classify(runs, candidate, repo, vault, contract_fingerprint, fetch_jobs, fet
             if not matching:
                 pending.append(path)
                 continue
-            if any(run.get("status") in (
-                    "queued", "in_progress", "requested", "waiting", "pending")
-                   for run in matching):
+            active = any(run.get("status") in (
+                "queued", "in_progress", "requested", "waiting", "pending")
+                for run in matching)
+            completed = [run for run in matching if run.get("status") == "completed"]
+            unsuccessful = [
+                run for run in completed if run.get("conclusion") != "success"
+            ]
+            if active:
                 pending.append(path)
-            elif any(run.get("status") == "completed" for run in matching):
+            elif unsuccessful:
                 failed.append(path)
+            elif completed:
+                if missing_workflow is None or missing_workflow == path:
+                    failed.append(path)
+                # Successful sibling workflows do not become failures merely
+                # because a different required workflow has not run yet.
             else:
                 pending.append(path)
         if failed:
