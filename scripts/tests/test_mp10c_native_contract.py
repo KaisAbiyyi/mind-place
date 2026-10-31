@@ -600,7 +600,7 @@ class NativeIdentityAndPrerequisiteTests(unittest.TestCase):
             self.require()
 
     def _require_sqlcipher_with_runner_labels(self, ubuntu_labels, windows_labels,
-                                              ipc_conclusion="success"):
+                                              ipc_conclusion="success", duplicate_ipc=False):
         cand = candidate(127, head_repo=REPO, base_repo=REPO)
         ci_run = native_run(cand, run_id=110)
         sql_run = native_run(cand, run_id=111, path=native_contract.SQLCIPHER_WORKFLOW)
@@ -618,6 +618,8 @@ class NativeIdentityAndPrerequisiteTests(unittest.TestCase):
                 "name": "Qualify native capture encrypted IPC and revoked owner epoch",
                 "status": "completed", "conclusion": ipc_conclusion,
             })
+        if duplicate_ipc:
+            self.jobs[2]["steps"].append(dict(self.jobs[2]["steps"][-1], conclusion="skipped"))
         by_run = {ci_run["id"]: self.jobs, sql_run["id"]: sql_jobs}
         sql_source = (
             "jobs:\n"
@@ -661,6 +663,11 @@ class NativeIdentityAndPrerequisiteTests(unittest.TestCase):
                 self.setUp()
                 self._require_sqlcipher_with_runner_labels(
                     ["ubuntu-24.04"], ["windows-2022"], ipc_conclusion=conclusion)
+
+    def test_duplicate_vault_ipc_step_does_not_satisfy_native_prerequisite(self):
+        with self.assertRaisesRegex(ValueError, "native capture encrypted IPC"):
+            self._require_sqlcipher_with_runner_labels(
+                ["ubuntu-24.04"], ["windows-2022"], duplicate_ipc=True)
 
     def test_sqlcipher_windows_job_on_ubuntu_is_rejected(self):
         with self.assertRaises(ValueError):

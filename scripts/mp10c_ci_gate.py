@@ -732,6 +732,8 @@ def require_prerequisites(runs: list[dict], candidate: dict, *, repo: str,
         }
     }
     if vault:
+        required[".github/workflows/ci.yml"]["Verify Windows product"] += (
+            "Qualify native capture encrypted IPC and revoked owner epoch",)
         required[".github/workflows/mp9b-sqlcipher-qualification.yml"] = {
             "SQLCipher / ubuntu-24.04": (
                 "Check Rust formatting", "Encrypted state/index and FTS regression",
