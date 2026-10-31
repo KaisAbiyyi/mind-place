@@ -8,7 +8,15 @@ on:
   workflow_dispatch:
     inputs:
       pr_number:
-        description: Open same-repository PR to qualify (select its current head branch above)
+        description: Open same-repository PR; dispatch native CI separately first on this exact head branch
+        type: string
+        required: true
+      head_sha:
+        description: Exact PR head SHA; must match the separately dispatched native CI run
+        type: string
+        required: true
+      base_sha:
+        description: Exact PR base SHA; must match the separately dispatched native CI run
         type: string
         required: true
       qualification:
@@ -38,10 +46,19 @@ jobs:
       source-sha: ${{ steps.decision.outputs.source-sha }}
       source-ref: ${{ steps.decision.outputs.source-ref }}
       checkout-sha: ${{ steps.decision.outputs.checkout-sha }}
+      head-repository: ${{ steps.decision.outputs.head-repository }}
+      head-repository-id: ${{ steps.decision.outputs.head-repository-id }}
+      base-repository: ${{ steps.decision.outputs.base-repository }}
+      base-repository-id: ${{ steps.decision.outputs.base-repository-id }}
+      base-ref: ${{ steps.decision.outputs.base-ref }}
+      base-sha: ${{ steps.decision.outputs.base-sha }}
+      native-contract-policy: ${{ steps.decision.outputs.native-contract-policy }}
+      native-contract-fingerprint: ${{ steps.decision.outputs.native-contract-fingerprint }}
+      native-checkout-sha: ${{ steps.decision.outputs.native-checkout-sha }}
     steps:
       - uses: actions/checkout@v5
       - name: Python gate decision and receipt regression tests
-        run: python3 -m unittest discover -s scripts/tests -p 'test_mp10c_ci_gate.py' -v
+        run: python3 -m unittest discover -s scripts/tests -p 'test_mp10c_*.py' -v
       - name: Decide from verified same-PR prior receipt
         id: decision
         env:
@@ -102,7 +119,9 @@ jobs:
   prerequisite-coordination:
     name: Wait for exact-source native prerequisites (Ubuntu, NOT 100K)
     needs: [effective-input-gate, document-smoke]
-    if: needs.effective-input-gate.outputs.run-heavy == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+    # Current native qualification is mandatory even when an authenticated 100K proof is reused.
+    # Draft PRs remain deferred; explicit dispatch and every Ready PR are coordinated.
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.draft == false)
     runs-on: ubuntu-24.04
     timeout-minutes: 85
     concurrency:
@@ -112,6 +131,16 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       PR_NUMBER: ${{ needs.effective-input-gate.outputs.pr-number }}
       PR_HEAD_SHA: ${{ needs.effective-input-gate.outputs.source-sha }}
+      PR_HEAD_REF: ${{ needs.effective-input-gate.outputs.source-ref }}
+      PR_HEAD_REPOSITORY: ${{ needs.effective-input-gate.outputs.head-repository }}
+      PR_HEAD_REPOSITORY_ID: ${{ needs.effective-input-gate.outputs.head-repository-id }}
+      PR_BASE_REPOSITORY: ${{ needs.effective-input-gate.outputs.base-repository }}
+      PR_BASE_REPOSITORY_ID: ${{ needs.effective-input-gate.outputs.base-repository-id }}
+      PR_BASE_REF: ${{ needs.effective-input-gate.outputs.base-ref }}
+      PR_BASE_SHA: ${{ needs.effective-input-gate.outputs.base-sha }}
+      PR_NATIVE_CHECKOUT_SHA: ${{ needs.effective-input-gate.outputs.native-checkout-sha }}
+      NATIVE_CONTRACT_POLICY: ${{ needs.effective-input-gate.outputs.native-contract-policy }}
+      NATIVE_CONTRACT_FINGERPRINT: ${{ needs.effective-input-gate.outputs.native-contract-fingerprint }}
       EXPECTED_FINGERPRINT: ${{ needs.effective-input-gate.outputs.fingerprint }}
     steps:
       - uses: actions/checkout@v5
@@ -143,6 +172,15 @@ jobs:
       PR_NUMBER: ${{ needs.effective-input-gate.outputs.pr-number }}
       PR_HEAD_SHA: ${{ needs.effective-input-gate.outputs.source-sha }}
       PR_HEAD_REF: ${{ needs.effective-input-gate.outputs.source-ref }}
+      PR_HEAD_REPOSITORY: ${{ needs.effective-input-gate.outputs.head-repository }}
+      PR_HEAD_REPOSITORY_ID: ${{ needs.effective-input-gate.outputs.head-repository-id }}
+      PR_BASE_REPOSITORY: ${{ needs.effective-input-gate.outputs.base-repository }}
+      PR_BASE_REPOSITORY_ID: ${{ needs.effective-input-gate.outputs.base-repository-id }}
+      PR_BASE_REF: ${{ needs.effective-input-gate.outputs.base-ref }}
+      PR_BASE_SHA: ${{ needs.effective-input-gate.outputs.base-sha }}
+      PR_NATIVE_CHECKOUT_SHA: ${{ needs.effective-input-gate.outputs.native-checkout-sha }}
+      NATIVE_CONTRACT_POLICY: ${{ needs.effective-input-gate.outputs.native-contract-policy }}
+      NATIVE_CONTRACT_FINGERPRINT: ${{ needs.effective-input-gate.outputs.native-contract-fingerprint }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -211,11 +249,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
+      GH_TOKEN: ${{ github.token }}
       EXPECTED_FINGERPRINT: ${{ needs.effective-input-gate.outputs.fingerprint }}
       PR_NUMBER: ${{ needs.effective-input-gate.outputs.pr-number }}
+      SCALE_RUN_ATTEMPT: ${{ needs.document-scale.outputs.scale-attempt }}
       PR_HEAD_SHA: ${{ needs.effective-input-gate.outputs.source-sha }}
       PR_HEAD_REF: ${{ needs.effective-input-gate.outputs.source-ref }}
-      SCALE_RUN_ATTEMPT: ${{ needs.document-scale.outputs.scale-attempt }}
+      PR_HEAD_REPOSITORY: ${{ needs.effective-input-gate.outputs.head-repository }}
+      PR_HEAD_REPOSITORY_ID: ${{ needs.effective-input-gate.outputs.head-repository-id }}
+      PR_BASE_REPOSITORY: ${{ needs.effective-input-gate.outputs.base-repository }}
+      PR_BASE_REPOSITORY_ID: ${{ needs.effective-input-gate.outputs.base-repository-id }}
+      PR_BASE_REF: ${{ needs.effective-input-gate.outputs.base-ref }}
+      PR_BASE_SHA: ${{ needs.effective-input-gate.outputs.base-sha }}
+      PR_NATIVE_CHECKOUT_SHA: ${{ needs.effective-input-gate.outputs.native-checkout-sha }}
+      NATIVE_CONTRACT_POLICY: ${{ needs.effective-input-gate.outputs.native-contract-policy }}
+      NATIVE_CONTRACT_FINGERPRINT: ${{ needs.effective-input-gate.outputs.native-contract-fingerprint }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -240,7 +288,7 @@ jobs:
   draft-qualification-pending:
     name: Draft development / qualification PENDING (NOT 100K PASS)
     needs: effective-input-gate
-    if: github.event_name == 'pull_request' && github.event.pull_request.draft == true && needs.effective-input-gate.outputs.run-heavy == 'true'
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft == true
     runs-on: ubuntu-latest
     steps:
       - run: |
@@ -249,7 +297,7 @@ jobs:
 
   qualification-accepted:
     name: 100K qualification accepted
-    needs: [effective-input-gate, document-smoke, document-scale, provenance]
+    needs: [effective-input-gate, document-smoke, document-scale, provenance, prerequisite-coordination]
     if: always() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -258,12 +306,14 @@ jobs:
       PR_NUMBER: ${{ needs.effective-input-gate.outputs.pr-number }}
       EXPECTED_FINGERPRINT: ${{ needs.effective-input-gate.outputs.fingerprint }}
       QUALIFICATION_MODE: ${{ inputs.qualification || 'auto' }}
+      NATIVE_PREREQUISITE_RESULT: ${{ needs.prerequisite-coordination.result }}
     steps:
-      - name: Deny final acceptance when development prerequisites failed
+      - name: Deny final acceptance when development or native prerequisites failed
         env:
           SOURCE_GATE_RESULT: ${{ needs.effective-input-gate.result }}
           SMOKE_RESULT: ${{ needs.document-smoke.result }}
-        run: test "$SOURCE_GATE_RESULT" = success && test "$SMOKE_RESULT" = success
+          PREREQUISITE_RESULT: ${{ needs.prerequisite-coordination.result }}
+        run: test "$SOURCE_GATE_RESULT" = success && test "$SMOKE_RESULT" = success && test "$PREREQUISITE_RESULT" = success
       - uses: actions/checkout@v5
         with:
           ref: ${{ needs.effective-input-gate.outputs.checkout-sha }}

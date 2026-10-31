@@ -1,3 +1,19 @@
+## 2026-10-30 native execution identity and contract binding
+
+The independent native contract is mp-native-contract/v2, SHA-256 over canonical JSON with sorted input paths, file modes and per-file SHA-256 digests. It is separate from WORKLOAD_POLICY = mp10c-workload/v2; changing native CI, native tests, or native verifier inputs does not by itself requalify the 100K indexing workload.
+
+Included inputs: the complete .github/workflows/ci.yml and, only for a candidate explicitly classified as an MP-9B vault candidate, .github/workflows/mp9b-sqlcipher-qualification.yml; Cargo.toml, Cargo.lock, package.json, package-lock.json, src-tauri/Cargo.toml, src-tauri/tauri.conf.json; optional .cargo/config.toml, .npmrc, .nvmrc, Rust toolchain files, root build/config files; and every tracked file under .github/actions/, crates/, src/, src-tauri/, test/, scripts/, extension/, .cargo/ and public/. This covers runner/OS and action references, toolchain setup, commands/flags, native build scripts, dependency locks, security/storage/native test definitions and referenced scripts.
+
+Exclusions: documentation, .github/workflows/mp-10c-scale.yml and unrelated workflow files are not native execution inputs. The MP-10C workload policy independently excludes CI scheduling, verifier/coordinator scripts and documentation. There is no YAML-name-only interpretation: the complete relevant workflow files are hashed as content, and missing required inputs fail closed.
+
+Candidate requirements are explicit: PR #127 is mp9b-vault and requires the SQLCipher workflow; PR #129 is mp-ci-100k-infrastructure and does not. Other ordinary PRs use the explicit non-vault default. File existence never decides whether SQLCipher is mandatory. A missing SQLCipher workflow for a vault candidate is a hard failure.
+
+Every native CI pull_request run and every explicitly PR-bound workflow_dispatch run uploads native-contract.json in the same workflow run/attempt. It records repository, PR, head repository/branch/SHA, base repository/branch/SHA, merge checkout SHA, contract policy/fingerprint, candidate requirement and run ID/attempt. For pull_request runs, the coordinator requires the exact GitHub PR association; for workflow_dispatch, it requires explicit PR/head/base inputs, the selected PR head branch, a live same-repository PR match and same-run/attempt evidence. Unbound dispatch runs are never accepted. Both CI and MP-10C dispatches are separately bound to the exact current PR merge ref.
+
+The coordinator rechecks the live PR before and after evidence inspection. A changed head, base repository, base branch or base SHA invalidates the frozen candidate. It runs on Ubuntu; the expensive Windows indexing job cannot start until exact native evidence passes. Draft CI may upload provenance, but a skipped Windows Product job cannot satisfy the prerequisite.
+
+mp10c-workload/v2 and the prior 100K receipt policy are unchanged. Native-only files and workflows remain excluded from the workload fingerprint. The scale signature continues to bind the actual Windows runner, commands, flags, indexing steps and receipt assertions, while explicitly normalizing only the new PR/base repository identity and native-contract environment keys from the document-scale job. This keeps evidence-binding metadata changes from forcing a 100K reindex. Regression coverage asserts that adding those identity keys leaves the workload fingerprint unchanged. No new full-scale indexing or manual/final qualification is part of this correction.
+
 ## 2026-10-29 cloud recovery: versioned workload identity and Ubuntu gate
 
 CI now separates the **v2 workload identity** (Rust source, dependencies, security/authority, native Windows smoke/100K execution contract) from **evidence verifier policy** (Python receipt parser, GitHub job/step verification and coordinator). The v2 fingerprint hashes Git tree mode/blob tuples plus a SHA256 of the Windows smoke/scale job runner-through-steps content. Scheduling/dependency edits above `runs-on`, verifier-only edits and docs no longer invalidate a successful identical workload. Any changed Windows step, receipt assertion, toolchain command, runner or production/test/security file still requires new scale work.
@@ -41,13 +57,25 @@ The source/dependency fingerprint includes the tracked object IDs, file modes an
 
 Historical run log: 100K fixture generated in about **68.2 seconds**; initial indexing 10 × 10K roots took **15,569.2 seconds**, and first-root reconciliation took **1,067.6 seconds**. Total exact test **16,959.1 seconds**. Indexing clearly dominates. Per-stage scanner/extraction/FTS write time is **not individually instrumented** yet; do not attribute the entire indexing time to FTS without profiling. Keep 10K-per-root cap, authorization/revocation, raw byte integrity and full 1M FTS chunks unchanged.
 
-### Operator instructions
+### Mandatory operator sequence: native CI first, MP-10C second
 
-- On Draft: run fast regression feedback and Windows 100-file smoke. Windows Product, native SQLCipher, and Storage full qualification are deferred until Ready for Review or explicit dispatch. Development can be green while native/owner acceptance is still PENDING; final acceptance is a distinct check.
-- Keep both takeover PRs Draft. Once the combined candidate is frozen and cheap Windows/Ubuntu checks pass, dispatch this workflow on its exact head branch with `qualification=final` and `pr_number=127`. The resulting receipt is reusable by PR #127 when merge checkout inputs are identical. No need to promote Draft merely to run the final test.
-- If attestation alone fails after a successful raw upload, inspect the raw artifact, then rerun the provenance job alone. Validate the final **whole workflow** outcome and qualified artifact before claiming acceptance.
-- A dispatch receipt records its actual event and head checkout, not a synthetic merge. Requalify if merge integration changes effective source/dependency/test inputs. Version-1 artifacts cannot satisfy the version-2 contract.
-- Cheap regression command: `python3 -m unittest discover -s scripts/tests -p test_mp10c_ci_gate.py -v`. Real depth-one clone coverage is mandatory.
+The native CI workflow and MP-10C qualification workflow are separate operations. **Dispatching MP-10C does not automatically dispatch CI**, and dispatching CI does not start MP-10C. Bounded coordination is a safety net, not a CI launcher.
+
+1. Freeze the candidate branch and record the exact open same-repository PR number, head branch, head SHA and base SHA. Do not continue if any of these change.
+2. Dispatch the CI workflow `.github/workflows/ci.yml` on that exact candidate head branch. Supply all three required inputs: `pr_number`, `head_sha` and `base_sha`. The workflow independently resolves the live PR, rejects a closed/forked/stale candidate, and checks out that PR's synthetic merge ref. Never dispatch CI from the default branch or from a different branch.
+3. Wait for the complete CI workflow to finish successfully. Verify successful Fast developer feedback, Fast Rust compile and vault feedback, **Verify Windows product**, and the same-run/attempt native execution evidence artifact. A green workflow summary alone is insufficient.
+4. Verify the actual `jobs[].labels` against the authoritative workflow-derived `runs-on` requirements and verify every required critical step conclusion. A skipped, failed, cancelled, missing or duplicate Windows Product job is NOT native PASS. For a candidate whose explicit policy requires SQLCipher (currently PR #127), also require both `SQLCipher / ubuntu-24.04` and `SQLCipher / windows-2022` jobs and their critical steps on the exact candidate.
+5. Only after those native prerequisites succeed, dispatch `.github/workflows/mp-10c-scale.yml` from the same exact candidate branch. Supply the correct `pr_number`, frozen `head_sha`, frozen `base_sha`, and explicitly select `qualification=manual` or `qualification=final`. The selected branch and all supplied identity fields must still match the live PR.
+6. Verify that MP-10C's coordinator reports exact-source native PASS and that final qualification remains bound to the same PR number, head repository/branch/SHA, base repository/branch/SHA, native contract policy and native contract fingerprint. A changed candidate requires restarting the sequence.
+7. Keep the bounded 80-minute coordinator wait as a fail-closed safety mechanism only. It does not start CI, and it must never be treated as a substitute for step 2.
+
+A normal Ready-for-Review PR event also starts native CI automatically. Draft PRs continue to defer Windows Product and final qualification. Draft development feedback and the 100-file smoke are not acceptance.
+
+**Cached-proof behavior:** on an ordinary Ready PR, an authenticated same-PR 100K proof with identical workload fingerprint v2 may keep `run-heavy=false` and skip Windows 100K indexing. The native coordinator still runs and must PASS before the cached proof can be accepted. Explicit `manual`/`final` modes intentionally require fresh 100K qualification; do not dispatch either mode unless that expensive run is separately authorized.
+
+If provenance attestation alone fails after a successful raw upload, inspect the raw artifact, then rerun the provenance job alone. Validate the final **whole workflow** outcome and qualified artifact before claiming acceptance.
+
+Cheap regression command: `python3 -m unittest discover -s scripts/tests -p 'test_mp10c_*.py' -v`. Real depth-one clone coverage is mandatory.
 
 ### Existing acceptance held constant
 
