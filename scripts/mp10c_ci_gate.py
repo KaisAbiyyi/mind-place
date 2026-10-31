@@ -524,7 +524,7 @@ def read_verified_artifact(item: dict, files: set[str], *, run_id: int, token: s
         return {name: archive.read(name) for name in files}
 
 
-def verify_source_tree(proof: dict, run: dict, *, repo: str, pr: int, desired: str, token: str) -> None:
+def verify_source_tree(proof: dict, run: dict, *, repo: str, pr: int, desired: str, token: str) -> bytes:
     base = f"https://api.github.com/repos/{repo}"
     commit = api_json(base + "/git/commits/" + proof["checkout_sha"], token)
     if commit.get("sha") != proof["checkout_sha"]:
@@ -571,6 +571,7 @@ def verify_source_tree(proof: dict, run: dict, *, repo: str, pr: int, desired: s
         raise ValueError("Original attested fingerprint does not match GitHub tree")
     if fingerprint_entries(entries, scale_workflow=scale_bytes) != desired:
         raise ValueError("Qualified production workload/Windows execution semantics changed")
+    return scale_bytes
 
 
 def validated_candidate(run: dict, *, token: str, repo: str, pr: int, desired: str,
@@ -583,7 +584,12 @@ def validated_candidate(run: dict, *, token: str, repo: str, pr: int, desired: s
         return None
     run_id, attempt = run["id"], run["run_attempt"]
     api = f"https://api.github.com/repos/{repo}/actions/runs/{run_id}"
-    artifacts = api_json(api + "/artifacts?per_page=100", token).get("artifacts", [])
+    listing = api_json(api + "/artifacts?per_page=100", token)
+    artifacts = listing.get("artifacts")
+    count = listing.get("total_count")
+    if (not isinstance(artifacts, list) or type(count) is not int
+            or count != len(artifacts) or any(not isinstance(item, dict) for item in artifacts)):
+        return None
     qualified = [a for a in artifacts if a.get("name") == artifact_name(ARTIFACT, attempt)]
     if len(qualified) != 1:
         return None
@@ -601,24 +607,47 @@ def validated_candidate(run: dict, *, token: str, repo: str, pr: int, desired: s
         if raw["mp10c-100000.json"] != receipt:
             return None
 
-        def succeeded(job: dict, name: str, required_steps: tuple[str, ...]) -> bool:
-            return job.get("name") == name and job.get("conclusion") == "success" and all(
-                sum(s.get("name") == step and s.get("conclusion") == "success"
-                    for s in job.get("steps", [])) == 1 for step in required_steps)
+        source = verify_source_tree(proof, run, repo=repo, pr=pr, desired=desired, token=token)
 
-        # The indexing attempt remains independently verifiable when a failed
-        # lightweight provenance job is rerun in a later attempt of this run.
-        scale_jobs = api_json(api + f"/attempts/{scale_attempt}/jobs?per_page=100", token).get("jobs", [])
-        proof_jobs = scale_jobs if scale_attempt == attempt else api_json(
-            api + f"/attempts/{attempt}/jobs?per_page=100", token).get("jobs", [])
-        full = [j for j in scale_jobs if succeeded(j, FULL_JOB, (
+        def attempt_jobs(number: int) -> list[dict]:
+            response = api_json(api + f"/attempts/{number}/jobs?per_page=100", token)
+            jobs = response.get("jobs")
+            count = response.get("total_count")
+            if (not isinstance(jobs, list) or type(count) is not int
+                    or count != len(jobs) or any(not isinstance(job, dict) for job in jobs)):
+                raise ValueError("Incomplete or malformed full-scale job listing")
+            return jobs
+
+        def require_job(jobs: list[dict], name: str, number: int,
+                        required_steps: tuple[str, ...]) -> None:
+            matches = [job for job in jobs if job.get("name") == name]
+            if len(matches) != 1:
+                raise ValueError("Full-scale evidence job must exist exactly once: " + name)
+            job = matches[0]
+            if (type(job.get("run_id")) is not int or job["run_id"] != run_id
+                    or type(job.get("run_attempt")) is not int or job["run_attempt"] != number
+                    or job.get("status") != "completed" or job.get("conclusion") != "success"):
+                raise ValueError("Full-scale evidence job did not complete on its original run/attempt")
+            native_contract.validate_runner_labels(
+                job, native_contract.workflow_job_runner_requirements(source, name))
+            steps = job.get("steps")
+            if not isinstance(steps, list) or any(not isinstance(step, dict) for step in steps):
+                raise ValueError("Malformed full-scale evidence steps")
+            for name in required_steps:
+                matches = [step for step in steps if step.get("name") == name]
+                if (len(matches) != 1 or matches[0].get("status") != "completed"
+                        or matches[0].get("conclusion") != "success"):
+                    raise ValueError("Full-scale evidence step must succeed exactly once: " + name)
+
+        # Attestation-only retries retain the original scale attempt and bind
+        # each job to the independently fetched original workflow contract.
+        scale_jobs = attempt_jobs(scale_attempt)
+        proof_jobs = scale_jobs if scale_attempt == attempt else attempt_jobs(attempt)
+        require_job(scale_jobs, FULL_JOB, scale_attempt, (
             "Qualify real authorized document scale", "Validate exact-tier receipt",
-            "Upload validated raw 100K receipt"))]
-        attested = [j for j in proof_jobs if succeeded(j, PROOF_JOB, (
-            "Mint source-bound 100K provenance", "Upload qualified receipt and provenance"))]
-        if len(full) != 1 or len(attested) != 1:
-            return None
-        verify_source_tree(proof, run, repo=repo, pr=pr, desired=desired, token=token)
+            "Upload validated raw 100K receipt"))
+        require_job(proof_jobs, PROOF_JOB, attempt, (
+            "Mint source-bound 100K provenance", "Upload qualified receipt and provenance"))
         return {"run_id": run_id, "artifact_id": item["id"],
                 "qualified_sha": proof["source_sha"], "artifact_digest": item["digest"],
                 "raw_artifact_id": raw_items[0]["id"], "raw_artifact_digest": raw_items[0]["digest"],
