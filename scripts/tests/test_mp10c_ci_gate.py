@@ -1,4 +1,5 @@
 """Synthetic MP-CI-100K-01 regression matrix; no network and no owner corpus."""
+import copy
 import hashlib
 import io
 import json
@@ -371,7 +372,7 @@ class PriorProofTests(unittest.TestCase):
     def setUp(self):
         self.repo, self.pr = "owner/repo", 128
         self.tree = [{"type": "blob", "mode": "100644", "sha": "e"*40, "path": "Cargo.lock"}]
-        self.scale_bytes = b"jobs:\n  document-smoke:\n    runs-on: windows-latest\n    steps:\n      - run: cargo test smoke\n  document-scale:\n    runs-on: windows-latest\n    steps:\n      - run: cargo test full\n  provenance:\n    runs-on: ubuntu-latest\n"
+        self.scale_bytes = b"jobs:\n  document-smoke:\n    runs-on: windows-latest\n    steps:\n      - run: cargo test smoke\n  document-scale:\n    name: Windows approved documents / 100000 files\n    runs-on: windows-latest\n    steps:\n      - run: cargo test full\n  provenance:\n    name: Source-bound 100K provenance (no indexing)\n    runs-on: ubuntu-latest\n"
         self.scale_sha = hashlib.sha1(b"blob " + str(len(self.scale_bytes)).encode() + b"\0" + self.scale_bytes).hexdigest()
         self.tree.append({"type": "blob", "mode": "100644", "sha": self.scale_sha,
                           "path": ".github/workflows/mp-10c-scale.yml"})
@@ -418,6 +419,15 @@ class PriorProofTests(unittest.TestCase):
                  "Mint source-bound 100K provenance",
                  "Upload qualified receipt and provenance")]}
         ]}
+        self.jobs["total_count"] = len(self.jobs["jobs"])
+        for index, job in enumerate(self.jobs["jobs"]):
+            job.update(id=100 + index, run_id=77, run_attempt=1,
+                       status="completed",
+                       labels=["windows-latest"] if index == 0 else ["ubuntu-latest"])
+            for step in job["steps"]:
+                step["status"] = "completed"
+        self.artifact_total = 2
+        self.jobs_by_attempt = {}
 
     def repack(self):
         stream = io.BytesIO()
@@ -430,9 +440,11 @@ class PriorProofTests(unittest.TestCase):
     def check(self):
         def fake_api(url, _token):
             if "/jobs?" in url:
-                return self.jobs
+                attempt = int(url.split("/attempts/", 1)[1].split("/", 1)[0])
+                return self.jobs_by_attempt.get(attempt, self.jobs)
             if "/artifacts?" in url:
-                return {"artifacts": [self.artifact, self.raw_artifact]}
+                return {"total_count": self.artifact_total,
+                        "artifacts": [self.artifact, self.raw_artifact]}
             if "/runs?" in url:
                 return {"workflow_runs": [self.run]}
             if "/git/commits/" in url:
@@ -463,6 +475,66 @@ class PriorProofTests(unittest.TestCase):
         self.assertEqual(result["run_id"], 77)
         self.assertEqual(result["artifact_id"], 12)
 
+
+
+    def test_incomplete_proof_job_and_artifact_listings_deny_reuse(self):
+        self.assertIsNotNone(self.check())
+        self.jobs["total_count"] += 1
+        self.assertIsNone(self.check())
+        self.jobs["total_count"] -= 1
+        self.artifact_total += 1
+        self.assertIsNone(self.check())
+
+    def test_duplicate_proof_jobs_deny_reuse_even_when_only_one_succeeds(self):
+        original = copy.deepcopy(self.jobs)
+        for index in (0, 1):
+            for conclusion in ("success", "skipped", "failure"):
+                with self.subTest(index=index, conclusion=conclusion):
+                    self.jobs = copy.deepcopy(original)
+                    duplicate = copy.deepcopy(self.jobs["jobs"][index])
+                    duplicate["id"] = 999
+                    duplicate["conclusion"] = conclusion
+                    self.jobs["jobs"].append(duplicate)
+                    self.jobs["total_count"] += 1
+                    self.assertIsNone(self.check())
+
+    def test_duplicate_proof_steps_deny_reuse_even_when_one_is_skipped(self):
+        original = copy.deepcopy(self.jobs)
+        for index in (0, 1):
+            for conclusion in ("success", "skipped", "failure"):
+                with self.subTest(index=index, conclusion=conclusion):
+                    self.jobs = copy.deepcopy(original)
+                    duplicate = dict(self.jobs["jobs"][index]["steps"][0],
+                                     conclusion=conclusion)
+                    self.jobs["jobs"][index]["steps"].append(duplicate)
+                    self.assertIsNone(self.check())
+
+    def test_unfinished_proof_jobs_and_steps_deny_reuse(self):
+        original = copy.deepcopy(self.jobs)
+        for index in (0, 1):
+            with self.subTest(index=index, field="job status"):
+                self.jobs = copy.deepcopy(original)
+                self.jobs["jobs"][index]["status"] = "in_progress"
+                self.assertIsNone(self.check())
+            with self.subTest(index=index, field="step status"):
+                self.jobs = copy.deepcopy(original)
+                self.jobs["jobs"][index]["steps"][0]["status"] = "in_progress"
+                self.assertIsNone(self.check())
+
+    def test_foreign_run_or_attempt_in_proof_jobs_denies_reuse(self):
+        original = copy.deepcopy(self.jobs)
+        for index in (0, 1):
+            for key, value in (("run_id", 88), ("run_attempt", 2)):
+                with self.subTest(index=index, key=key):
+                    self.jobs = copy.deepcopy(original)
+                    self.jobs["jobs"][index][key] = value
+                    self.assertIsNone(self.check())
+
+    def test_non_windows_scale_runner_denies_proof_reuse(self):
+        for labels in (["ubuntu-latest"], [], None):
+            with self.subTest(labels=labels):
+                self.jobs["jobs"][0]["labels"] = labels
+                self.assertIsNone(self.check())
 
     def test_legacy_authenticated_proof_can_revalidate_without_reindex(self):
         entries = [(x["mode"].encode(), x["sha"].encode(), x["path"].encode()) for x in self.tree]
@@ -574,6 +646,10 @@ class PriorProofTests(unittest.TestCase):
         self.run["run_attempt"] = 2
         self.proof["run_attempt"] = 2
         self.artifact["name"] = gate.artifact_name(gate.ARTIFACT, 2)
+        retry = copy.deepcopy(self.jobs)
+        for job in retry["jobs"]:
+            job["run_attempt"] = 2
+        self.jobs_by_attempt[2] = retry
         self.repack()
         self.assertIsNotNone(self.check())
         self.raw_artifact["name"] = gate.artifact_name(gate.RAW_ARTIFACT, 2)
