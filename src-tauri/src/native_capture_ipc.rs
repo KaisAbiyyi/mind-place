@@ -2,11 +2,15 @@
 //! Only Tauri keeps unlocked CryptoVault. Native messages authenticate an
 //! ephemeral HMAC session capability and unique nonce; no DEK crosses IPC.
 use mind_place_archive::MAX_CAPTURE_BYTES;
-use mind_place_capture_host::ipc::{SessionDescriptor, SignedCapture};
 #[cfg(test)]
 use mind_place_capture_host::ipc::read_frame_with_timeout;
+use mind_place_capture_host::ipc::{SessionDescriptor, SignedCapture};
 use mind_place_index::vault_archive::VaultCaptureStore;
 use mind_place_security::{SecurityGate, UnlockLease};
+#[cfg(unix)]
+use std::os::fd::AsRawFd;
+#[cfg(windows)]
+use std::os::windows::io::AsRawSocket;
 use std::{
     collections::HashSet,
     fs,
@@ -20,10 +24,6 @@ use std::{
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
-#[cfg(unix)]
-use std::os::fd::AsRawFd;
-#[cfg(windows)]
-use std::os::windows::io::AsRawSocket;
 
 pub(super) struct NativeCaptureIpc {
     stop: Arc<AtomicBool>,
@@ -126,13 +126,8 @@ fn wait_for_socket_ready(
                     revents: 0,
                 },
             ];
-            let ready = unsafe {
-                libc::poll(
-                    descriptors.as_mut_ptr(),
-                    descriptors.len() as _,
-                    timeout_ms,
-                )
-            };
+            let ready =
+                unsafe { libc::poll(descriptors.as_mut_ptr(), descriptors.len() as _, timeout_ms) };
             if ready < 0 {
                 let error = io::Error::last_os_error();
                 if error.kind() == io::ErrorKind::Interrupted {
@@ -153,7 +148,7 @@ fn wait_for_socket_ready(
         #[cfg(windows)]
         {
             use windows_sys::Win32::Networking::WinSock::{
-                WSAGetLastError, WSAPoll, WSAPOLLFD, POLLRDNORM, POLLWRNORM,
+                WSAGetLastError, WSAPoll, POLLRDNORM, POLLWRNORM, WSAPOLLFD,
             };
             let target_events = match interest {
                 SocketInterest::Readable => POLLRDNORM,
@@ -207,13 +202,7 @@ fn read_exact_cancellable(
 ) -> io::Result<()> {
     let mut offset = 0;
     while offset < buffer.len() {
-        match wait_for_socket_ready(
-            stream,
-            wake,
-            SocketInterest::Readable,
-            deadline,
-            stop,
-        )? {
+        match wait_for_socket_ready(stream, wake, SocketInterest::Readable, deadline, stop)? {
             SocketWait::Ready => {}
             SocketWait::Cancelled => {
                 return Err(io::Error::new(
@@ -280,13 +269,7 @@ fn write_all_cancellable(
 ) -> io::Result<()> {
     let mut offset = 0;
     while offset < buffer.len() {
-        match wait_for_socket_ready(
-            stream,
-            wake,
-            SocketInterest::Writable,
-            deadline,
-            stop,
-        )? {
+        match wait_for_socket_ready(stream, wake, SocketInterest::Writable, deadline, stop)? {
             SocketWait::Ready => {}
             SocketWait::Cancelled => {
                 return Err(io::Error::new(
@@ -371,8 +354,8 @@ impl NativeCaptureIpc {
         listener
             .set_nonblocking(true)
             .map_err(|_| "MP_VAULT_IPC_BIND_FAILED".to_owned())?;
-        let (wake_tx, wake_rx) = cancellation_pair()
-            .map_err(|_| "MP_VAULT_IPC_CANCEL_FAILED".to_owned())?;
+        let (wake_tx, wake_rx) =
+            cancellation_pair().map_err(|_| "MP_VAULT_IPC_CANCEL_FAILED".to_owned())?;
         let mut token = [0u8; 32];
         getrandom::fill(&mut token).map_err(|_| "MP_VAULT_IPC_ENTROPY_FAILED".to_owned())?;
         let identity = SessionDescriptor::new(port, &token);
@@ -644,7 +627,11 @@ impl Drop for NativeCaptureIpc {
         let wake_error = match wake_result.as_ref() {
             Ok(_) => None,
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => None,
-            Err(error) => Some(format!("{:?}/{}", error.kind(), error.raw_os_error().unwrap_or_default())),
+            Err(error) => Some(format!(
+                "{:?}/{}",
+                error.kind(),
+                error.raw_os_error().unwrap_or_default()
+            )),
         };
         #[cfg(not(test))]
         let _ = wake_result;
@@ -677,7 +664,11 @@ impl Drop for NativeCaptureIpc {
             let result = stream.shutdown(Shutdown::Both);
             #[cfg(test)]
             if let Err(error) = result.as_ref() {
-                shutdown_error = Some(format!("{:?}/{}", error.kind(), error.raw_os_error().unwrap_or_default()));
+                shutdown_error = Some(format!(
+                    "{:?}/{}",
+                    error.kind(),
+                    error.raw_os_error().unwrap_or_default()
+                ));
             }
             #[cfg(not(test))]
             let _ = result;
@@ -799,12 +790,28 @@ impl Drop for NativeCaptureIpc {
         }
         #[cfg(test)]
         {
-            let worker_exit_from_drop = trace.exit_at.map(|exit| exit.saturating_duration_since(drop_started));
-            let join_after_worker_exit = trace.exit_at.map(|exit| join_finished.saturating_duration_since(exit));
-            let read_elapsed = trace.read_started.zip(trace.read_finished).map(|(start, end)| end.saturating_duration_since(start));
-            let post_read_processing = trace.read_finished.zip(trace.processing_finished).map(|(start, end)| end.saturating_duration_since(start));
-            let response_write = trace.write_started.zip(trace.write_finished).map(|(start, end)| end.saturating_duration_since(start));
-            let active_clear_after_write = trace.write_finished.zip(trace.active_cleared).map(|(start, end)| end.saturating_duration_since(start));
+            let worker_exit_from_drop = trace
+                .exit_at
+                .map(|exit| exit.saturating_duration_since(drop_started));
+            let join_after_worker_exit = trace
+                .exit_at
+                .map(|exit| join_finished.saturating_duration_since(exit));
+            let read_elapsed = trace
+                .read_started
+                .zip(trace.read_finished)
+                .map(|(start, end)| end.saturating_duration_since(start));
+            let post_read_processing = trace
+                .read_finished
+                .zip(trace.processing_finished)
+                .map(|(start, end)| end.saturating_duration_since(start));
+            let response_write = trace
+                .write_started
+                .zip(trace.write_finished)
+                .map(|(start, end)| end.saturating_duration_since(start));
+            let active_clear_after_write = trace
+                .write_finished
+                .zip(trace.active_cleared)
+                .map(|(start, end)| end.saturating_duration_since(start));
             eprintln!(
                 "MP9B_DROP_TIMING stop_signal_us={} wake_signal_us={} wake_error={:?} active_lock_wait_us={} socket_shutdown_us={} worker_read_us={} post_read_processing_us={} response_write_us={} active_clear_after_write_us={} worker_exit_from_drop_us={} join_wait_us={} join_after_worker_exit_us={} worker_panicked={} shutdown_error={:?} descriptor_identity_verify_us={} descriptor_delete_us={} descriptor_sleep_us={} descriptor_attempts={} descriptor_retries={} descriptor_outcome={} total_drop_us={}",
                 stop_signal.as_micros(),
@@ -1038,7 +1045,9 @@ mod qualification {
         ipc.fail_next_clone.store(true, Ordering::Release);
         let descriptor = SessionDescriptor::read(&archive_root).unwrap();
         let mut client = TcpStream::connect(("127.0.0.1", descriptor.port)).unwrap();
-        client.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
         client.write_all(&[1]).unwrap();
 
         let (seen, ready) = &*ipc.clone_failure_seen;
