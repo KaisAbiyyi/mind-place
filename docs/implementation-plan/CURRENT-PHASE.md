@@ -2,9 +2,15 @@
 
 This file is the small execution-order pointer for cloud agents. Strategy lives in `../BIG-IMPLEMENTATION-PLAN.md`; detailed design notes live beside this file. If older phase labels conflict with this file, follow this file for the current execution order.
 
+## Repository governance gate — MP-GOV-01..04 (2026-10-31)
+
+The repository governance track is independent of product phase ordering. MP-GOV-01 prepares the owner-controlled PR policy and runbook; MP-GOV-02 audits fork-PR workflow trust; MP-GOV-03 hardens read-only AI review; MP-GOV-04 is the owner-only settings application and exact-readback gate. Agents may implement/test on isolated branches or contributor-owned forks, AI review is read-only, and only the owner may approve and manually merge. Auto-merge, merge queues, Brokers, and bot/AI/App bypass are not authorized.
+
+The baseline main SHA is efe91155d37d8b1ca0608fe3bd862be311fed004; branch metadata reports protection disabled and repository rulesets are empty. No settings were changed by MP-GOV-01. Main remains NOT VERIFIED as protected until MP-GOV-04 completes after MP-GOV-01 and MP-GOV-02 acceptance. See [the owner runbook](../governance/OWNER-MANUAL-MERGE-RUNBOOK.md).
+
 ## Current execution gate � 2026-10-23
 
-**MP-4L2: native document qualification recovery**, [PR #42](https://github.com/KaisAbiyyi/mind-place/pull/42). The optimized Windows real-corpus gate passes 10/10 with no skips on product SHA `60233a0`; [implementation receipt](../implementation-summary/2026-10-23-mp-4l2-native-parser-recovery.md) and [machine-readable evidence](../qualification/2026-10-23-mp-4l2-release.json). Final-head CI and reviewed merge are required for integration acceptance. This local bounded repair was explicitly owner-authorized.
+**MP-4L2: native document qualification recovery**, [PR #42](https://github.com/KaisAbiyyi/mind-place/pull/42). The optimized Windows real-corpus gate passes 10/10 with no skips on product SHA `60233a0`; [implementation receipt](../implementation-summary/2026-10-23-mp-4l2-native-parser-recovery.md) and [machine-readable evidence](../qualification/2026-10-23-mp-4l2-release.json). Final-head CI, explicit repository-owner approval, and owner-performed manual merge are required for integration acceptance. This local bounded repair was explicitly owner-authorized.
 
 **Immediate successor: MP-4U**, owner folder add/search/revoke workflow acceptance after #42 integration. Phases 5/6/7 remain gated by that owner decision. Historical phase labels below do not move execution back to Phase 3; live task status is maintained in the Notion execution board.
 
@@ -132,4 +138,4 @@ Do not weaken Phase 1A to fake those later guarantees. UI/documentation must sta
 
 ## Handoff rule
 
-A cloud unit is complete only when its PR/branch is CI-green and its final SHA is reported. If a bug is fixed, rerun the relevant checks before merge. The immediate priority is **local MP-3L1**, then real hosted MP-3L2 and user MP-3U qualification. MP-4A is gated by MP-3U acceptance. Do not misreport build/CI/package evidence as a real tunnel or ChatGPT account proof.
+A cloud unit is complete only when its PR/branch is CI-green and its final SHA is reported. CI-green is not merge authorization: only the repository owner may approve and manually merge after required protections pass. If a bug is fixed, rerun the relevant checks before owner merge. The immediate priority is **local MP-3L1**, then real hosted MP-3L2 and user MP-3U qualification. MP-4A is gated by MP-3U acceptance. Do not misreport build/CI/package evidence as a real tunnel or ChatGPT account proof.
