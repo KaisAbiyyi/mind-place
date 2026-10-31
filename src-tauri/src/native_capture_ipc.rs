@@ -16,6 +16,8 @@ use std::{
     thread::{self, JoinHandle},
     time::Duration,
 };
+#[cfg(test)]
+use std::time::Instant;
 
 pub(super) struct NativeCaptureIpc {
     stop: Arc<AtomicBool>,
@@ -26,6 +28,20 @@ pub(super) struct NativeCaptureIpc {
     // Test-only notification from the real receiver, not a fabricated accept.
     #[cfg(test)]
     accepted_clients: Arc<(Mutex<u64>, std::sync::Condvar)>,
+    #[cfg(test)]
+    worker_trace: Arc<Mutex<WorkerTrace>>,
+}
+
+#[cfg(test)]
+#[derive(Clone, Default)]
+struct WorkerTrace {
+    read_started: Option<Instant>,
+    read_finished: Option<Instant>,
+    processing_finished: Option<Instant>,
+    write_started: Option<Instant>,
+    write_finished: Option<Instant>,
+    active_cleared: Option<Instant>,
+    exit_at: Option<Instant>,
 }
 
 impl NativeCaptureIpc {
@@ -98,6 +114,10 @@ impl NativeCaptureIpc {
         let accepted_clients = Arc::new((Mutex::new(0_u64), std::sync::Condvar::new()));
         #[cfg(test)]
         let worker_accepted = accepted_clients.clone();
+        #[cfg(test)]
+        let worker_trace = Arc::new(Mutex::new(WorkerTrace::default()));
+        #[cfg(test)]
+        let worker_trace_worker = worker_trace.clone();
         let thread = thread::spawn(move || {
             let mut seen = HashSet::new();
             while !terminate.load(Ordering::Acquire) {
@@ -139,9 +159,23 @@ impl NativeCaptureIpc {
                         let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
                         let result = (|| -> Result<serde_json::Value, ()> {
                             security.validate_lease(lease).map_err(|_| ())?;
-                            let signed =
-                                read_frame_with_timeout(&mut stream, Duration::from_secs(5))
-                                    .map_err(|_| ())?;
+                            #[cfg(test)]
+                            {
+                                worker_trace_worker
+                                    .lock()
+                                    .unwrap_or_else(|error| error.into_inner())
+                                    .read_started = Some(Instant::now());
+                            }
+                            let frame =
+                                read_frame_with_timeout(&mut stream, Duration::from_secs(5));
+                            #[cfg(test)]
+                            {
+                                worker_trace_worker
+                                    .lock()
+                                    .unwrap_or_else(|error| error.into_inner())
+                                    .read_finished = Some(Instant::now());
+                            }
+                            let signed = frame.map_err(|_| ())?;
                             let capture = signed.authenticate(&token, &mut seen).map_err(|_| ())?;
                             // Lock and owner-state grants acquire this same
                             // gate, so no IPC capture can commit *after* lock
@@ -156,19 +190,50 @@ impl NativeCaptureIpc {
                         })();
                         // Never expose verification, key or filesystem details
                         // through browser native messaging error responses.
+                        #[cfg(test)]
+                        {
+                            let mut trace = worker_trace_worker
+                                .lock()
+                                .unwrap_or_else(|error| error.into_inner());
+                            let now = Instant::now();
+                            trace.processing_finished = Some(now);
+                            trace.write_started = Some(now);
+                        }
                         let response = result.unwrap_or_else(
                             |_| serde_json::json!({"ok":false,"error":"MP_VAULT_CAPTURE_DENIED"}),
                         );
-                        let _ = write_json(&mut stream, &response);
+                        let write_result = write_json(&mut stream, &response);
+                        #[cfg(test)]
+                        {
+                            worker_trace_worker
+                                .lock()
+                                .unwrap_or_else(|error| error.into_inner())
+                                .write_finished = Some(Instant::now());
+                        }
+                        let _ = write_result;
                         *worker_active
                             .lock()
                             .unwrap_or_else(|error| error.into_inner()) = None;
+                        #[cfg(test)]
+                        {
+                            worker_trace_worker
+                                .lock()
+                                .unwrap_or_else(|error| error.into_inner())
+                                .active_cleared = Some(Instant::now());
+                        }
                     }
                     Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
                         thread::sleep(Duration::from_millis(25));
                     }
                     Err(_) => break,
                 }
+            }
+            #[cfg(test)]
+            {
+                worker_trace_worker
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .exit_at = Some(Instant::now());
             }
         });
         Ok(Self {
@@ -179,45 +244,188 @@ impl NativeCaptureIpc {
             active_stream,
             #[cfg(test)]
             accepted_clients,
+            #[cfg(test)]
+            worker_trace,
         })
     }
 }
 
 impl Drop for NativeCaptureIpc {
     fn drop(&mut self) {
+        #[cfg(test)]
+        let drop_started = Instant::now();
+        #[cfg(test)]
+        let stop_started = Instant::now();
         self.stop.store(true, Ordering::Release);
-        {
-            let active = self
-                .active_stream
-                .lock()
-                .unwrap_or_else(|error| error.into_inner());
-            if let Some(stream) = active.as_ref() {
-                let _ = stream.shutdown(Shutdown::Both);
+        #[cfg(test)]
+        let stop_signal = stop_started.elapsed();
+
+        #[cfg(test)]
+        let active_lock_started = Instant::now();
+        let active = self
+            .active_stream
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        #[cfg(test)]
+        let active_lock_wait = active_lock_started.elapsed();
+        #[cfg(test)]
+        let shutdown_started = Instant::now();
+        #[cfg(test)]
+        let mut shutdown_error = None;
+        if let Some(stream) = active.as_ref() {
+            let result = stream.shutdown(Shutdown::Both);
+            #[cfg(test)]
+            if let Err(error) = result.as_ref() {
+                shutdown_error = Some(format!("{:?}/{}", error.kind(), error.raw_os_error().unwrap_or_default()));
             }
+            #[cfg(not(test))]
+            let _ = result;
         }
+        #[cfg(test)]
+        let shutdown_elapsed = shutdown_started.elapsed();
+        drop(active);
+
+        #[cfg(test)]
+        let join_started = Instant::now();
+        #[cfg(test)]
+        let mut worker_panicked = false;
         if let Some(worker) = self.thread.take() {
-            let _ = worker.join();
+            let result = worker.join();
+            #[cfg(test)]
+            {
+                worker_panicked = result.is_err();
+            }
+            #[cfg(not(test))]
+            let _ = result;
         }
+        #[cfg(test)]
+        let join_elapsed = join_started.elapsed();
+        #[cfg(test)]
+        let join_finished = Instant::now();
+        #[cfg(test)]
+        let trace = self
+            .worker_trace
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone();
+
         // A pinned native reader can briefly deny Windows DeleteFile. Retry
         // only our exact identity, with a bounded delay; never unlink a newer
         // session or force permissions on a changed/foreign descriptor.
+        #[cfg(test)]
+        let cleanup_started = Instant::now();
+        #[cfg(test)]
+        let mut cleanup_verify_elapsed = Duration::ZERO;
+        #[cfg(test)]
+        let mut cleanup_delete_elapsed = Duration::ZERO;
+        #[cfg(test)]
+        let mut cleanup_sleep_elapsed = Duration::ZERO;
+        #[cfg(test)]
+        let mut cleanup_attempts = 0_u32;
+        #[cfg(test)]
+        let mut cleanup_retries = 0_u32;
+        #[cfg(test)]
+        let mut cleanup_outcome = "not_attempted";
         for _ in 0..50 {
-            let Ok(current) = SessionDescriptor::read(&self.archive_root) else {
-                break;
+            #[cfg(test)]
+            {
+                cleanup_attempts += 1;
+            }
+            #[cfg(test)]
+            let verify_started = Instant::now();
+            let current_result = SessionDescriptor::read(&self.archive_root);
+            #[cfg(test)]
+            {
+                cleanup_verify_elapsed += verify_started.elapsed();
+            }
+            let current = match current_result {
+                Ok(current) => current,
+                Err(_) => {
+                    #[cfg(test)]
+                    {
+                        cleanup_outcome = "identity_read_failed_or_missing";
+                    }
+                    break;
+                }
             };
             if current != self.identity {
+                #[cfg(test)]
+                {
+                    cleanup_outcome = "identity_changed_foreign_or_newer";
+                }
                 break;
             }
             let Some(parent) = self.archive_root.parent() else {
+                #[cfg(test)]
+                {
+                    cleanup_outcome = "parent_missing";
+                }
                 break;
             };
+            #[cfg(test)]
+            let delete_started = Instant::now();
             match fs::remove_file(parent.join("capture-ipc-v1.json")) {
-                Ok(()) => break,
-                Err(error) if matches!(error.raw_os_error(), Some(5 | 32 | 33)) => {
-                    thread::sleep(Duration::from_millis(10))
+                Ok(()) => {
+                    #[cfg(test)]
+                    {
+                        cleanup_delete_elapsed += delete_started.elapsed();
+                        cleanup_outcome = "deleted";
+                    }
+                    break;
                 }
-                Err(_) => break,
+                Err(error) if matches!(error.raw_os_error(), Some(5 | 32 | 33)) => {
+                    #[cfg(test)]
+                    {
+                        cleanup_delete_elapsed += delete_started.elapsed();
+                        cleanup_retries += 1;
+                        let sleep_started = Instant::now();
+                        thread::sleep(Duration::from_millis(10));
+                        cleanup_sleep_elapsed += sleep_started.elapsed();
+                        cleanup_outcome = "retry_exhausted_or_pending";
+                    }
+                    #[cfg(not(test))]
+                    thread::sleep(Duration::from_millis(10));
+                }
+                Err(_) => {
+                    #[cfg(test)]
+                    {
+                        cleanup_delete_elapsed += delete_started.elapsed();
+                        cleanup_outcome = "delete_failed_non_retryable";
+                    }
+                    break;
+                }
             }
+        }
+        #[cfg(test)]
+        {
+            let worker_exit_from_drop = trace.exit_at.map(|exit| exit.saturating_duration_since(drop_started));
+            let join_after_worker_exit = trace.exit_at.map(|exit| join_finished.saturating_duration_since(exit));
+            let read_elapsed = trace.read_started.zip(trace.read_finished).map(|(start, end)| end.saturating_duration_since(start));
+            let post_read_processing = trace.read_finished.zip(trace.processing_finished).map(|(start, end)| end.saturating_duration_since(start));
+            let response_write = trace.write_started.zip(trace.write_finished).map(|(start, end)| end.saturating_duration_since(start));
+            let active_clear_after_write = trace.write_finished.zip(trace.active_cleared).map(|(start, end)| end.saturating_duration_since(start));
+            eprintln!(
+                "MP9B_DROP_TIMING stop_signal_us={} active_lock_wait_us={} socket_shutdown_us={} worker_read_us={} post_read_processing_us={} response_write_us={} active_clear_after_write_us={} worker_exit_from_drop_us={} join_wait_us={} join_after_worker_exit_us={} worker_panicked={} shutdown_error={:?} descriptor_identity_verify_us={} descriptor_delete_us={} descriptor_sleep_us={} descriptor_attempts={} descriptor_retries={} descriptor_outcome={} total_drop_us={}",
+                stop_signal.as_micros(),
+                active_lock_wait.as_micros(),
+                shutdown_elapsed.as_micros(),
+                read_elapsed.map(|value| value.as_micros()).unwrap_or(0),
+                post_read_processing.map(|value| value.as_micros()).unwrap_or(0),
+                response_write.map(|value| value.as_micros()).unwrap_or(0),
+                active_clear_after_write.map(|value| value.as_micros()).unwrap_or(0),
+                worker_exit_from_drop.map(|value| value.as_micros()).unwrap_or(0),
+                join_elapsed.as_micros(),
+                join_after_worker_exit.map(|value| value.as_micros()).unwrap_or(0),
+                worker_panicked,
+                shutdown_error,
+                cleanup_verify_elapsed.as_micros(),
+                cleanup_delete_elapsed.as_micros(),
+                cleanup_sleep_elapsed.as_micros(),
+                cleanup_attempts,
+                cleanup_retries,
+                cleanup_outcome,
+                drop_started.elapsed().as_micros(),
+            );
         }
     }
 }
