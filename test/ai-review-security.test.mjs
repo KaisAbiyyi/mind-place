@@ -17,6 +17,8 @@ test('AI review policy defines a read-only, advisory, fail-closed boundary', () 
   assert.match(policy, /No GitHub mutation is available to the reviewer/);
   assert.match(policy, /The trusted policy must be loaded from outside the PR head/);
   assert.match(policy, /do not connect it to the reviewer environment/i);
+  assert.match(policy, /must not be described as a compliant read-only reviewer/i);
+  assert.match(policy, /do not echo it, copy it into the report, or attempt to validate or use it/i);
 });
 
 test('adversarial matrix covers Markdown, source comments, test output, and workflow logs', async () => {
@@ -33,6 +35,7 @@ test('adversarial matrix covers Markdown, source comments, test output, and work
     ids.add(entry.id);
     assert.equal(entry.privileged_action_expected, false);
     assert.ok(entry.attack_classes.length > 0);
+    assert.match(entry.path, /^[A-Za-z0-9][A-Za-z0-9._-]*$/, 'fixture path must stay within the fixture directory');
 
     const fixture = await readFile(fixtureUrl(entry.path), 'utf8');
     assert.match(fixture, /UNTRUSTED_FIXTURE_START/);
