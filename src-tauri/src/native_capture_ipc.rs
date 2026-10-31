@@ -812,8 +812,9 @@ impl Drop for NativeCaptureIpc {
                 .write_finished
                 .zip(trace.active_cleared)
                 .map(|(start, end)| end.saturating_duration_since(start));
+            let cleanup_elapsed = cleanup_started.elapsed();
             eprintln!(
-                "MP9B_DROP_TIMING stop_signal_us={} wake_signal_us={} wake_error={:?} active_lock_wait_us={} socket_shutdown_us={} worker_read_us={} post_read_processing_us={} response_write_us={} active_clear_after_write_us={} worker_exit_from_drop_us={} join_wait_us={} join_after_worker_exit_us={} worker_panicked={} shutdown_error={:?} descriptor_identity_verify_us={} descriptor_delete_us={} descriptor_sleep_us={} descriptor_attempts={} descriptor_retries={} descriptor_outcome={} total_drop_us={}",
+                "MP9B_DROP_TIMING stop_signal_us={} wake_signal_us={} wake_error={:?} active_lock_wait_us={} socket_shutdown_us={} worker_read_us={} post_read_processing_us={} response_write_us={} active_clear_after_write_us={} worker_exit_from_drop_us={} join_wait_us={} join_after_worker_exit_us={} worker_panicked={} shutdown_error={:?} descriptor_identity_verify_us={} descriptor_delete_us={} descriptor_sleep_us={} descriptor_attempts={} descriptor_retries={} descriptor_cleanup_total_us={} descriptor_outcome={} total_drop_us={}",
                 stop_signal.as_micros(),
                 wake_elapsed.as_micros(),
                 wake_error,
@@ -833,6 +834,7 @@ impl Drop for NativeCaptureIpc {
                 cleanup_sleep_elapsed.as_micros(),
                 cleanup_attempts,
                 cleanup_retries,
+                cleanup_elapsed.as_micros(),
                 cleanup_outcome,
                 drop_started.elapsed().as_micros(),
             );
@@ -1115,7 +1117,7 @@ mod qualification {
         wait_for_accept_count(&ipc, 2);
         wait_for_active_stream_clear(&ipc);
 
-        let concurrent_disconnect = TcpStream::connect(("127.0.0.1", descriptor.port)).unwrap();
+        let mut concurrent_disconnect = TcpStream::connect(("127.0.0.1", descriptor.port)).unwrap();
         concurrent_disconnect.write_all(&[1]).unwrap();
         wait_for_accept_count(&ipc, 3);
         let barrier = Arc::new(std::sync::Barrier::new(2));
