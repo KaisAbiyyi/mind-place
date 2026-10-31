@@ -120,10 +120,17 @@ test("new installation stages recovery before any legacy runtime unlock", async 
   const { dom, root } = domRoot();
   const calls: string[] = [];
   let opened = 0;
+  let provisioned = false;
   const code = "MP-RECOVERY-1-synthetic-secret.checksum";
   const invoke: Invoke = async <T>(command: string, args?: Record<string, unknown>) => {
     calls.push(command);
-    if (command === "get_security_status") return lockedUnconfigured as T;
+    if (command === "get_security_status") {
+      return (provisioned ? { ...lockedConfigured, vault_mode: "encrypted" } : lockedUnconfigured) as T;
+    }
+    if (command === "unlock_security") {
+      assert.equal(args?.secret, "correct horse battery staple");
+      return { ...lockedConfigured, locked: false, epoch: 2, vault_mode: "encrypted" } as T;
+    }
     if (command === "initialize_security") throw new Error("MP_VAULT_PROVISION_REQUIRED");
     if (command === "begin_vault_setup") {
       assert.equal(args?.secret, "correct horse battery staple");
@@ -131,6 +138,7 @@ test("new installation stages recovery before any legacy runtime unlock", async 
     }
     if (command === "confirm_vault_setup") {
       assert.equal(args?.code, code);
+      provisioned = true;
       return undefined as T;
     }
     throw new Error(`unexpected ${command}`);
@@ -153,10 +161,18 @@ test("new installation stages recovery before any legacy runtime unlock", async 
   await delay(0);
   assert.equal(opened, 0);
   assert.equal(root.querySelector("#vault-code"), null);
-  assert.match(root.textContent ?? "", /Unlock it to access encrypted conversations/i);
+  assert.ok(root.querySelector("#security-form"), "confirmation must return to explicit unlock");
+  assert.ok(root.querySelector("#security-secret"));
   assert.deepEqual(calls, [
-    "get_security_status", "initialize_security", "begin_vault_setup", "confirm_vault_setup",
+    "get_security_status", "initialize_security", "begin_vault_setup", "confirm_vault_setup", "get_security_status",
   ]);
+  root.querySelector<HTMLInputElement>("#security-secret")!.value = "correct horse battery staple";
+  root.querySelector<HTMLFormElement>("#security-form")!.dispatchEvent(
+    new dom.window.Event("submit", { bubbles: true, cancelable: true }),
+  );
+  await delay(0);
+  assert.equal(opened, 1);
+  assert.equal(calls.at(-1), "unlock_security");
 });
 
 test("wrong recovery code leaves the ceremony open without unlocking", async () => {

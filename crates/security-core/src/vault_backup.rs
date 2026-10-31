@@ -84,7 +84,8 @@ impl PortableBackup {
         }
         let parent = destination.parent().ok_or(SecurityError::UnsafePath)?;
         safe(parent)?;
-        fs::create_dir(&staging)?;
+        // Persist and flush the wrapped recovery key before any publication.
+        original.persist_new(&staging)?;
         // On errors the staging folder is intentionally left for explicit
         // owner disposition; never auto-delete snapshots on catch/rollback.
         let expected_files = files.clone();
@@ -171,15 +172,13 @@ impl PortableBackup {
         let mut metadata_file = File::create_new(staging.join("bundle.json"))?;
         metadata_file.write_all(&serde_json::to_vec(&meta).map_err(|_| SecurityError::Crypto)?)?;
         metadata_file.sync_all()?;
-        fs::write(
-            staging.join("vault-v1.json"),
-            serde_json::to_vec(&original).map_err(|_| SecurityError::Crypto)?,
-        )?;
         // Windows denies renaming directories containing files whose open
         // handles do not share DELETE. Finish and close *all* staging writers
         // before publishing the complete snapshot via atomic rename.
         drop(metadata_file);
         drop(encrypted_manifest);
+        #[cfg(unix)]
+        File::open(&staging)?.sync_all()?;
         gate.validate_lease(lease)?;
         crate::vault_fs::publish_new_directory(&staging, destination)?;
         Ok(meta)

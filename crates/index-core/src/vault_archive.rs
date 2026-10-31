@@ -10,12 +10,13 @@ use mind_place_security::{
     vault::{ContentKind, CryptoVault},
     vault_fence::VaultWriterFence,
     vault_storage::ImmutableVaultStorage,
-    SecurityGate, UnlockLease,
+    SecurityError, SecurityGate, UnlockLease,
 };
 use mind_place_state::{CipherKey, StateStore};
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use sha2::{Digest, Sha256};
 use std::{
+    fs,
     ops::{Deref, DerefMut},
     path::{Path, PathBuf},
     sync::Arc,
@@ -23,7 +24,7 @@ use std::{
 use zeroize::Zeroize;
 
 const APPLICATION_ID: i64 = 0x4d505641; // MPVA (never legacy MPIX).
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 const SCHEMA: &str = "
 CREATE TABLE vault_captures(
     archive_id TEXT NOT NULL,
@@ -41,6 +42,10 @@ CREATE TABLE vault_captures(
     UNIQUE(identity)
 );
 CREATE INDEX vault_capture_recent ON vault_captures(archive_id,captured_at DESC);
+CREATE TABLE vault_current_snapshots(
+    archive_id TEXT NOT NULL PRIMARY KEY,
+    snapshot_id TEXT NOT NULL
+);
 ";
 
 pub struct VaultCaptureStore {
@@ -82,6 +87,10 @@ impl VaultCaptureStore {
         let vault = Arc::new(vault);
         ImmutableVaultStorage::new(&root, &vault, gate, lease)
             .map_err(|_| IndexError::InvalidEvidence)?;
+        let catalog_exists = root.join("archive-index.sqlite3").exists();
+        if !catalog_exists && Self::archive_objects_present(&root)? {
+            return Err(IndexError::InvalidIndex);
+        }
         let derived = vault
             .derived_key(gate, lease, b"archive-index/sqlcipher/v1")
             .map_err(|_| IndexError::Revoked)?;
@@ -99,16 +108,8 @@ impl VaultCaptureStore {
         {
             let _fence =
                 VaultWriterFence::writer(&store.root).map_err(|_| IndexError::InvalidEvidence)?;
-            let db = store.connection()?;
-            let current: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-            let app: i64 = db.query_row("PRAGMA application_id", [], |r| r.get(0))?;
-            if current == 0 && app == 0 {
-                db.execute_batch(SCHEMA)?;
-                db.pragma_update(None, "application_id", APPLICATION_ID)?;
-                db.pragma_update(None, "user_version", SCHEMA_VERSION)?;
-            } else if current != SCHEMA_VERSION || app != APPLICATION_ID {
-                return Err(IndexError::InvalidIndex);
-            }
+            let mut db = store.connection()?;
+            Self::ensure_schema(&mut db, &store.root)?;
             Self::integrity(&db)?;
         }
         Ok(store)
@@ -162,6 +163,90 @@ impl VaultCaptureStore {
         self.root.join("archive-index.sqlite3")
     }
 
+    pub(crate) fn archive_objects_present(root: &Path) -> Result<bool> {
+        let archive = root.join("archive");
+        let metadata = match fs::symlink_metadata(&archive) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error.into()),
+        };
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err(IndexError::InvalidEvidence);
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::MetadataExt;
+            if metadata.file_attributes() & 0x400 != 0 {
+                return Err(IndexError::InvalidEvidence);
+            }
+        }
+        let mut pending = vec![archive];
+        while let Some(directory) = pending.pop() {
+            for entry in fs::read_dir(directory)? {
+                let path = entry?.path();
+                let metadata = fs::symlink_metadata(&path)?;
+                if metadata.file_type().is_symlink() {
+                    return Err(IndexError::InvalidEvidence);
+                }
+                #[cfg(windows)]
+                {
+                    use std::os::windows::fs::MetadataExt;
+                    if metadata.file_attributes() & 0x400 != 0 {
+                        return Err(IndexError::InvalidEvidence);
+                    }
+                }
+                if metadata.is_file() {
+                    return Ok(true);
+                }
+                if metadata.is_dir() {
+                    pending.push(path);
+                } else {
+                    return Err(IndexError::InvalidEvidence);
+                }
+            }
+        }
+        Ok(false)
+    }
+
+    fn ensure_schema(db: &mut Connection, root: &Path) -> Result<()> {
+        let current: i64 = db.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+        let app: i64 = db.query_row("PRAGMA application_id", [], |row| row.get(0))?;
+        if current == 0 && app == 0 {
+            if Self::archive_objects_present(root)? {
+                return Err(IndexError::InvalidIndex);
+            }
+            let tx = db.transaction()?;
+            tx.execute_batch(SCHEMA)?;
+            tx.pragma_update(None, "application_id", APPLICATION_ID)?;
+            tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+            tx.commit()?;
+        } else if current == 1 && app == APPLICATION_ID {
+            let tx = db.transaction()?;
+            tx.execute_batch(
+                "CREATE TABLE vault_current_snapshots(
+                    archive_id TEXT NOT NULL PRIMARY KEY,
+                    snapshot_id TEXT NOT NULL
+                 );",
+            )?;
+            tx.execute(
+                "INSERT INTO vault_current_snapshots(archive_id,snapshot_id)
+                 SELECT c.archive_id,c.snapshot_id
+                 FROM vault_captures c
+                 WHERE c.rowid = (
+                    SELECT rowid FROM vault_captures x
+                    WHERE x.archive_id=c.archive_id
+                    ORDER BY x.captured_at DESC,x.snapshot_id DESC LIMIT 1
+                 )",
+                [],
+            )?;
+            tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+            tx.commit()?;
+        } else if current != SCHEMA_VERSION || app != APPLICATION_ID {
+            return Err(IndexError::InvalidIndex);
+        }
+        Ok(())
+    }
+
     fn connection(&self) -> Result<VaultConnection> {
         self.gate
             .validate_lease(self.lease)
@@ -187,6 +272,29 @@ impl VaultCaptureStore {
 
     fn integrity(db: &Connection) -> Result<()> {
         let _: i64 = db.query_row("SELECT count(*) FROM vault_captures", [], |r| r.get(0))?;
+        let missing: i64 = db.query_row(
+            "SELECT count(*) FROM (
+                SELECT DISTINCT archive_id FROM vault_captures
+             ) archives
+             LEFT JOIN vault_current_snapshots current
+               ON current.archive_id=archives.archive_id
+             WHERE current.archive_id IS NULL",
+            [],
+            |row| row.get(0),
+        )?;
+        let orphaned: i64 = db.query_row(
+            "SELECT count(*) FROM vault_current_snapshots current
+             WHERE NOT EXISTS (
+                SELECT 1 FROM vault_captures capture
+                WHERE capture.archive_id=current.archive_id
+                  AND capture.snapshot_id=current.snapshot_id
+             )",
+            [],
+            |row| row.get(0),
+        )?;
+        if missing != 0 || orphaned != 0 {
+            return Err(IndexError::InvalidIndex);
+        }
         Ok(())
     }
 
@@ -250,6 +358,19 @@ impl VaultCaptureStore {
             .optional()?
             .is_some()
         {
+            if !migration {
+                let tx = db.transaction()?;
+                tx.execute(
+                    "INSERT INTO vault_current_snapshots(archive_id,snapshot_id)
+                     VALUES(?1,?2)
+                     ON CONFLICT(archive_id) DO UPDATE SET snapshot_id=excluded.snapshot_id",
+                    params![id, snapshot_id],
+                )?;
+                self.gate
+                    .validate_lease(self.lease)
+                    .map_err(|_| IndexError::Revoked)?;
+                tx.commit()?;
+            }
             return Ok(SaveReceipt {
                 ok: true,
                 id,
@@ -264,15 +385,83 @@ impl VaultCaptureStore {
         if payload.len() > MAX_CAPTURE_BYTES {
             return Err(IndexError::InvalidEvidence);
         }
-        self.storage()?
-            .write_immutable(
-                &self.gate,
-                self.lease,
-                ContentKind::Archive,
-                identity.as_bytes(),
-                &payload,
+        let storage = self.storage()?;
+        let previous_current_identity = if migration {
+            db.query_row(
+                "SELECT capture.identity
+                 FROM vault_current_snapshots current
+                 JOIN vault_captures capture
+                   ON capture.archive_id=current.archive_id
+                  AND capture.snapshot_id=current.snapshot_id
+                 WHERE current.archive_id=?1",
+                [&id],
+                |row| row.get::<_, String>(0),
             )
-            .map_err(|_| IndexError::InvalidEvidence)?;
+            .optional()?
+        } else {
+            None
+        };
+        if let Err(error) = storage.write_immutable(
+            &self.gate,
+            self.lease,
+            ContentKind::Archive,
+            identity.as_bytes(),
+            &payload,
+        ) {
+            let collision = match &error {
+                SecurityError::Crypto => true,
+                SecurityError::Io(error) => error.kind() == std::io::ErrorKind::AlreadyExists,
+                _ => false,
+            };
+            if !collision {
+                return Err(IndexError::InvalidEvidence);
+            }
+            // A crash can publish immutable evidence before its catalog commit.
+            // Adopt only authenticated, identical normalized content; retain the
+            // original observation timestamp and never replace the raw object.
+            let previous = storage
+                .read(
+                    &self.gate,
+                    self.lease,
+                    ContentKind::Archive,
+                    identity.as_bytes(),
+                )
+                .map_err(|_| IndexError::InvalidEvidence)?;
+            let mut original: Capture =
+                serde_json::from_slice(&previous).map_err(|_| IndexError::InvalidEvidence)?;
+            validate_capture(&mut original)?;
+            let mut original_normalized = original.clone();
+            original_normalized.captured_at.clear();
+            if serde_json::to_vec(&original_normalized).map_err(|_| IndexError::InvalidEvidence)?
+                != serde_json::to_vec(&normalized).map_err(|_| IndexError::InvalidEvidence)?
+            {
+                return Err(IndexError::InvalidEvidence);
+            }
+            capture = original;
+        }
+        // Evaluate the legacy selection policy against the exact immutable
+        // object adopted above, not a retry payload with a different timestamp.
+        let preserve_current = if let Some(previous_identity) = previous_current_identity {
+            let previous = storage
+                .read(
+                    &self.gate,
+                    self.lease,
+                    ContentKind::Archive,
+                    previous_identity.as_bytes(),
+                )
+                .map_err(|_| IndexError::InvalidEvidence)?;
+            let mut prior: Capture =
+                serde_json::from_slice(&previous).map_err(|_| IndexError::InvalidEvidence)?;
+            validate_capture(&mut prior)?;
+            let prior_time = chrono::DateTime::parse_from_rfc3339(&prior.captured_at)
+                .map_err(|_| IndexError::InvalidEvidence)?;
+            let incoming_time = chrono::DateTime::parse_from_rfc3339(&capture.captured_at)
+                .map_err(|_| IndexError::InvalidEvidence)?;
+            matches!(prior.capture_method.as_str(), "manual-dom" | "automatic-dom")
+                || prior_time >= incoming_time
+        } else {
+            false
+        };
         let tx = db.transaction()?;
         tx.execute(
             "INSERT INTO vault_captures(
@@ -294,6 +483,14 @@ impl VaultCaptureStore {
                     .map_err(|_| IndexError::InvalidEvidence)?
             ],
         )?;
+        if !preserve_current {
+            tx.execute(
+                "INSERT INTO vault_current_snapshots(archive_id,snapshot_id)
+                 VALUES(?1,?2)
+                 ON CONFLICT(archive_id) DO UPDATE SET snapshot_id=excluded.snapshot_id",
+                params![id, snapshot_id],
+            )?;
+        }
         self.gate
             .validate_lease(self.lease)
             .map_err(|_| IndexError::Revoked)?;
@@ -317,8 +514,14 @@ impl VaultCaptureStore {
             "SELECT snapshot_id,identity,provider,conversation_id,title,source_url,
                     captured_at,message_count,completeness,warnings_json
              FROM vault_captures
-             WHERE archive_id=?1 AND (?2 IS NULL OR snapshot_id=?2)
-             ORDER BY captured_at DESC LIMIT 1",
+             WHERE archive_id=?1
+               AND (
+                 (?2 IS NOT NULL AND snapshot_id=?2)
+                 OR (?2 IS NULL AND snapshot_id=(
+                    SELECT snapshot_id FROM vault_current_snapshots WHERE archive_id=?1
+                 ))
+               )
+             LIMIT 1",
         )?;
         let row = statement
             .query_row(params![archive_id, revision], |r| {
@@ -395,6 +598,47 @@ impl VaultCaptureStore {
             capture,
             snapshot_id: row.0,
         })
+    }
+
+    pub(crate) fn select_current_snapshot(
+        &self,
+        archive_id: &str,
+        snapshot_id: &str,
+    ) -> Result<()> {
+        let valid = |value: &str| {
+            value.len() == 64
+                && value
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        };
+        if !valid(archive_id) || !valid(snapshot_id) {
+            return Err(IndexError::InvalidEvidence);
+        }
+        let _writer =
+            VaultWriterFence::writer(&self.root).map_err(|_| IndexError::InvalidEvidence)?;
+        let mut db = self.connection()?;
+        let exists: Option<i64> = db
+            .query_row(
+                "SELECT 1 FROM vault_captures WHERE archive_id=?1 AND snapshot_id=?2",
+                params![archive_id, snapshot_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if exists.is_none() {
+            return Err(IndexError::InvalidEvidence);
+        }
+        let tx = db.transaction()?;
+        tx.execute(
+            "INSERT INTO vault_current_snapshots(archive_id,snapshot_id)
+             VALUES(?1,?2)
+             ON CONFLICT(archive_id) DO UPDATE SET snapshot_id=excluded.snapshot_id",
+            params![archive_id, snapshot_id],
+        )?;
+        self.gate
+            .validate_lease(self.lease)
+            .map_err(|_| IndexError::Revoked)?;
+        tx.commit()?;
+        Ok(())
     }
 
     /// A vault export stays in owner memory. The caller can explicitly copy or
@@ -509,11 +753,10 @@ impl VaultCaptureStore {
                         c.captured_at,c.message_count,c.completeness,c.warnings_json,
                         (SELECT count(*) FROM vault_captures WHERE archive_id=c.archive_id)
                  FROM vault_captures c
-                 WHERE c.rowid = (
-                   SELECT rowid FROM vault_captures x WHERE x.archive_id=c.archive_id
-                   ORDER BY x.captured_at DESC,x.snapshot_id DESC LIMIT 1
-                 )
-                 AND (?1 IS NULL OR c.captured_at < ?1
+                 JOIN vault_current_snapshots current
+                   ON current.archive_id=c.archive_id
+                  AND current.snapshot_id=c.snapshot_id
+                 WHERE (?1 IS NULL OR c.captured_at < ?1
                       OR (c.captured_at = ?1 AND c.archive_id < ?2))
                  ORDER BY c.captured_at DESC,c.archive_id DESC LIMIT ?3",
             )?;
@@ -601,7 +844,11 @@ impl VaultCaptureStore {
     ) -> Result<()> {
         let path = root.join("archive-index.sqlite3");
         if !path.exists() {
-            return Ok(());
+            return if Self::archive_objects_present(root)? {
+                Err(IndexError::InvalidEvidence)
+            } else {
+                Ok(())
+            };
         }
         let derived = vault
             .derived_key(gate, lease, b"archive-index/sqlcipher/v1")
@@ -613,16 +860,13 @@ impl VaultCaptureStore {
         // This is an unpublished snapshot. A read-only WAL reader leaves
         // empty WAL/SHM sidecars behind; a writable pager closes/checkpoints
         // them before the snapshot's quiescent packaging/publication step.
-        let db = Connection::open_with_flags(
+        let mut db = Connection::open_with_flags(
             path,
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
         )?;
         key.unlock(&db)?;
-        let app: i64 = db.query_row("PRAGMA application_id", [], |r| r.get(0))?;
-        let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-        if app != APPLICATION_ID || version != SCHEMA_VERSION {
-            return Err(IndexError::InvalidEvidence);
-        }
+        Self::ensure_schema(&mut db, root).map_err(|_| IndexError::InvalidEvidence)?;
+        Self::integrity(&db).map_err(|_| IndexError::InvalidEvidence)?;
         let storage = ImmutableVaultStorage::new(root, vault, gate, lease)
             .map_err(|_| IndexError::InvalidEvidence)?;
         let mut statement = db.prepare("SELECT archive_id,snapshot_id,identity,provider,conversation_id,title,source_url,captured_at,message_count,completeness,warnings_json FROM vault_captures ORDER BY archive_id,snapshot_id")?;
@@ -725,6 +969,12 @@ mod vault_catalog_pagination_tests {
                 .expect("insert synthetic row");
             }
         }
+        tx.execute(
+            "INSERT INTO vault_current_snapshots(archive_id,snapshot_id)
+             SELECT archive_id,snapshot_id FROM vault_captures",
+            [],
+        )
+        .expect("populate current pointers");
         tx.commit().expect("commit");
         let sidebar = VaultCaptureStore::catalog_rows(&db, "", false).expect("sidebar");
         assert_eq!(sidebar.len(), 10_000);
@@ -735,4 +985,73 @@ mod vault_catalog_pagination_tests {
         let unique: std::collections::HashSet<_> = full.iter().map(|item| &item.id).collect();
         assert_eq!(unique.len(), full.len());
     }
+    #[test]
+    fn schema_v1_upgrade_backfills_the_latest_current_revision() {
+        let home = tempfile::tempdir().unwrap();
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch(
+            "CREATE TABLE vault_captures(
+                archive_id TEXT NOT NULL,
+                snapshot_id TEXT NOT NULL,
+                captured_at TEXT NOT NULL
+             );
+             INSERT INTO vault_captures VALUES
+                ('synthetic-archive','older','2026-10-28T08:00:00Z'),
+                ('synthetic-archive','newer','2026-10-28T09:00:00Z');",
+        )
+        .unwrap();
+        db.pragma_update(None, "application_id", APPLICATION_ID)
+            .unwrap();
+        db.pragma_update(None, "user_version", 1).unwrap();
+
+        VaultCaptureStore::ensure_schema(&mut db, home.path()).unwrap();
+
+        let version: i64 = db
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        let current: String = db
+            .query_row(
+                "SELECT snapshot_id FROM vault_current_snapshots WHERE archive_id=?1",
+                ["synthetic-archive"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+        assert_eq!(current, "newer");
+    }
+
+    #[cfg(feature = "sqlcipher-preview")]
+    #[test]
+    fn lost_catalog_with_raw_inventory_fails_closed_for_open_and_backup() {
+        use crate::vault_legacy_objects::RawLegacyInventory;
+        use mind_place_security::vault::CryptoVault;
+
+        let home = tempfile::tempdir().unwrap();
+        let gate = SecurityGate::open(home.path().join("security.json")).unwrap();
+        gate.initialize(b"synthetic-lost-catalog-raw-map").unwrap();
+        let lease = gate.require_unlocked().unwrap();
+        let (vault, recovery, manifest) = CryptoVault::provision(&gate, lease).unwrap();
+        let root = home.path().join("vault");
+        manifest.persist_new(&root).unwrap();
+        let store = VaultCaptureStore::open(&root, vault, &gate, lease).unwrap();
+
+        let vault = CryptoVault::restore_with_recovery(&gate, lease, &manifest, &recovery).unwrap();
+        let storage = ImmutableVaultStorage::new(&root, &vault, &gate, lease).unwrap();
+        RawLegacyInventory {
+            version: 1,
+            files: Vec::new(),
+        }
+        .persist(&storage, &gate, lease)
+        .unwrap();
+        drop(storage);
+        drop(store);
+        fs::remove_file(root.join("archive-index.sqlite3")).unwrap();
+
+        let vault = CryptoVault::restore_with_recovery(&gate, lease, &manifest, &recovery).unwrap();
+        assert!(VaultCaptureStore::open(&root, vault, &gate, lease).is_err());
+        let vault = CryptoVault::restore_with_recovery(&gate, lease, &manifest, &recovery).unwrap();
+        assert!(VaultCaptureStore::verify_backup_catalog(&root, &vault, &gate, lease).is_err());
+        assert!(!root.join("archive-index.sqlite3").exists());
+    }
+
 }

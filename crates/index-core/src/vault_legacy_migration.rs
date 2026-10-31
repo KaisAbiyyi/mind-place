@@ -102,6 +102,12 @@ impl LegacyEncryptedConversion<'_> {
     ) -> SecResult<()> {
         self.gate.validate_lease(self.lease)?;
         self.ensure_manifest(stage)?;
+        // Establish the encrypted archive catalog before preserving the raw
+        // legacy archive map or any immutable archive objects. A missing
+        // catalog after object publication must never be mistaken for empty.
+        let _archive = VaultCaptureStore::open(stage, self.crypto()?, self.gate, self.lease)
+            .map_err(|_| SecurityError::Crypto)?;
+        drop(_archive);
         self.copy_state(source, stage)?;
         checkpoint(LegacyConversionCheckpoint::StateCopied)?;
         // Preserve a stable, encrypted raw mapping before normalized views.
@@ -139,6 +145,7 @@ impl LegacyEncryptedConversion<'_> {
         let mut expected = BTreeSet::from([
             PathBuf::from("vault-v1.json"),
             PathBuf::from("state.sqlite3"),
+            PathBuf::from("archive-index.sqlite3"),
         ]);
         let mut object = |kind: ContentKind, identity: &str, category: &str| -> SecResult<()> {
             let name = vault.storage_name(self.gate, self.lease, kind, identity.as_bytes())?;
@@ -186,9 +193,6 @@ impl LegacyEncryptedConversion<'_> {
                     "document-objects",
                 )?;
             }
-        }
-        if captures.exists() {
-            expected.insert(PathBuf::from("archive-index.sqlite3"));
         }
         for sentinel in [".vault-writer.lock", ".state-schema.lock"] {
             let path = stage.join(sentinel);
@@ -445,6 +449,11 @@ impl LegacyEncryptedConversion<'_> {
                 return Err(SecurityError::Crypto);
             }
         }
+        for (archive_id, snapshot_id) in archive_current_snapshots(&root)? {
+            adapter
+                .select_current_snapshot(&archive_id, &snapshot_id)
+                .map_err(|_| SecurityError::Crypto)?;
+        }
         Ok(())
     }
 
@@ -462,6 +471,14 @@ impl LegacyEncryptedConversion<'_> {
                 .read(&archive_id, Some(&snapshot_id))
                 .map_err(|_| SecurityError::Crypto)?;
             if actual.capture != expected {
+                return Err(SecurityError::Crypto);
+            }
+        }
+        for (archive_id, snapshot_id) in archive_current_snapshots(&root)? {
+            let current = adapter
+                .read(&archive_id, None)
+                .map_err(|_| SecurityError::Crypto)?;
+            if current.snapshot_id != snapshot_id {
                 return Err(SecurityError::Crypto);
             }
         }
@@ -755,6 +772,57 @@ fn archive_snapshots(root: &Path) -> SecResult<Vec<(String, String, PathBuf)>> {
             }
             result.push((id.to_owned(), snapshot.to_owned(), path));
         }
+    }
+    result.sort();
+    Ok(result)
+}
+
+fn archive_current_snapshots(root: &Path) -> SecResult<Vec<(String, String)>> {
+    if !root.exists() {
+        return Ok(Vec::new());
+    }
+    let mut result = Vec::new();
+    for conversation in fs::read_dir(root)? {
+        let dir = conversation?.path();
+        if !fs::symlink_metadata(&dir)?.is_dir() {
+            return Err(SecurityError::UnsafePath);
+        }
+        let id = dir
+            .file_name()
+            .and_then(|value| value.to_str())
+            .ok_or(SecurityError::InvalidConfig)?;
+        if !hex64(id) {
+            return Err(SecurityError::InvalidConfig);
+        }
+        let captures = dir.join("captures");
+        let captures_metadata = fs::symlink_metadata(&captures)?;
+        if captures_metadata.file_type().is_symlink() || !captures_metadata.is_dir() {
+            return Err(SecurityError::UnsafePath);
+        }
+        if fs::read_dir(&captures)?.next().is_none() {
+            continue;
+        }
+        let meta_path = dir.join("meta.json");
+        safe_regular(&meta_path)?;
+        let bytes = bounded_file(&meta_path)?;
+        if bytes.len() > 128 * 1024 {
+            return Err(SecurityError::InvalidConfig);
+        }
+        let metadata: serde_json::Value =
+            serde_json::from_slice(&bytes).map_err(|_| SecurityError::Crypto)?;
+        let snapshot = metadata
+            .get("latest_snapshot")
+            .and_then(serde_json::Value::as_str)
+            .ok_or(SecurityError::Crypto)?;
+        if !hex64(snapshot) {
+            return Err(SecurityError::InvalidConfig);
+        }
+        let selected = captures.join(format!("{snapshot}.jsonl"));
+        safe_regular(&selected)?;
+        if !selected.is_file() {
+            return Err(SecurityError::Crypto);
+        }
+        result.push((id.to_owned(), snapshot.to_owned()));
     }
     result.sort();
     Ok(result)

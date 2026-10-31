@@ -10,7 +10,7 @@ use std::{
     io::{Read, Write},
     net::{Ipv4Addr, SocketAddrV4, TcpStream},
     path::Path,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 #[cfg(windows)]
@@ -216,6 +216,61 @@ pub fn read_frame(mut input: impl Read) -> Result<SignedCapture> {
     }
     let mut bytes = vec![0u8; length];
     input.read_exact(&mut bytes)?;
+    Ok(serde_json::from_slice(&bytes)?)
+}
+
+fn read_exact_before_deadline(
+    input: &mut TcpStream,
+    mut buffer: &mut [u8],
+    deadline: Instant,
+) -> Result<()> {
+    while !buffer.is_empty() {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "IPC frame deadline exceeded",
+            )
+            .into());
+        }
+        input.set_read_timeout(Some(remaining))?;
+        match input.read(buffer) {
+            Ok(0) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "IPC frame ended early",
+                )
+                .into())
+            }
+            Ok(count) => {
+                let (_, rest) = buffer.split_at_mut(count);
+                buffer = rest;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(())
+}
+
+/// Read one bounded frame against a single monotonic deadline. Updating the
+/// socket timeout before every read prevents a peer from extending the frame
+/// indefinitely by delivering one byte just before each per-read timeout.
+pub fn read_frame_with_timeout(
+    input: &mut TcpStream,
+    timeout: Duration,
+) -> Result<SignedCapture> {
+    let deadline = Instant::now()
+        .checked_add(timeout)
+        .ok_or_else(|| invalid("IPC frame deadline is invalid"))?;
+    let mut size = [0u8; 4];
+    read_exact_before_deadline(input, &mut size, deadline)?;
+    let length = u32::from_le_bytes(size) as usize;
+    if length == 0 || length > MAX_FRAME {
+        return Err(invalid("IPC payload outside allowed limits"));
+    }
+    let mut bytes = vec![0u8; length];
+    read_exact_before_deadline(input, &mut bytes, deadline)?;
     Ok(serde_json::from_slice(&bytes)?)
 }
 

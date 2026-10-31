@@ -1,4 +1,5 @@
 """Synthetic MP-CI-100K-01 regression matrix; no network and no owner corpus."""
+import copy
 import hashlib
 import io
 import json
@@ -76,11 +77,65 @@ class FingerprintTests(unittest.TestCase):
                 self.write(path, (self.root.joinpath(path).read_text() if self.root.joinpath(path).exists() else "") + "!")
                 self.assertNotEqual(before, self.fp())
 
+    def test_native_candidate_identity_environment_does_not_reindex(self):
+        workflow = self.root.joinpath(".github/workflows/mp-10c-scale.yml").read_text()
+        workflow = workflow.replace(
+            "  document-scale:\n    runs-on: windows-latest\n",
+            "  document-scale:\n    runs-on: windows-latest\n    env:\n      CARGO_INCREMENTAL: '0'\n")
+        self.write(".github/workflows/mp-10c-scale.yml", workflow)
+        before = self.fp()
+        workflow = workflow.replace(
+            "      CARGO_INCREMENTAL: '0'\n",
+            "      CARGO_INCREMENTAL: '0'\n"
+            "      PR_HEAD_REPOSITORY: owner/repo\n"
+            "      PR_BASE_SHA: " + "b"*40 + "\n"
+            "      NATIVE_CONTRACT_FINGERPRINT: " + "c"*64 + "\n")
+        self.write(".github/workflows/mp-10c-scale.yml", workflow)
+        self.assertEqual(before, self.fp())
+
+
+    def test_metadata_text_inside_scale_execution_command_is_not_excluded(self):
+        workflow = self.root.joinpath(".github/workflows/mp-10c-scale.yml").read_text()
+        workflow = workflow.replace(
+            "      - run: cargo test full\n",
+            "      - run: |\n          echo PR_HEAD_REPOSITORY: original/repo\n")
+        self.write(".github/workflows/mp-10c-scale.yml", workflow)
+        before = self.fp()
+        workflow = self.root.joinpath(".github/workflows/mp-10c-scale.yml").read_text()
+        self.write(".github/workflows/mp-10c-scale.yml", workflow.replace(
+            "PR_HEAD_REPOSITORY: original/repo",
+            "PR_HEAD_REPOSITORY: changed/repo"))
+        self.assertNotEqual(before, self.fp())
+
+    def test_immutable_workload_v2_fixture_preserves_proof_compatibility(self):
+        # Immutable synthetic inputs keep the v2 encoding stable without
+        # rejecting legitimate changes to the repository under qualification.
+        scale = (
+            b"jobs:\n  document-smoke:\n    runs-on: windows-latest\n"
+            b"    steps:\n      - run: cargo test smoke\n"
+            b"  document-scale:\n    name: Windows approved documents / 100000 files\n"
+            b"    runs-on: windows-latest\n    steps:\n      - run: cargo test full\n"
+            b"  provenance:\n    name: Source-bound 100K provenance (no indexing)\n"
+            b"    runs-on: ubuntu-latest\n"
+        )
+        entries = [
+            (b"100644", b"e" * 40, b"Cargo.lock"),
+            (b"100644", b"f" * 40, b".github/workflows/mp-10c-scale.yml"),
+        ]
+        original = gate.fingerprint_entries(entries, scale_workflow=scale)
+        self.assertEqual(
+            original, "00c86f788c008e68ef9c9d6775b5c57d1d6b753fc866a9a9e5c131274fa051c3")
+        entries[0] = (b"100644", b"d" * 40, b"Cargo.lock")
+        self.assertNotEqual(original, gate.fingerprint_entries(entries, scale_workflow=scale))
+        self.assertTrue(gate.decision("pull_request", "auto", None)[0])
+
     def test_validator_only_and_coordination_only_edits_do_not_reindex(self):
         before = self.fp()
         self.write("scripts/mp10c_ci_gate.py", "new strict parser")
         self.write("scripts/tests/test_mp10c_ci_gate.py", "new tests")
         self.write("scripts/mp10c_prerequisite_wait.py", "bounded wait")
+        self.write("scripts/mp10c_native_contract.py", "native-only verifier")
+        self.write("scripts/tests/test_mp10c_native_contract.py", "native contract tests")
         text = self.root.joinpath(".github/workflows/mp-10c-scale.yml").read_text()
         self.write(".github/workflows/mp-10c-scale.yml", text.replace(
             "  document-scale:", "  coordinator:\n    runs-on: ubuntu-latest\n  document-scale:"))
@@ -129,6 +184,11 @@ class ShallowMergeTests(unittest.TestCase):
                 gate.check_merge_source(repo_root=str(clone), expected_source=base)
             with self.assertRaises(ValueError):
                 gate.check_merge_source(repo_root=str(clone), expected_source="0"*40)
+            with self.assertRaises(ValueError):
+                gate.check_merge_source(repo_root=str(clone), expected_source=source,
+                                        expected_base="f"*40)
+            gate.check_merge_source(repo_root=str(clone), expected_source=source,
+                                    expected_base=base)
 
 
 class DecisionTests(unittest.TestCase):
@@ -166,89 +226,122 @@ class DecisionTests(unittest.TestCase):
             gate.make_proof(receipt=b"{}", source="a"*40, run_id=2, attempt=1,
                             pr=128, repo="owner/repo", event="pull_request", effective="d"*64)
 
-    def test_full_run_waits_for_exact_source_cheap_ci(self):
-        source = "a"*40
-        passed = [{"id": i, "run_attempt": 1, "path": path, "head_sha": source,
-                   "status": "completed", "conclusion": "success"}
-                  for i, path in enumerate((".github/workflows/ci.yml",
-                      ".github/workflows/mp9b-sqlcipher-qualification.yml"), start=1)]
-        def job(name, steps, *, conclusion="success"):
-            return {"name": name, "status": "completed", "conclusion": conclusion,
-                    "steps": [{"name": s, "conclusion": "success"} for s in steps]}
-        product = job("Verify Windows product", ("Test", "Test hosted tunnel desktop boundaries", "Build desktop app", "Qualify native capture encrypted IPC and revoked owner epoch"))
-        rust = job("Fast Rust compile and vault feedback", (
-            "Rust format", "Compile production core crates",
-            "Compile available SQLCipher and vault features", "Focused security tests"))
-        sql_steps = ("Encrypted state/index and FTS regression",
-                     "Keyed MCP synthetic authorization and revocation",
-                     "Vault and backup adversarial regression")
-        sql_ubuntu = job("SQLCipher / ubuntu-24.04", sql_steps)
-        sql_windows = job("SQLCipher / windows-2022", sql_steps)
-        jobs = {1: [product, rust], 2: [sql_ubuntu, sql_windows]}
-        def fetch(run):
-            return {"jobs": jobs[run["id"]], "total_count": len(jobs[run["id"]])}
-        gate.require_prerequisites(passed, source, vault=True, fetch_jobs=fetch)
-        for bad in ([], passed[:1], [dict(r, head_sha="b"*40) for r in passed],
-                    [dict(r, conclusion="failure") for r in passed]):
-            with self.subTest(bad=bad), self.assertRaises(ValueError):
-                gate.require_prerequisites(bad, source, vault=True, fetch_jobs=fetch)
-        # A successful Draft workflow can contain a skipped native job. Never
-        # treat its overall SUCCESS as proof for a multi-hour qualification.
-        for replacement in (dict(product, conclusion="skipped"),
-                            dict(product, steps=[{"name": "Build desktop app", "conclusion": "skipped"}]),
-                            dict(product, name="Fast developer feedback")):
-            with self.subTest(replacement=replacement), self.assertRaises(ValueError):
-                jobs[1] = [replacement]
-                gate.require_prerequisites(passed, source, vault=False, fetch_jobs=fetch)
-        jobs[1] = [product, rust]
-        for replacement in (dict(sql_windows, conclusion="skipped"),
-                            dict(sql_windows, steps=[]),
-                            dict(sql_windows, name="SQLCipher / macos-15")):
-            with self.subTest(replacement=replacement), self.assertRaises(ValueError):
-                jobs[2] = [sql_ubuntu, replacement]
-                gate.require_prerequisites(passed, source, vault=True, fetch_jobs=fetch)
-        jobs[2] = [sql_ubuntu, sql_windows]
-        for bad_rust in (
-            dict(rust, conclusion="skipped"),
-            dict(rust, steps=[{"name": "Compile production core crates", "conclusion": "skipped"}]),
-        ):
-            with self.assertRaises(ValueError):
-                jobs[1] = [product, bad_rust]
-                gate.require_prerequisites(passed, source, vault=False, fetch_jobs=fetch)
-        jobs[1] = [product, rust]
-        ipc = job("Verify Windows product", (
-            "Test", "Test hosted tunnel desktop boundaries", "Build desktop app",
-            "Qualify native capture encrypted IPC and revoked owner epoch"))
-        jobs[1] = [ipc, rust]
-        gate.require_prerequisites(passed, source, vault=True, fetch_jobs=fetch)
-        jobs[1] = [job("Verify Windows product", ("Test", "Test hosted tunnel desktop boundaries", "Build desktop app")), rust]
+    def test_candidate_sqlcipher_requirements_are_explicit_not_file_inferred(self):
+        self.assertTrue(gate.native_contract.requires_sqlcipher("KaisAbiyyi/mind-place", 127))
+        self.assertFalse(gate.native_contract.requires_sqlcipher("KaisAbiyyi/mind-place", 129))
+        self.assertFalse(gate.native_contract.requires_sqlcipher("KaisAbiyyi/mind-place", 9001))
+
+
+class AcceptancePrerequisiteTests(unittest.TestCase):
+    def test_cached_100k_proof_reuse_requires_current_native_coordination_success(self):
+        cached = {"run_id": 77, "artifact_id": 12}
+        accepted, fresh = gate.select_acceptance_evidence(
+            native_result="success", fresh=None, previous=cached,
+            event="pull_request", mode="auto")
+        self.assertIs(accepted, cached)
+        self.assertFalse(fresh)
+        for result in ("skipped", "failure", "cancelled", "neutral", "", None):
+            with self.subTest(native_result=result), self.assertRaises(ValueError):
+                gate.select_acceptance_evidence(
+                    native_result=result, fresh=None, previous=cached,
+                    event="pull_request", mode="auto")
+
+    def test_fresh_100k_proof_also_requires_current_native_coordination_success(self):
+        fresh = {"run_id": 88, "artifact_id": 22}
+        accepted, is_fresh = gate.select_acceptance_evidence(
+            native_result="success", fresh=fresh, previous=None,
+            event="pull_request", mode="final")
+        self.assertIs(accepted, fresh)
+        self.assertTrue(is_fresh)
         with self.assertRaises(ValueError):
-            gate.require_prerequisites(passed, source, vault=True, fetch_jobs=fetch)
-        jobs[1] = [product, rust]
-        with self.assertRaises(ValueError):
-            gate.require_prerequisites(passed, source, vault=True,
-                                       fetch_jobs=lambda r: {"jobs": jobs[r["id"]], "total_count": 101})
+            gate.select_acceptance_evidence(
+                native_result="skipped", fresh=fresh, previous=None,
+                event="pull_request", mode="final")
+
+    def test_workflow_keeps_cached_reuse_separate_from_native_coordination(self):
+        root = Path(__file__).resolve().parents[2]
+        source = (root / ".github/workflows/mp-10c-scale.yml").read_text()
+        coordinator = source.split("  prerequisite-coordination:\n", 1)[1].split(
+            "\n  document-scale:\n", 1)[0]
+        coordinator_if = next(
+            line.strip() for line in coordinator.splitlines()
+            if line.strip().startswith("if:"))
+        self.assertNotIn("run-heavy", coordinator_if)
+        self.assertIn("workflow_dispatch", coordinator_if)
+        self.assertIn("draft == false", coordinator_if)
+
+        scale = source.split("  document-scale:\n", 1)[1].split(
+            "\n  provenance:\n", 1)[0]
+        self.assertIn("run-heavy == 'true'", scale)
+        self.assertIn("needs.prerequisite-coordination.result == 'success'", scale)
+
+        accepted = source.split("  qualification-accepted:\n", 1)[1]
+        self.assertIn("prerequisite-coordination", accepted.splitlines()[1])
+        self.assertIn("NATIVE_PREREQUISITE_RESULT: ${{ needs.prerequisite-coordination.result }}", accepted)
+        self.assertIn('test "$PREREQUISITE_RESULT" = success', accepted)
+
+        draft = source.split("  draft-qualification-pending:\n", 1)[1].split(
+            "\n  qualification-accepted:\n", 1)[0]
+        draft_if = next(line.strip() for line in draft.splitlines() if line.strip().startswith("if:"))
+        self.assertIn("draft == true", draft_if)
+        self.assertNotIn("run-heavy", draft_if)
+
+    def test_manual_operator_sequence_requires_ci_dispatch_before_mp10c(self):
+        root = Path(__file__).resolve().parents[2]
+        ci = (root / ".github/workflows/ci.yml").read_text()
+        dispatch = ci.split("  workflow_dispatch:\n", 1)[1].split("\npermissions:", 1)[0]
+        for field in ("pr_number", "head_sha", "base_sha"):
+            with self.subTest(field=field):
+                self.assertIn(field + ":", dispatch)
+                self.assertIn("required: true", dispatch)
+        self.assertIn("refs/pull/{0}/merge", ci)
+        self.assertIn("github.event_name == 'workflow_dispatch'", ci)
+
+        docs = (root / "docs/implementation-plan/mp-ci-100k-01-qualification-gate.md").read_text()
+        sequence = docs.split("### Mandatory operator sequence: native CI first, MP-10C second", 1)[1]
+        ci_dispatch = sequence.index(".github/workflows/ci.yml")
+        scale_dispatch = sequence.index(".github/workflows/mp-10c-scale.yml")
+        self.assertLess(ci_dispatch, scale_dispatch)
+        self.assertIn("does not automatically dispatch CI", sequence)
+        self.assertIn("native contract fingerprint", sequence)
+        self.assertIn("explicitly PR-bound workflow_dispatch", docs)
+        self.assertNotIn("workflow_dispatch runs are never accepted", docs)
+        self.assertIn("manual", sequence)
+        self.assertIn("final", sequence)
 
 
 class DispatchTargetTests(unittest.TestCase):
     def setUp(self):
         self.pull = {"number": 127, "state": "open",
-                     "head": {"sha": "a"*40, "ref": "feature/target", "repo": {"full_name": "owner/repo"}},
-                     "base": {"repo": {"full_name": "owner/repo"}}}
+                     "head": {"sha": "a"*40, "ref": "feature/target", "repo": {"full_name": "owner/repo", "id": 1}},
+                     "base": {"sha": "b"*40, "ref": "main", "repo": {"full_name": "owner/repo", "id": 1}}}
 
     def resolve(self, number="127", sha="a"*40, ref="refs/heads/feature/target"):
         with patch.object(gate, "api_json", return_value=self.pull):
-            return gate.resolve_target(event="workflow_dispatch", payload={"inputs": {"pr_number": number}},
-                                        repo="owner/repo", sha=sha, ref=ref, token="synthetic")
+            return gate.resolve_target(
+                event="workflow_dispatch",
+                payload={"inputs": {"pr_number": number, "head_sha": "a"*40, "base_sha": "b"*40}},
+                repo="owner/repo", sha=sha, ref=ref, token="synthetic")
 
     def test_open_pr_exact_head_branch_is_required(self):
-        self.assertEqual(self.resolve(), {"pr": 127, "head": "a"*40, "branch": "feature/target"})
+        self.assertEqual(self.resolve(), {
+            "pr": 127, "head": "a"*40, "branch": "feature/target",
+            "head_repo": "owner/repo", "head_repo_id": 1,
+            "base_repo": "owner/repo", "base_repo_id": 1,
+            "base_branch": "main", "base_sha": "b"*40,
+        })
         for number in ("", "0", "-1", "127\n", 127):
             with self.subTest(number=number), self.assertRaises(ValueError):
                 self.resolve(number=number)
         for sha, ref in (("b"*40, "refs/heads/feature/target"), ("a"*40, "refs/heads/main")):
             with self.subTest(sha=sha, ref=ref), self.assertRaises(ValueError):
                 self.resolve(sha=sha, ref=ref)
+        with patch.object(gate, "api_json", return_value=self.pull):
+            with self.assertRaises(ValueError):
+                gate.resolve_target(
+                    event="workflow_dispatch",
+                    payload={"inputs": {"pr_number": "127", "head_sha": "a"*40, "base_sha": "c"*40}},
+                    repo="owner/repo", sha="a"*40, ref="refs/heads/feature/target", token="synthetic")
 
     def test_foreign_or_closed_pr_is_never_adopted(self):
         self.pull["head"]["repo"]["full_name"] = "foreign/repo"
@@ -261,7 +354,7 @@ class DispatchTargetTests(unittest.TestCase):
 
 
 class AttestationCliTests(unittest.TestCase):
-    def test_real_cli_binds_dispatch_and_preserves_scale_attempt_without_indexing(self):
+    def test_real_cli_rejects_branch_only_dispatch_attestation(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             git(root, "init", "-q")
@@ -275,31 +368,26 @@ class AttestationCliTests(unittest.TestCase):
             receipt, event, output = root/"raw.json", root/"event.json", root/"proof.json"
             receipt.write_text(json.dumps(raw_receipt()))
             event.write_text(json.dumps({"inputs": {"pr_number": "127"}}))
-            env = dict(os.environ, GITHUB_EVENT_NAME="workflow_dispatch", GITHUB_REPOSITORY="owner/repo",
-                       GITHUB_SHA=source, GITHUB_REF="refs/heads/qualification", GITHUB_EVENT_PATH=str(event),
-                       GITHUB_RUN_ID="77", GITHUB_RUN_ATTEMPT="2", SCALE_RUN_ATTEMPT="1", PR_NUMBER="127",
-                       PR_HEAD_SHA=source, PR_HEAD_REF="qualification", EXPECTED_FINGERPRINT=fp)
-            command = [sys.executable, str(Path(gate.__file__).resolve()), "attest", "--receipt", str(receipt), "--output", str(output)]
-            good = subprocess.run(command, cwd=root, env=env, capture_output=True, text=True)
-            self.assertEqual(good.returncode, 0, good.stderr)
-            proof = json.loads(output.read_bytes())
-            self.assertEqual((proof["event"], proof["pr_number"], proof["source_sha"], proof["checkout_sha"]),
-                             ("workflow_dispatch", 127, source, source))
-            self.assertEqual((proof["run_attempt"], proof["scale_run_attempt"]), (2, 1))
-            for change in ({"PR_NUMBER": "0"}, {"PR_HEAD_SHA": "0"*40},
-                           {"PR_HEAD_REF": "main"}, {"EXPECTED_FINGERPRINT": "0"*64}):
-                with self.subTest(change=change):
-                    output.unlink()
-                    failed = subprocess.run(command, cwd=root, env=dict(env, **change), capture_output=True)
-                    self.assertNotEqual(failed.returncode, 0)
-                    self.assertFalse(output.exists())
-                    # Restore a successful output for the next independent case.
-                    self.assertEqual(subprocess.run(command, cwd=root, env=env, capture_output=True).returncode, 0)
+            env = dict(os.environ, GITHUB_EVENT_NAME="workflow_dispatch",
+                       GITHUB_REPOSITORY="owner/repo", GITHUB_SHA=source,
+                       GITHUB_REF="refs/heads/qualification", GITHUB_EVENT_PATH=str(event),
+                       GITHUB_RUN_ID="77", GITHUB_RUN_ATTEMPT="2",
+                       SCALE_RUN_ATTEMPT="1", PR_NUMBER="127",
+                       PR_HEAD_SHA=source, PR_HEAD_REF="qualification",
+                       EXPECTED_FINGERPRINT=fp)
+            command = [sys.executable, str(Path(gate.__file__).resolve()), "attest",
+                       "--receipt", str(receipt), "--output", str(output)]
+            rejected = subprocess.run(command, cwd=root, env=env, capture_output=True, text=True)
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn("PR_HEAD_REPOSITORY", rejected.stderr)
+            self.assertFalse(output.exists())
+
+
 class PriorProofTests(unittest.TestCase):
     def setUp(self):
         self.repo, self.pr = "owner/repo", 128
         self.tree = [{"type": "blob", "mode": "100644", "sha": "e"*40, "path": "Cargo.lock"}]
-        self.scale_bytes = b"jobs:\n  document-smoke:\n    runs-on: windows-latest\n    steps:\n      - run: cargo test smoke\n  document-scale:\n    runs-on: windows-latest\n    steps:\n      - run: cargo test full\n  provenance:\n    runs-on: ubuntu-latest\n"
+        self.scale_bytes = b"jobs:\n  document-smoke:\n    runs-on: windows-latest\n    steps:\n      - run: cargo test smoke\n  document-scale:\n    name: Windows approved documents / 100000 files\n    runs-on: windows-latest\n    steps:\n      - run: cargo test full\n  provenance:\n    name: Source-bound 100K provenance (no indexing)\n    runs-on: ubuntu-latest\n"
         self.scale_sha = hashlib.sha1(b"blob " + str(len(self.scale_bytes)).encode() + b"\0" + self.scale_bytes).hexdigest()
         self.tree.append({"type": "blob", "mode": "100644", "sha": self.scale_sha,
                           "path": ".github/workflows/mp-10c-scale.yml"})
@@ -346,6 +434,15 @@ class PriorProofTests(unittest.TestCase):
                  "Mint source-bound 100K provenance",
                  "Upload qualified receipt and provenance")]}
         ]}
+        self.jobs["total_count"] = len(self.jobs["jobs"])
+        for index, job in enumerate(self.jobs["jobs"]):
+            job.update(id=100 + index, run_id=77, run_attempt=1,
+                       status="completed",
+                       labels=["windows-latest"] if index == 0 else ["ubuntu-latest"])
+            for step in job["steps"]:
+                step["status"] = "completed"
+        self.artifact_total = 2
+        self.jobs_by_attempt = {}
 
     def repack(self):
         stream = io.BytesIO()
@@ -358,9 +455,11 @@ class PriorProofTests(unittest.TestCase):
     def check(self):
         def fake_api(url, _token):
             if "/jobs?" in url:
-                return self.jobs
+                attempt = int(url.split("/attempts/", 1)[1].split("/", 1)[0])
+                return self.jobs_by_attempt.get(attempt, self.jobs)
             if "/artifacts?" in url:
-                return {"artifacts": [self.artifact, self.raw_artifact]}
+                return {"total_count": self.artifact_total,
+                        "artifacts": [self.artifact, self.raw_artifact]}
             if "/runs?" in url:
                 return {"workflow_runs": [self.run]}
             if "/git/commits/" in url:
@@ -391,6 +490,66 @@ class PriorProofTests(unittest.TestCase):
         self.assertEqual(result["run_id"], 77)
         self.assertEqual(result["artifact_id"], 12)
 
+
+
+    def test_incomplete_proof_job_and_artifact_listings_deny_reuse(self):
+        self.assertIsNotNone(self.check())
+        self.jobs["total_count"] += 1
+        self.assertIsNone(self.check())
+        self.jobs["total_count"] -= 1
+        self.artifact_total += 1
+        self.assertIsNone(self.check())
+
+    def test_duplicate_proof_jobs_deny_reuse_even_when_only_one_succeeds(self):
+        original = copy.deepcopy(self.jobs)
+        for index in (0, 1):
+            for conclusion in ("success", "skipped", "failure"):
+                with self.subTest(index=index, conclusion=conclusion):
+                    self.jobs = copy.deepcopy(original)
+                    duplicate = copy.deepcopy(self.jobs["jobs"][index])
+                    duplicate["id"] = 999
+                    duplicate["conclusion"] = conclusion
+                    self.jobs["jobs"].append(duplicate)
+                    self.jobs["total_count"] += 1
+                    self.assertIsNone(self.check())
+
+    def test_duplicate_proof_steps_deny_reuse_even_when_one_is_skipped(self):
+        original = copy.deepcopy(self.jobs)
+        for index in (0, 1):
+            for conclusion in ("success", "skipped", "failure"):
+                with self.subTest(index=index, conclusion=conclusion):
+                    self.jobs = copy.deepcopy(original)
+                    duplicate = dict(self.jobs["jobs"][index]["steps"][0],
+                                     conclusion=conclusion)
+                    self.jobs["jobs"][index]["steps"].append(duplicate)
+                    self.assertIsNone(self.check())
+
+    def test_unfinished_proof_jobs_and_steps_deny_reuse(self):
+        original = copy.deepcopy(self.jobs)
+        for index in (0, 1):
+            with self.subTest(index=index, field="job status"):
+                self.jobs = copy.deepcopy(original)
+                self.jobs["jobs"][index]["status"] = "in_progress"
+                self.assertIsNone(self.check())
+            with self.subTest(index=index, field="step status"):
+                self.jobs = copy.deepcopy(original)
+                self.jobs["jobs"][index]["steps"][0]["status"] = "in_progress"
+                self.assertIsNone(self.check())
+
+    def test_foreign_run_or_attempt_in_proof_jobs_denies_reuse(self):
+        original = copy.deepcopy(self.jobs)
+        for index in (0, 1):
+            for key, value in (("run_id", 88), ("run_attempt", 2)):
+                with self.subTest(index=index, key=key):
+                    self.jobs = copy.deepcopy(original)
+                    self.jobs["jobs"][index][key] = value
+                    self.assertIsNone(self.check())
+
+    def test_non_windows_scale_runner_denies_proof_reuse(self):
+        for labels in (["ubuntu-latest"], [], None):
+            with self.subTest(labels=labels):
+                self.jobs["jobs"][0]["labels"] = labels
+                self.assertIsNone(self.check())
 
     def test_legacy_authenticated_proof_can_revalidate_without_reindex(self):
         entries = [(x["mode"].encode(), x["sha"].encode(), x["path"].encode()) for x in self.tree]
@@ -502,6 +661,10 @@ class PriorProofTests(unittest.TestCase):
         self.run["run_attempt"] = 2
         self.proof["run_attempt"] = 2
         self.artifact["name"] = gate.artifact_name(gate.ARTIFACT, 2)
+        retry = {"total_count": 1, "jobs": [copy.deepcopy(self.jobs["jobs"][1])]}
+        retry["jobs"][0]["run_attempt"] = 2
+        self.jobs["jobs"][1]["conclusion"] = "failure"
+        self.jobs_by_attempt[2] = retry
         self.repack()
         self.assertIsNotNone(self.check())
         self.raw_artifact["name"] = gate.artifact_name(gate.RAW_ARTIFACT, 2)
@@ -524,60 +687,3 @@ class PriorProofTests(unittest.TestCase):
 if __name__ == "__main__":
     unittest.main()
 
-class PrerequisiteCoordinationTests(unittest.TestCase):
-    def test_pending_success_failure_skipped_and_missing(self):
-        import mp10c_prerequisite_wait as coordinator
-        sha = "a" * 40
-        run = {"id": 2, "run_attempt": 1, "path": ".github/workflows/ci.yml",
-               "head_sha": sha, "status": "in_progress", "conclusion": None}
-        def jobs(_):
-            return {"total_count": 2, "jobs": [
-                {"name": "Verify Windows product",
-                 "status": "completed", "conclusion": "success", "steps": [
-                    {"name": n, "conclusion": "success"} for n in
-                    ("Test", "Test hosted tunnel desktop boundaries", "Build desktop app")]},
-                {"name": "Fast Rust compile and vault feedback",
-                 "status": "completed", "conclusion": "success", "steps": [
-                    {"name": n, "conclusion": "success"} for n in
-                    ("Rust format", "Compile production core crates",
-                     "Compile available SQLCipher and vault features", "Focused security tests")]}
-            ]}
-        self.assertEqual(coordinator.classify([run], sha, False, jobs)[0], "pending")
-        success = dict(run, status="completed", conclusion="success")
-        self.assertEqual(coordinator.classify([success], sha, False, jobs)[0], "ready")
-        for conclusion in ("failure", "cancelled", "skipped"):
-            self.assertEqual(coordinator.classify([dict(success, conclusion=conclusion)],
-                             sha, False, jobs)[0], "failed")
-        self.assertEqual(coordinator.classify([], sha, False, jobs)[0], "pending")
-        self.assertEqual(coordinator.classify([dict(run, head_sha="b"*40)], sha,
-                         False, jobs)[0], "pending")
-        self.assertEqual(coordinator.classify([success], sha, False,
-                         lambda _: {"total_count": 0, "jobs": []})[0], "failed")
-
-    def test_waits_then_passes_without_premature_failure_or_loop(self):
-        import mp10c_prerequisite_wait as coordinator
-        result = iter([("pending", "running"), ("pending", "queued"), ("ready", "good")])
-        calls = []
-        coordinator.wait("owner/repo", "a"*40, 127, "test", False,
-                         timeout=60, poll=10, clock=lambda: len(calls)*10,
-                         sleep=lambda n: calls.append(n),
-                         inspect=lambda *_: next(result))
-        self.assertEqual(calls, [10, 10])
-        for state in ("failed",):
-            with self.assertRaises(ValueError):
-                coordinator.wait("owner/repo", "a"*40, 127, "test", False,
-                                 inspect=lambda *_: (state, "native failed"))
-        with self.assertRaises(TimeoutError):
-            coordinator.wait("owner/repo", "a"*40, 127, "test", False,
-                             timeout=0, inspect=lambda *_: ("pending", "missing"))
-
-    def test_superseded_sha_and_api_outage_are_never_accepted(self):
-        import mp10c_prerequisite_wait as coordinator
-        with patch.object(gate, "api_json", return_value={"state": "open",
-                "head": {"sha": "b"*40, "repo": {"full_name": "owner/repo"}}}):
-            self.assertEqual(coordinator.snapshot("owner/repo", "a"*40, 127,
-                                                  "token", False)[0], "failed")
-        with self.assertRaises(TimeoutError):
-            coordinator.wait("owner/repo", "a"*40, 127, "token", False,
-                             timeout=0,
-                             inspect=lambda *_: (_ for _ in ()).throw(OSError("api offline")))
