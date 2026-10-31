@@ -23,6 +23,9 @@ pub(super) struct NativeCaptureIpc {
     archive_root: PathBuf,
     identity: SessionDescriptor,
     active_stream: Arc<Mutex<Option<TcpStream>>>,
+    // Test-only notification from the real receiver, not a fabricated accept.
+    #[cfg(test)]
+    accepted_clients: Arc<(Mutex<u64>, std::sync::Condvar)>,
 }
 
 impl NativeCaptureIpc {
@@ -91,15 +94,40 @@ impl NativeCaptureIpc {
         let terminate = stop.clone();
         let active_stream = Arc::new(Mutex::new(None));
         let worker_active = active_stream.clone();
+        #[cfg(test)]
+        let accepted_clients = Arc::new((Mutex::new(0_u64), std::sync::Condvar::new()));
+        #[cfg(test)]
+        let worker_accepted = accepted_clients.clone();
         let thread = thread::spawn(move || {
             let mut seen = HashSet::new();
             while !terminate.load(Ordering::Acquire) {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
-                        if let Ok(active) = stream.try_clone() {
-                            *worker_active
-                                .lock()
-                                .unwrap_or_else(|error| error.into_inner()) = Some(active);
+                        // Winsock accept inherits the listener's nonblocking mode.
+                        // The frame reader requires blocking I/O to honor its
+                        // bounded read deadline on both Windows and Unix.
+                        if stream.set_nonblocking(false).is_err() {
+                            let _ = stream.shutdown(Shutdown::Both);
+                            continue;
+                        }
+                        // Never read from a socket that Drop cannot cancel.
+                        // A failed clone must deny this client, not leave an
+                        // untracked five-second read blocking receiver shutdown.
+                        let active = match stream.try_clone() {
+                            Ok(active) => active,
+                            Err(_) => {
+                                let _ = stream.shutdown(Shutdown::Both);
+                                continue;
+                            }
+                        };
+                        *worker_active
+                            .lock()
+                            .unwrap_or_else(|error| error.into_inner()) = Some(active);
+                        #[cfg(test)]
+                        {
+                            let (count, ready) = &*worker_accepted;
+                            *count.lock().unwrap_or_else(|error| error.into_inner()) += 1;
+                            ready.notify_all();
                         }
                         if terminate.load(Ordering::Acquire) {
                             let _ = stream.shutdown(Shutdown::Both);
@@ -149,6 +177,8 @@ impl NativeCaptureIpc {
             archive_root,
             identity,
             active_stream,
+            #[cfg(test)]
+            accepted_clients,
         })
     }
 }
@@ -268,26 +298,26 @@ mod qualification {
         let mut client = TcpStream::connect(("127.0.0.1", descriptor.port)).unwrap();
         client.write_all(&[1]).unwrap();
 
-        let accept_deadline = Instant::now() + Duration::from_secs(5);
-        let accepted = loop {
-            if ipc
-                .active_stream
+        // Wait on a registration event from the production accept/clone path.
+        // Polling for five seconds competes with the frame's own five-second
+        // deadline and can miss a client that was accepted then cleared.
+        let (count, ready) = &*ipc.accepted_clients;
+        let seen = count.lock().unwrap_or_else(|error| error.into_inner());
+        let (seen, _) = ready
+            .wait_timeout_while(seen, Duration::from_secs(4), |count| *count == 0)
+            .unwrap_or_else(|error| error.into_inner());
+        assert!(*seen > 0, "receiver did not register the partial client");
+        drop(seen);
+        // A partial header must keep a live reader until cancelled; it must
+        // not be discarded immediately as WouldBlock on accepted Windows TCP.
+        thread::sleep(Duration::from_millis(50));
+        assert!(
+            ipc.active_stream
                 .lock()
                 .unwrap_or_else(|error| error.into_inner())
-                .is_some()
-            {
-                break true;
-            }
-            if Instant::now() >= accept_deadline {
-                break false;
-            }
-            thread::sleep(Duration::from_millis(10));
-        };
-        assert!(
-            accepted,
-            "receiver must have accepted the partial client within 5 seconds"
+                .is_some(),
+            "receiver cleared the partial client before vault lock"
         );
-        thread::sleep(Duration::from_millis(50));
         gate.lock();
         let started = Instant::now();
         drop(ipc);
