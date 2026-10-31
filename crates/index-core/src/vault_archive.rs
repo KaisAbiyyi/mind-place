@@ -10,7 +10,7 @@ use mind_place_security::{
     vault::{ContentKind, CryptoVault},
     vault_fence::VaultWriterFence,
     vault_storage::ImmutableVaultStorage,
-    SecurityGate, UnlockLease,
+    SecurityError, SecurityGate, UnlockLease,
 };
 use mind_place_state::{CipherKey, StateStore};
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
@@ -99,13 +99,15 @@ impl VaultCaptureStore {
         {
             let _fence =
                 VaultWriterFence::writer(&store.root).map_err(|_| IndexError::InvalidEvidence)?;
-            let db = store.connection()?;
+            let mut db = store.connection()?;
             let current: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
             let app: i64 = db.query_row("PRAGMA application_id", [], |r| r.get(0))?;
             if current == 0 && app == 0 {
-                db.execute_batch(SCHEMA)?;
-                db.pragma_update(None, "application_id", APPLICATION_ID)?;
-                db.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+                let tx = db.transaction()?;
+                tx.execute_batch(SCHEMA)?;
+                tx.pragma_update(None, "application_id", APPLICATION_ID)?;
+                tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+                tx.commit()?;
             } else if current != SCHEMA_VERSION || app != APPLICATION_ID {
                 return Err(IndexError::InvalidIndex);
             }
@@ -264,15 +266,45 @@ impl VaultCaptureStore {
         if payload.len() > MAX_CAPTURE_BYTES {
             return Err(IndexError::InvalidEvidence);
         }
-        self.storage()?
-            .write_immutable(
-                &self.gate,
-                self.lease,
-                ContentKind::Archive,
-                identity.as_bytes(),
-                &payload,
-            )
-            .map_err(|_| IndexError::InvalidEvidence)?;
+        let storage = self.storage()?;
+        if let Err(error) = storage.write_immutable(
+            &self.gate,
+            self.lease,
+            ContentKind::Archive,
+            identity.as_bytes(),
+            &payload,
+        ) {
+            let collision = match &error {
+                SecurityError::Crypto => true,
+                SecurityError::Io(error) => error.kind() == std::io::ErrorKind::AlreadyExists,
+                _ => false,
+            };
+            if !collision {
+                return Err(IndexError::InvalidEvidence);
+            }
+            // A crash can publish immutable evidence before its catalog commit.
+            // Adopt only authenticated, identical normalized content; retain the
+            // original observation timestamp and never replace the raw object.
+            let previous = storage
+                .read(
+                    &self.gate,
+                    self.lease,
+                    ContentKind::Archive,
+                    identity.as_bytes(),
+                )
+                .map_err(|_| IndexError::InvalidEvidence)?;
+            let mut original: Capture =
+                serde_json::from_slice(&previous).map_err(|_| IndexError::InvalidEvidence)?;
+            validate_capture(&mut original)?;
+            let mut original_normalized = original.clone();
+            original_normalized.captured_at.clear();
+            if serde_json::to_vec(&original_normalized).map_err(|_| IndexError::InvalidEvidence)?
+                != serde_json::to_vec(&normalized).map_err(|_| IndexError::InvalidEvidence)?
+            {
+                return Err(IndexError::InvalidEvidence);
+            }
+            capture = original;
+        }
         let tx = db.transaction()?;
         tx.execute(
             "INSERT INTO vault_captures(

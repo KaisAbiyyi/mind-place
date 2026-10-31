@@ -55,7 +55,7 @@ function errorMessage(value: unknown): string {
  * The recovery code is only ever inserted with textContent. Do not persist it,
  * auto-copy it, print it, interpolate it into HTML, or unlock the legacy UI.
  */
-async function presentVaultRecovery(root: HTMLElement, invoke: Invoke, code: string): Promise<void> {
+async function presentVaultRecovery(root: HTMLElement, invoke: Invoke, code: string, onUnlocked: () => void): Promise<void> {
   root.innerHTML = `
     <main class="security-gate">
       <section class="security-card" aria-labelledby="vault-title">
@@ -91,13 +91,9 @@ async function presentVaultRecovery(root: HTMLElement, invoke: Invoke, code: str
     submit.disabled = true;
     try {
       await invoke("confirm_vault_setup", { code: confirmation });
-      // No legacy fallback. The product only becomes available after the
-      // encrypted archive and native capture adapters are qualified.
-      root.replaceChildren();
-      const note = root.ownerDocument.createElement("p");
-      note.setAttribute("role", "status");
-      note.textContent = "Your encrypted vault was created. Unlock it to access encrypted conversations. Browser capture remains disabled until authenticated native IPC is available.";
-      root.append(note);
+      // Provisioning finishes locked. Require the explicit encrypted unlock
+      // flow before the reader or any privileged adapter becomes available.
+      await mountSecurityGate({ root, invoke, onUnlocked });
     } catch {
       error.textContent = "Recovery confirmation failed. Verify the code and try again.";
       submit.disabled = false;
@@ -119,7 +115,7 @@ export async function mountSecurityGate({ root, invoke, onUnlocked }: SecurityGa
     // than opening the legacy reader or generating a replacement key.
     try {
       const pendingCode = await invoke<string>("resume_vault_setup");
-      await presentVaultRecovery(root, invoke, pendingCode);
+      await presentVaultRecovery(root, invoke, pendingCode, onUnlocked);
       return;
     } catch {
       // The owner must re-enter the password to resume provisioning.
@@ -231,7 +227,7 @@ export async function mountSecurityGate({ root, invoke, onUnlocked }: SecurityGa
       if (failure.includes("MP_VAULT_PROVISION_REQUIRED") || failure.includes("MP_VAULT_NOT_READY")) {
         try {
           const recoveryCode = await invoke<string>("begin_vault_setup", { secret });
-          await presentVaultRecovery(root, invoke, recoveryCode);
+          await presentVaultRecovery(root, invoke, recoveryCode, onUnlocked);
           return;
         } catch {
           error.textContent = "Encrypted vault setup is unavailable. No plaintext data was created.";

@@ -194,10 +194,12 @@ fn interrupted_capture_publication_reuses_only_matching_authenticated_evidence()
                 store.read(&first.id, None).unwrap().capture.captured_at,
                 "2026-10-26T03:00:00Z"
             );
-            assert!(store
-                .save(capture("2026-10-26T03:00:02Z"))
-                .unwrap()
-                .unchanged);
+            assert!(
+                store
+                    .save(capture("2026-10-26T03:00:02Z"))
+                    .unwrap()
+                    .unchanged
+            );
         }
         assert_eq!(fs::read(&object).unwrap(), ciphertext);
     }
