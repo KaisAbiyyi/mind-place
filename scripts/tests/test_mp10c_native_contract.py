@@ -297,6 +297,32 @@ class NativeContractFingerprintTests(unittest.TestCase):
             "windows",
         )
 
+    def test_indentless_yaml_sequences_are_supported_without_weakening_indentation(self):
+        source = (
+            "'on':\n"
+            "  pull_request:\n"
+            "    types:\n"
+            "    - opened\n"
+            "    - synchronize\n"
+            "jobs:\n"
+            "  candidate:\n"
+            "    needs:\n"
+            "    - plan\n"
+            "    - coordinate\n"
+            "    runs-on: ubuntu-latest\n"
+            "    steps:\n"
+            "    - name: Report\n"
+            "      run: echo ok\n"
+        )
+        document = native_contract.parse_workflow_yaml(
+            source, source_path=native_contract.PRODUCT_WORKFLOW)
+        self.assertEqual(
+            document["on"]["pull_request"]["types"], ["opened", "synchronize"])
+        self.assertEqual(
+            document["jobs"]["candidate"]["needs"], ["plan", "coordinate"])
+        self.assertEqual(
+            document["jobs"]["candidate"]["steps"][0]["name"], "Report")
+
     def test_multiline_quoted_yaml_and_strict_path_diagnostics(self):
         source = (
             "jobs:\n"

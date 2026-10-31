@@ -320,8 +320,15 @@ def _yaml_parse_entry(value_text: str, pos: int, key_indent: int,
             pos += 1
         return value, pos
     if value_text == "":
-        if pos < len(tokens) and tokens[pos]["indent"] > key_indent:
-            return _yaml_parse_block(raw_lines, tokens, pos, tokens[pos]["indent"])
+        if pos < len(tokens):
+            next_token = tokens[pos]
+            indentless_sequence = (
+                next_token["indent"] == key_indent
+                and (next_token["text"] == "-" or next_token["text"].startswith("- "))
+            )
+            if next_token["indent"] > key_indent or indentless_sequence:
+                return _yaml_parse_block(
+                    raw_lines, tokens, pos, next_token["indent"])
         return None, pos
     return _yaml_scalar(value_text), pos
 
