@@ -12,15 +12,23 @@ import subprocess
 import sys
 import urllib.request
 
-POLICY = "mp-native-contract/v2"
+POLICY = "mp-native-contract/v3"
 EVIDENCE_SCHEMA = "mind-place-native-evidence/v1"
 CI_WORKFLOW = ".github/workflows/ci.yml"
 SQLCIPHER_WORKFLOW = ".github/workflows/mp9b-sqlcipher-qualification.yml"
+PRODUCT_WORKFLOW = ".github/workflows/windows-product.yml"
 
-# Explicit candidate policy: PR 127 is MP-9B vault; PR 129 is CI infrastructure.
+# Explicit candidate policy. The separated Windows Product workflow is used
+# only by PRs 131/132; earlier candidates retain the integrated CI contract.
 CANDIDATE_REQUIREMENTS = {
     ("KaisAbiyyi/mind-place", 127): ("mp9b-vault", True),
     ("KaisAbiyyi/mind-place", 129): ("mp-ci-100k-infrastructure", False),
+    ("KaisAbiyyi/mind-place", 131): ("mp-ci-win-policy", False),
+    ("KaisAbiyyi/mind-place", 132): ("mp-p0-integration", True),
+}
+SEPARATED_PRODUCT_CANDIDATES = {
+    ("KaisAbiyyi/mind-place", 131),
+    ("KaisAbiyyi/mind-place", 132),
 }
 DEFAULT_REQUIREMENT = ("ordinary-non-vault-pr", False)
 
@@ -501,7 +509,7 @@ OPTIONAL_FILES = {
     "index.html", "vite.config.ts", "vite.config.js", "tsconfig.json", "tsconfig.node.json",
 }
 INPUT_PREFIXES = (
-    ".cargo/", ".github/actions/", "crates/", "src/", "src-tauri/", "test/", "scripts/",
+    ".cargo/", ".github/actions/", ".github/windows-policy/", "crates/", "src/", "src-tauri/", "test/", "scripts/",
     "extension/", "public/",
 )
 OPTIONAL_ROOT_PREFIXES = ("vite.config.", "tsconfig.", "postcss.config.", "tailwind.config.")
@@ -515,6 +523,12 @@ def candidate_requirement(repo: str, pr: int) -> tuple[str, bool]:
 
 def requires_sqlcipher(repo: str, pr: int) -> bool:
     return candidate_requirement(repo, pr)[1]
+
+
+def requires_separated_product(repo: str, pr: int) -> bool:
+    if not isinstance(repo, str) or not repo or type(pr) is not int or pr <= 0:
+        raise ValueError("Invalid native candidate identity")
+    return (repo, pr) in SEPARATED_PRODUCT_CANDIDATES
 
 
 def _tree_entries(root: str, revision: str) -> list[tuple[str, str, str]]:
@@ -542,8 +556,16 @@ def native_contract_manifest(root: str = ".", repo: str = "KaisAbiyyi/mind-place
     entries = _tree_entries(root, revision)
     by_path = {path: (mode, oid) for path, mode, oid in entries}
     required = set(REQUIRED_FILES)
+    separated_product = requires_separated_product(repo, pr)
     if sqlcipher_required:
         required.add(SQLCIPHER_WORKFLOW)
+    if separated_product:
+        required.update({
+            PRODUCT_WORKFLOW,
+            ".github/windows-policy/config.example.json",
+            ".github/windows-policy/native-steps.json",
+            ".github/windows-policy/verifier.yml",
+        })
     missing = sorted(required - set(by_path))
     if missing:
         raise ValueError("Missing required native execution inputs: " + ", ".join(missing))
@@ -555,11 +577,12 @@ def native_contract_manifest(root: str = ".", repo: str = "KaisAbiyyi/mind-place
             or path.startswith(INPUT_PREFIXES)
             or (path.startswith(OPTIONAL_ROOT_PREFIXES) and "/" not in path)
             or (sqlcipher_required and path == SQLCIPHER_WORKFLOW)
+            or (separated_product and path == PRODUCT_WORKFLOW)
         )
         if not include:
             continue
         content = subprocess.check_output(["git", "cat-file", "blob", oid], cwd=root)
-        if path in {CI_WORKFLOW, SQLCIPHER_WORKFLOW}:
+        if path in {CI_WORKFLOW, SQLCIPHER_WORKFLOW, PRODUCT_WORKFLOW}:
             content = canonical_workflow_signature(content)
         selected.append({
             "path": path, "mode": mode, "sha256": hashlib.sha256(content).hexdigest(),
