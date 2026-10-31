@@ -137,6 +137,9 @@ jobs:
       - name: Generate canonical third-party notices resource
         if: always()
         run: node scripts/generate-notices.mjs
+      - name: Build frontend assets required by Tauri test build
+        if: always()
+        run: npm run build:web
       - name: Native capture IPC qualification
         if: always()
         run: cargo test -p mind-place --bin mind-place native_capture_ipc::qualification -- --nocapture
