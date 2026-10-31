@@ -265,7 +265,7 @@ fn interrupted_capture_publication_reuses_only_matching_authenticated_evidence()
             let selected: String = db
                 .query_row(
                     "SELECT snapshot_id FROM vault_current_snapshots WHERE archive_id=?1",
-                    &first.id,
+                    (&first.id,),
                     |row| row.get(0),
                 )
                 .unwrap();

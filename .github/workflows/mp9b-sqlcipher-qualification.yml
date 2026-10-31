@@ -93,6 +93,21 @@ jobs:
       - name: Encrypted vault migration restart regressions
         if: always()
         run: cargo test --locked -p mind-place-index --features sqlcipher-preview --test vault_migration_restart -- --nocapture
+      - name: Install Tauri Linux build dependencies
+        if: always() && runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libglib2.0-dev \
+            librsvg2-dev \
+            libayatana-appindicator3-dev
       - name: Native capture IPC qualification
         if: always()
         run: cargo test -p mind-place --bin mind-place native_capture_ipc::qualification -- --nocapture
