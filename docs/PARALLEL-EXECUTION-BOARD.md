@@ -2,6 +2,19 @@
 
 **Last coordinated baseline:** 2026-10-21. This supplements [the BIG plan](BIG-IMPLEMENTATION-PLAN.md) and [current phase](implementation-plan/CURRENT-PHASE.md); it does **not** replace acceptance gates or rewrite historical status. Read [agent orchestration policy](AGENT-ORCHESTRATION.md).
 
+## P0 · Repository governance — MP-GOV-01..04 (31 October 2026)
+
+The current repository policy is **owner-controlled manual merge**. Agents may implement and test on isolated branches or contributor-owned forks; AI review is read-only and advisory; only the repository owner approves and manually merges. GitHub Auto-merge, merge queues, custom Merge Brokers, autonomous merge, and bot/AI/App bypass actors are not authorized.
+
+- **MP-GOV-01 / #136:** prepare the exact main-branch admission policy, canonical governance updates, owner runbook, and negative-test matrix. [Notion task](https://app.notion.com/p/409c4a6aaf738181bd96e5e7ea0583fa).
+- **MP-GOV-02 / #137:** audit fork-PR workflow trust boundaries. This must be accepted before MP-GOV-04 applies the branch policy.
+- **MP-GOV-03 / #138:** harden read-only AI review and prompt-injection boundaries. It is required before connecting an AI reviewer to GitHub, but is not a technical prerequisite for the owner applying branch protection.
+- **MP-GOV-04 / #139:** owner-only apply/readback gate. It remains an Owner Gate until MP-GOV-01 and MP-GOV-02 are accepted and the owner applies and verifies the settings.
+
+Read-only baseline at main SHA efe91155d37d8b1ca0608fe3bd862be311fed004: main.protected=false, classic required-check enforcement off, repository ruleset inventory empty, and repository Auto-merge disabled. The full classic-protection endpoint was not readable by the connected integration (HTTP 403); this is not evidence that additional settings exist. **Do not claim main is protected until MP-GOV-04 exact readback succeeds.**
+
+The exact candidate settings, check-source evidence, owner-identity caveat, administrator/root-of-trust limitation, and disposable-repository negative-test matrix are in [the MP-GOV-01 owner runbook](governance/OWNER-MANUAL-MERGE-RUNBOOK.md). This is repository governance, not a product-phase completion or authorization to merge any current PR.
+
 ## P0 · License migration — MP-LIC-00 (22 October 2026)
 
 **TOP PRIORITY / NOW — CLAIMED by ChatGPT Cloud on 2026-10-22, `feat/mp-lic-00-mit-relicense`; acceptance pending rights/compatibility + PR CI.** [Issue #33](https://github.com/KaisAbiyyi/mind-place/issues/33) and the [Notion task](https://app.notion.com/p/401c4a6aaf7381778e6fe0d3ed83da62) track the **AGPLv3 → MIT** migration for future Mind Place releases. Root `LICENSE` on `main` at claim baseline declares GNU AGPLv3; the dedicated branch proposes MIT pending approval. Before changing it, audit contributor copyrights, upstream/vendored content, assets and dependency notices; secure permission or rewrite code that cannot be relicensed. Update MIT LICENSE, SPDX/package metadata, README, legal/installer notices, CI checks and release notes together. Existing AGPL-licensed releases keep their historical license grants. Do **not** mark done from a mere file replacement.
@@ -113,6 +126,6 @@ Historical Cloud 1A–1E, 2A–2D, 3A–3F are merged (3E #14: `5546504`; 3F #17
 
 ## Task output contract
 
-Every unit must conclude with `TASK_ID, CLAIM, OWNER, BASE_SHA, BRANCH, REMOTE_CHECKPOINT_SHA, PR, CHECKS, CHANGED_LOGICAL_RESOURCES, NEXT, LOCAL_REQUIRED, HUMAN_REQUIRED`. Only reviewed CI-green code merges. If the agent/browser/quota stops before push, report **UNPUSHED_WORK_AT_RISK** and favor resuming its original workspace. Avoid changing a live private archive during cloud tests. No phase is accepted until all planned C/L/U gates for that phase succeed.
+Every unit must conclude with `TASK_ID, CLAIM, OWNER, BASE_SHA, BRANCH, REMOTE_CHECKPOINT_SHA, PR, CHECKS, CHANGED_LOGICAL_RESOURCES, NEXT, LOCAL_REQUIRED, HUMAN_REQUIRED`. Only owner-approved, CI-green pull requests may be manually merged by the repository owner; agent merge, Auto-merge, merge queues, and Brokers are not authorized. If the agent/browser/quota stops before push, report **UNPUSHED_WORK_AT_RISK** and favor resuming its original workspace. Avoid changing a live private archive during cloud tests. No phase is accepted until all planned C/L/U gates for that phase succeed.
 
 Historical tasks are retained in the BIG plan rather than being duplicated as available claims here.
