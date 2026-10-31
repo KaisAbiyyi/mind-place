@@ -710,31 +710,61 @@ def require_prerequisites(runs: list[dict], candidate: dict, *, repo: str,
     """Accept only exact PR/base/head-bound native runs with same-run provenance."""
     if native_contract.requires_sqlcipher(repo, candidate["pr"]) is not vault:
         raise ValueError("Candidate SQLCipher policy mismatch")
-    required = {
-        ".github/workflows/ci.yml": {
-            "Fast developer feedback": (
-                "Install dependencies", "Verify repository contract", "Typecheck",
-                "Test reader and browser contracts", "Build reader",
-                "Validate document qualification gate policy"),
-            "Fast Rust compile and vault feedback": (
-                "Install pinned Rust 1.90", "Rust format", "Compile production core crates",
-                "Compile available SQLCipher and vault features", "Focused security tests"),
+    separated_product = native_contract.requires_separated_product(repo, candidate["pr"])
+    ci_jobs = {
+        "Fast developer feedback": (
+            "Install dependencies", "Verify repository contract", "Typecheck",
+            "Test reader and browser contracts", "Build reader",
+            "Validate document qualification gate policy"),
+        "Fast Rust compile and vault feedback": (
+            "Install pinned Rust 1.90", "Rust format", "Compile production core crates",
+            "Compile available SQLCipher and vault features", "Focused security tests"),
+        "Native execution evidence": (
+            "Capture native execution provenance", "Upload native execution evidence"),
+    }
+    required = {native_contract.CI_WORKFLOW: ci_jobs}
+    if separated_product:
+        required[native_contract.CI_WORKFLOW]["Fast developer feedback"] += (
+            "Validate Windows qualification policy",
+        )
+        required[native_contract.PRODUCT_WORKFLOW] = {
+            "Windows source and execution decision": (
+                "Checkout policy candidate", "Decide Windows execution"),
+            "Await exact-source authority on Ubuntu": (
+                "Checkout policy candidate",
+                "Bounded authority coordination before allocating Windows"),
             "Verify Windows product": (
-                "Setup Node.js", "Setup Rust 1.90", "Install dependencies",
-                "Check Rust formatting", "Verify repository contract", "Typecheck",
-                "Visual Settings scroll and footer regression", "Qualify bundled SQLite runtime",
-                "Test", "Stage capture sidecar for native desktop tests",
+                "Checkout", "Recheck after Windows slot", "Setup Node.js",
+                "Setup Rust 1.90", "Install dependencies", "Check Rust formatting",
+                "Verify repository contract", "Typecheck",
+                "Visual Settings scroll and footer regression",
+                "Qualify bundled SQLite runtime", "Test",
+                "Stage capture sidecar for native desktop tests",
                 "Qualify Phase 3E simulated MCP and revocation boundary",
                 "Test hosted tunnel desktop boundaries", "Build desktop app",
-                "Verify portable MIT license and third-party notices"),
-            "Native execution evidence": (
-                "Capture native execution provenance", "Upload native execution evidence"),
+                "Verify portable MIT license and third-party notices",
+                "Record native proof", "Upload native proof"),
+            "Windows Product / candidate result": ("Report actual execution boundary",),
         }
-    }
+    else:
+        required[native_contract.CI_WORKFLOW]["Verify Windows product"] = (
+            "Setup Node.js", "Setup Rust 1.90", "Install dependencies",
+            "Check Rust formatting", "Verify repository contract", "Typecheck",
+            "Visual Settings scroll and footer regression", "Qualify bundled SQLite runtime",
+            "Test", "Stage capture sidecar for native desktop tests",
+            "Qualify Phase 3E simulated MCP and revocation boundary",
+            "Test hosted tunnel desktop boundaries", "Build desktop app",
+            "Verify portable MIT license and third-party notices",
+        )
     if vault:
-        required[".github/workflows/ci.yml"]["Verify Windows product"] += (
-            "Qualify native capture encrypted IPC and revoked owner epoch",)
-        required[".github/workflows/mp9b-sqlcipher-qualification.yml"] = {
+        product_path = (
+            native_contract.PRODUCT_WORKFLOW if separated_product
+            else native_contract.CI_WORKFLOW
+        )
+        required[product_path]["Verify Windows product"] += (
+            "Qualify native capture encrypted IPC and revoked owner epoch",
+        )
+        required[native_contract.SQLCIPHER_WORKFLOW] = {
             "SQLCipher / ubuntu-24.04": (
                 "Check Rust formatting", "Encrypted state/index and FTS regression",
                 "Keyed MCP synthetic authorization and revocation",
