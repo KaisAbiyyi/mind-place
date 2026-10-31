@@ -111,11 +111,9 @@ impl NativeCaptureIpc {
                         let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
                         let result = (|| -> Result<serde_json::Value, ()> {
                             security.validate_lease(lease).map_err(|_| ())?;
-                            let signed = read_frame_with_timeout(
-                                &mut stream,
-                                Duration::from_secs(5),
-                            )
-                            .map_err(|_| ())?;
+                            let signed =
+                                read_frame_with_timeout(&mut stream, Duration::from_secs(5))
+                                    .map_err(|_| ())?;
                             let capture = signed.authenticate(&token, &mut seen).map_err(|_| ())?;
                             // Lock and owner-state grants acquire this same
                             // gate, so no IPC capture can commit *after* lock

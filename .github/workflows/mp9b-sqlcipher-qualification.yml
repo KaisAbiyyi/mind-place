@@ -90,6 +90,12 @@ jobs:
       - name: Portable backup and filesystem publication regressions
         if: always()
         run: cargo test --locked -p mind-place-security vault_backup -- --nocapture
+      - name: Encrypted vault migration restart regressions
+        if: always()
+        run: cargo test --locked -p mind-place-index --features sqlcipher-preview --test vault_migration_restart -- --nocapture
+      - name: Native capture IPC qualification
+        if: always()
+        run: cargo test -p mind-place --bin mind-place native_capture_ipc::qualification -- --nocapture
       - name: Check Rust formatting
         if: always()
         run: cargo fmt --all -- --check

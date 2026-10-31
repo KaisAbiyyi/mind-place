@@ -226,7 +226,9 @@ fn interrupted_capture_publication_reuses_only_matching_authenticated_evidence()
             .query_row("SELECT count(*) FROM vault_captures", [], |row| row.get(0))
             .unwrap();
         let pointer_rows: i64 = db
-            .query_row("SELECT count(*) FROM vault_current_snapshots", [], |row| row.get(0))
+            .query_row("SELECT count(*) FROM vault_current_snapshots", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         let orphaned_pointers: i64 = db
             .query_row(
