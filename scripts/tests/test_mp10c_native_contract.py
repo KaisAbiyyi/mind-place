@@ -599,7 +599,8 @@ class NativeIdentityAndPrerequisiteTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.require()
 
-    def _require_sqlcipher_with_runner_labels(self, ubuntu_labels, windows_labels):
+    def _require_sqlcipher_with_runner_labels(self, ubuntu_labels, windows_labels,
+                                              ipc_conclusion="success"):
         cand = candidate(127, head_repo=REPO, base_repo=REPO)
         ci_run = native_run(cand, run_id=110)
         sql_run = native_run(cand, run_id=111, path=native_contract.SQLCIPHER_WORKFLOW)
@@ -612,6 +613,11 @@ class NativeIdentityAndPrerequisiteTests(unittest.TestCase):
             job("SQLCipher / ubuntu-24.04", sql_steps, labels=ubuntu_labels),
             job("SQLCipher / windows-2022", sql_steps, labels=windows_labels),
         ]
+        if ipc_conclusion is not None:
+            self.jobs[2]["steps"].append({
+                "name": "Qualify native capture encrypted IPC and revoked owner epoch",
+                "status": "completed", "conclusion": ipc_conclusion,
+            })
         by_run = {ci_run["id"]: self.jobs, sql_run["id"]: sql_jobs}
         sql_source = (
             "jobs:\n"
@@ -643,6 +649,18 @@ class NativeIdentityAndPrerequisiteTests(unittest.TestCase):
             "workflow_sources": sources,
         }
         gate.require_prerequisites([ci_run, sql_run], cand, **args)
+
+    def test_vault_native_capture_ipc_success_is_accepted(self):
+        self._require_sqlcipher_with_runner_labels(
+            ["ubuntu-24.04"], ["windows-2022"])
+
+    def test_vault_native_capture_ipc_cannot_be_missing_or_skipped(self):
+        for conclusion in (None, "skipped", "failure", "cancelled"):
+            with self.subTest(conclusion=conclusion), self.assertRaisesRegex(
+                    ValueError, "native capture encrypted IPC"):
+                self.setUp()
+                self._require_sqlcipher_with_runner_labels(
+                    ["ubuntu-24.04"], ["windows-2022"], ipc_conclusion=conclusion)
 
     def test_sqlcipher_windows_job_on_ubuntu_is_rejected(self):
         with self.assertRaises(ValueError):

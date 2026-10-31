@@ -661,9 +661,9 @@ class PriorProofTests(unittest.TestCase):
         self.run["run_attempt"] = 2
         self.proof["run_attempt"] = 2
         self.artifact["name"] = gate.artifact_name(gate.ARTIFACT, 2)
-        retry = copy.deepcopy(self.jobs)
-        for job in retry["jobs"]:
-            job["run_attempt"] = 2
+        retry = {"total_count": 1, "jobs": [copy.deepcopy(self.jobs["jobs"][1])]}
+        retry["jobs"][0]["run_attempt"] = 2
+        self.jobs["jobs"][1]["conclusion"] = "failure"
         self.jobs_by_attempt[2] = retry
         self.repack()
         self.assertIsNotNone(self.check())
