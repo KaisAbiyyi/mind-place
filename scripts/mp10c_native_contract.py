@@ -253,6 +253,45 @@ def _yaml_quote_end(text: str, quote: str, start: int = 1) -> int | None:
     return None
 
 
+def _yaml_decode_double_quoted(value: str) -> str:
+    """Decode YAML 1.2 double-quoted escapes (including escaped spaces and Unicode)."""
+    escapes = {
+        "0": "\0", "a": "\a", "b": "\b", "t": "\t", "\t": "\t",
+        "n": "\n", "v": "\v", "f": "\f", "r": "\r", "e": "\x1b",
+        " ": " ", '"': '"', "/": "/", "\\": "\\",
+        "N": "\u0085", "_": "\u00a0", "L": "\u2028", "P": "\u2029",
+    }
+    result = []
+    index = 0
+    while index < len(value):
+        char = value[index]
+        if char != "\\":
+            result.append(char)
+            index += 1
+            continue
+        index += 1
+        if index >= len(value):
+            raise ValueError("Trailing escape in YAML double-quoted scalar")
+        escape = value[index]
+        if escape in escapes:
+            result.append(escapes[escape])
+            index += 1
+            continue
+        if escape in {"x", "u", "U"}:
+            width = {"x": 2, "u": 4, "U": 8}[escape]
+            digits = value[index + 1:index + 1 + width]
+            if len(digits) != width or not re.fullmatch(r"[0-9A-Fa-f]+", digits):
+                raise ValueError("Malformed Unicode escape in YAML double-quoted scalar")
+            codepoint = int(digits, 16)
+            if codepoint > 0x10FFFF or 0xD800 <= codepoint <= 0xDFFF:
+                raise ValueError("Invalid Unicode scalar in YAML double-quoted scalar")
+            result.append(chr(codepoint))
+            index += width + 1
+            continue
+        raise ValueError("Unsupported YAML double-quoted escape: \\" + escape)
+    return "".join(result)
+
+
 def _yaml_multiline_quoted(raw_lines: list[str], header_line: int,
                            parent_indent: int, value_text: str) -> tuple[str, int]:
     """Read a valid multiline single/double-quoted YAML scalar without losing indentation."""
@@ -303,11 +342,11 @@ def _yaml_multiline_quoted(raw_lines: list[str], header_line: int,
     if quote == "'":
         return folded.replace("''", "'"), cursor
     try:
-        return json.loads('"' + folded + '"'), cursor
-    except json.JSONDecodeError as error:
+        return _yaml_decode_double_quoted(folded), cursor
+    except ValueError as error:
         raise ValueError(
             "Invalid multiline double-quoted YAML scalar at line "
-            + str(header_line + 1)) from error
+            + str(header_line + 1) + ": " + str(error)) from error
 
 
 def _yaml_parse_entry(value_text: str, pos: int, key_indent: int,
