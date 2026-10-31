@@ -1,6 +1,8 @@
 name: MP-9B SQLCipher native qualification
 
 on:
+  push:
+    branches: [feat/mp-9b-encrypted-vault-cloud-20261025]
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
     paths:
@@ -21,7 +23,7 @@ jobs:
     name: SQLCipher / ${{ matrix.os }}
     # Draft work receives fast feedback through CI. Keep native SQLCipher
     # qualification mandatory on Ready for Review and subsequent ready pushes.
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    if: github.event_name != 'push' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     strategy:
       fail-fast: false
       matrix:
@@ -46,3 +48,31 @@ jobs:
         run: cargo test --locked -p mind-place-integration --features vault-mcp --test mcp_vault -- --nocapture
       - name: Vault and backup adversarial regression
         run: cargo test --locked -p mind-place-security -- --nocapture
+
+  foundation-regressions:
+    name: Bounded vault regressions / ${{ matrix.os }} (NOT Product qualification)
+    if: github.event_name == 'push'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    env:
+      CARGO_INCREMENTAL: '0'
+      CARGO_BUILD_JOBS: '2'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust 1.90
+        shell: bash
+        run: |
+          rustup toolchain install 1.90.0 --profile minimal --component rustfmt --no-self-update
+          rustup default 1.90.0
+      - name: Capture publication and coherent backup regressions
+        run: cargo test --locked -p mind-place-index --features sqlcipher-preview --test vault_capture_encrypted --test vault_online_backup --test vault_backup_consistency --test sqlcipher_index_backup -- --nocapture
+      - name: Portable backup and filesystem publication regressions
+        if: always()
+        run: cargo test --locked -p mind-place-security vault_backup -- --nocapture
+      - name: Check Rust formatting
+        if: always()
+        run: cargo fmt --all -- --check
