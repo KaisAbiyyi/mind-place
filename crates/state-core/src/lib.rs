@@ -1,12 +1,15 @@
 use fs2::FileExt;
+use mind_place_security::vault_fence::VaultWriterFence;
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension, TransactionBehavior};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{
     fs::{self, File, OpenOptions},
+    ops::{Deref, DerefMut},
     path::{Path, PathBuf},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
+mod cipher;
 mod clients;
 mod document_objects;
 mod document_roots;
@@ -17,6 +20,8 @@ mod memory_inspection;
 mod memory_ranking;
 mod memory_writes;
 mod ntfs;
+#[cfg(feature = "sqlcipher-preview")]
+pub mod vault_bootstrap;
 pub use clients::{ClientAuditEvent, ClientCapability, ClientRecord};
 pub use document_objects::{
     DocumentMetadata, DocumentObjectStore, DocumentPreserveReceipt, DocumentVersion,
@@ -45,6 +50,7 @@ const MIGRATION_V6: &str = include_str!("schema_v6.sql");
 const MIGRATION_V7: &str = include_str!("schema_v7.sql");
 const MIGRATION_V8: &str = include_str!("schema_v8.sql");
 const MIGRATION_V9: &str = include_str!("schema_v9.sql");
+pub use cipher::CipherKey;
 pub type Result<T> = std::result::Result<T, StateError>;
 
 #[derive(Debug, thiserror::Error)]
@@ -101,6 +107,25 @@ impl StateError {
 #[derive(Clone, Debug)]
 pub struct StateStore {
     path: PathBuf,
+    cipher_key: Option<std::sync::Arc<CipherKey>>,
+}
+
+/// Holds the encrypted vault's shared writer lease for the entire SQLite
+/// operation/transaction. No extra file lock on legacy plaintext state.
+struct FencedStateConnection {
+    db: Connection,
+    _writer: Option<VaultWriterFence>,
+}
+impl Deref for FencedStateConnection {
+    type Target = Connection;
+    fn deref(&self) -> &Connection {
+        &self.db
+    }
+}
+impl DerefMut for FencedStateConnection {
+    fn deref_mut(&mut self) -> &mut Connection {
+        &mut self.db
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Project {
@@ -168,15 +193,42 @@ impl StateStore {
     /// Call only after authorized unlock. Never wipe, recreate, or auto-repair
     /// an existing unknown/corrupt/future-schema database.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        Self::open_internal(path, None)
+    }
+    /// Encrypted vaults only. Caller must validate unlock epoch before and after usage.
+    pub fn open_encrypted(
+        path: impl AsRef<Path>,
+        raw_key: [u8; 32],
+        gate: &mind_place_security::SecurityGate,
+        lease: mind_place_security::UnlockLease,
+    ) -> Result<Self> {
+        Self::open_internal(path, Some(CipherKey::new(raw_key, gate, lease)))
+    }
+    fn open_internal(
+        path: impl AsRef<Path>,
+        cipher_key: Option<std::sync::Arc<CipherKey>>,
+    ) -> Result<Self> {
         if rusqlite::version_number() < MIN_SQLITE_NUMBER {
             return Err(StateError::SqliteTooOld);
         }
         let path = path.as_ref().to_owned();
         let parent = path.parent().ok_or(StateError::UnsafePath)?;
         safe_path(parent)?;
+        // A recognized encrypted-vault root must never fall back to plaintext
+        // SQLite, even when its database has not yet been created.
+        if cipher_key.is_none() && parent.join("vault-v1.json").exists() {
+            return Err(StateError::Corrupt);
+        }
         fs::create_dir_all(parent)?;
         safe_path(parent)?;
         safe_path(&path)?;
+        // A keyed vault initializer may create/migrate schema. Participate in
+        // the same cross-process writer fence as immutable objects and backups.
+        let _writer_guard = if cipher_key.is_some() && parent.join("vault-v1.json").exists() {
+            Some(VaultWriterFence::writer(parent).map_err(|_| StateError::Corrupt)?)
+        } else {
+            None
+        };
         let lock_path = parent.join(".state-schema.lock");
         safe_path(&lock_path)?;
         let lock = OpenOptions::new()
@@ -192,6 +244,9 @@ impl StateStore {
                 &path,
                 OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
             )?;
+            if let Some(key) = cipher_key.as_ref() {
+                key.unlock(&ro)?;
+            }
             identity(&ro)?;
             let version = user_version(&ro)?;
             if version > SCHEMA_VERSION {
@@ -209,6 +264,9 @@ impl StateStore {
                 | OpenFlags::SQLITE_OPEN_CREATE
                 | OpenFlags::SQLITE_OPEN_NOFOLLOW,
         )?;
+        if let Some(key) = cipher_key.as_ref() {
+            key.unlock(&db)?;
+        }
         db.busy_timeout(Duration::from_secs(5))?;
         db.pragma_update(None, "foreign_keys", "ON")?;
         db.pragma_update(None, "journal_mode", "WAL")?;
@@ -218,6 +276,11 @@ impl StateStore {
         }
         let previous_version = user_version(&db)?;
         if previous_version < SCHEMA_VERSION {
+            if existed && cipher_key.is_some() {
+                // Encrypted schema migrations require separately consented staging;
+                // ordinary snapshots would leak plaintext.
+                return Err(StateError::Corrupt);
+            }
             if existed {
                 backup(&db, parent, previous_version)?;
             }
@@ -293,17 +356,83 @@ impl StateStore {
         validate(&db)?;
         drop(db);
         FileExt::unlock(&lock)?;
-        Ok(Self { path })
+        Ok(Self { path, cipher_key })
     }
+    /// Create a consistent, still-encrypted snapshot of the authoritative state,
+    /// including committed WAL content, using SQLite's Online Backup API.
+    ///
+    /// This is a single-database primitive, NOT an atomic cross-database/object
+    /// vault backup. A higher-level owner-authorized coordinator must fence all
+    /// writers, capture every database/object at the same generation, and then
+    /// package the verified results. It never reads or mutates legacy plaintext.
+    #[cfg(feature = "sqlcipher-preview")]
+    pub fn create_encrypted_online_snapshot(&self, destination: impl AsRef<Path>) -> Result<()> {
+        use rusqlite::backup::Backup;
+        use std::io::Read;
+
+        let key = self.cipher_key.as_ref().ok_or(StateError::Corrupt)?;
+        let destination = destination.as_ref();
+        let parent = destination.parent().ok_or(StateError::UnsafePath)?;
+        safe_path(parent)?;
+        safe_path(destination)?;
+        if destination == self.path || !parent.is_dir() {
+            return Err(StateError::UnsafePath);
+        }
+
+        // Exclusive creation ensures no existing owner backup can be overwritten.
+        // On failure, the staged output remains for explicit owner disposition.
+        // Its destination pager is keyed *before* any SQLite pages are copied.
+        let source = self.read_connection()?;
+        let placeholder = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(destination)?;
+        placeholder.sync_all()?;
+        drop(placeholder);
+        let mut target = Connection::open_with_flags(
+            destination,
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+        )?;
+        key.unlock(&target)?;
+        {
+            let backup = Backup::new(&source, &mut target)?;
+            backup.run_to_completion(64, Duration::from_millis(50), None)?;
+        }
+        // Verify real schema and active keyed codec, not just an opaque header.
+        key.unlock(&target)?;
+        validate(&target)?;
+        let health: String = target.query_row("PRAGMA quick_check(1)", [], |row| row.get(0))?;
+        if health != "ok" {
+            return Err(StateError::Corrupt);
+        }
+        drop(target);
+        drop(source);
+        let mut first = [0u8; 16];
+        File::open(destination)?.read_exact(&mut first)?;
+        if &first == b"SQLite format 3\0" {
+            return Err(StateError::Corrupt);
+        }
+        Ok(())
+    }
+
     pub fn path(&self) -> &Path {
         &self.path
     }
-    fn connection(&self) -> Result<Connection> {
+    fn connection(&self) -> Result<FencedStateConnection> {
         safe_path(&self.path)?;
+        let parent = self.path.parent().ok_or(StateError::UnsafePath)?;
+        let writer = if self.cipher_key.is_some() && parent.join("vault-v1.json").exists() {
+            Some(VaultWriterFence::writer(parent).map_err(|_| StateError::Corrupt)?)
+        } else {
+            None
+        };
         let db = Connection::open_with_flags(
             &self.path,
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
         )?;
+        if let Some(key) = self.cipher_key.as_ref() {
+            key.unlock(&db)?;
+        }
         db.busy_timeout(Duration::from_secs(5))?;
         db.pragma_update(None, "foreign_keys", "ON")?;
         db.pragma_update(None, "synchronous", "FULL")?;
@@ -311,7 +440,10 @@ impl StateStore {
         if user_version(&db)? != SCHEMA_VERSION {
             return Err(StateError::Corrupt);
         }
-        Ok(db)
+        Ok(FencedStateConnection {
+            db,
+            _writer: writer,
+        })
     }
     /// Fresh authority snapshot for hot read-only checks. Do not configure a
     /// writable WAL connection (and its close/checkpoint work) for each poll.
@@ -321,6 +453,9 @@ impl StateStore {
             &self.path,
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
         )?;
+        if let Some(key) = self.cipher_key.as_ref() {
+            key.unlock(&db)?;
+        }
         db.busy_timeout(Duration::from_secs(5))?;
         identity(&db)?;
         if user_version(&db)? != SCHEMA_VERSION {

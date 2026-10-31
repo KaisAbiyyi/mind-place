@@ -5,15 +5,21 @@ use crate::{configure, safe_path, IndexError, Result};
 use mind_place_documents::{
     extract_with_check, DocumentFormat, ExtractionError, ExtractionLimits, EXTRACTOR_REVISION,
 };
+use mind_place_security::{
+    vault::CryptoVault, vault_fence::VaultWriterFence, SecurityGate, UnlockLease,
+};
 use mind_place_state::{
-    DocumentObjectStore, DocumentScanner, ScanPolicy, StateError, StateStore, VirtualDocumentPath,
+    CipherKey, DocumentObjectStore, DocumentScanner, ScanPolicy, StateError, StateStore,
+    VirtualDocumentPath,
 };
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension, TransactionBehavior};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{
     fs,
+    ops::{Deref, DerefMut},
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 const APPLICATION_ID: i64 = 0x4D504446; // MPDF; never confused with conversation index.
@@ -33,6 +39,36 @@ CREATE TABLE document_meta(root_id TEXT PRIMARY KEY, generation INTEGER NOT NULL
 #[derive(Clone, Debug)]
 pub struct DocumentIndex {
     path: PathBuf,
+    cipher_key: Option<std::sync::Arc<CipherKey>>,
+    vault_documents: Option<VaultDocumentBinding>,
+}
+#[derive(Clone)]
+struct VaultDocumentBinding {
+    root: PathBuf,
+    vault: Arc<CryptoVault>,
+    gate: SecurityGate,
+    lease: UnlockLease,
+}
+impl std::fmt::Debug for VaultDocumentBinding {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("VaultDocumentBinding([redacted])")
+    }
+}
+
+struct FencedDocumentConnection {
+    db: Connection,
+    _writer: Option<VaultWriterFence>,
+}
+impl Deref for FencedDocumentConnection {
+    type Target = Connection;
+    fn deref(&self) -> &Connection {
+        &self.db
+    }
+}
+impl DerefMut for FencedDocumentConnection {
+    fn deref_mut(&mut self) -> &mut Connection {
+        &mut self.db
+    }
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
@@ -114,11 +150,84 @@ fn verify_document_database(db: &Connection, check_integrity: bool) -> Result<()
 impl DocumentIndex {
     /// Separate from the v1 conversation index: rebuildable without a schema migration.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        Self::open_internal(path, None)
+    }
+    pub fn open_encrypted(
+        path: impl AsRef<Path>,
+        raw_key: [u8; 32],
+        gate: &mind_place_security::SecurityGate,
+        lease: mind_place_security::UnlockLease,
+    ) -> Result<Self> {
+        Self::open_internal(path, Some(CipherKey::new(raw_key, gate, lease)))
+    }
+    pub fn open_encrypted_with_objects(
+        path: impl AsRef<Path>,
+        raw_key: [u8; 32],
+        gate: &SecurityGate,
+        lease: UnlockLease,
+        vault: Arc<CryptoVault>,
+        root: impl AsRef<Path>,
+    ) -> Result<Self> {
+        let root = root.as_ref();
+        if path.as_ref().parent() != Some(root) {
+            return Err(IndexError::UnsafePath);
+        }
+        let mut index = Self::open_encrypted(path, raw_key, gate, lease)?;
+        index.vault_documents = Some(VaultDocumentBinding {
+            root: root.to_owned(),
+            vault,
+            gate: gate.clone(),
+            lease,
+        });
+        Ok(index)
+    }
+
+    fn objects(&self, state: &StateStore) -> Result<DocumentObjectStore> {
+        match &self.vault_documents {
+            Some(binding) => Ok(DocumentObjectStore::open_encrypted(
+                state.clone(),
+                &binding.root,
+                binding.vault.clone(),
+                &binding.gate,
+                binding.lease,
+            )?),
+            None => Ok(DocumentObjectStore::open(state.clone())?),
+        }
+    }
+
+    fn scanner(&self, state: &StateStore) -> Result<DocumentScanner> {
+        let policy = ScanPolicy::default();
+        match &self.vault_documents {
+            Some(binding) => Ok(DocumentScanner::new_encrypted(
+                state.clone(),
+                policy,
+                &binding.root,
+                binding.vault.clone(),
+                &binding.gate,
+                binding.lease,
+            )?),
+            None => Ok(DocumentScanner::new(state.clone(), policy)?),
+        }
+    }
+
+    fn open_internal(
+        path: impl AsRef<Path>,
+        cipher_key: Option<std::sync::Arc<CipherKey>>,
+    ) -> Result<Self> {
         let path = path.as_ref().to_owned();
         let parent = path.parent().ok_or(IndexError::UnsafePath)?;
         safe_path(parent)?;
+        // Reject a legacy plaintext open path once the vault marker exists.
+        if cipher_key.is_none() && parent.join("vault-v1.json").exists() {
+            return Err(IndexError::ForeignDatabase);
+        }
         fs::create_dir_all(parent)?;
         safe_path(&path)?;
+        let _writer_guard = if cipher_key.is_some() && parent.join("vault-v1.json").exists() {
+            Some(VaultWriterFence::writer(parent).map_err(|_| IndexError::InvalidIndex)?)
+        } else {
+            None
+        };
         let existed = path.exists();
         let mut legacy_v1 = false;
         if existed {
@@ -127,6 +236,9 @@ impl DocumentIndex {
                 &path,
                 OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
             )?;
+            if let Some(key) = cipher_key.as_ref() {
+                key.unlock(&ro)?;
+            }
             let id: i64 = ro.query_row("PRAGMA application_id", [], |r| r.get(0))?;
             let version: i64 = ro.query_row("PRAGMA user_version", [], |r| r.get(0))?;
             if id != APPLICATION_ID || !matches!(version, 1 | SCHEMA_VERSION) {
@@ -152,6 +264,9 @@ impl DocumentIndex {
                 | OpenFlags::SQLITE_OPEN_CREATE
                 | OpenFlags::SQLITE_OPEN_NOFOLLOW,
         )?;
+        if let Some(key) = cipher_key.as_ref() {
+            key.unlock(&db)?;
+        }
         configure(&db)?;
         if !existed {
             db.execute_batch(SCHEMA)?;
@@ -167,24 +282,43 @@ impl DocumentIndex {
             tx.commit()?;
         }
         verify_document_database(&db, false)?;
-        Ok(Self { path })
+        Ok(Self {
+            path,
+            cipher_key,
+            vault_documents: None,
+        })
     }
 
-    fn connection(&self) -> Result<Connection> {
+    fn connection(&self) -> Result<FencedDocumentConnection> {
         safe_path(&self.path)?;
+        let parent = self.path.parent().ok_or(IndexError::UnsafePath)?;
+        let writer = if self.cipher_key.is_some() && parent.join("vault-v1.json").exists() {
+            Some(VaultWriterFence::writer(parent).map_err(|_| IndexError::InvalidIndex)?)
+        } else {
+            None
+        };
         let ro = Connection::open_with_flags(
             &self.path,
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
         )?;
+        if let Some(key) = self.cipher_key.as_ref() {
+            key.unlock(&ro)?;
+        }
         verify_document_database(&ro, false)?;
         drop(ro);
         let db = Connection::open_with_flags(
             &self.path,
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
         )?;
+        if let Some(key) = self.cipher_key.as_ref() {
+            key.unlock(&db)?;
+        }
         configure(&db)?;
         verify_document_database(&db, false)?;
-        Ok(db)
+        Ok(FencedDocumentConnection {
+            db,
+            _writer: writer,
+        })
     }
 
     /// All-or-nothing generation for one explicitly approved root.
@@ -196,7 +330,16 @@ impl DocumentIndex {
         mut check: impl FnMut() -> Result<()>,
     ) -> Result<DocumentIndexReport> {
         check()?;
-        let mut scanner = DocumentScanner::new(state.clone(), ScanPolicy::default())?;
+        // One approved-root generation spans scanner object/state publication
+        // and the FTS transaction below. A per-connection fence alone permits
+        // backup to cut between these two parts of the same generation.
+        let parent = self.path.parent().ok_or(IndexError::UnsafePath)?;
+        let _generation = if self.cipher_key.is_some() && parent.join("vault-v1.json").exists() {
+            Some(VaultWriterFence::writer(parent).map_err(|_| IndexError::InvalidEvidence)?)
+        } else {
+            None
+        };
+        let mut scanner = self.scanner(state)?;
         let scan = scanner.rescan(root_id, || lease(&mut check))?;
         if !scan.complete {
             return Err(IndexError::InvalidEvidence);
@@ -204,7 +347,7 @@ impl DocumentIndex {
         let uris = scanner
             .current_uris(root_id, || lease(&mut check))?
             .ok_or(IndexError::InvalidEvidence)?;
-        let objects = DocumentObjectStore::open(state.clone())?;
+        let objects = self.objects(state)?;
         let mut db = self.connection()?;
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute("DELETE FROM document_fts WHERE root_id=?1", [root_id])?;
@@ -349,7 +492,7 @@ impl DocumentIndex {
         let candidates: Vec<_> = rows.collect::<std::result::Result<_, _>>()?;
         drop(statement);
         drop(db);
-        let objects = DocumentObjectStore::open(state.clone())?;
+        let objects = self.objects(state)?;
         let mut hits = Vec::new();
         // Bound verification effort even if 100 candidates match.
         let mut verified_bytes = 0usize;
@@ -455,7 +598,7 @@ impl DocumentIndex {
         const MAX_PREVIEW_CHARS: usize = 4096;
         check()?;
         let path = VirtualDocumentPath::parse(uri)?;
-        let objects = DocumentObjectStore::open(state.clone())?;
+        let objects = self.objects(state)?;
         let head = objects
             .current_version(uri, || lease(&mut check))?
             .ok_or(IndexError::Revoked)?;

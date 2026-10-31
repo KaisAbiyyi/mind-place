@@ -11,15 +11,21 @@ tauri-build = { version = "=2.7.2", features = [] }
 [dependencies]
 tauri = { version = "=2.12.3", features = [] }
 mind-place-archive = { path = "../crates/archive-core" }
+mind-place-capture-host = { path = "../crates/capture-host" }
+getrandom = "0.4.3"
 mind-place-security = { path = "../crates/security-core" }
-mind-place-state = { path = "../crates/state-core" }
-mind-place-index = { path = "../crates/index-core" }
-mind-place-integration = { path = "../crates/integration-core" }
+mind-place-state = { path = "../crates/state-core", features = ["sqlcipher-preview"] }
+mind-place-index = { path = "../crates/index-core", features = ["sqlcipher-preview"] }
+mind-place-integration = { path = "../crates/integration-core", features = ["vault-mcp"] }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 tempfile.workspace = true
 zeroize = "1.9.0"
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2.190"
+
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Networking_WinSock"] }

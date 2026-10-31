@@ -2,6 +2,8 @@
 
 This document describes the behavior shipped by the current Mind Place desktop app and browser extension. The numbered architecture documents in this directory include future roadmap work and should not be read as implemented features.
 
+**MP-9B branch qualification (2026-10-28, Draft #127):** the encrypted-vault candidate includes a separately invoked Windows source maintenance command for explicitly confirmed offline legacy migration, authenticated resume/rollback and coherent encrypted backup/restore. Read the [owner runtime contract](implementation-plan/2026-10-28-mp9b-owner-runtime-and-writers.md) and [implementation evidence](implementation-summary/2026-10-28-mp9b-ci100k-local-takeover.md). These candidate changes are not a shipped release or approval to migrate owner data. Installed-owner recovery/migration and actual hostile Windows-account acceptance remain separate.
+
 ## Components
 
 Mind Place has four product components:

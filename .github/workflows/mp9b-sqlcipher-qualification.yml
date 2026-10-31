@@ -1,0 +1,148 @@
+name: MP-9B SQLCipher native qualification
+
+on:
+  push:
+    branches: [feat/mp-9b-encrypted-vault-cloud-20261025]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
+    paths:
+      - 'Cargo.lock'
+      - 'crates/state-core/**'
+      - 'crates/index-core/**'
+      - 'crates/security-core/**'
+      - 'crates/integration-core/**'
+      - 'src-tauri/**'
+      - '.github/workflows/mp9b-sqlcipher-qualification.yml'
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Exact open PR number to qualify
+        required: true
+        type: string
+      head_sha:
+        description: Frozen PR head SHA
+        required: true
+        type: string
+      base_sha:
+        description: Frozen PR base SHA
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  sqlcipher:
+    name: SQLCipher / ${{ matrix.os }}
+    # Draft work receives fast feedback through CI. Keep native SQLCipher
+    # qualification mandatory on Ready for Review and subsequent ready pushes.
+    if: github.event_name != 'push' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    env:
+      CARGO_INCREMENTAL: '0'
+      CARGO_BUILD_JOBS: '2'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.event_name == 'workflow_dispatch' && format('refs/pull/{0}/merge', inputs.pr_number) || github.sha }}
+          persist-credentials: false
+      - name: Install Rust 1.90
+        shell: bash
+        run: |
+          rustup toolchain install 1.90.0 --profile minimal --component rustfmt --no-self-update
+          rustup default 1.90.0
+      - name: Check Rust formatting
+        run: cargo fmt --all -- --check
+      - name: Encrypted state/index and FTS regression
+        run: cargo test --locked -p mind-place-state -p mind-place-index --features sqlcipher-preview -- --nocapture
+      - name: Keyed MCP synthetic authorization and revocation
+        run: cargo test --locked -p mind-place-integration --features vault-mcp --test mcp_vault -- --nocapture
+      - name: Vault and backup adversarial regression
+        run: cargo test --locked -p mind-place-security -- --nocapture
+
+  foundation-regressions:
+    name: Bounded vault regressions / ${{ matrix.os }} (NOT Product qualification)
+    if: github.event_name == 'push'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    env:
+      CARGO_INCREMENTAL: '0'
+      CARGO_BUILD_JOBS: '2'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust 1.90
+        shell: bash
+        run: |
+          rustup toolchain install 1.90.0 --profile minimal --component rustfmt --no-self-update
+          rustup default 1.90.0
+      - name: Capture publication and coherent backup regressions
+        run: cargo test --locked -p mind-place-index --features sqlcipher-preview --test vault_capture_encrypted --test vault_online_backup --test vault_backup_consistency --test sqlcipher_index_backup -- --nocapture
+      - name: Portable backup and filesystem publication regressions
+        if: always()
+        run: cargo test --locked -p mind-place-security vault_backup -- --nocapture
+      - name: Encrypted vault migration restart regressions
+        if: always()
+        run: cargo test --locked -p mind-place-index --features sqlcipher-preview --test vault_migration_restart -- --nocapture
+      - name: Install Tauri Linux build dependencies
+        if: always() && runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libglib2.0-dev \
+            librsvg2-dev \
+            libayatana-appindicator3-dev
+      - name: Build and stage native capture sidecar (Windows)
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cargo build --locked -p mind-place-capture-host
+          New-Item -ItemType Directory -Force src-tauri/binaries | Out-Null
+          Copy-Item "target/debug/mind-place-capture-host.exe" "src-tauri/binaries/mind-place-capture-host-x86_64-pc-windows-msvc.exe"
+      - name: Build and stage native capture sidecar (Linux)
+        if: always() && runner.os == 'Linux'
+        shell: bash
+        run: |
+          cargo build --locked -p mind-place-capture-host
+          mkdir -p src-tauri/binaries
+          cp target/debug/mind-place-capture-host src-tauri/binaries/mind-place-capture-host-x86_64-unknown-linux-gnu
+      - name: Setup Node.js for distribution notices
+        if: always()
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install frontend dependencies for notice inventory
+        if: always()
+        run: npm ci
+      - name: Prepare pinned Windows tunnel helper notices
+        if: always() && runner.os == 'Windows'
+        run: node scripts/tunnel-helper.mjs
+      - name: Generate canonical third-party notices resource
+        if: always()
+        run: node scripts/generate-notices.mjs
+      - name: Build frontend assets required by Tauri test build
+        if: always()
+        run: npm run build:web
+      - name: Native capture IPC qualification
+        if: always()
+        run: cargo test -p mind-place --bin mind-place native_capture_ipc::qualification -- --nocapture
+      - name: Check Rust formatting
+        if: always()
+        run: cargo fmt --all -- --check
