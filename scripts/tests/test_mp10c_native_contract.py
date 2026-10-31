@@ -296,14 +296,17 @@ class NativeContractFingerprintTests(unittest.TestCase):
                 source_path=native_contract.PRODUCT_WORKFLOW)["platform"],
             "windows",
         )
+        product_signature = native_contract.canonical_workflow_signature(
+            product_source, source_path=native_contract.PRODUCT_WORKFLOW)
+        self.assertEqual(len(product_signature), 32)
 
     def test_multiline_double_quoted_yaml_decodes_yaml_escapes(self):
-        source = """jobs:
+        source = r"""jobs:
   build:
     runs-on: ubuntu-latest
     steps:
     - name: command
-      run: "alpha\ beta\
+      run: "alpha\ beta \
         gamma"
 """
         document = native_contract.parse_workflow_yaml(
@@ -312,7 +315,7 @@ class NativeContractFingerprintTests(unittest.TestCase):
             document["jobs"]["build"]["steps"][0]["run"], "alpha beta gamma")
 
     def test_multiline_double_quoted_yaml_line_continuations_fold_correctly(self):
-        source = """jobs:
+        source = r"""jobs:
   build:
     runs-on: ubuntu-latest
     steps:
