@@ -97,7 +97,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertTrue(native_contract.requires_separated_product(repo, 131))
         self.assertEqual(
             coordinator.required_paths(False, True),
-            (native_contract.CI_WORKFLOW, PRODUCT_WORKFLOW),
+            (native_contract.CI_WORKFLOW, native_contract.PRODUCT_WORKFLOW),
         )
         self.assertIn("Native execution evidence", self.workflow_ci)
         self.assertIn("Capture native execution provenance", self.workflow_ci)
