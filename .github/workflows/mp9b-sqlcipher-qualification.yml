@@ -108,6 +108,20 @@ jobs:
             libglib2.0-dev \
             librsvg2-dev \
             libayatana-appindicator3-dev
+      - name: Build and stage native capture sidecar (Windows)
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cargo build --locked -p mind-place-capture-host
+          New-Item -ItemType Directory -Force src-tauri/binaries | Out-Null
+          Copy-Item "target/debug/mind-place-capture-host.exe" "src-tauri/binaries/mind-place-capture-host-x86_64-pc-windows-msvc.exe"
+      - name: Build and stage native capture sidecar (Linux)
+        if: always() && runner.os == 'Linux'
+        shell: bash
+        run: |
+          cargo build --locked -p mind-place-capture-host
+          mkdir -p src-tauri/binaries
+          cp target/debug/mind-place-capture-host src-tauri/binaries/mind-place-capture-host-x86_64-unknown-linux-gnu
       - name: Native capture IPC qualification
         if: always()
         run: cargo test -p mind-place --bin mind-place native_capture_ipc::qualification -- --nocapture
