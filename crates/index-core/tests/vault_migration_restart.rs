@@ -52,6 +52,7 @@ struct Fixture {
     home: tempfile::TempDir,
     source_id: String,
     captures: Vec<(String, String, Capture)>,
+    selected_current: (String, String),
     before: BTreeMap<PathBuf, Vec<u8>>,
 }
 
@@ -102,6 +103,27 @@ fn fixture() -> Fixture {
             .unwrap();
         captures.push((receipt.id, receipt.snapshot_id, loaded.capture));
     }
+    let selected_current = {
+        let (id, snapshot, _) = captures.last().unwrap();
+        (id.clone(), snapshot.clone())
+    };
+    // A later legacy import is retained as a raw revision but must not displace
+    // the manual capture selected by the legacy meta.json pointer.
+    let mut later_import = capture.clone();
+    later_import.capture_method = "legacy-import".into();
+    later_import.captured_at = "2026-10-28T09:00:00Z".into();
+    later_import.messages[0].text = "synthetic later legacy import".into();
+    let imported = archive.save(later_import).unwrap();
+    let still_selected = archive.read(&imported.id, None).unwrap();
+    assert_eq!(still_selected.snapshot_id, selected_current.1);
+    let imported_revision = archive
+        .read(&imported.id, Some(&imported.snapshot_id))
+        .unwrap();
+    captures.push((
+        imported.id,
+        imported.snapshot_id,
+        imported_revision.capture,
+    ));
     let generic_raw = serde_json::to_vec(&serde_json::json!({
         "title":"Synthetic raw agent import",
         "messages":[{"role":"user", "content":"preserve original raw record", "authored_at":"2026-10-28T08:00:00Z"},
@@ -147,6 +169,7 @@ fn fixture() -> Fixture {
         home,
         source_id,
         captures,
+        selected_current,
         before,
     }
 }
@@ -337,6 +360,15 @@ fn real_domains_recover_after_fresh_process_exit_at_every_boundary() {
                     .count()
             );
         }
+        let selected = archive.read(&f.selected_current.0, None).unwrap();
+        assert_eq!(selected.snapshot_id, f.selected_current.1);
+        assert_eq!(selected.capture.capture_method, "manual-dom");
+        let listed = archive.list("").unwrap();
+        let selected_summary = listed
+            .iter()
+            .find(|summary| summary.id == f.selected_current.0)
+            .unwrap();
+        assert_eq!(selected_summary.captured_at, selected.capture.captured_at);
         assert_eq!(
             archive
                 .open_state_store()
