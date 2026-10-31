@@ -408,8 +408,14 @@ def parse_workflow_yaml(contents: bytes | str, *,
         if tokens[0]["indent"] != 0:
             raise ValueError("Workflow YAML must start at indentation zero")
         document, pos = _yaml_parse_block(raw_lines, tokens, 0, 0)
-        if pos != len(tokens) or not isinstance(document, dict):
-            raise ValueError("Incomplete or invalid workflow YAML document")
+        if pos != len(tokens):
+            token = tokens[pos]
+            raise ValueError(
+                "Incomplete workflow YAML at line "
+                + str(token["line"] + 1) + ", indentation "
+                + str(token["indent"]) + ": " + repr(token["text"]))
+        if not isinstance(document, dict):
+            raise ValueError("Workflow YAML root must be a mapping")
         return document
     except (UnicodeDecodeError, ValueError) as error:
         raise ValueError(f"Invalid workflow YAML at {path}: {error}") from error
