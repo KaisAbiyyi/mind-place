@@ -401,27 +401,6 @@ impl VaultCaptureStore {
         } else {
             None
         };
-        let preserve_current = if let Some(previous_identity) = previous_current_identity {
-            let previous = storage
-                .read(
-                    &self.gate,
-                    self.lease,
-                    ContentKind::Archive,
-                    previous_identity.as_bytes(),
-                )
-                .map_err(|_| IndexError::InvalidEvidence)?;
-            let mut prior: Capture =
-                serde_json::from_slice(&previous).map_err(|_| IndexError::InvalidEvidence)?;
-            validate_capture(&mut prior)?;
-            let prior_time = chrono::DateTime::parse_from_rfc3339(&prior.captured_at)
-                .map_err(|_| IndexError::InvalidEvidence)?;
-            let incoming_time = chrono::DateTime::parse_from_rfc3339(&capture.captured_at)
-                .map_err(|_| IndexError::InvalidEvidence)?;
-            matches!(prior.capture_method.as_str(), "manual-dom" | "automatic-dom")
-                || prior_time >= incoming_time
-        } else {
-            false
-        };
         if let Err(error) = storage.write_immutable(
             &self.gate,
             self.lease,
@@ -460,6 +439,29 @@ impl VaultCaptureStore {
             }
             capture = original;
         }
+        // Evaluate the legacy selection policy against the exact immutable
+        // object adopted above, not a retry payload with a different timestamp.
+        let preserve_current = if let Some(previous_identity) = previous_current_identity {
+            let previous = storage
+                .read(
+                    &self.gate,
+                    self.lease,
+                    ContentKind::Archive,
+                    previous_identity.as_bytes(),
+                )
+                .map_err(|_| IndexError::InvalidEvidence)?;
+            let mut prior: Capture =
+                serde_json::from_slice(&previous).map_err(|_| IndexError::InvalidEvidence)?;
+            validate_capture(&mut prior)?;
+            let prior_time = chrono::DateTime::parse_from_rfc3339(&prior.captured_at)
+                .map_err(|_| IndexError::InvalidEvidence)?;
+            let incoming_time = chrono::DateTime::parse_from_rfc3339(&capture.captured_at)
+                .map_err(|_| IndexError::InvalidEvidence)?;
+            matches!(prior.capture_method.as_str(), "manual-dom" | "automatic-dom")
+                || prior_time >= incoming_time
+        } else {
+            false
+        };
         let tx = db.transaction()?;
         tx.execute(
             "INSERT INTO vault_captures(
