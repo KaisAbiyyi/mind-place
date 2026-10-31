@@ -419,14 +419,15 @@ def canonical_workflow_signature(contents: bytes | str, *,
                                  source_path: str = "<workflow>") -> bytes:
     """Return a formatting/comment-independent native execution contract."""
     document = parse_workflow_yaml(contents, source_path=source_path)
+    path = source_path if isinstance(source_path, str) and source_path else "<workflow>"
     jobs = document.get("jobs")
     if not isinstance(jobs, dict) or not jobs:
-        raise ValueError("Native workflow has no jobs mapping")
+        raise ValueError(f"Native workflow at {path} has no jobs mapping")
     for job_id, job in jobs.items():
         if not isinstance(job, dict) or not ("runs-on" in job or "uses" in job):
-            raise ValueError("Invalid native workflow job: " + str(job_id))
+            raise ValueError(f"Invalid native workflow job at {path}: {job_id}")
         if "steps" in job and not isinstance(job["steps"], list):
-            raise ValueError("Invalid native workflow steps: " + str(job_id))
+            raise ValueError(f"Invalid native workflow steps at {path}: {job_id}")
     selected = {
         key: document[key]
         for key in ("on", "permissions", "defaults", "env", "concurrency")

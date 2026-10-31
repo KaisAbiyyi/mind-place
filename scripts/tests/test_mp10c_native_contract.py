@@ -877,7 +877,8 @@ class NativeIdentityAndPrerequisiteTests(unittest.TestCase):
     def test_missing_native_workflow_times_out_and_cannot_accept_cached_proof(self):
         state, reason = coordinator.classify(
             [], self.candidate, "owner/repo", False, CONTRACT,
-            self.args["fetch_jobs"], self.args["fetch_evidence"])
+            self.args["fetch_jobs"], self.args["fetch_evidence"],
+            workflow_sources=self.workflow_sources)
         self.assertEqual(state, "pending")
         with self.assertRaises(TimeoutError):
             coordinator.wait(
@@ -894,21 +895,21 @@ class NativeIdentityAndPrerequisiteTests(unittest.TestCase):
         fetch_evidence = self.args["fetch_evidence"]
         self.assertEqual(coordinator.classify(
             [in_progress], self.candidate, "owner/repo", False, CONTRACT,
-            fetch_jobs, fetch_evidence)[0], "pending")
+            fetch_jobs, fetch_evidence, workflow_sources=self.workflow_sources)[0], "pending")
         self.assertEqual(coordinator.classify(
             [self.run], self.candidate, "owner/repo", False, CONTRACT,
-            fetch_jobs, fetch_evidence)[0], "ready")
+            fetch_jobs, fetch_evidence, workflow_sources=self.workflow_sources)[0], "ready")
         failed = dict(self.run, conclusion="failure")
         self.assertEqual(coordinator.classify(
             [failed], self.candidate, "owner/repo", False, CONTRACT,
-            fetch_jobs, fetch_evidence)[0], "failed")
+            fetch_jobs, fetch_evidence, workflow_sources=self.workflow_sources)[0], "failed")
         self.assertEqual(coordinator.classify(
             [], self.candidate, "owner/repo", False, CONTRACT,
-            fetch_jobs, fetch_evidence)[0], "pending")
+            fetch_jobs, fetch_evidence, workflow_sources=self.workflow_sources)[0], "pending")
         self.jobs[2]["steps"][0]["conclusion"] = "skipped"
         self.assertEqual(coordinator.classify(
             [self.run], self.candidate, "owner/repo", False, CONTRACT,
-            fetch_jobs, fetch_evidence)[0], "failed")
+            fetch_jobs, fetch_evidence, workflow_sources=self.workflow_sources)[0], "failed")
 
     def test_candidate_head_or_base_mutation_during_wait_fails_closed(self):
         mutations = (
