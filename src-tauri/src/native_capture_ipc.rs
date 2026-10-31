@@ -1,13 +1,13 @@
 //! Desktop-owned localhost IPC receiver for native browser capture.
 //! Only Tauri keeps unlocked CryptoVault. Native messages authenticate an
 //! ephemeral HMAC session capability and unique nonce; no DEK crosses IPC.
-use mind_place_capture_host::ipc::{read_frame, write_json, SessionDescriptor};
+use mind_place_capture_host::ipc::{read_frame_with_timeout, write_json, SessionDescriptor};
 use mind_place_index::vault_archive::VaultCaptureStore;
 use mind_place_security::{SecurityGate, UnlockLease};
 use std::{
     collections::HashSet,
     fs, io,
-    net::TcpListener,
+    net::{Shutdown, TcpListener, TcpStream},
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -22,6 +22,7 @@ pub(super) struct NativeCaptureIpc {
     thread: Option<JoinHandle<()>>,
     archive_root: PathBuf,
     identity: SessionDescriptor,
+    active_stream: Arc<Mutex<Option<TcpStream>>>,
 }
 
 impl NativeCaptureIpc {
@@ -88,16 +89,33 @@ impl NativeCaptureIpc {
 
         let stop = Arc::new(AtomicBool::new(false));
         let terminate = stop.clone();
+        let active_stream = Arc::new(Mutex::new(None));
+        let worker_active = active_stream.clone();
         let thread = thread::spawn(move || {
             let mut seen = HashSet::new();
             while !terminate.load(Ordering::Acquire) {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
-                        let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+                        if let Ok(active) = stream.try_clone() {
+                            *worker_active
+                                .lock()
+                                .unwrap_or_else(|error| error.into_inner()) = Some(active);
+                        }
+                        if terminate.load(Ordering::Acquire) {
+                            let _ = stream.shutdown(Shutdown::Both);
+                            *worker_active
+                                .lock()
+                                .unwrap_or_else(|error| error.into_inner()) = None;
+                            continue;
+                        }
                         let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
                         let result = (|| -> Result<serde_json::Value, ()> {
                             security.validate_lease(lease).map_err(|_| ())?;
-                            let signed = read_frame(&mut stream).map_err(|_| ())?;
+                            let signed = read_frame_with_timeout(
+                                &mut stream,
+                                Duration::from_secs(5),
+                            )
+                            .map_err(|_| ())?;
                             let capture = signed.authenticate(&token, &mut seen).map_err(|_| ())?;
                             // Lock and owner-state grants acquire this same
                             // gate, so no IPC capture can commit *after* lock
@@ -116,6 +134,9 @@ impl NativeCaptureIpc {
                             |_| serde_json::json!({"ok":false,"error":"MP_VAULT_CAPTURE_DENIED"}),
                         );
                         let _ = write_json(&mut stream, &response);
+                        *worker_active
+                            .lock()
+                            .unwrap_or_else(|error| error.into_inner()) = None;
                     }
                     Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
                         thread::sleep(Duration::from_millis(25));
@@ -129,6 +150,7 @@ impl NativeCaptureIpc {
             thread: Some(thread),
             archive_root,
             identity,
+            active_stream,
         })
     }
 }
@@ -136,6 +158,15 @@ impl NativeCaptureIpc {
 impl Drop for NativeCaptureIpc {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
+        {
+            let active = self
+                .active_stream
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            if let Some(stream) = active.as_ref() {
+                let _ = stream.shutdown(Shutdown::Both);
+            }
+        }
         if let Some(worker) = self.thread.take() {
             let _ = worker.join();
         }
@@ -189,6 +220,78 @@ mod qualification {
             }]
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn slow_drip_header_uses_one_total_deadline() {
+        use std::{io::Write, time::Instant};
+
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let sender = thread::spawn(move || {
+            let mut client = TcpStream::connect(address).unwrap();
+            for byte in [1u8, 0, 0, 0] {
+                if client.write_all(&[byte]).is_err() {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(60));
+            }
+        });
+        let (mut server, _) = listener.accept().unwrap();
+        let started = Instant::now();
+        assert!(read_frame_with_timeout(&mut server, Duration::from_millis(130)).is_err());
+        assert!(started.elapsed() < Duration::from_millis(400));
+        drop(server);
+        let _ = sender.join();
+    }
+
+    #[test]
+    fn lock_cancels_a_slow_partial_client_before_receiver_join() {
+        use std::{io::Write, time::Instant};
+
+        let home = tempfile::tempdir().unwrap();
+        let gate = SecurityGate::open(home.path().join("security.json")).unwrap();
+        gate.initialize(b"synthetic-slow-client-lock").unwrap();
+        let lease = gate.require_unlocked().unwrap();
+        let (vault, _, manifest) = CryptoVault::provision(&gate, lease).unwrap();
+        let vault_root = home.path().join("vault");
+        manifest.persist_new(&vault_root).unwrap();
+        let writer = Arc::new(VaultCaptureStore::open(&vault_root, vault, &gate, lease).unwrap());
+        let archive_root = home.path().join("archive-v1");
+        let ipc = NativeCaptureIpc::start(
+            archive_root.clone(),
+            writer,
+            gate.clone(),
+            lease,
+            Arc::new(Mutex::new(())),
+        )
+        .unwrap();
+        let descriptor = SessionDescriptor::read(&archive_root).unwrap();
+        let mut client = TcpStream::connect(("127.0.0.1", descriptor.port)).unwrap();
+        client.write_all(&[1]).unwrap();
+
+        let mut accepted = false;
+        for _ in 0..100 {
+            accepted = ipc
+                .active_stream
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .is_some();
+            if accepted {
+                break;
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(accepted, "receiver must have accepted the partial client");
+        thread::sleep(Duration::from_millis(50));
+        gate.lock();
+        let started = Instant::now();
+        drop(ipc);
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "Lock must cancel the active reader instead of waiting for a peer timeout"
+        );
+        drop(client);
     }
 
     /// Real process boundary (not a thread/mock): the native-host equivalent
