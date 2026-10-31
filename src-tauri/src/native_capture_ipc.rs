@@ -283,7 +283,10 @@ mod qualification {
             }
             thread::sleep(Duration::from_millis(10));
         };
-        assert!(accepted, "receiver must have accepted the partial client within 5 seconds");
+        assert!(
+            accepted,
+            "receiver must have accepted the partial client within 5 seconds"
+        );
         thread::sleep(Duration::from_millis(50));
         gate.lock();
         let started = Instant::now();
