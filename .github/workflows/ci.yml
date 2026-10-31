@@ -32,6 +32,10 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/merge', github.event.pull_request.number) || format('refs/pull/{0}/merge', inputs.pr_number) }}
+          persist-credentials: false
       - uses: actions/setup-node@v5
         with:
           node-version: 24
@@ -67,6 +71,10 @@ jobs:
       CARGO_BUILD_JOBS: 2
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/merge', github.event.pull_request.number) || format('refs/pull/{0}/merge', inputs.pr_number) }}
+          persist-credentials: false
       - name: Install pinned Rust 1.90
         run: |
           rustup toolchain install 1.90.0 --profile minimal --component rustfmt --no-self-update
