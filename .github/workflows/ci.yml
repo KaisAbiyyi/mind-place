@@ -7,9 +7,23 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Exact open PR number to qualify
+        required: true
+        type: string
+      head_sha:
+        description: Frozen PR head SHA
+        required: true
+        type: string
+      base_sha:
+        description: Frozen PR base SHA
+        required: true
+        type: string
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   fast:
@@ -33,7 +47,7 @@ jobs:
       - name: Build reader
         run: npm run build:web
       - name: Validate document qualification gate policy
-        run: python3 -m unittest discover -s scripts/tests -p 'test_mp10c_ci_gate.py' -q
+        run: python3 -m unittest discover -s scripts/tests -p 'test_mp10c_*.py' -q
       - name: Validate Windows qualification policy
         run: |
           python3 -m pip install --disable-pip-version-check PyYAML==6.0.3
@@ -86,3 +100,30 @@ jobs:
           PY
       - name: Focused security tests
         run: cargo test --locked -p mind-place-security --lib
+
+  native-evidence:
+    name: Native execution evidence
+    needs: [fast, rust-fast]
+    if: always() && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/merge', github.event.pull_request.number) || format('refs/pull/{0}/merge', inputs.pr_number) }}
+          persist-credentials: false
+      - name: Capture native execution provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/mp10c_native_contract.py attest --output qualification/native-contract.json
+      - name: Upload native execution evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: mp-native-contract-attempt-${{ github.run_attempt }}
+          path: qualification/native-contract.json
+          if-no-files-found: error
+          retention-days: 14
