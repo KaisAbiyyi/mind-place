@@ -37,7 +37,16 @@ Agents must not receive upstream write, merge, administration, repository-settin
 | CODEOWNERS | No .github/CODEOWNERS file exists at this baseline |
 | Required CI candidate | Main's .github/workflows/ci.yml is named CI and defines the Windows job as Verify Windows product on windows-latest. Recent check-run evidence shows this check from the GitHub Actions App (ID 15368). |
 
-The collaborator roster could not be enumerated through the available read-only integration. A generic one-approval rule accepts an approval from a user with sufficient write permission; it does not, by itself, name the repository owner as the required reviewer. Before applying the owner-only review requirement, the owner must confirm that KaisAbiyyi is the only write-capable human reviewer, or add a CODEOWNERS rule assigning all paths to @KaisAbiyyi and enable required Code Owner review. Do not assume the generic approval count alone proves owner identity.
+The collaborator roster could not be enumerated through the available read-only integration. A generic one-approval rule accepts an approval from a user with sufficient write permission; it does not, by itself, name the repository owner as the required reviewer. Because the roster is unknown and no CODEOWNERS file exists, the safe default is to add owner-wide CODEOWNERS coverage and enable required Code Owner review before MP-GOV-04. The owner may instead document that KaisAbiyyi is the only write-capable human reviewer after checking the collaborator roster; only then does a generic one-approval rule identify the owner by exclusivity. Do not assume the generic approval count alone proves owner identity.
+
+If CODEOWNERS coverage is needed, the owner-wide file should contain:
+
+~~~text
+* @KaisAbiyyi
+/.github/CODEOWNERS @KaisAbiyyi
+~~~
+
+The first pattern assigns all repository paths to the owner; the second explicitly protects the CODEOWNERS policy file itself. The file must exist on the base branch before it can enforce owner review on later PRs. The owner must have write permission.
 
 The check source (GitHub Actions App ID 15368) is the provider of the required CI result, not a bypass actor. The bypass list below must remain empty.
 
@@ -57,7 +66,7 @@ Use one active repository-level branch ruleset targeting main. Rulesets are supp
 | Required approvals | 1 minimum |
 | Stale approvals | Dismiss stale pull-request approvals when new commits are pushed |
 | Latest push | Require approval of the most recent reviewable push by someone other than the pusher |
-| Code Owner review | Required if needed to ensure the approver is specifically KaisAbiyyi; first establish the CODEOWNERS/permission condition above |
+| Code Owner review | ON with owner-wide CODEOWNERS coverage; alternatively, document that the owner is the only write-capable human reviewer |
 | Conversation resolution | Require all review conversations to be resolved before merging |
 | Required status checks | Require Verify Windows product, expected source GitHub Actions App ID 15368 |
 | Branch freshness | Require the PR branch to be up to date with main before merging (strict checks) |
@@ -91,7 +100,7 @@ These are owner-only actions for MP-GOV-04. They were not performed by MP-GOV-01
 5. Leave the bypass list completely empty. Do not add repository admins, users, teams, Apps, bots, Dependabot, or Copilot agents.
 6. Enable the pull-request, review, stale-dismissal, latest-push approval, conversation-resolution, required-status-check, strict-up-to-date, force-push-block, and deletion-block settings listed above.
 7. Select **Verify Windows product** from GitHub Actions (App ID 15368) only after confirming that it is the exact, current, always-executed check on a Ready-for-review PR. Resolve any MP-GOV-02 workflow findings before selecting a replacement check.
-8. Resolve the owner-only reviewer identity: confirm the owner is the only write-capable human reviewer, or add owner CODEOWNERS coverage and require Code Owner review.
+8. Enforce owner-specific approval: add .github/CODEOWNERS with the patterns above and enable Require review from Code Owners. The CODEOWNERS file itself must be owned by the repository owner. The only alternative is to verify and record that no other human has write access, so the one required approval can only come from the owner.
 9. Save the ruleset. Keep repository Auto-merge disabled. Do not enable a merge queue or install an App.
 10. Read the saved ruleset back from the Settings UI and the repository ruleset API. Verify its target, Active enforcement, every rule, exact required-check name/source, and an empty bypass list. Also read back the repository Auto-merge setting as false.
 11. Record the effective settings, readback timestamp, and evidence in MP-GOV-04. If any required field cannot be read back, status remains NOT VERIFIED.
@@ -151,4 +160,5 @@ A compromised owner/admin account can alter the policy and then modify main. Git
 - [GitHub: Creating rulesets for a repository](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/creating-rulesets-for-a-repository)
 - [GitHub: Available rules for rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets)
 - [GitHub: About protected branches](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches)
+- [GitHub: About code owners](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners)
 - [GitHub: Troubleshooting required status checks](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks)
