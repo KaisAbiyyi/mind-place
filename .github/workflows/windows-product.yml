@@ -15,7 +15,15 @@ name: Windows Product qualification
   workflow_dispatch:
     inputs:
       pr_number:
-        description: Open same-repository PR; dispatch on its current head branch. Always fresh native execution.
+        description: Exact open same-repository PR number
+        required: true
+        type: string
+      head_sha:
+        description: Frozen PR head SHA
+        required: true
+        type: string
+      base_sha:
+        description: Frozen PR base SHA
         required: true
         type: string
 permissions:

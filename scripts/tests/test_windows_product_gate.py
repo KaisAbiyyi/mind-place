@@ -86,10 +86,10 @@ class GateTests(unittest.TestCase):
                          "workflow_run": {"id": 7, "head_sha": self.head, "repository_id": 123, "head_repository_id": 123}}
         self.api.data = {
             "/actions/runs/7": self.run,
-            "/actions/runs/7/artifacts": {"artifacts": [self.artifact]},
-            "/actions/runs/7/attempts/1/jobs": {"jobs": [{"name": "Verify Windows product", "run_id": 7,
-                  "conclusion": "success", "labels": ["windows-latest"], "steps": self.steps}]},
-            "/actions/workflows/windows-product.yml/runs?status=success": {"workflow_runs": [self.run]},
+            "/actions/runs/7/artifacts": {"total_count": 1, "artifacts": [self.artifact]},
+            "/actions/runs/7/attempts/1/jobs": {"total_count": 1, "jobs": [{"name": "Verify Windows product", "run_id": 7,
+                  "run_attempt": 1, "status": "completed", "conclusion": "success", "labels": ["windows-latest"], "steps": self.steps}]},
+            "/actions/workflows/windows-product.yml/runs?status=success": {"total_count": 1, "workflow_runs": [self.run]},
             "/branches/main/protection": {"required_status_checks": {"strict": True, "checks": [{"context": gate.CHECK, "app_id": 42}]},
                                            "enforce_admins": {"enabled": True}},
             "/pulls?state=open": [{"number": 131, "draft": False}],
@@ -148,6 +148,29 @@ class GateTests(unittest.TestCase):
 
     def test_actual_native_evidence(self):
         self.assertEqual(self.verify()["run_id"], 7)
+
+    def test_native_job_must_complete_on_the_exact_run_attempt(self):
+        job = self.api.data["/actions/runs/7/attempts/1/jobs"]["jobs"][0]
+        for field, value in (("status", None), ("status", "in_progress"),
+                             ("run_attempt", None), ("run_attempt", 2)):
+            with self.subTest(field=field, value=value):
+                previous = job[field]
+                job[field] = value
+                with self.assertRaises(gate.Rejected):
+                    self.verify()
+                self.assertEqual(self.decide(), "native")
+                job[field] = previous
+
+    def test_incomplete_wire_job_listing_cannot_accept_native_proof(self):
+        real = gate.GitHub(API.repo, "synthetic")
+        def wire(path, *args, **kwargs):
+            return self.api.request(path.split("?per_page=", 1)[0], *args, **kwargs)
+        with patch.object(real, "request", side_effect=wire):
+            self.assertEqual(gate.verify_run(
+                real, self.sources, 7, self.current, self.identity, self.policy)["run_id"], 7)
+            self.api.data["/actions/runs/7/attempts/1/jobs"]["total_count"] = 2
+            with self.assertRaises(gate.Rejected):
+                gate.verify_run(real, self.sources, 7, self.current, self.identity, self.policy)
 
     def test_artifact_digest_missing_malformed_or_mismatched_cannot_qualify(self):
         for value in [None, "", "sha256:invalid", "sha256:" + "0" * 64, "sha512:" + "a" * 64, 123]:
