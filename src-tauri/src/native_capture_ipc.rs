@@ -268,19 +268,22 @@ mod qualification {
         let mut client = TcpStream::connect(("127.0.0.1", descriptor.port)).unwrap();
         client.write_all(&[1]).unwrap();
 
-        let mut accepted = false;
-        for _ in 0..100 {
-            accepted = ipc
+        let accept_deadline = Instant::now() + Duration::from_secs(5);
+        let accepted = loop {
+            if ipc
                 .active_stream
                 .lock()
                 .unwrap_or_else(|error| error.into_inner())
-                .is_some();
-            if accepted {
-                break;
+                .is_some()
+            {
+                break true;
             }
-            thread::sleep(Duration::from_millis(5));
-        }
-        assert!(accepted, "receiver must have accepted the partial client");
+            if Instant::now() >= accept_deadline {
+                break false;
+            }
+            thread::sleep(Duration::from_millis(10));
+        };
+        assert!(accepted, "receiver must have accepted the partial client within 5 seconds");
         thread::sleep(Duration::from_millis(50));
         gate.lock();
         let started = Instant::now();
