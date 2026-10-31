@@ -10,14 +10,16 @@ import urllib.error
 import mp10c_ci_gate as gate
 import mp10c_native_contract as native_contract
 
-NATIVE_PATHS = (
-    ".github/workflows/ci.yml",
-    ".github/workflows/mp9b-sqlcipher-qualification.yml",
+BASE_NATIVE_PATHS = (native_contract.CI_WORKFLOW,)
+SEPARATED_PRODUCT_PATHS = (
+    native_contract.CI_WORKFLOW,
+    native_contract.PRODUCT_WORKFLOW,
 )
 
 
-def required_paths(vault: bool) -> tuple[str, ...]:
-    return NATIVE_PATHS if vault else NATIVE_PATHS[:1]
+def required_paths(vault: bool, separated_product: bool = False) -> tuple[str, ...]:
+    paths = SEPARATED_PRODUCT_PATHS if separated_product else BASE_NATIVE_PATHS
+    return paths + ((native_contract.SQLCIPHER_WORKFLOW,) if vault else ())
 
 
 def classify(runs, candidate, repo, vault, contract_fingerprint, fetch_jobs, fetch_evidence):
@@ -31,7 +33,8 @@ def classify(runs, candidate, repo, vault, contract_fingerprint, fetch_jobs, fet
     except ValueError as error:
         pending = []
         failed = []
-        for path in required_paths(vault):
+        separated_product = native_contract.requires_separated_product(repo, candidate["pr"])
+        for path in required_paths(vault, separated_product):
             matching = []
             for run in runs:
                 if run.get("path") != path:
