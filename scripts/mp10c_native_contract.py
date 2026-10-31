@@ -230,8 +230,89 @@ def _yaml_block_scalar(raw_lines: list[str], header_line: int,
     return value, cursor
 
 
+def _yaml_quote_end(text: str, quote: str, start: int = 1) -> int | None:
+    """Return the closing quote offset, respecting YAML doubled/shell escapes."""
+    escaped = False
+    index = start
+    while index < len(text):
+        char = text[index]
+        if quote == "'":
+            if char == "'" and index + 1 < len(text) and text[index + 1] == "'":
+                index += 2
+                continue
+            if char == "'":
+                return index
+        else:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                return index
+        index += 1
+    return None
+
+
+def _yaml_multiline_quoted(raw_lines: list[str], header_line: int,
+                           parent_indent: int, value_text: str) -> tuple[str, int]:
+    """Read a valid multiline single/double-quoted YAML scalar without losing indentation."""
+    quote = value_text[0]
+    fragments = [value_text[1:]]
+    content_indent = None
+    cursor = header_line + 1
+    closed = False
+    while cursor < len(raw_lines):
+        raw = raw_lines[cursor]
+        if not raw.strip():
+            fragments.append("")
+            cursor += 1
+            continue
+        prefix = raw[:len(raw) - len(raw.lstrip(" \t"))]
+        if "\t" in prefix:
+            raise ValueError("Tabs are not valid YAML indentation")
+        indent = len(prefix)
+        if indent <= parent_indent:
+            break
+        if content_indent is None:
+            content_indent = indent
+        elif indent < content_indent:
+            raise ValueError("Invalid multiline quoted scalar indentation")
+        content = raw[content_indent:]
+        end = _yaml_quote_end(content, quote, start=0)
+        if end is None:
+            fragments.append(content)
+            cursor += 1
+            continue
+        if _yaml_strip_comment(content[end + 1:]).strip():
+            raise ValueError("Unexpected text after multiline quoted YAML scalar")
+        fragments.append(content[:end])
+        cursor += 1
+        closed = True
+        break
+    if not closed:
+        raise ValueError("Unterminated multiline quoted YAML scalar")
+
+    folded = "\n".join(fragments)
+    # YAML folds ordinary line breaks to spaces but preserves paragraph breaks.
+    folded = re.sub(r"(?<!\n)\n(?!\n)", " ", folded)
+    folded = re.sub(r"\n{2,}", lambda match: "\n" * (len(match.group(0)) - 1), folded)
+    if quote == "'":
+        return folded.replace("''", "'"), cursor
+    try:
+        return json.loads('"' + folded + '"'), cursor
+    except json.JSONDecodeError as error:
+        raise ValueError("Invalid multiline double-quoted YAML scalar") from error
+
+
 def _yaml_parse_entry(value_text: str, pos: int, key_indent: int,
                       line_number: int, raw_lines: list[str], tokens: list[dict]):
+    if (value_text.startswith(("'", '"'))
+            and _yaml_quote_end(value_text, value_text[0]) is None):
+        value, end_line = _yaml_multiline_quoted(
+            raw_lines, line_number, key_indent, value_text)
+        while pos < len(tokens) and tokens[pos]["line"] < end_line:
+            pos += 1
+        return value, pos
     if value_text in {"|", "|-", "|+", ">", ">-", ">+"}:
         value, end_line = _yaml_block_scalar(
             raw_lines, line_number, key_indent, value_text)
@@ -308,29 +389,36 @@ def _yaml_parse_block(raw_lines: list[str], tokens: list[dict],
     return _yaml_parse_mapping(raw_lines, tokens, pos, indent)
 
 
-def parse_workflow_yaml(contents: bytes | str) -> dict:
+def parse_workflow_yaml(contents: bytes | str, *,
+                        source_path: str = "<workflow>") -> dict:
     """Parse GitHub Actions workflow YAML without adding a runtime dependency.
 
-    Mapping/list structure, quoted and inline scalars, comments, and literal/folded
-    block scalars are supported. Ambiguous indentation and duplicate keys fail closed.
+    Mapping/list structure, quoted and inline scalars, multiline quoted scalars,
+    comments, and literal/folded block scalars are supported. Ambiguous indentation
+    and duplicate keys fail closed. Diagnostics always retain the authoritative path.
     """
-    source = contents.decode("utf-8") if isinstance(contents, bytes) else contents
-    if not isinstance(source, str):
-        raise ValueError("Workflow source must be UTF-8 text")
-    raw_lines, tokens = _yaml_tokens(source)
-    if not tokens:
-        raise ValueError("Empty workflow YAML")
-    if tokens[0]["indent"] != 0:
-        raise ValueError("Workflow YAML must start at indentation zero")
-    document, pos = _yaml_parse_block(raw_lines, tokens, 0, 0)
-    if pos != len(tokens) or not isinstance(document, dict):
-        raise ValueError("Incomplete or invalid workflow YAML document")
-    return document
+    path = source_path if isinstance(source_path, str) and source_path else "<workflow>"
+    try:
+        source = contents.decode("utf-8") if isinstance(contents, bytes) else contents
+        if not isinstance(source, str):
+            raise ValueError("Workflow source must be UTF-8 text")
+        raw_lines, tokens = _yaml_tokens(source)
+        if not tokens:
+            raise ValueError("Empty workflow YAML")
+        if tokens[0]["indent"] != 0:
+            raise ValueError("Workflow YAML must start at indentation zero")
+        document, pos = _yaml_parse_block(raw_lines, tokens, 0, 0)
+        if pos != len(tokens) or not isinstance(document, dict):
+            raise ValueError("Incomplete or invalid workflow YAML document")
+        return document
+    except (UnicodeDecodeError, ValueError) as error:
+        raise ValueError(f"Invalid workflow YAML at {path}: {error}") from error
 
 
-def canonical_workflow_signature(contents: bytes | str) -> bytes:
+def canonical_workflow_signature(contents: bytes | str, *,
+                                 source_path: str = "<workflow>") -> bytes:
     """Return a formatting/comment-independent native execution contract."""
-    document = parse_workflow_yaml(contents)
+    document = parse_workflow_yaml(contents, source_path=source_path)
     jobs = document.get("jobs")
     if not isinstance(jobs, dict) or not jobs:
         raise ValueError("Native workflow has no jobs mapping")
@@ -422,9 +510,10 @@ def _matrix_expression_axes(value) -> set[str]:
     return set()
 
 
-def workflow_job_runner_requirements(contents: bytes | str, job_name: str) -> dict:
+def workflow_job_runner_requirements(contents: bytes | str, job_name: str, *,
+                                      source_path: str = "<workflow>") -> dict:
     """Derive configured runner labels/platform, including explicit matrix expansions."""
-    document = parse_workflow_yaml(contents)
+    document = parse_workflow_yaml(contents, source_path=source_path)
     jobs = document.get("jobs")
     if not isinstance(jobs, dict):
         raise ValueError("Workflow has no jobs mapping")
@@ -583,7 +672,7 @@ def native_contract_manifest(root: str = ".", repo: str = "KaisAbiyyi/mind-place
             continue
         content = subprocess.check_output(["git", "cat-file", "blob", oid], cwd=root)
         if path in {CI_WORKFLOW, SQLCIPHER_WORKFLOW, PRODUCT_WORKFLOW}:
-            content = canonical_workflow_signature(content)
+            content = canonical_workflow_signature(content, source_path=path)
         selected.append({
             "path": path, "mode": mode, "sha256": hashlib.sha256(content).hexdigest(),
         })

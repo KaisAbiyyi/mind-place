@@ -783,7 +783,8 @@ def require_prerequisites(runs: list[dict], candidate: dict, *, repo: str,
         else:
             source = Path(path).read_bytes()
         runner_contracts = {
-            name: native_contract.workflow_job_runner_requirements(source, name)
+            name: native_contract.workflow_job_runner_requirements(
+                source, name, source_path=path)
             for name in expected_jobs
         }
         accepted = False

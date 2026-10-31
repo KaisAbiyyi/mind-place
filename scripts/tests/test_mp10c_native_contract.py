@@ -273,6 +273,74 @@ class NativeContractFingerprintTests(unittest.TestCase):
                 native_contract.validate_runner_labels({"labels": labels}, windows)
 
 
+    def test_real_ci_and_separated_product_workflows_parse_with_path_context(self):
+        root = Path(__file__).resolve().parents[2]
+        ci_source = root.joinpath(native_contract.CI_WORKFLOW).read_bytes()
+        product_source = root.joinpath(native_contract.PRODUCT_WORKFLOW).read_bytes()
+
+        ci_document = native_contract.parse_workflow_yaml(
+            ci_source, source_path=native_contract.CI_WORKFLOW)
+        product_document = native_contract.parse_workflow_yaml(
+            product_source, source_path=native_contract.PRODUCT_WORKFLOW)
+        self.assertIsInstance(ci_document.get("jobs"), dict)
+        self.assertIsInstance(product_document.get("jobs"), dict)
+        self.assertEqual(
+            native_contract.workflow_job_runner_requirements(
+                ci_source, "Native execution evidence",
+                source_path=native_contract.CI_WORKFLOW)["platform"],
+            "linux",
+        )
+        self.assertEqual(
+            native_contract.workflow_job_runner_requirements(
+                product_source, "Verify Windows product",
+                source_path=native_contract.PRODUCT_WORKFLOW)["platform"],
+            "windows",
+        )
+
+    def test_multiline_quoted_yaml_and_strict_path_diagnostics(self):
+        source = (
+            "jobs:\n"
+            "  build:\n"
+            "    runs-on: windows-latest\n"
+            "    steps:\n"
+            "      - name: Install Rust\n"
+            "        run: 'rustup toolchain install 1.90.0\n"
+            "\n"
+            "          rustup default 1.90.0\n"
+            "          '\n"
+        )
+        document = native_contract.parse_workflow_yaml(
+            source, source_path=native_contract.PRODUCT_WORKFLOW)
+        run = document["jobs"]["build"]["steps"][0]["run"]
+        self.assertIn("rustup toolchain install 1.90.0", run)
+        self.assertIn("rustup default 1.90.0", run)
+        self.assertIn("\n", run)
+
+        duplicate = (
+            "jobs:\n"
+            "  verify:\n"
+            "    runs-on: ubuntu-latest\n"
+            "  verify:\n"
+            "    runs-on: windows-latest\n"
+        )
+        with self.assertRaises(ValueError) as duplicate_error:
+            native_contract.parse_workflow_yaml(
+                duplicate, source_path=native_contract.PRODUCT_WORKFLOW)
+        self.assertIn(native_contract.PRODUCT_WORKFLOW, str(duplicate_error.exception))
+        self.assertIn("Duplicate YAML mapping key", str(duplicate_error.exception))
+
+        invalid_indent = (
+            "jobs:\n"
+            "  verify:\n"
+            "    runs-on: ubuntu-latest\n"
+            "   steps:\n"
+            "     - run: cargo test\n"
+        )
+        with self.assertRaises(ValueError) as indent_error:
+            native_contract.parse_workflow_yaml(
+                invalid_indent, source_path=native_contract.CI_WORKFLOW)
+        self.assertIn(native_contract.CI_WORKFLOW, str(indent_error.exception))
+
     def test_matrix_runner_requirements_resolve_each_expanded_sqlcipher_job(self):
         source = (
             "jobs:\n"
@@ -335,25 +403,25 @@ class NativeContractFingerprintTests(unittest.TestCase):
 
     def test_separated_product_candidate_fingerprints_product_and_policy_inputs(self):
         self.write(native_contract.PRODUCT_WORKFLOW, (
-            "jobs:\\n"
-            "  verify:\\n"
-            "    runs-on: windows-latest\\n"
-            "    timeout-minutes: 120\\n"
-            "    steps:\\n"
-            "      - name: Native desktop qualification\\n"
-            "        run: cargo test\\n"
+            "jobs:\n"
+            "  verify:\n"
+            "    runs-on: windows-latest\n"
+            "    timeout-minutes: 120\n"
+            "    steps:\n"
+            "      - name: Native desktop qualification\n"
+            "        run: cargo test\n"
         ))
         self.write(native_contract.SQLCIPHER_WORKFLOW, (
-            "jobs:\\n"
-            "  sqlcipher:\\n"
-            "    runs-on: ubuntu-24.04\\n"
-            "    steps:\\n"
-            "      - name: Encrypted regression\\n"
-            "        run: cargo test\\n"
+            "jobs:\n"
+            "  sqlcipher:\n"
+            "    runs-on: ubuntu-24.04\n"
+            "    steps:\n"
+            "      - name: Encrypted regression\n"
+            "        run: cargo test\n"
         ))
-        self.write(".github/windows-policy/config.example.json", '{"enabled":false}\\n')
-        self.write(".github/windows-policy/native-steps.json", '{"schema":1}\\n')
-        self.write(".github/windows-policy/verifier.yml", "name: independent verifier\\n")
+        self.write(".github/windows-policy/config.example.json", '{"enabled":false}\n')
+        self.write(".github/windows-policy/native-steps.json", '{"schema":1}\n')
+        self.write(".github/windows-policy/verifier.yml", "name: independent verifier\n")
         self.commit()
 
         manifest = native_contract.native_contract_manifest(str(self.root), REPO, 132)
@@ -371,7 +439,7 @@ class NativeContractFingerprintTests(unittest.TestCase):
         self.assertNotEqual(before, native_contract.native_contract_fingerprint(str(self.root), REPO, 132))
 
         before = native_contract.native_contract_fingerprint(str(self.root), REPO, 132)
-        self.write(".github/windows-policy/native-steps.json", '{"schema":2}\\n')
+        self.write(".github/windows-policy/native-steps.json", '{"schema":2}\n')
         self.commit()
         self.assertNotEqual(before, native_contract.native_contract_fingerprint(str(self.root), REPO, 132))
 
@@ -496,14 +564,38 @@ class NativeContractFingerprintTests(unittest.TestCase):
 
 
 class NativeIdentityAndPrerequisiteTests(unittest.TestCase):
+    # PR 129 retains the historical integrated workflow contract. Its fixture
+    # must not borrow PR 131's separated CI workflow from the current checkout.
+    LEGACY_CI_SOURCE = """jobs:
+  fast:
+    name: Fast developer feedback
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install dependencies
+  rust:
+    name: Fast Rust compile and vault feedback
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Install pinned Rust 1.90
+  windows:
+    name: Verify Windows product
+    runs-on: windows-latest
+    steps:
+      - name: Setup Node.js
+  evidence:
+    name: Native execution evidence
+    runs-on: ubuntu-latest
+    steps:
+      - name: Capture native execution provenance
+"""
     def setUp(self):
         self.candidate = candidate()
         self.run = native_run(self.candidate)
         self.jobs = ci_jobs()
         self.evidence = native_evidence(self.candidate, self.run)
-        ci_source = Path(__file__).resolve().parents[2].joinpath(
-            ".github/workflows/ci.yml").read_bytes()
-        self.workflow_sources = {native_contract.CI_WORKFLOW: ci_source}
+        self.workflow_sources = {
+            native_contract.CI_WORKFLOW: self.LEGACY_CI_SOURCE,
+        }
         self.args = {
             "repo": "owner/repo", "vault": False, "contract_fingerprint": CONTRACT,
             "fetch_jobs": lambda _: {"total_count": len(self.jobs), "jobs": self.jobs},
@@ -1055,6 +1147,85 @@ class SeparatedProductPrerequisiteTests(unittest.TestCase):
         )
         self.assertEqual(state, "pending")
         self.assertIn("windows-product.yml", reason)
+
+    def _mp_ci_win_01_fixture(self):
+        cand = candidate(
+            131, head_repo=REPO, base_repo=REPO,
+            head_repo_id=99, base_repo_id=99,
+        )
+        ci_run = native_run(cand, run_id=401)
+        product_run = native_run(
+            cand, run_id=402, path=native_contract.PRODUCT_WORKFLOW)
+        jobs_by_run = {
+            ci_run["id"]: json.loads(json.dumps(self.ci_jobs)),
+            product_run["id"]: json.loads(json.dumps(self.product_jobs)),
+        }
+        sources = {
+            native_contract.CI_WORKFLOW: self.CI_SOURCE,
+            native_contract.PRODUCT_WORKFLOW: self.PRODUCT_SOURCE,
+        }
+        evidence = native_evidence(cand, ci_run, fingerprint=CONTRACT, vault=False)
+
+        def fetch_jobs(run):
+            jobs = jobs_by_run[run["id"]]
+            return {"total_count": len(jobs), "jobs": jobs}
+
+        return cand, ci_run, product_run, jobs_by_run, sources, evidence, fetch_jobs
+
+    def test_mp_ci_win_01_uses_separate_authoritative_windows_product_source(self):
+        cand, ci_run, product_run, jobs_by_run, sources, evidence, fetch_jobs = (
+            self._mp_ci_win_01_fixture())
+        with patch.object(
+                Path, "read_bytes",
+                side_effect=AssertionError("authoritative workflow injection was bypassed")):
+            state, reason = coordinator.classify(
+                [ci_run, product_run], cand, REPO, False, CONTRACT,
+                fetch_jobs, lambda run: evidence, workflow_sources=sources)
+        self.assertEqual(state, "ready", reason)
+        self.assertTrue(native_contract.requires_separated_product(REPO, 131))
+        self.assertEqual(
+            coordinator.required_paths(False, True),
+            (native_contract.CI_WORKFLOW, native_contract.PRODUCT_WORKFLOW),
+        )
+
+    def test_mp_ci_win_01_missing_windows_product_source_fails_closed(self):
+        cand, ci_run, product_run, jobs_by_run, sources, evidence, fetch_jobs = (
+            self._mp_ci_win_01_fixture())
+        sources.pop(native_contract.PRODUCT_WORKFLOW)
+        state, reason = coordinator.classify(
+            [ci_run, product_run], cand, REPO, False, CONTRACT,
+            fetch_jobs, lambda run: evidence, workflow_sources=sources)
+        self.assertEqual(state, "failed")
+        self.assertIn(native_contract.PRODUCT_WORKFLOW, reason)
+
+    def test_mp_ci_win_01_missing_native_evidence_fails_closed(self):
+        cand, ci_run, product_run, jobs_by_run, sources, evidence, fetch_jobs = (
+            self._mp_ci_win_01_fixture())
+        state, reason = coordinator.classify(
+            [ci_run, product_run], cand, REPO, False, CONTRACT,
+            fetch_jobs, lambda run: {}, workflow_sources=sources)
+        self.assertEqual(state, "failed")
+        self.assertIn("Native provenance mismatch", reason)
+
+    def test_mp_ci_win_01_product_prerequisite_waits_while_in_progress(self):
+        cand, ci_run, product_run, jobs_by_run, sources, evidence, fetch_jobs = (
+            self._mp_ci_win_01_fixture())
+        pending_product = dict(product_run, status="in_progress", conclusion=None)
+        state, reason = coordinator.classify(
+            [ci_run, pending_product], cand, REPO, False, CONTRACT,
+            fetch_jobs, lambda run: evidence, workflow_sources=sources)
+        self.assertEqual(state, "pending", reason)
+        self.assertIn("windows-product.yml", reason)
+
+    def test_mp_ci_win_01_failed_or_cancelled_product_prerequisite_fails(self):
+        cand, ci_run, product_run, jobs_by_run, sources, evidence, fetch_jobs = (
+            self._mp_ci_win_01_fixture())
+        for conclusion in ("failure", "cancelled"):
+            failed_product = dict(product_run, status="completed", conclusion=conclusion)
+            state, reason = coordinator.classify(
+                [ci_run, failed_product], cand, REPO, False, CONTRACT,
+                fetch_jobs, lambda run: evidence, workflow_sources=sources)
+            self.assertEqual(state, "failed", reason)
 
     def test_exact_product_job_attempt_and_complete_listing_are_required(self):
         wrong_attempt = [[dict(item) for item in self.product_jobs]]

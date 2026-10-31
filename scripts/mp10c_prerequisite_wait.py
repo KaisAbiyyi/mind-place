@@ -22,15 +22,19 @@ def required_paths(vault: bool, separated_product: bool = False) -> tuple[str, .
     return paths + ((native_contract.SQLCIPHER_WORKFLOW,) if vault else ())
 
 
-def classify(runs, candidate, repo, vault, contract_fingerprint, fetch_jobs, fetch_evidence):
+def classify(runs, candidate, repo, vault, contract_fingerprint, fetch_jobs,
+             fetch_evidence, workflow_sources: dict[str, bytes | str] | None = None):
     """Return ready/pending/failed; only exact candidate runs can count."""
     try:
         gate.require_prerequisites(
             runs, candidate, repo=repo, vault=vault,
             contract_fingerprint=contract_fingerprint,
-            fetch_jobs=fetch_jobs, fetch_evidence=fetch_evidence)
+            fetch_jobs=fetch_jobs, fetch_evidence=fetch_evidence,
+            workflow_sources=workflow_sources)
         return "ready", "Exact PR/base/head native jobs and contract evidence succeeded"
     except ValueError as error:
+        if "Missing authoritative workflow source:" in str(error):
+            return "failed", str(error)
         pending = []
         failed = []
         separated_product = native_contract.requires_separated_product(repo, candidate["pr"])
@@ -51,18 +55,27 @@ def classify(runs, candidate, repo, vault, contract_fingerprint, fetch_jobs, fet
                     "queued", "in_progress", "requested", "waiting", "pending")
                    for run in matching):
                 pending.append(path)
-            elif any(run.get("status") == "completed" for run in matching):
+                continue
+            completed = [run for run in matching if run.get("status") == "completed"]
+            if completed and not any(run.get("conclusion") == "success" for run in completed):
                 failed.append(path)
-            else:
+            elif not completed:
                 pending.append(path)
         if failed:
             return "failed", (
                 "Completed exact-candidate native prerequisite failed or lacked required "
                 "jobs/steps/provenance: " + ", ".join(failed) + f" ({error})")
-        return "pending", "Exact-candidate native prerequisite queued/running/missing: " + ", ".join(pending)
+        if pending:
+            return "pending", (
+                "Exact-candidate native prerequisite queued/running/missing: "
+                + ", ".join(pending) + f" ({error})")
+        return "failed", (
+            "Completed exact-candidate native prerequisite failed or lacked required "
+            "jobs/steps/provenance: " + str(error))
 
 
-def snapshot(repo, candidate, token, vault, contract_fingerprint):
+def snapshot(repo, candidate, token, vault, contract_fingerprint,
+             workflow_sources: dict[str, bytes | str] | None = None):
     try:
         gate.require_live_candidate(repo, candidate, token)
     except ValueError as error:
@@ -96,7 +109,8 @@ def snapshot(repo, candidate, token, vault, contract_fingerprint):
         return gate.fetch_native_evidence(run, repo=repo, token=token)
 
     state, reason = classify(
-        runs, candidate, repo, vault, contract_fingerprint, jobs, evidence)
+        runs, candidate, repo, vault, contract_fingerprint, jobs, evidence,
+        workflow_sources=workflow_sources)
     try:
         gate.require_live_candidate(repo, candidate, token)
     except ValueError as error:
@@ -105,7 +119,8 @@ def snapshot(repo, candidate, token, vault, contract_fingerprint):
 
 
 def wait(repo, candidate, token, vault, contract_fingerprint, timeout=4800, poll=30,
-         clock=time.monotonic, sleep=time.sleep, inspect=snapshot):
+         clock=time.monotonic, sleep=time.sleep, inspect=snapshot,
+         workflow_sources: dict[str, bytes | str] | None = None):
     if (not repo or not isinstance(candidate, dict)
             or type(candidate.get("pr")) is not int or candidate["pr"] <= 0
             or not gate.HEX40.fullmatch(candidate.get("head", ""))
@@ -117,7 +132,12 @@ def wait(repo, candidate, token, vault, contract_fingerprint, timeout=4800, poll
     deadline = clock() + timeout
     while True:
         try:
-            state, reason = inspect(repo, candidate, token, vault, contract_fingerprint)
+            if workflow_sources is None:
+                state, reason = inspect(repo, candidate, token, vault, contract_fingerprint)
+            else:
+                state, reason = inspect(
+                    repo, candidate, token, vault, contract_fingerprint,
+                    workflow_sources=workflow_sources)
         except (OSError, ValueError, KeyError, TypeError, AttributeError, urllib.error.URLError, TimeoutError) as err:
             state, reason = "pending", f"API/evidence verification unavailable: {type(err).__name__}"
         print(f"MP-10C native coordination: {state} — {reason}", flush=True)
