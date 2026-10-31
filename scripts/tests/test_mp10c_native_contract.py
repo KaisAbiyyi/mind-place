@@ -477,7 +477,7 @@ class NativeContractFingerprintTests(unittest.TestCase):
         self.assertEqual((evidence["pr_number"], evidence["head_sha"], evidence["base_sha"]),
                          (129, head, base))
         self.assertEqual((evidence["workflow_run_id"], evidence["workflow_run_attempt"]), (700, 2))
-        self.assertEqual(evidence["native_contract_policy"], "mp-native-contract/v2")
+        self.assertEqual(evidence["native_contract_policy"], native_contract.POLICY)
         bad = json.loads(json.dumps(payload))
         bad["pull_request"]["base"]["sha"] = "e" * 40
         with self.assertRaises(ValueError):
