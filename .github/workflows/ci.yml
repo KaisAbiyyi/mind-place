@@ -2,7 +2,8 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # Keep bounded policy feedback available while the stacked PR is conflicted.
+    branches: [main, codex/mp-ci-win-01]
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   workflow_dispatch:
