@@ -77,11 +77,25 @@ class GitHub:
         return payload if binary else json.loads(payload)
 
     def iter_pages(self, path, key=None):
+        expected_total = None
+        seen = 0
         for page in range(1, 21):
             data = self.request(path + ("&" if "?" in path else "?") + f"per_page=100&page={page}")
-            items = data if key is None else data[key]
+            if key is None:
+                items = data
+            else:
+                require(isinstance(data, dict), "malformed API listing")
+                items = data.get(key)
+                total = data.get("total_count")
+                require(type(total) is int and total >= 0, "missing API listing count")
+                require(expected_total is None or total == expected_total, "API listing changed during pagination")
+                expected_total = total
+            require(isinstance(items, list), "malformed API listing entries")
+            seen += len(items)
+            require(expected_total is None or seen <= expected_total, "API listing count mismatch")
             yield from items
             if len(items) < 100:
+                require(expected_total is None or seen == expected_total, "incomplete API listing")
                 return
         raise Rejected("API pagination limit; no partial evidence accepted")
 
@@ -217,8 +231,12 @@ def verify_run(api, sources, run_id, current, identity, policy_root, now=None):
     require(proof.get("fingerprint") == identity == sources.fingerprint(proof["source"]), "Windows inputs changed")
     jobs = api.pages(f"/actions/runs/{run_id}/attempts/{attempt}/jobs", "jobs")
     jobs = [job for job in jobs if job["name"] == "Verify Windows product"]
-    require(len(jobs) == 1 and jobs[0]["run_id"] == run_id and jobs[0]["conclusion"] == "success",
-            "native job failed, skipped or ambiguous")
+    require(len(jobs) == 1, "native job missing or ambiguous")
+    job = jobs[0]
+    require(type(job.get("run_id")) is int and job["run_id"] == run_id
+            and type(job.get("run_attempt")) is int and job["run_attempt"] == attempt
+            and job.get("status") == "completed" and job.get("conclusion") == "success",
+            "native job did not complete successfully on the exact run attempt")
     require("windows-latest" in jobs[0]["labels"], "wrong native runner")
     contract = json.loads((Path(policy_root) / ".github/windows-policy/native-steps.json").read_text())
     require(contract.get("schema") == "windows-product-native-steps/v2", "unknown native step policy")
