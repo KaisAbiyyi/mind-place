@@ -122,6 +122,21 @@ jobs:
           cargo build --locked -p mind-place-capture-host
           mkdir -p src-tauri/binaries
           cp target/debug/mind-place-capture-host src-tauri/binaries/mind-place-capture-host-x86_64-unknown-linux-gnu
+      - name: Setup Node.js for distribution notices
+        if: always()
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install frontend dependencies for notice inventory
+        if: always()
+        run: npm ci
+      - name: Prepare pinned Windows tunnel helper notices
+        if: always() && runner.os == 'Windows'
+        run: node scripts/tunnel-helper.mjs
+      - name: Generate canonical third-party notices resource
+        if: always()
+        run: node scripts/generate-notices.mjs
       - name: Native capture IPC qualification
         if: always()
         run: cargo test -p mind-place --bin mind-place native_capture_ipc::qualification -- --nocapture
