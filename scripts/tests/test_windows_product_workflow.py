@@ -13,13 +13,14 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
-import mp10c_ci_gate as scale
+import mp10c_native_contract as native_contract
 import mp10c_prerequisite_wait as coordinator
 
 
 class WorkflowTests(unittest.TestCase):
     def setUp(self):
         self.workflow = yaml.safe_load((ROOT / ".github/workflows/windows-product.yml").read_text())
+        self.workflow_ci = (ROOT / ".github/workflows/ci.yml").read_text()
         self.jobs = self.workflow["jobs"]
         self.steps = self.jobs["verify"]["steps"]
 
@@ -78,7 +79,7 @@ class WorkflowTests(unittest.TestCase):
 
     def test_fast_workflow_cannot_trigger_native_build(self):
         fast = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
-        self.assertEqual(set(fast["jobs"]), {"fast", "rust-fast"})
+        self.assertEqual(set(fast["jobs"]), {"fast", "rust-fast", "native-evidence"})
         self.assertNotIn("windows-latest", str(fast))
 
     def test_authority_template_never_checks_out_target_or_exposes_app_to_it(self):
@@ -91,58 +92,50 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(policy["jobs"]["verify"]["environment"], "windows-policy-authority")
         self.assertNotIn("pull_request", str(policy.get("on", policy.get(True))))
 
-    def test_mp10c_requires_actual_exact_source_native_in_separated_workflow(self):
-        source = "a" * 40
-        product_path = ".github/workflows/windows-product.yml"
-        fast = {"id": 1, "run_attempt": 1, "head_sha": source, "status": "completed", "conclusion": "success",
-                "path": ".github/workflows/ci.yml"}
-        native = {**fast, "id": 2, "path": product_path}
-        rust = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())["jobs"]["rust-fast"]
-        def job(name, steps):
-            return {"name": name, "status": "completed", "conclusion": "success", "steps": [
-                {"name": step["name"], "conclusion": "success"} for step in steps if "name" in step]}
-        jobs = {1: [job(rust["name"], rust["steps"])],
-                2: [job(self.jobs["verify"]["name"], self.steps)]}
-        def fetch(run):
-            return {"total_count": len(jobs[run["id"]]), "jobs": jobs[run["id"]]}
-        self.assertEqual(scale.product_workflow(), product_path)
-        scale.require_prerequisites([fast, native], source, vault=False, fetch_jobs=fetch, product_path=product_path)
-        self.assertEqual(coordinator.classify([fast, native], source, False, fetch, product_path)[0], "ready")
-        self.assertEqual(coordinator.classify([fast], source, False, fetch, product_path)[0], "pending")
-        self.assertEqual(coordinator.classify([fast, {**native, "status": "in_progress"}], source, False, fetch, product_path)[0], "pending")
-        jobs[2][0]["conclusion"] = "skipped"
-        self.assertEqual(coordinator.classify([fast, native], source, False, fetch, product_path)[0], "failed")
-        with self.assertRaises(ValueError):
-            scale.require_prerequisites([fast, native], source, vault=False, fetch_jobs=fetch, product_path=product_path)
+    def test_mp10c_requires_exact_native_evidence_and_separated_product_workflow(self):
+        repo = "KaisAbiyyi/mind-place"
+        self.assertTrue(native_contract.requires_separated_product(repo, 131))
+        self.assertEqual(
+            coordinator.required_paths(False, True),
+            (native_contract.CI_WORKFLOW, PRODUCT_WORKFLOW),
+        )
+        self.assertIn("Native execution evidence", self.workflow_ci)
+        self.assertIn("Capture native execution provenance", self.workflow_ci)
+        self.assertIn("Upload native execution evidence", self.workflow_ci)
+        self.assertIn("Windows source and execution decision", self.workflow["jobs"]["plan"]["name"])
+        self.assertIn("Await exact-source authority on Ubuntu", self.workflow["jobs"]["coordinate"]["name"])
+        self.assertEqual(self.workflow["jobs"]["verify"]["name"], "Verify Windows product")
+        self.assertEqual(self.workflow["jobs"]["candidate"]["name"], "Windows Product / candidate result")
+        self.assertEqual(self.steps[-2]["name"], "Record native proof")
+        self.assertEqual(self.steps[-1]["name"], "Upload native proof")
 
-    def test_mp9b_vault_integration_keeps_encrypted_native_ipc_prerequisite(self):
-        source = "a" * 40
-        product_path = ".github/workflows/windows-product.yml"
-        def run(identifier, path):
-            return {"id": identifier, "run_attempt": 1, "head_sha": source, "status": "completed",
-                    "conclusion": "success", "path": path}
-        rust = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())["jobs"]["rust-fast"]
-        def job(name, names):
-            return {"name": name, "status": "completed", "conclusion": "success",
-                    "steps": [{"name": n, "conclusion": "success"} for n in names]}
-        jobs = {1: [job(rust["name"], [s["name"] for s in rust["steps"] if "name" in s])],
-                2: [job(self.jobs["verify"]["name"], [s["name"] for s in self.steps])],
-                3: [job("SQLCipher / " + platform, ["Encrypted state/index and FTS regression",
-                      "Keyed MCP synthetic authorization and revocation", "Vault and backup adversarial regression"])
-                    for platform in ["ubuntu-24.04", "windows-2022"]]}
-        runs = [run(1, ".github/workflows/ci.yml"), run(2, product_path),
-                run(3, ".github/workflows/mp9b-sqlcipher-qualification.yml")]
-        def fetch(candidate):
-            return {"total_count": len(jobs[candidate["id"]]), "jobs": jobs[candidate["id"]]}
-        scale.require_prerequisites(runs, source, vault=True, fetch_jobs=fetch, product_path=product_path)
-        self.assertEqual(coordinator.classify(runs, source, True, fetch, product_path)[0], "ready")
+    def test_mp9b_vault_integration_keeps_encrypted_native_ipc_and_both_sqlcipher_runners(self):
+        repo = "KaisAbiyyi/mind-place"
+        self.assertTrue(native_contract.requires_sqlcipher(repo, 132))
+        self.assertTrue(native_contract.requires_separated_product(repo, 132))
+        self.assertEqual(
+            coordinator.required_paths(True, True),
+            (
+                native_contract.CI_WORKFLOW,
+                native_contract.PRODUCT_WORKFLOW,
+                native_contract.SQLCIPHER_WORKFLOW,
+            ),
+        )
         ipc_name = "Qualify native capture encrypted IPC and revoked owner epoch"
         ipc = next(step for step in self.steps if step["name"] == ipc_name)
-        self.assertIn("cargo test -p mind-place --bin mind-place native_capture_ipc::qualification -- --nocapture", ipc["run"])
-        for outcome in ["skipped", "failure", "cancelled"]:
-            next(s for s in jobs[2][0]["steps"] if s["name"] == ipc_name)["conclusion"] = outcome
-            with self.assertRaises(ValueError):
-                scale.require_prerequisites(runs, source, vault=True, fetch_jobs=fetch, product_path=product_path)
+        self.assertIn(
+            "cargo test -p mind-place --bin mind-place native_capture_ipc::qualification -- --nocapture",
+            ipc["run"],
+        )
+
+
+    def test_manual_dispatch_requires_frozen_head_base_and_reviewed_timeout(self):
+        inputs = self.workflow.get("on", self.workflow.get(True))["workflow_dispatch"]["inputs"]
+        self.assertEqual(set(inputs), {"pr_number", "head_sha", "base_sha"})
+        self.assertTrue(all(item["required"] for item in inputs.values()))
+        self.assertEqual(self.jobs["verify"]["timeout-minutes"], 120)
+        gate = (ROOT / "scripts/windows_product_gate.py").read_text()
+        self.assertIn("dispatch PR head/base does not match the live frozen candidate", gate)
 
     @unittest.skipUnless(shutil.which("pwsh"), "PowerShell unavailable in this cloud shell; exercised on hosted CI")
     def test_native_ipc_powershell_step_cannot_pass_with_zero_missing_or_failing_tests(self):
