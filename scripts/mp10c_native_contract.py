@@ -293,6 +293,10 @@ def _yaml_multiline_quoted(raw_lines: list[str], header_line: int,
         raise ValueError("Unterminated multiline quoted YAML scalar")
 
     folded = "\n".join(fragments)
+    if quote == '"':
+        # YAML double-quoted backslash-newline continuations discard the line break
+        # and following indentation; ordinary line breaks are folded below.
+        folded = re.sub(r"(?<!\\)\\\n[ \t]*", "", folded)
     # YAML folds ordinary line breaks to spaces but preserves paragraph breaks.
     folded = re.sub(r"(?<!\n)\n(?!\n)", " ", folded)
     folded = re.sub(r"\n{2,}", lambda match: "\n" * (len(match.group(0)) - 1), folded)
@@ -301,7 +305,9 @@ def _yaml_multiline_quoted(raw_lines: list[str], header_line: int,
     try:
         return json.loads('"' + folded + '"'), cursor
     except json.JSONDecodeError as error:
-        raise ValueError("Invalid multiline double-quoted YAML scalar") from error
+        raise ValueError(
+            "Invalid multiline double-quoted YAML scalar at line "
+            + str(header_line + 1)) from error
 
 
 def _yaml_parse_entry(value_text: str, pos: int, key_indent: int,

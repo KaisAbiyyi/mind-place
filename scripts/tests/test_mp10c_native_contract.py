@@ -297,6 +297,22 @@ class NativeContractFingerprintTests(unittest.TestCase):
             "windows",
         )
 
+    def test_multiline_double_quoted_yaml_line_continuations_fold_correctly(self):
+        source = """jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: command
+      run: "echo one && \
+        echo two"
+"""
+        document = native_contract.parse_workflow_yaml(
+            source, source_path=native_contract.PRODUCT_WORKFLOW)
+        self.assertEqual(
+            document["jobs"]["build"]["steps"][0]["run"],
+            "echo one && echo two",
+        )
+
     def test_indentless_yaml_sequences_are_supported_without_weakening_indentation(self):
         source = (
             "'on':\n"
