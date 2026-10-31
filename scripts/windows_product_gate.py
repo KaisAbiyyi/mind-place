@@ -440,6 +440,11 @@ def main():
                        "base_ref": event["pull_request"]["base"]["ref"]}
         else:
             current = snapshot(api, int(number))
+            if os.environ["GITHUB_EVENT_NAME"] == "workflow_dispatch":
+                inputs = event.get("inputs", {})
+                require(sha(inputs.get("head_sha")) == current["head"]
+                        and sha(inputs.get("base_sha")) == current["base"],
+                        "dispatch PR head/base does not match the live frozen candidate")
         if not fresh:
             require(event["pull_request"]["head"]["sha"] == current["head"]
                     and event["pull_request"]["base"]["sha"] == current["base"]
