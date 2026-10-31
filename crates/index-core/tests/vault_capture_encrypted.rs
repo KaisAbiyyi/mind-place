@@ -110,7 +110,11 @@ fn unmarked_vault_cannot_create_encrypted_capture_index() {
     assert!(!root.join("archive-index.sqlite3").exists());
 }
 
-fn catalog_key(vault: &CryptoVault, gate: &SecurityGate, lease: UnlockLease) -> std::sync::Arc<CipherKey> {
+fn catalog_key(
+    vault: &CryptoVault,
+    gate: &SecurityGate,
+    lease: UnlockLease,
+) -> std::sync::Arc<CipherKey> {
     let key = vault
         .derived_key(gate, lease, b"archive-index/sqlcipher/v1")
         .unwrap();
@@ -144,8 +148,16 @@ fn interrupted_capture_publication_reuses_only_matching_authenticated_evidence()
         }
         let identity = format!("capture/{}/{}", first.id, first.snapshot_id);
         let storage = ImmutableVaultStorage::new(&root, &vault, &gate, lease).unwrap();
+        let mut original = capture("2026-10-26T03:00:00Z");
+        mind_place_archive::validate_capture(&mut original).unwrap();
         let object = storage
-            .location(&gate, lease, ContentKind::Archive, identity.as_bytes())
+            .write_immutable(
+                &gate,
+                lease,
+                ContentKind::Archive,
+                identity.as_bytes(),
+                &serde_json::to_vec(&original).unwrap(),
+            )
             .unwrap();
         if mismatched {
             fs::remove_file(&object).unwrap();
@@ -182,7 +194,10 @@ fn interrupted_capture_publication_reuses_only_matching_authenticated_evidence()
                 store.read(&first.id, None).unwrap().capture.captured_at,
                 "2026-10-26T03:00:00Z"
             );
-            assert!(store.save(capture("2026-10-26T03:00:02Z")).unwrap().unchanged);
+            assert!(store
+                .save(capture("2026-10-26T03:00:02Z"))
+                .unwrap()
+                .unchanged);
         }
         assert_eq!(fs::read(&object).unwrap(), ciphertext);
     }
@@ -217,5 +232,8 @@ fn failed_catalog_initialization_rolls_back_its_partial_schema() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(created, 0, "failed initialization must not publish a partial schema");
+    assert_eq!(
+        created, 0,
+        "failed initialization must not publish a partial schema"
+    );
 }
