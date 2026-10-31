@@ -1,12 +1,16 @@
 //! Desktop-owned localhost IPC receiver for native browser capture.
 //! Only Tauri keeps unlocked CryptoVault. Native messages authenticate an
 //! ephemeral HMAC session capability and unique nonce; no DEK crosses IPC.
-use mind_place_capture_host::ipc::{read_frame_with_timeout, write_json, SessionDescriptor};
+use mind_place_archive::MAX_CAPTURE_BYTES;
+use mind_place_capture_host::ipc::{SessionDescriptor, SignedCapture};
+#[cfg(test)]
+use mind_place_capture_host::ipc::read_frame_with_timeout;
 use mind_place_index::vault_archive::VaultCaptureStore;
 use mind_place_security::{SecurityGate, UnlockLease};
 use std::{
     collections::HashSet,
-    fs, io,
+    fs,
+    io::{self, Read, Write},
     net::{Shutdown, TcpListener, TcpStream},
     path::PathBuf,
     sync::{
@@ -14,10 +18,12 @@ use std::{
         Arc, Mutex,
     },
     thread::{self, JoinHandle},
-    time::Duration,
+    time::{Duration, Instant},
 };
-#[cfg(test)]
-use std::time::Instant;
+#[cfg(unix)]
+use std::os::fd::AsRawFd;
+#[cfg(windows)]
+use std::os::windows::io::AsRawSocket;
 
 pub(super) struct NativeCaptureIpc {
     stop: Arc<AtomicBool>,
@@ -25,9 +31,20 @@ pub(super) struct NativeCaptureIpc {
     archive_root: PathBuf,
     identity: SessionDescriptor,
     active_stream: Arc<Mutex<Option<TcpStream>>>,
-    // Test-only notification from the real receiver, not a fabricated accept.
+    // A loopback wake socket interrupts readiness waits without changing the
+    // accepted client socket's blocking mode.
+    wake_tx: TcpStream,
+    // Test-only notifications from the real receiver, not fabricated accepts.
     #[cfg(test)]
     accepted_clients: Arc<(Mutex<u64>, std::sync::Condvar)>,
+    #[cfg(test)]
+    reader_started: Arc<(Mutex<bool>, std::sync::Condvar)>,
+    #[cfg(test)]
+    fail_next_clone: Arc<AtomicBool>,
+    #[cfg(test)]
+    clone_failure_seen: Arc<(Mutex<bool>, std::sync::Condvar)>,
+    #[cfg(test)]
+    force_shutdown_error: Arc<AtomicBool>,
     #[cfg(test)]
     worker_trace: Arc<Mutex<WorkerTrace>>,
 }
@@ -42,6 +59,296 @@ struct WorkerTrace {
     write_finished: Option<Instant>,
     active_cleared: Option<Instant>,
     exit_at: Option<Instant>,
+}
+
+#[derive(Clone, Copy)]
+enum SocketInterest {
+    Readable,
+    Writable,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SocketWait {
+    Ready,
+    Cancelled,
+    TimedOut,
+}
+
+fn cancellation_pair() -> io::Result<(TcpStream, TcpStream)> {
+    let listener = TcpListener::bind(("127.0.0.1", 0))?;
+    let sender = TcpStream::connect(listener.local_addr()?)?;
+    let (receiver, _) = listener.accept()?;
+    sender.set_nonblocking(true)?;
+    receiver.set_nonblocking(false)?;
+    Ok((sender, receiver))
+}
+
+fn poll_timeout_ms(deadline: Instant) -> i32 {
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    if remaining.is_zero() {
+        return 0;
+    }
+    let fractional_millisecond = remaining.subsec_nanos() % 1_000_000 != 0;
+    let milliseconds = remaining.as_millis() + if fractional_millisecond { 1 } else { 0 };
+    milliseconds.min(i32::MAX as u128) as i32
+}
+
+fn wait_for_socket_ready(
+    stream: &TcpStream,
+    wake: &TcpStream,
+    interest: SocketInterest,
+    deadline: Instant,
+    stop: &AtomicBool,
+) -> io::Result<SocketWait> {
+    loop {
+        if stop.load(Ordering::Acquire) {
+            return Ok(SocketWait::Cancelled);
+        }
+        if Instant::now() >= deadline {
+            return Ok(SocketWait::TimedOut);
+        }
+        let timeout_ms = poll_timeout_ms(deadline);
+        #[cfg(unix)]
+        {
+            let target_events = match interest {
+                SocketInterest::Readable => libc::POLLIN,
+                SocketInterest::Writable => libc::POLLOUT,
+            };
+            let mut descriptors = [
+                libc::pollfd {
+                    fd: stream.as_raw_fd(),
+                    events: target_events,
+                    revents: 0,
+                },
+                libc::pollfd {
+                    fd: wake.as_raw_fd(),
+                    events: libc::POLLIN,
+                    revents: 0,
+                },
+            ];
+            let ready = unsafe {
+                libc::poll(
+                    descriptors.as_mut_ptr(),
+                    descriptors.len() as _,
+                    timeout_ms,
+                )
+            };
+            if ready < 0 {
+                let error = io::Error::last_os_error();
+                if error.kind() == io::ErrorKind::Interrupted {
+                    continue;
+                }
+                return Err(error);
+            }
+            if ready == 0 {
+                continue;
+            }
+            if descriptors[1].revents != 0 || stop.load(Ordering::Acquire) {
+                return Ok(SocketWait::Cancelled);
+            }
+            if descriptors[0].revents != 0 {
+                return Ok(SocketWait::Ready);
+            }
+        }
+        #[cfg(windows)]
+        {
+            use windows_sys::Win32::Networking::WinSock::{
+                WSAGetLastError, WSAPoll, WSAPOLLFD, POLLRDNORM, POLLWRNORM,
+            };
+            let target_events = match interest {
+                SocketInterest::Readable => POLLRDNORM,
+                SocketInterest::Writable => POLLWRNORM,
+            };
+            let mut descriptors = [
+                WSAPOLLFD {
+                    fd: stream.as_raw_socket() as usize,
+                    events: target_events,
+                    revents: 0,
+                },
+                WSAPOLLFD {
+                    fd: wake.as_raw_socket() as usize,
+                    events: POLLRDNORM,
+                    revents: 0,
+                },
+            ];
+            let ready = unsafe {
+                WSAPoll(
+                    descriptors.as_mut_ptr(),
+                    descriptors.len() as u32,
+                    timeout_ms,
+                )
+            };
+            if ready < 0 {
+                let error = io::Error::from_raw_os_error(unsafe { WSAGetLastError() });
+                if error.kind() == io::ErrorKind::Interrupted {
+                    continue;
+                }
+                return Err(error);
+            }
+            if ready == 0 {
+                continue;
+            }
+            if descriptors[1].revents != 0 || stop.load(Ordering::Acquire) {
+                return Ok(SocketWait::Cancelled);
+            }
+            if descriptors[0].revents != 0 {
+                return Ok(SocketWait::Ready);
+            }
+        }
+    }
+}
+
+fn read_exact_cancellable(
+    stream: &mut TcpStream,
+    wake: &TcpStream,
+    buffer: &mut [u8],
+    deadline: Instant,
+    stop: &AtomicBool,
+) -> io::Result<()> {
+    let mut offset = 0;
+    while offset < buffer.len() {
+        match wait_for_socket_ready(
+            stream,
+            wake,
+            SocketInterest::Readable,
+            deadline,
+            stop,
+        )? {
+            SocketWait::Ready => {}
+            SocketWait::Cancelled => {
+                return Err(io::Error::new(
+                    io::ErrorKind::Interrupted,
+                    "native IPC receiver cancelled",
+                ));
+            }
+            SocketWait::TimedOut => {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "native IPC frame deadline exceeded",
+                ));
+            }
+        }
+        if stop.load(Ordering::Acquire) {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "native IPC receiver cancelled",
+            ));
+        }
+        match stream.read(&mut buffer[offset..]) {
+            Ok(0) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "native IPC client disconnected",
+                ));
+            }
+            Ok(read) => offset += read,
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock
+                ) => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+fn read_signed_capture_cancellable(
+    stream: &mut TcpStream,
+    wake: &TcpStream,
+    timeout: Duration,
+    stop: &AtomicBool,
+) -> Result<SignedCapture, ()> {
+    let deadline = Instant::now().checked_add(timeout).ok_or(())?;
+    let mut size = [0u8; 4];
+    read_exact_cancellable(stream, wake, &mut size, deadline, stop).map_err(|_| ())?;
+    let length = u32::from_le_bytes(size) as usize;
+    if length == 0 || length > MAX_CAPTURE_BYTES + 8192 {
+        return Err(());
+    }
+    let mut bytes = vec![0u8; length];
+    read_exact_cancellable(stream, wake, &mut bytes, deadline, stop).map_err(|_| ())?;
+    serde_json::from_slice(&bytes).map_err(|_| ())
+}
+
+fn write_all_cancellable(
+    stream: &mut TcpStream,
+    wake: &TcpStream,
+    buffer: &[u8],
+    deadline: Instant,
+    stop: &AtomicBool,
+) -> io::Result<()> {
+    let mut offset = 0;
+    while offset < buffer.len() {
+        match wait_for_socket_ready(
+            stream,
+            wake,
+            SocketInterest::Writable,
+            deadline,
+            stop,
+        )? {
+            SocketWait::Ready => {}
+            SocketWait::Cancelled => {
+                return Err(io::Error::new(
+                    io::ErrorKind::Interrupted,
+                    "native IPC response cancelled",
+                ));
+            }
+            SocketWait::TimedOut => {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "native IPC response deadline exceeded",
+                ));
+            }
+        }
+        if stop.load(Ordering::Acquire) {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "native IPC response cancelled",
+            ));
+        }
+        match stream.write(&buffer[offset..]) {
+            Ok(0) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::WriteZero,
+                    "native IPC response socket closed",
+                ));
+            }
+            Ok(written) => offset += written,
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock
+                ) => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+fn write_json_cancellable(
+    stream: &mut TcpStream,
+    wake: &TcpStream,
+    value: &serde_json::Value,
+    timeout: Duration,
+    stop: &AtomicBool,
+) -> Result<(), ()> {
+    let bytes = serde_json::to_vec(value).map_err(|_| ())?;
+    if bytes.len() > 1024 * 1024 {
+        return Err(());
+    }
+    let deadline = Instant::now().checked_add(timeout).ok_or(())?;
+    write_all_cancellable(
+        stream,
+        wake,
+        &(bytes.len() as u32).to_le_bytes(),
+        deadline,
+        stop,
+    )
+    .map_err(|_| ())?;
+    write_all_cancellable(stream, wake, &bytes, deadline, stop).map_err(|_| ())?;
+    stream.flush().map_err(|_| ())?;
+    Ok(())
 }
 
 impl NativeCaptureIpc {
@@ -64,6 +371,8 @@ impl NativeCaptureIpc {
         listener
             .set_nonblocking(true)
             .map_err(|_| "MP_VAULT_IPC_BIND_FAILED".to_owned())?;
+        let (wake_tx, wake_rx) = cancellation_pair()
+            .map_err(|_| "MP_VAULT_IPC_CANCEL_FAILED".to_owned())?;
         let mut token = [0u8; 32];
         getrandom::fill(&mut token).map_err(|_| "MP_VAULT_IPC_ENTROPY_FAILED".to_owned())?;
         let identity = SessionDescriptor::new(port, &token);
@@ -115,6 +424,20 @@ impl NativeCaptureIpc {
         #[cfg(test)]
         let worker_accepted = accepted_clients.clone();
         #[cfg(test)]
+        let reader_started = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
+        #[cfg(test)]
+        let worker_reader_started = reader_started.clone();
+        #[cfg(test)]
+        let fail_next_clone = Arc::new(AtomicBool::new(false));
+        #[cfg(test)]
+        let worker_fail_next_clone = fail_next_clone.clone();
+        #[cfg(test)]
+        let clone_failure_seen = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
+        #[cfg(test)]
+        let worker_clone_failure_seen = clone_failure_seen.clone();
+        #[cfg(test)]
+        let force_shutdown_error = Arc::new(AtomicBool::new(false));
+        #[cfg(test)]
         let worker_trace = Arc::new(Mutex::new(WorkerTrace::default()));
         #[cfg(test)]
         let worker_trace_worker = worker_trace.clone();
@@ -133,7 +456,21 @@ impl NativeCaptureIpc {
                         // Never read from a socket that Drop cannot cancel.
                         // A failed clone must deny this client, not leave an
                         // untracked five-second read blocking receiver shutdown.
-                        let active = match stream.try_clone() {
+                        #[cfg(test)]
+                        let clone_result = if worker_fail_next_clone.swap(false, Ordering::AcqRel) {
+                            let (seen, ready) = &*worker_clone_failure_seen;
+                            *seen.lock().unwrap_or_else(|error| error.into_inner()) = true;
+                            ready.notify_all();
+                            Err(io::Error::new(
+                                io::ErrorKind::Other,
+                                "injected native IPC cancellation clone failure",
+                            ))
+                        } else {
+                            stream.try_clone()
+                        };
+                        #[cfg(not(test))]
+                        let clone_result = stream.try_clone();
+                        let active = match clone_result {
                             Ok(active) => active,
                             Err(_) => {
                                 let _ = stream.shutdown(Shutdown::Both);
@@ -165,9 +502,16 @@ impl NativeCaptureIpc {
                                     .lock()
                                     .unwrap_or_else(|error| error.into_inner())
                                     .read_started = Some(Instant::now());
+                                let (started, ready) = &*worker_reader_started;
+                                *started.lock().unwrap_or_else(|error| error.into_inner()) = true;
+                                ready.notify_all();
                             }
-                            let frame =
-                                read_frame_with_timeout(&mut stream, Duration::from_secs(5));
+                            let frame = read_signed_capture_cancellable(
+                                &mut stream,
+                                &wake_rx,
+                                Duration::from_secs(5),
+                                &terminate,
+                            );
                             #[cfg(test)]
                             {
                                 worker_trace_worker
@@ -192,17 +536,41 @@ impl NativeCaptureIpc {
                         // through browser native messaging error responses.
                         #[cfg(test)]
                         {
-                            let mut trace = worker_trace_worker
+                            worker_trace_worker
                                 .lock()
-                                .unwrap_or_else(|error| error.into_inner());
-                            let now = Instant::now();
-                            trace.processing_finished = Some(now);
-                            trace.write_started = Some(now);
+                                .unwrap_or_else(|error| error.into_inner())
+                                .processing_finished = Some(Instant::now());
+                        }
+                        if terminate.load(Ordering::Acquire) {
+                            *worker_active
+                                .lock()
+                                .unwrap_or_else(|error| error.into_inner()) = None;
+                            #[cfg(test)]
+                            {
+                                worker_trace_worker
+                                    .lock()
+                                    .unwrap_or_else(|error| error.into_inner())
+                                    .active_cleared = Some(Instant::now());
+                            }
+                            continue;
+                        }
+                        #[cfg(test)]
+                        {
+                            worker_trace_worker
+                                .lock()
+                                .unwrap_or_else(|error| error.into_inner())
+                                .write_started = Some(Instant::now());
                         }
                         let response = result.unwrap_or_else(
                             |_| serde_json::json!({"ok":false,"error":"MP_VAULT_CAPTURE_DENIED"}),
                         );
-                        let write_result = write_json(&mut stream, &response);
+                        let write_result = write_json_cancellable(
+                            &mut stream,
+                            &wake_rx,
+                            &response,
+                            Duration::from_secs(5),
+                            &terminate,
+                        );
                         #[cfg(test)]
                         {
                             worker_trace_worker
@@ -242,8 +610,17 @@ impl NativeCaptureIpc {
             archive_root,
             identity,
             active_stream,
+            wake_tx,
             #[cfg(test)]
             accepted_clients,
+            #[cfg(test)]
+            reader_started,
+            #[cfg(test)]
+            fail_next_clone,
+            #[cfg(test)]
+            clone_failure_seen,
+            #[cfg(test)]
+            force_shutdown_error,
             #[cfg(test)]
             worker_trace,
         })
@@ -261,6 +638,20 @@ impl Drop for NativeCaptureIpc {
         let stop_signal = stop_started.elapsed();
 
         #[cfg(test)]
+        let wake_started = Instant::now();
+        let wake_result = self.wake_tx.write(&[1]);
+        #[cfg(test)]
+        let wake_error = match wake_result.as_ref() {
+            Ok(_) => None,
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => None,
+            Err(error) => Some(format!("{:?}/{}", error.kind(), error.raw_os_error().unwrap_or_default())),
+        };
+        #[cfg(not(test))]
+        let _ = wake_result;
+        #[cfg(test)]
+        let wake_elapsed = wake_started.elapsed();
+
+        #[cfg(test)]
         let active_lock_started = Instant::now();
         let active = self
             .active_stream
@@ -273,6 +664,16 @@ impl Drop for NativeCaptureIpc {
         #[cfg(test)]
         let mut shutdown_error = None;
         if let Some(stream) = active.as_ref() {
+            #[cfg(test)]
+            let result = if self.force_shutdown_error.swap(false, Ordering::AcqRel) {
+                Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "injected native IPC socket shutdown failure",
+                ))
+            } else {
+                stream.shutdown(Shutdown::Both)
+            };
+            #[cfg(not(test))]
             let result = stream.shutdown(Shutdown::Both);
             #[cfg(test)]
             if let Err(error) = result.as_ref() {
@@ -405,8 +806,10 @@ impl Drop for NativeCaptureIpc {
             let response_write = trace.write_started.zip(trace.write_finished).map(|(start, end)| end.saturating_duration_since(start));
             let active_clear_after_write = trace.write_finished.zip(trace.active_cleared).map(|(start, end)| end.saturating_duration_since(start));
             eprintln!(
-                "MP9B_DROP_TIMING stop_signal_us={} active_lock_wait_us={} socket_shutdown_us={} worker_read_us={} post_read_processing_us={} response_write_us={} active_clear_after_write_us={} worker_exit_from_drop_us={} join_wait_us={} join_after_worker_exit_us={} worker_panicked={} shutdown_error={:?} descriptor_identity_verify_us={} descriptor_delete_us={} descriptor_sleep_us={} descriptor_attempts={} descriptor_retries={} descriptor_outcome={} total_drop_us={}",
+                "MP9B_DROP_TIMING stop_signal_us={} wake_signal_us={} wake_error={:?} active_lock_wait_us={} socket_shutdown_us={} worker_read_us={} post_read_processing_us={} response_write_us={} active_clear_after_write_us={} worker_exit_from_drop_us={} join_wait_us={} join_after_worker_exit_us={} worker_panicked={} shutdown_error={:?} descriptor_identity_verify_us={} descriptor_delete_us={} descriptor_sleep_us={} descriptor_attempts={} descriptor_retries={} descriptor_outcome={} total_drop_us={}",
                 stop_signal.as_micros(),
+                wake_elapsed.as_micros(),
+                wake_error,
                 active_lock_wait.as_micros(),
                 shutdown_elapsed.as_micros(),
                 read_elapsed.map(|value| value.as_micros()).unwrap_or(0),
@@ -481,13 +884,108 @@ mod qualification {
         let _ = sender.join();
     }
 
+    fn wait_for_accept_count(ipc: &NativeCaptureIpc, expected: u64) {
+        let (count, ready) = &*ipc.accepted_clients;
+        let seen = count.lock().unwrap_or_else(|error| error.into_inner());
+        let (seen, result) = ready
+            .wait_timeout_while(seen, Duration::from_secs(4), |count| *count < expected)
+            .unwrap_or_else(|error| error.into_inner());
+        assert!(
+            !result.timed_out() && *seen >= expected,
+            "receiver did not accept client {expected}"
+        );
+    }
+
+    fn wait_for_reader_started(ipc: &NativeCaptureIpc) {
+        let (started, ready) = &*ipc.reader_started;
+        let started = started.lock().unwrap_or_else(|error| error.into_inner());
+        let (started, result) = ready
+            .wait_timeout_while(started, Duration::from_secs(4), |started| !*started)
+            .unwrap_or_else(|error| error.into_inner());
+        assert!(
+            !result.timed_out() && *started,
+            "receiver did not enter the real frame reader"
+        );
+        drop(started);
+        thread::sleep(Duration::from_millis(50));
+    }
+
+    fn wait_for_active_stream_clear(ipc: &NativeCaptureIpc) {
+        for _ in 0..100 {
+            if ipc
+                .active_stream
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .is_none()
+            {
+                return;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        panic!("receiver did not clear the disconnected active client");
+    }
+
     #[test]
     fn lock_cancels_a_slow_partial_client_before_receiver_join() {
-        use std::{io::Write, time::Instant};
+        for iteration in 0..30 {
+            let home = tempfile::tempdir().unwrap();
+            let gate = SecurityGate::open(home.path().join("security.json")).unwrap();
+            gate.initialize(b"synthetic-slow-client-lock").unwrap();
+            let lease = gate.require_unlocked().unwrap();
+            let (vault, _, manifest) = CryptoVault::provision(&gate, lease).unwrap();
+            let vault_root = home.path().join("vault");
+            manifest.persist_new(&vault_root).unwrap();
+            let writer =
+                Arc::new(VaultCaptureStore::open(&vault_root, vault, &gate, lease).unwrap());
+            let writer_after_lock = writer.clone();
+            let archive_root = home.path().join("archive-v1");
+            let ipc = NativeCaptureIpc::start(
+                archive_root.clone(),
+                writer,
+                gate.clone(),
+                lease,
+                Arc::new(Mutex::new(())),
+            )
+            .unwrap();
+            let descriptor = SessionDescriptor::read(&archive_root).unwrap();
+            let mut client = TcpStream::connect(("127.0.0.1", descriptor.port)).unwrap();
+            client.write_all(&[1]).unwrap();
 
+            wait_for_accept_count(&ipc, 1);
+            wait_for_reader_started(&ipc);
+            assert!(
+                ipc.active_stream
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .is_some(),
+                "receiver cleared the partial client before vault lock"
+            );
+            gate.lock();
+            let started = Instant::now();
+            drop(ipc);
+            let elapsed = started.elapsed();
+            assert!(
+                elapsed < Duration::from_secs(1),
+                "Lock must cancel the active reader instead of waiting for a peer timeout (iteration {iteration}: {elapsed:?})"
+            );
+            assert!(
+                !home.path().join("capture-ipc-v1.json").exists(),
+                "owned session descriptor must be removed after cancellation"
+            );
+            assert!(
+                writer_after_lock.save(synthetic_capture()).is_err(),
+                "revoked epoch must reject every later archive commit"
+            );
+            drop(client);
+        }
+        eprintln!("MP9B_CANCEL_STABILITY iterations=30 passed=30");
+    }
+
+    #[test]
+    fn cancellation_wake_survives_socket_shutdown_error() {
         let home = tempfile::tempdir().unwrap();
         let gate = SecurityGate::open(home.path().join("security.json")).unwrap();
-        gate.initialize(b"synthetic-slow-client-lock").unwrap();
+        gate.initialize(b"synthetic-shutdown-error").unwrap();
         let lease = gate.require_unlocked().unwrap();
         let (vault, _, manifest) = CryptoVault::provision(&gate, lease).unwrap();
         let vault_root = home.path().join("vault");
@@ -505,33 +1003,205 @@ mod qualification {
         let descriptor = SessionDescriptor::read(&archive_root).unwrap();
         let mut client = TcpStream::connect(("127.0.0.1", descriptor.port)).unwrap();
         client.write_all(&[1]).unwrap();
-
-        // Wait on a registration event from the production accept/clone path.
-        // Polling for five seconds competes with the frame's own five-second
-        // deadline and can miss a client that was accepted then cleared.
-        let (count, ready) = &*ipc.accepted_clients;
-        let seen = count.lock().unwrap_or_else(|error| error.into_inner());
-        let (seen, _) = ready
-            .wait_timeout_while(seen, Duration::from_secs(4), |count| *count == 0)
-            .unwrap_or_else(|error| error.into_inner());
-        assert!(*seen > 0, "receiver did not register the partial client");
-        drop(seen);
-        // A partial header must keep a live reader until cancelled; it must
-        // not be discarded immediately as WouldBlock on accepted Windows TCP.
-        thread::sleep(Duration::from_millis(50));
-        assert!(
-            ipc.active_stream
-                .lock()
-                .unwrap_or_else(|error| error.into_inner())
-                .is_some(),
-            "receiver cleared the partial client before vault lock"
-        );
+        wait_for_accept_count(&ipc, 1);
+        wait_for_reader_started(&ipc);
+        ipc.force_shutdown_error.store(true, Ordering::Release);
         gate.lock();
         let started = Instant::now();
         drop(ipc);
         assert!(
             started.elapsed() < Duration::from_secs(1),
-            "Lock must cancel the active reader instead of waiting for a peer timeout"
+            "cancellation wake must work even when socket shutdown fails"
+        );
+        drop(client);
+    }
+
+    #[test]
+    fn injected_clone_failure_denies_client_without_untracked_reader() {
+        let home = tempfile::tempdir().unwrap();
+        let gate = SecurityGate::open(home.path().join("security.json")).unwrap();
+        gate.initialize(b"synthetic-clone-failure").unwrap();
+        let lease = gate.require_unlocked().unwrap();
+        let (vault, _, manifest) = CryptoVault::provision(&gate, lease).unwrap();
+        let vault_root = home.path().join("vault");
+        manifest.persist_new(&vault_root).unwrap();
+        let writer = Arc::new(VaultCaptureStore::open(&vault_root, vault, &gate, lease).unwrap());
+        let archive_root = home.path().join("archive-v1");
+        let ipc = NativeCaptureIpc::start(
+            archive_root.clone(),
+            writer,
+            gate.clone(),
+            lease,
+            Arc::new(Mutex::new(())),
+        )
+        .unwrap();
+        ipc.fail_next_clone.store(true, Ordering::Release);
+        let descriptor = SessionDescriptor::read(&archive_root).unwrap();
+        let mut client = TcpStream::connect(("127.0.0.1", descriptor.port)).unwrap();
+        client.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        client.write_all(&[1]).unwrap();
+
+        let (seen, ready) = &*ipc.clone_failure_seen;
+        let seen = seen.lock().unwrap_or_else(|error| error.into_inner());
+        let (seen, result) = ready
+            .wait_timeout_while(seen, Duration::from_secs(4), |seen| !*seen)
+            .unwrap_or_else(|error| error.into_inner());
+        assert!(
+            !result.timed_out() && *seen,
+            "real accept path did not exercise injected clone failure"
+        );
+        drop(seen);
+        assert!(
+            ipc.active_stream
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .is_none(),
+            "failed clone must never publish an active stream"
+        );
+        let mut byte = [0u8; 1];
+        let disconnected = client.read(&mut byte);
+        assert!(
+            matches!(disconnected, Ok(0) | Err(_)),
+            "client must be denied after clone failure"
+        );
+        let started = Instant::now();
+        drop(ipc);
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert!(!home.path().join("capture-ipc-v1.json").exists());
+    }
+
+    #[test]
+    fn disconnect_during_read_and_response_write_does_not_strand_receiver() {
+        let home = tempfile::tempdir().unwrap();
+        let gate = SecurityGate::open(home.path().join("security.json")).unwrap();
+        gate.initialize(b"synthetic-client-disconnects").unwrap();
+        let lease = gate.require_unlocked().unwrap();
+        let (vault, _, manifest) = CryptoVault::provision(&gate, lease).unwrap();
+        let vault_root = home.path().join("vault");
+        manifest.persist_new(&vault_root).unwrap();
+        let writer = Arc::new(VaultCaptureStore::open(&vault_root, vault, &gate, lease).unwrap());
+        let archive_root = home.path().join("archive-v1");
+        let ipc = NativeCaptureIpc::start(
+            archive_root.clone(),
+            writer,
+            gate.clone(),
+            lease,
+            Arc::new(Mutex::new(())),
+        )
+        .unwrap();
+        let descriptor = SessionDescriptor::read(&archive_root).unwrap();
+
+        let mut abrupt = TcpStream::connect(("127.0.0.1", descriptor.port)).unwrap();
+        abrupt.write_all(&[1]).unwrap();
+        wait_for_accept_count(&ipc, 1);
+        wait_for_reader_started(&ipc);
+        drop(abrupt);
+        wait_for_active_stream_clear(&ipc);
+
+        let mut response_disconnect = TcpStream::connect(("127.0.0.1", descriptor.port)).unwrap();
+        response_disconnect
+            .write_all(&[2, 0, 0, 0, b'{', b'}'])
+            .unwrap();
+        drop(response_disconnect);
+        wait_for_accept_count(&ipc, 2);
+        wait_for_active_stream_clear(&ipc);
+
+        let concurrent_disconnect = TcpStream::connect(("127.0.0.1", descriptor.port)).unwrap();
+        concurrent_disconnect.write_all(&[1]).unwrap();
+        wait_for_accept_count(&ipc, 3);
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let disconnect_barrier = barrier.clone();
+        let disconnect = thread::spawn(move || {
+            disconnect_barrier.wait();
+            drop(concurrent_disconnect);
+        });
+        barrier.wait();
+        gate.lock();
+        let started = Instant::now();
+        drop(ipc);
+        let elapsed = started.elapsed();
+        disconnect.join().unwrap();
+        assert!(
+            elapsed < Duration::from_secs(1),
+            "concurrent disconnect and receiver cleanup must remain bounded"
+        );
+    }
+
+    #[test]
+    fn descriptor_cleanup_preserves_replaced_session_identity() {
+        let home = tempfile::tempdir().unwrap();
+        let gate = SecurityGate::open(home.path().join("security.json")).unwrap();
+        gate.initialize(b"synthetic-replaced-descriptor").unwrap();
+        let lease = gate.require_unlocked().unwrap();
+        let (vault, _, manifest) = CryptoVault::provision(&gate, lease).unwrap();
+        let vault_root = home.path().join("vault");
+        manifest.persist_new(&vault_root).unwrap();
+        let writer = Arc::new(VaultCaptureStore::open(&vault_root, vault, &gate, lease).unwrap());
+        let archive_root = home.path().join("archive-v1");
+        let ipc = NativeCaptureIpc::start(
+            archive_root.clone(),
+            writer,
+            gate,
+            lease,
+            Arc::new(Mutex::new(())),
+        )
+        .unwrap();
+        let replacement = SessionDescriptor::new(65534, &[0xA5; 32]);
+        fs::write(
+            home.path().join("capture-ipc-v1.json"),
+            serde_json::to_vec(&replacement).unwrap(),
+        )
+        .unwrap();
+        drop(ipc);
+        assert_eq!(
+            SessionDescriptor::read(&archive_root).unwrap(),
+            replacement,
+            "Drop must never delete a newer or foreign descriptor"
+        );
+    }
+
+    #[test]
+    fn locked_epoch_rejects_completion_of_partial_frame_without_archive_commit() {
+        let home = tempfile::tempdir().unwrap();
+        let gate = SecurityGate::open(home.path().join("security.json")).unwrap();
+        gate.initialize(b"synthetic-epoch-revocation").unwrap();
+        let lease = gate.require_unlocked().unwrap();
+        let (vault, _, manifest) = CryptoVault::provision(&gate, lease).unwrap();
+        let vault_root = home.path().join("vault");
+        manifest.persist_new(&vault_root).unwrap();
+        let writer = Arc::new(VaultCaptureStore::open(&vault_root, vault, &gate, lease).unwrap());
+        let writer_after_lock = writer.clone();
+        let archive_root = home.path().join("archive-v1");
+        let ipc = NativeCaptureIpc::start(
+            archive_root.clone(),
+            writer,
+            gate.clone(),
+            lease,
+            Arc::new(Mutex::new(())),
+        )
+        .unwrap();
+        let descriptor = SessionDescriptor::read(&archive_root).unwrap();
+        let signed = SignedCapture::prepare(
+            &descriptor.key().unwrap(),
+            &format!("chrome-extension://{}/", extension_id()),
+            synthetic_capture(),
+        )
+        .unwrap();
+        let payload = serde_json::to_vec(&signed).unwrap();
+        let mut framed = (payload.len() as u32).to_le_bytes().to_vec();
+        framed.extend_from_slice(&payload);
+        let mut client = TcpStream::connect(("127.0.0.1", descriptor.port)).unwrap();
+        client.write_all(&framed[..1]).unwrap();
+        wait_for_accept_count(&ipc, 1);
+        wait_for_reader_started(&ipc);
+        gate.lock();
+        let _ = client.write_all(&framed[1..]);
+        let started = Instant::now();
+        drop(ipc);
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert!(
+            writer_after_lock.save(synthetic_capture()).is_err(),
+            "revoked epoch must reject any archive commit after lock"
         );
         drop(client);
     }

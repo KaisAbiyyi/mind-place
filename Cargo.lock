@@ -1963,6 +1963,7 @@ name = "mind-place"
 version = "0.2.5"
 dependencies = [
  "getrandom 0.4.3",
+ "libc",
  "mind-place-archive",
  "mind-place-capture-host",
  "mind-place-index",
@@ -1975,6 +1976,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tempfile",
+ "windows-sys 0.61.2",
  "winreg 0.55.0",
  "zeroize",
 ]
