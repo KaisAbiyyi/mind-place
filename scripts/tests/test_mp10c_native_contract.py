@@ -332,10 +332,58 @@ class NativeContractFingerprintTests(unittest.TestCase):
         self.commit()
         self.assertEqual(before, self.fp())
 
+
+    def test_separated_product_candidate_fingerprints_product_and_policy_inputs(self):
+        self.write(native_contract.PRODUCT_WORKFLOW, (
+            "jobs:\\n"
+            "  verify:\\n"
+            "    runs-on: windows-latest\\n"
+            "    timeout-minutes: 120\\n"
+            "    steps:\\n"
+            "      - name: Native desktop qualification\\n"
+            "        run: cargo test\\n"
+        ))
+        self.write(native_contract.SQLCIPHER_WORKFLOW, (
+            "jobs:\\n"
+            "  sqlcipher:\\n"
+            "    runs-on: ubuntu-24.04\\n"
+            "    steps:\\n"
+            "      - name: Encrypted regression\\n"
+            "        run: cargo test\\n"
+        ))
+        self.write(".github/windows-policy/config.example.json", '{"enabled":false}\\n')
+        self.write(".github/windows-policy/native-steps.json", '{"schema":1}\\n')
+        self.write(".github/windows-policy/verifier.yml", "name: independent verifier\\n")
+        self.commit()
+
+        manifest = native_contract.native_contract_manifest(str(self.root), REPO, 132)
+        paths = {entry["path"] for entry in manifest["inputs"]}
+        self.assertEqual(manifest["candidate_kind"], "mp-p0-integration")
+        self.assertTrue(manifest["sqlcipher_required"])
+        self.assertTrue(native_contract.PRODUCT_WORKFLOW in paths)
+        self.assertTrue(native_contract.SQLCIPHER_WORKFLOW in paths)
+        self.assertTrue(".github/windows-policy/config.example.json" in paths)
+
+        before = native_contract.native_contract_fingerprint(str(self.root), REPO, 132)
+        product = self.root / native_contract.PRODUCT_WORKFLOW
+        product.write_text(product.read_text().replace("timeout-minutes: 120", "timeout-minutes: 121"))
+        self.commit()
+        self.assertNotEqual(before, native_contract.native_contract_fingerprint(str(self.root), REPO, 132))
+
+        before = native_contract.native_contract_fingerprint(str(self.root), REPO, 132)
+        self.write(".github/windows-policy/native-steps.json", '{"schema":2}\\n')
+        self.commit()
+        self.assertNotEqual(before, native_contract.native_contract_fingerprint(str(self.root), REPO, 132))
+
     def test_sqlcipher_requirement_is_explicit_and_candidate_specific(self):
         self.assertTrue(native_contract.requires_sqlcipher(REPO, 127))
         self.assertFalse(native_contract.requires_sqlcipher(REPO, 129))
+        self.assertFalse(native_contract.requires_sqlcipher(REPO, 131))
+        self.assertTrue(native_contract.requires_sqlcipher(REPO, 132))
         self.assertFalse(native_contract.requires_sqlcipher(REPO, 9001))
+        self.assertFalse(native_contract.requires_separated_product(REPO, 129))
+        self.assertTrue(native_contract.requires_separated_product(REPO, 131))
+        self.assertTrue(native_contract.requires_separated_product(REPO, 132))
         # PR 129 is not a vault candidate: absence of the optional workflow is valid.
         self.assertEqual(len(self.fp(129)), 64)
         # PR 127 is a vault candidate: absence of its mandatory workflow fails closed.
@@ -811,6 +859,239 @@ class NativeIdentityAndPrerequisiteTests(unittest.TestCase):
             coordinator.wait(
                 "owner/repo", self.candidate, "token", False, CONTRACT,
                 timeout=0, inspect=lambda *_: ("pending", "missing"))
+
+
+
+class SeparatedProductPrerequisiteTests(unittest.TestCase):
+    CI_SOURCE = """jobs:
+  fast:
+    name: Fast developer feedback
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install dependencies
+      - name: Verify repository contract
+      - name: Typecheck
+      - name: Test reader and browser contracts
+      - name: Build reader
+      - name: Validate document qualification gate policy
+      - name: Validate Windows qualification policy
+  rust:
+    name: Fast Rust compile and vault feedback
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Install pinned Rust 1.90
+      - name: Rust format
+      - name: Compile production core crates
+      - name: Compile available SQLCipher and vault features
+      - name: Focused security tests
+  evidence:
+    name: Native execution evidence
+    runs-on: ubuntu-latest
+    steps:
+      - name: Capture native execution provenance
+      - name: Upload native execution evidence
+"""
+    PRODUCT_SOURCE = """jobs:
+  plan:
+    name: Windows source and execution decision
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout policy candidate
+      - name: Decide Windows execution
+  coordinate:
+    name: Await exact-source authority on Ubuntu
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout policy candidate
+      - name: Bounded authority coordination before allocating Windows
+  verify:
+    name: Verify Windows product
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+      - name: Recheck after Windows slot
+      - name: Setup Node.js
+      - name: Setup Rust 1.90
+      - name: Install dependencies
+      - name: Check Rust formatting
+      - name: Verify repository contract
+      - name: Typecheck
+      - name: Visual Settings scroll and footer regression
+      - name: Qualify bundled SQLite runtime
+      - name: Test
+      - name: Stage capture sidecar for native desktop tests
+      - name: Qualify Phase 3E simulated MCP and revocation boundary
+      - name: Test hosted tunnel desktop boundaries
+      - name: Build desktop app
+      - name: Verify portable MIT license and third-party notices
+      - name: Qualify native capture encrypted IPC and revoked owner epoch
+      - name: Record native proof
+      - name: Upload native proof
+  candidate:
+    name: Windows Product / candidate result
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report actual execution boundary
+"""
+    SQL_SOURCE = """jobs:
+  ubuntu:
+    name: SQLCipher / ubuntu-24.04
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check Rust formatting
+      - name: Encrypted state/index and FTS regression
+      - name: Keyed MCP synthetic authorization and revocation
+      - name: Vault and backup adversarial regression
+  windows:
+    name: SQLCipher / windows-2022
+    runs-on: windows-2022
+    steps:
+      - name: Check Rust formatting
+      - name: Encrypted state/index and FTS regression
+      - name: Keyed MCP synthetic authorization and revocation
+      - name: Vault and backup adversarial regression
+"""
+
+    def setUp(self):
+        self.candidate = candidate(
+            132, head_repo=REPO, base_repo=REPO,
+            head_repo_id=99, base_repo_id=99,
+        )
+        self.ci_run = native_run(self.candidate, run_id=301)
+        self.product_run = native_run(
+            self.candidate, run_id=302, path=native_contract.PRODUCT_WORKFLOW)
+        self.sql_run = native_run(
+            self.candidate, run_id=303, path=native_contract.SQLCIPHER_WORKFLOW)
+        self.ci_jobs = [
+            job("Fast developer feedback", (
+                "Install dependencies", "Verify repository contract", "Typecheck",
+                "Test reader and browser contracts", "Build reader",
+                "Validate document qualification gate policy",
+                "Validate Windows qualification policy"), labels=("ubuntu-latest",)),
+            job("Fast Rust compile and vault feedback", (
+                "Install pinned Rust 1.90", "Rust format", "Compile production core crates",
+                "Compile available SQLCipher and vault features", "Focused security tests"),
+                labels=("ubuntu-24.04",)),
+            job("Native execution evidence", (
+                "Capture native execution provenance", "Upload native execution evidence"),
+                labels=("ubuntu-latest",)),
+        ]
+        self.product_jobs = [
+            job("Windows source and execution decision", (
+                "Checkout policy candidate", "Decide Windows execution"),
+                labels=("ubuntu-latest",)),
+            job("Await exact-source authority on Ubuntu", (
+                "Checkout policy candidate",
+                "Bounded authority coordination before allocating Windows"),
+                labels=("ubuntu-latest",)),
+            job("Verify Windows product", (
+                "Checkout", "Recheck after Windows slot", "Setup Node.js",
+                "Setup Rust 1.90", "Install dependencies", "Check Rust formatting",
+                "Verify repository contract", "Typecheck",
+                "Visual Settings scroll and footer regression",
+                "Qualify bundled SQLite runtime", "Test",
+                "Stage capture sidecar for native desktop tests",
+                "Qualify Phase 3E simulated MCP and revocation boundary",
+                "Test hosted tunnel desktop boundaries", "Build desktop app",
+                "Verify portable MIT license and third-party notices",
+                "Qualify native capture encrypted IPC and revoked owner epoch",
+                "Record native proof", "Upload native proof"),
+                labels=("windows-latest",)),
+            job("Windows Product / candidate result", ("Report actual execution boundary",),
+                labels=("ubuntu-latest",)),
+        ]
+        sql_steps = (
+            "Check Rust formatting", "Encrypted state/index and FTS regression",
+            "Keyed MCP synthetic authorization and revocation",
+            "Vault and backup adversarial regression",
+        )
+        self.sql_jobs = [
+            job("SQLCipher / ubuntu-24.04", sql_steps, labels=("ubuntu-24.04",)),
+            job("SQLCipher / windows-2022", sql_steps, labels=("windows-2022",)),
+        ]
+        self.jobs_by_run = {
+            self.ci_run["id"]: self.ci_jobs,
+            self.product_run["id"]: self.product_jobs,
+            self.sql_run["id"]: self.sql_jobs,
+        }
+        self.sources = {
+            native_contract.CI_WORKFLOW: self.CI_SOURCE,
+            native_contract.PRODUCT_WORKFLOW: self.PRODUCT_SOURCE,
+            native_contract.SQLCIPHER_WORKFLOW: self.SQL_SOURCE,
+        }
+        self.evidence = native_evidence(
+            self.candidate, self.ci_run, fingerprint=CONTRACT, vault=True)
+
+    def fetch_jobs(self, run):
+        jobs = self.jobs_by_run[run["id"]]
+        return {"total_count": len(jobs), "jobs": jobs}
+
+    def require(self, runs=None, fetch_jobs=None):
+        gate.require_prerequisites(
+            runs or [self.ci_run, self.product_run, self.sql_run],
+            self.candidate, repo=REPO, vault=True,
+            contract_fingerprint=CONTRACT,
+            fetch_jobs=fetch_jobs or self.fetch_jobs,
+            fetch_evidence=lambda run: self.evidence,
+            workflow_sources=self.sources,
+        )
+
+    def test_integrated_vault_candidate_requires_ci_product_and_both_sqlcipher_runners(self):
+        self.assertEqual(
+            coordinator.required_paths(True, True),
+            (
+                native_contract.CI_WORKFLOW,
+                native_contract.PRODUCT_WORKFLOW,
+                native_contract.SQLCIPHER_WORKFLOW,
+            ),
+        )
+        self.require()
+
+    def test_missing_separated_product_run_is_pending_not_ready(self):
+        state, reason = coordinator.classify(
+            [self.ci_run, self.sql_run], self.candidate, REPO, True, CONTRACT,
+            self.fetch_jobs, lambda run: self.evidence,
+            workflow_sources=self.sources,
+        )
+        self.assertEqual(state, "pending")
+        self.assertIn("windows-product.yml", reason)
+
+    def test_exact_product_job_attempt_and_complete_listing_are_required(self):
+        wrong_attempt = [[dict(item) for item in self.product_jobs]]
+        wrong_attempt[0][2]["run_attempt"] = 2
+        by_run = dict(self.jobs_by_run)
+        by_run[self.product_run["id"]] = wrong_attempt[0]
+        with self.assertRaises(ValueError):
+            self.require(fetch_jobs=lambda run: {
+                "total_count": len(by_run[run["id"]]), "jobs": by_run[run["id"]],
+            })
+
+        with self.assertRaises(ValueError):
+            self.require(fetch_jobs=lambda run: {
+                "total_count": len(self.jobs_by_run[run["id"]]) + 1,
+                "jobs": self.jobs_by_run[run["id"]],
+            })
+
+    def test_vault_candidate_requires_native_ipc_step_and_both_sqlcipher_jobs(self):
+        missing_ipc = [[dict(item) for item in self.product_jobs]]
+        missing_ipc[0][2]["steps"] = [
+            step for step in missing_ipc[0][2]["steps"]
+            if step["name"] != "Qualify native capture encrypted IPC and revoked owner epoch"
+        ]
+        by_run = dict(self.jobs_by_run)
+        by_run[self.product_run["id"]] = missing_ipc[0]
+        with self.assertRaises(ValueError):
+            self.require(fetch_jobs=lambda run: {
+                "total_count": len(by_run[run["id"]]), "jobs": by_run[run["id"]],
+            })
+
+        without_windows = dict(self.jobs_by_run)
+        without_windows[self.sql_run["id"]] = self.sql_jobs[:1]
+        with self.assertRaises(ValueError):
+            self.require(fetch_jobs=lambda run: {
+                "total_count": len(without_windows[run["id"]]),
+                "jobs": without_windows[run["id"]],
+            })
 
 
 if __name__ == "__main__":
