@@ -223,24 +223,24 @@ mod qualification {
     }
 
     #[test]
-    fn slow_drip_header_uses_one_total_deadline() {
+    fn slow_drip_frame_uses_one_total_deadline() {
         use std::{io::Write, time::Instant};
 
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let address = listener.local_addr().unwrap();
         let sender = thread::spawn(move || {
             let mut client = TcpStream::connect(address).unwrap();
-            for byte in [1u8, 0, 0, 0] {
+            for byte in [2u8, 0, 0, 0, b'{', b'}'] {
                 if client.write_all(&[byte]).is_err() {
                     break;
                 }
-                thread::sleep(Duration::from_millis(60));
+                thread::sleep(Duration::from_millis(70));
             }
         });
         let (mut server, _) = listener.accept().unwrap();
         let started = Instant::now();
         assert!(read_frame_with_timeout(&mut server, Duration::from_millis(130)).is_err());
-        assert!(started.elapsed() < Duration::from_millis(400));
+        assert!(started.elapsed() < Duration::from_millis(250));
         drop(server);
         let _ = sender.join();
     }
