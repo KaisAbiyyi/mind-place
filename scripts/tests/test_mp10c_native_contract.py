@@ -298,7 +298,9 @@ class NativeContractFingerprintTests(unittest.TestCase):
         )
         product_signature = native_contract.canonical_workflow_signature(
             product_source, source_path=native_contract.PRODUCT_WORKFLOW)
-        self.assertEqual(len(product_signature), 32)
+        self.assertIsInstance(product_signature, bytes)
+        self.assertGreater(len(product_signature), 0)
+        self.assertIn(b"Verify Windows product", product_signature)
 
     def test_multiline_double_quoted_yaml_decodes_yaml_escapes(self):
         source = r"""jobs:
