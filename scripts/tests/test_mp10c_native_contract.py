@@ -212,6 +212,21 @@ class NativeContractFingerprintTests(unittest.TestCase):
         self.commit()
         self.assertEqual(before, self.fp())
 
+    def test_canonical_workflow_signature_rejects_malformed_yaml_and_missing_jobs_mapping(self):
+        malformed = (
+            "jobs:\n"
+            "  verify:\n"
+            "    runs-on: windows-latest\n"
+            "    runs-on: ubuntu-latest\n"
+        )
+        with self.assertRaisesRegex(ValueError, "Duplicate YAML mapping key"):
+            native_contract.canonical_workflow_signature(malformed)
+
+        for source in ("name: no jobs mapping\n", "jobs: []\n"):
+            with self.subTest(source=source), self.assertRaisesRegex(
+                    ValueError, "Native workflow has no jobs mapping"):
+                native_contract.canonical_workflow_signature(source)
+
     def test_identity_metadata_inside_command_is_not_globally_excluded(self):
         path = self.root / ".github/workflows/ci.yml"
         text = path.read_text().replace(
@@ -335,25 +350,25 @@ class NativeContractFingerprintTests(unittest.TestCase):
 
     def test_separated_product_candidate_fingerprints_product_and_policy_inputs(self):
         self.write(native_contract.PRODUCT_WORKFLOW, (
-            "jobs:\\n"
-            "  verify:\\n"
-            "    runs-on: windows-latest\\n"
-            "    timeout-minutes: 120\\n"
-            "    steps:\\n"
-            "      - name: Native desktop qualification\\n"
-            "        run: cargo test\\n"
+            "jobs:\n"
+            "  verify:\n"
+            "    runs-on: windows-latest\n"
+            "    timeout-minutes: 120\n"
+            "    steps:\n"
+            "      - name: Native desktop qualification\n"
+            "        run: cargo test\n"
         ))
         self.write(native_contract.SQLCIPHER_WORKFLOW, (
-            "jobs:\\n"
-            "  sqlcipher:\\n"
-            "    runs-on: ubuntu-24.04\\n"
-            "    steps:\\n"
-            "      - name: Encrypted regression\\n"
-            "        run: cargo test\\n"
+            "jobs:\n"
+            "  sqlcipher:\n"
+            "    runs-on: ubuntu-24.04\n"
+            "    steps:\n"
+            "      - name: Encrypted regression\n"
+            "        run: cargo test\n"
         ))
-        self.write(".github/windows-policy/config.example.json", '{"enabled":false}\\n')
-        self.write(".github/windows-policy/native-steps.json", '{"schema":1}\\n')
-        self.write(".github/windows-policy/verifier.yml", "name: independent verifier\\n")
+        self.write(".github/windows-policy/config.example.json", '{"enabled":false}\n')
+        self.write(".github/windows-policy/native-steps.json", '{"schema":1}\n')
+        self.write(".github/windows-policy/verifier.yml", "name: independent verifier\n")
         self.commit()
 
         manifest = native_contract.native_contract_manifest(str(self.root), REPO, 132)
@@ -371,7 +386,7 @@ class NativeContractFingerprintTests(unittest.TestCase):
         self.assertNotEqual(before, native_contract.native_contract_fingerprint(str(self.root), REPO, 132))
 
         before = native_contract.native_contract_fingerprint(str(self.root), REPO, 132)
-        self.write(".github/windows-policy/native-steps.json", '{"schema":2}\\n')
+        self.write(".github/windows-policy/native-steps.json", '{"schema":2}\n')
         self.commit()
         self.assertNotEqual(before, native_contract.native_contract_fingerprint(str(self.root), REPO, 132))
 
@@ -1046,6 +1061,38 @@ class SeparatedProductPrerequisiteTests(unittest.TestCase):
             ),
         )
         self.require()
+
+    def test_coordinator_forwards_exact_workflow_sources_unchanged(self):
+        with patch.object(gate, "require_prerequisites") as require:
+            state, _ = coordinator.classify(
+                [self.ci_run, self.product_run, self.sql_run],
+                self.candidate, REPO, True, CONTRACT,
+                self.fetch_jobs, lambda run: self.evidence,
+                workflow_sources=self.sources,
+            )
+        self.assertEqual(state, "ready")
+        self.assertIs(require.call_args.kwargs["workflow_sources"], self.sources)
+
+    def test_coordinator_uses_exact_workflow_sources_for_ready_result(self):
+        state, reason = coordinator.classify(
+            [self.ci_run, self.product_run, self.sql_run],
+            self.candidate, REPO, True, CONTRACT,
+            self.fetch_jobs, lambda run: self.evidence,
+            workflow_sources=self.sources,
+        )
+        self.assertEqual(state, "ready", reason)
+
+    def test_missing_authoritative_workflow_source_fails_closed_without_local_fallback(self):
+        missing_sources = dict(self.sources)
+        missing_sources.pop(native_contract.PRODUCT_WORKFLOW)
+        state, reason = coordinator.classify(
+            [self.ci_run, self.product_run, self.sql_run],
+            self.candidate, REPO, True, CONTRACT,
+            self.fetch_jobs, lambda run: self.evidence,
+            workflow_sources=missing_sources,
+        )
+        self.assertEqual(state, "failed")
+        self.assertIn("Missing authoritative workflow source", reason)
 
     def test_missing_separated_product_run_is_pending_not_ready(self):
         state, reason = coordinator.classify(

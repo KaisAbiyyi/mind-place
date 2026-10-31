@@ -22,13 +22,15 @@ def required_paths(vault: bool, separated_product: bool = False) -> tuple[str, .
     return paths + ((native_contract.SQLCIPHER_WORKFLOW,) if vault else ())
 
 
-def classify(runs, candidate, repo, vault, contract_fingerprint, fetch_jobs, fetch_evidence):
+def classify(runs, candidate, repo, vault, contract_fingerprint, fetch_jobs, fetch_evidence,
+             workflow_sources: dict[str, bytes | str] | None = None):
     """Return ready/pending/failed; only exact candidate runs can count."""
     try:
         gate.require_prerequisites(
             runs, candidate, repo=repo, vault=vault,
             contract_fingerprint=contract_fingerprint,
-            fetch_jobs=fetch_jobs, fetch_evidence=fetch_evidence)
+            fetch_jobs=fetch_jobs, fetch_evidence=fetch_evidence,
+            workflow_sources=workflow_sources)
         return "ready", "Exact PR/base/head native jobs and contract evidence succeeded"
     except ValueError as error:
         pending = []
