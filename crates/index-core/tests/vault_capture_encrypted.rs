@@ -140,11 +140,26 @@ fn interrupted_capture_publication_reuses_only_matching_authenticated_evidence()
         let vault = CryptoVault::restore_with_recovery(&gate, lease, &manifest, &recovery).unwrap();
         let key = catalog_key(&vault, &gate, lease);
         {
-            let db = Connection::open(root.join("archive-index.sqlite3")).unwrap();
+            let mut db = Connection::open(root.join("archive-index.sqlite3")).unwrap();
             key.unlock(&db).unwrap();
             // The exact durable state after object publication but before the
-            // catalog transaction commits. No private corpus is used.
-            db.execute("DELETE FROM vault_captures", []).unwrap();
+            // catalog transaction commits: neither catalog row was committed.
+            // Remove the capture and its current pointer atomically; keep the
+            // authenticated immutable object below.
+            let tx = db.transaction().unwrap();
+            tx.execute(
+                "DELETE FROM vault_current_snapshots
+                 WHERE archive_id=?1 AND snapshot_id=?2",
+                (&first.id, &first.snapshot_id),
+            )
+            .unwrap();
+            tx.execute(
+                "DELETE FROM vault_captures
+                 WHERE archive_id=?1 AND snapshot_id=?2",
+                (&first.id, &first.snapshot_id),
+            )
+            .unwrap();
+            tx.commit().unwrap();
         }
         let identity = format!("capture/{}/{}", first.id, first.snapshot_id);
         let storage = ImmutableVaultStorage::new(&root, &vault, &gate, lease).unwrap();
@@ -200,6 +215,59 @@ fn interrupted_capture_publication_reuses_only_matching_authenticated_evidence()
                     .unwrap()
                     .unchanged
             );
+        }
+        drop(store);
+        let audit_vault =
+            CryptoVault::restore_with_recovery(&gate, lease, &manifest, &recovery).unwrap();
+        let audit_key = catalog_key(&audit_vault, &gate, lease);
+        let db = Connection::open(root.join("archive-index.sqlite3")).unwrap();
+        audit_key.unlock(&db).unwrap();
+        let capture_rows: i64 = db
+            .query_row("SELECT count(*) FROM vault_captures", [], |row| row.get(0))
+            .unwrap();
+        let pointer_rows: i64 = db
+            .query_row("SELECT count(*) FROM vault_current_snapshots", [], |row| row.get(0))
+            .unwrap();
+        let orphaned_pointers: i64 = db
+            .query_row(
+                "SELECT count(*) FROM vault_current_snapshots current
+                 WHERE NOT EXISTS (
+                     SELECT 1 FROM vault_captures capture
+                     WHERE capture.archive_id=current.archive_id
+                       AND capture.snapshot_id=current.snapshot_id
+                 )",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let missing_current_pointers: i64 = db
+            .query_row(
+                "SELECT count(*) FROM (
+                     SELECT DISTINCT archive_id FROM vault_captures
+                 ) captures
+                 LEFT JOIN vault_current_snapshots current
+                   ON current.archive_id=captures.archive_id
+                 WHERE current.archive_id IS NULL",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(orphaned_pointers, 0);
+        assert_eq!(missing_current_pointers, 0);
+        if mismatched {
+            assert_eq!(capture_rows, 0);
+            assert_eq!(pointer_rows, 0);
+        } else {
+            assert_eq!(capture_rows, 1);
+            assert_eq!(pointer_rows, 1);
+            let selected: String = db
+                .query_row(
+                    "SELECT snapshot_id FROM vault_current_snapshots WHERE archive_id=?1",
+                    &first.id,
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(selected, first.snapshot_id);
         }
         assert_eq!(fs::read(&object).unwrap(), ciphertext);
     }
