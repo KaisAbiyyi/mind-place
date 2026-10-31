@@ -68,7 +68,7 @@ for (const file of actualFiles) {
 
   const lines = source.split(/\r?\n/);
   for (let index = 0; index < lines.length; index += 1) {
-    const checkout = lines[index].match(/^(\s*)-\s+uses:\s*actions\/checkout@/);
+    const checkout = lines[index].match(/^(\s*)(?:-\s+)?uses:\s*actions\/checkout@/);
     if (!checkout) continue;
 
     const stepIndent = checkout[1].length;

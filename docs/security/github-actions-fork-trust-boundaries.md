@@ -96,7 +96,7 @@ The three pending baseline files and these in-flight files must be reconciled af
 ## Out of scope and remaining gates
 
 - No repository settings, branch protection, rulesets, secrets, GitHub App, tokens, release, or workflow dispatch were changed or invoked.
-- No 100K, 1M, native Windows, or owner-machine qualification was run.
+- No 100K/1M scale qualification, separate MP-CI native-evidence/Windows-product qualification, or owner-machine/local qualification was invoked. The ordinary PR CI workflow's standard hosted Windows test/build job was allowed to run.
 - The branch-protection observation `main protected=false` belongs to MP-GOV-01/04; this task does not change it.
 - Repository secret inventory was not read. The finding is that the audited workflow source contains no secret references, not that the repository contains no configured secrets.
 - Final acceptance requires the active MP-CI workflow lock to be released, all in-flight workflow changes to be integrated/reconciled, the remaining checkouts and action references to be hardened, the temporary exceptions removed, and the resulting exact head to pass actionlint and regression CI.
