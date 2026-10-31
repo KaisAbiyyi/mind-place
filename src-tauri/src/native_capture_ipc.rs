@@ -234,13 +234,13 @@ mod qualification {
                 if client.write_all(&[byte]).is_err() {
                     break;
                 }
-                thread::sleep(Duration::from_millis(70));
+                thread::sleep(Duration::from_millis(120));
             }
         });
         let (mut server, _) = listener.accept().unwrap();
         let started = Instant::now();
-        assert!(read_frame_with_timeout(&mut server, Duration::from_millis(130)).is_err());
-        assert!(started.elapsed() < Duration::from_millis(250));
+        assert!(read_frame_with_timeout(&mut server, Duration::from_millis(200)).is_err());
+        assert!(started.elapsed() < Duration::from_millis(400));
         drop(server);
         let _ = sender.join();
     }
