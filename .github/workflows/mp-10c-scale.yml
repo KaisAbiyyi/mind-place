@@ -1,34 +1,85 @@
+# MP-CI-100K-01: fast PR smoke + fail-closed source-bound 100K proof reuse.
+# A skipped full job NEVER asserts a new 100K PASS for the current commit.
 name: MP-10C cloud document scale qualification
+
 on:
   pull_request:
-    paths:
-      - '.github/workflows/mp-10c-scale.yml'
-      - 'crates/index-core/tests/document_scale_qualification.rs'
-      - 'crates/index-core/src/documents.rs'
-      - 'crates/state-core/src/document_scanner.rs'
-      - 'crates/document-core/**'
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Open same-repository PR; dispatch native CI separately first on this exact head branch
+        type: string
+        required: true
+      head_sha:
+        description: Exact PR head SHA; must match the separately dispatched native CI run
+        type: string
+        required: true
+      base_sha:
+        description: Exact PR base SHA; must match the separately dispatched native CI run
+        type: string
+        required: true
+      qualification:
+        description: Full qualification intent (never consult prior receipts)
+        type: choice
+        required: true
+        default: manual
+        options: [manual, final]
+  push:
+    tags: ['v*']
+
 permissions:
   contents: read
-concurrency:
-  group: mp10c-scale-${{ github.ref }}
-  cancel-in-progress: false
+  actions: read
+
 jobs:
-  document-scale:
-    name: Windows approved documents / ${{ matrix.files }} files
+  effective-input-gate:
+    name: Source fingerprint / acceptance decision (NOT 100K PASS)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      run-heavy: ${{ steps.decision.outputs.run-heavy }}
+      fingerprint: ${{ steps.decision.outputs.fingerprint }}
+      qualified-run: ${{ steps.decision.outputs.qualified-run }}
+      qualified-artifact: ${{ steps.decision.outputs.qualified-artifact }}
+      pr-number: ${{ steps.decision.outputs.pr-number }}
+      source-sha: ${{ steps.decision.outputs.source-sha }}
+      source-ref: ${{ steps.decision.outputs.source-ref }}
+      checkout-sha: ${{ steps.decision.outputs.checkout-sha }}
+      head-repository: ${{ steps.decision.outputs.head-repository }}
+      head-repository-id: ${{ steps.decision.outputs.head-repository-id }}
+      base-repository: ${{ steps.decision.outputs.base-repository }}
+      base-repository-id: ${{ steps.decision.outputs.base-repository-id }}
+      base-ref: ${{ steps.decision.outputs.base-ref }}
+      base-sha: ${{ steps.decision.outputs.base-sha }}
+      native-contract-policy: ${{ steps.decision.outputs.native-contract-policy }}
+      native-contract-fingerprint: ${{ steps.decision.outputs.native-contract-fingerprint }}
+      native-checkout-sha: ${{ steps.decision.outputs.native-checkout-sha }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Python gate decision and receipt regression tests
+        run: python3 -m unittest discover -s scripts/tests -p 'test_mp10c_*.py' -v
+      - name: Decide from verified same-PR prior receipt
+        id: decision
+        env:
+          GH_TOKEN: ${{ github.token }}
+          QUALIFICATION_MODE: ${{ inputs.qualification || 'auto' }}
+        run: python3 scripts/mp10c_ci_gate.py decide --output "$GITHUB_OUTPUT"
+
+  document-smoke:
+    name: Windows approved documents / 100 files
+    needs: effective-input-gate
     runs-on: windows-latest
     timeout-minutes: 360
-    strategy:
-      fail-fast: false
-      matrix:
-        files: [100, 100000]
     env:
       CARGO_INCREMENTAL: 0
       CARGO_BUILD_JOBS: 2
-      MP_10C_FILES: ${{ matrix.files }}
-      MP_10C_RECEIPT: ${{ github.workspace }}/qualification/mp10c-${{ matrix.files }}.json
+      MP_10C_FILES: '100'
+      MP_10C_RECEIPT: ${{ github.workspace }}/qualification/mp10c-100.json
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.effective-input-gate.outputs.checkout-sha }}
       - name: Pinned Rust 1.90
         shell: pwsh
         run: |
@@ -56,11 +107,215 @@ jobs:
             throw "MP-10C receipt did not meet exact-tier qualification"
           }
           Write-Output "MP-10C exact-tier receipt validated: $expected files, $($receipt.extracted_chunks) chunks"
-      - name: Upload receipt
-        if: always()
+      - name: Upload smoke receipt
+        if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: mp10c-document-${{ matrix.files }}
-          path: qualification/mp10c-${{ matrix.files }}.json
+          name: mp10c-document-100
+          path: qualification/mp10c-100.json
           if-no-files-found: error
           retention-days: 30
+
+  prerequisite-coordination:
+    name: Wait for exact-source native prerequisites (Ubuntu, NOT 100K)
+    needs: [effective-input-gate, document-smoke]
+    # Current native qualification is mandatory even when an authenticated 100K proof is reused.
+    # Draft PRs remain deferred; explicit dispatch and every Ready PR are coordinated.
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.draft == false)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 85
+    concurrency:
+      group: mp10c-native-wait-${{ needs.effective-input-gate.outputs.pr-number || github.ref }}
+      cancel-in-progress: true
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PR_NUMBER: ${{ needs.effective-input-gate.outputs.pr-number }}
+      PR_HEAD_SHA: ${{ needs.effective-input-gate.outputs.source-sha }}
+      PR_HEAD_REF: ${{ needs.effective-input-gate.outputs.source-ref }}
+      PR_HEAD_REPOSITORY: ${{ needs.effective-input-gate.outputs.head-repository }}
+      PR_HEAD_REPOSITORY_ID: ${{ needs.effective-input-gate.outputs.head-repository-id }}
+      PR_BASE_REPOSITORY: ${{ needs.effective-input-gate.outputs.base-repository }}
+      PR_BASE_REPOSITORY_ID: ${{ needs.effective-input-gate.outputs.base-repository-id }}
+      PR_BASE_REF: ${{ needs.effective-input-gate.outputs.base-ref }}
+      PR_BASE_SHA: ${{ needs.effective-input-gate.outputs.base-sha }}
+      PR_NATIVE_CHECKOUT_SHA: ${{ needs.effective-input-gate.outputs.native-checkout-sha }}
+      NATIVE_CONTRACT_POLICY: ${{ needs.effective-input-gate.outputs.native-contract-policy }}
+      NATIVE_CONTRACT_FINGERPRINT: ${{ needs.effective-input-gate.outputs.native-contract-fingerprint }}
+      EXPECTED_FINGERPRINT: ${{ needs.effective-input-gate.outputs.fingerprint }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.effective-input-gate.outputs.checkout-sha }}
+      - name: Bounded native prerequisite coordination
+        run: python3 scripts/mp10c_prerequisite_wait.py --timeout-seconds 4800
+
+  document-scale:
+    name: Windows approved documents / 100000 files
+    needs: [effective-input-gate, document-smoke, prerequisite-coordination]
+    # Never schedule multi-hour indexing on each Draft development commit.
+    # Promote PR out of Draft only after frozen cheap CI; full is still mandatory.
+    if: needs.effective-input-gate.outputs.run-heavy == 'true' && needs.prerequisite-coordination.result == 'success' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+    runs-on: windows-latest
+    timeout-minutes: 360
+    outputs:
+      tier-passed: ${{ steps.full-receipt.outputs.tier-passed }}
+      scale-attempt: ${{ steps.full-receipt.outputs.scale-attempt }}
+    concurrency:
+      group: mp10c-100k-${{ needs.effective-input-gate.outputs.pr-number || github.ref }}
+      cancel-in-progress: false
+    env:
+      CARGO_INCREMENTAL: 0
+      CARGO_BUILD_JOBS: 2
+      MP_10C_FILES: '100000'
+      MP_10C_RECEIPT: ${{ github.workspace }}/qualification/mp10c-100000.json
+      EXPECTED_FINGERPRINT: ${{ needs.effective-input-gate.outputs.fingerprint }}
+      PR_NUMBER: ${{ needs.effective-input-gate.outputs.pr-number }}
+      PR_HEAD_SHA: ${{ needs.effective-input-gate.outputs.source-sha }}
+      PR_HEAD_REF: ${{ needs.effective-input-gate.outputs.source-ref }}
+      PR_HEAD_REPOSITORY: ${{ needs.effective-input-gate.outputs.head-repository }}
+      PR_HEAD_REPOSITORY_ID: ${{ needs.effective-input-gate.outputs.head-repository-id }}
+      PR_BASE_REPOSITORY: ${{ needs.effective-input-gate.outputs.base-repository }}
+      PR_BASE_REPOSITORY_ID: ${{ needs.effective-input-gate.outputs.base-repository-id }}
+      PR_BASE_REF: ${{ needs.effective-input-gate.outputs.base-ref }}
+      PR_BASE_SHA: ${{ needs.effective-input-gate.outputs.base-sha }}
+      PR_NATIVE_CHECKOUT_SHA: ${{ needs.effective-input-gate.outputs.native-checkout-sha }}
+      NATIVE_CONTRACT_POLICY: ${{ needs.effective-input-gate.outputs.native-contract-policy }}
+      NATIVE_CONTRACT_FINGERPRINT: ${{ needs.effective-input-gate.outputs.native-contract-fingerprint }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.effective-input-gate.outputs.checkout-sha }}
+      # A newer unrelated push may have queued while the previous full tier ran.
+      # Re-evaluate after acquiring the only full-test slot, not hours before.
+      - name: Recheck previous proof after 100K slot acquired
+        id: recheck
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          QUALIFICATION_MODE: ${{ inputs.qualification || 'auto' }}
+        run: python scripts/mp10c_ci_gate.py decide --output "$env:GITHUB_OUTPUT"
+      - name: Verify frozen candidate cheap CI before expensive qualification
+        if: steps.recheck.outputs.run-heavy == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/mp10c_ci_gate.py preflight
+      - name: Pinned Rust 1.90
+        if: steps.recheck.outputs.run-heavy == 'true'
+        shell: pwsh
+        run: |
+          rustup toolchain install 1.90.0 --profile minimal --component rustfmt --no-self-update
+          rustup default 1.90.0
+      - name: Check Rust format
+        if: steps.recheck.outputs.run-heavy == 'true'
+        run: cargo fmt --all -- --check
+      - name: Qualify real authorized document scale
+        if: steps.recheck.outputs.run-heavy == 'true'
+        run: cargo test --release -p mind-place-index --test document_scale_qualification qualifies_document_scale -- --ignored --exact --nocapture
+      - name: Validate exact-tier receipt
+        id: full-receipt
+        if: steps.recheck.outputs.run-heavy == 'true'
+        shell: pwsh
+        run: |
+          if (!(Test-Path -LiteralPath $env:MP_10C_RECEIPT)) { throw "Missing MP-10C receipt" }
+          $receipt = Get-Content -LiteralPath $env:MP_10C_RECEIPT -Raw | ConvertFrom-Json
+          $expected = [int]$env:MP_10C_FILES
+          $roots = [int][math]::Ceiling($expected / 10000)
+          if ($receipt.target_files -ne $expected -or
+              $receipt.indexed_files -ne $expected -or
+              $receipt.extracted_chunks -ne ($expected * 10) -or
+              $receipt.approved_roots -ne $roots -or
+              $receipt.production_files_per_root_cap -ne 10000 -or
+              $receipt.sqlite_and_fts_integrity -ne "pass" -or
+              $receipt.raw_bytes_unchanged -ne $true -or
+              $receipt.fixture_sha256 -notmatch '^[0-9a-f]{64}$') {
+            throw "MP-10C receipt did not meet exact-tier qualification"
+          }
+          Write-Output "MP-10C exact-tier receipt validated: $expected files, $($receipt.extracted_chunks) chunks"
+          "tier-passed=true" >> $env:GITHUB_OUTPUT
+          "scale-attempt=$env:GITHUB_RUN_ATTEMPT" >> $env:GITHUB_OUTPUT
+      - name: Upload validated raw 100K receipt
+        if: success() && steps.full-receipt.outputs.tier-passed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mp10c-raw-100000-attempt-${{ github.run_attempt }}
+          path: qualification/mp10c-100000.json
+          if-no-files-found: error
+          retention-days: 90
+
+  provenance:
+    name: Source-bound 100K provenance (no indexing)
+    needs: [effective-input-gate, document-scale]
+    if: needs.document-scale.outputs.tier-passed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      EXPECTED_FINGERPRINT: ${{ needs.effective-input-gate.outputs.fingerprint }}
+      PR_NUMBER: ${{ needs.effective-input-gate.outputs.pr-number }}
+      SCALE_RUN_ATTEMPT: ${{ needs.document-scale.outputs.scale-attempt }}
+      PR_HEAD_SHA: ${{ needs.effective-input-gate.outputs.source-sha }}
+      PR_HEAD_REF: ${{ needs.effective-input-gate.outputs.source-ref }}
+      PR_HEAD_REPOSITORY: ${{ needs.effective-input-gate.outputs.head-repository }}
+      PR_HEAD_REPOSITORY_ID: ${{ needs.effective-input-gate.outputs.head-repository-id }}
+      PR_BASE_REPOSITORY: ${{ needs.effective-input-gate.outputs.base-repository }}
+      PR_BASE_REPOSITORY_ID: ${{ needs.effective-input-gate.outputs.base-repository-id }}
+      PR_BASE_REF: ${{ needs.effective-input-gate.outputs.base-ref }}
+      PR_BASE_SHA: ${{ needs.effective-input-gate.outputs.base-sha }}
+      PR_NATIVE_CHECKOUT_SHA: ${{ needs.effective-input-gate.outputs.native-checkout-sha }}
+      NATIVE_CONTRACT_POLICY: ${{ needs.effective-input-gate.outputs.native-contract-policy }}
+      NATIVE_CONTRACT_FINGERPRINT: ${{ needs.effective-input-gate.outputs.native-contract-fingerprint }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.effective-input-gate.outputs.checkout-sha }}
+      - name: Download validated raw 100K receipt
+        uses: actions/download-artifact@v4
+        with:
+          name: mp10c-raw-100000-attempt-${{ needs.document-scale.outputs.scale-attempt }}
+          path: qualification
+      - name: Mint source-bound 100K provenance
+        run: python3 scripts/mp10c_ci_gate.py attest --receipt qualification/mp10c-100000.json --output qualification/mp10c-provenance.json
+      - name: Upload qualified receipt and provenance
+        uses: actions/upload-artifact@v4
+        with:
+          name: mp10c-qualified-100000-attempt-${{ github.run_attempt }}
+          path: |
+            qualification/mp10c-100000.json
+            qualification/mp10c-provenance.json
+          if-no-files-found: error
+          retention-days: 30
+
+  draft-qualification-pending:
+    name: Draft development / qualification PENDING (NOT 100K PASS)
+    needs: effective-input-gate
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft == true
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "::notice::100K qualification PENDING. Development checks are separate from final acceptance."
+          echo '100K qualification: **PENDING / NOT RUN**. Freeze source, pass cheap CI, then dispatch manual/final on the PR head branch with its PR number. The required final acceptance check runs on ready_for_review.' >> "$GITHUB_STEP_SUMMARY"
+
+  qualification-accepted:
+    name: 100K qualification accepted
+    needs: [effective-input-gate, document-smoke, document-scale, provenance, prerequisite-coordination]
+    if: always() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PR_NUMBER: ${{ needs.effective-input-gate.outputs.pr-number }}
+      EXPECTED_FINGERPRINT: ${{ needs.effective-input-gate.outputs.fingerprint }}
+      QUALIFICATION_MODE: ${{ inputs.qualification || 'auto' }}
+      NATIVE_PREREQUISITE_RESULT: ${{ needs.prerequisite-coordination.result }}
+    steps:
+      - name: Deny final acceptance when development or native prerequisites failed
+        env:
+          SOURCE_GATE_RESULT: ${{ needs.effective-input-gate.result }}
+          SMOKE_RESULT: ${{ needs.document-smoke.result }}
+          PREREQUISITE_RESULT: ${{ needs.prerequisite-coordination.result }}
+        run: test "$SOURCE_GATE_RESULT" = success && test "$SMOKE_RESULT" = success && test "$PREREQUISITE_RESULT" = success
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.effective-input-gate.outputs.checkout-sha }}
+      - name: Require verified fresh or matching prior full-scale evidence
+        run: python3 scripts/mp10c_ci_gate.py accept

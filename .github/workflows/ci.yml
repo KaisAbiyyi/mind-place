@@ -4,19 +4,114 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Open same-repository PR number for this exact candidate branch
+        type: string
+        required: true
+      head_sha:
+        description: Exact PR head SHA frozen before dispatch
+        type: string
+        required: true
+      base_sha:
+        description: Exact PR base SHA frozen before dispatch
+        type: string
+        required: true
 
 permissions:
   contents: read
-
-concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  pull-requests: read
 
 jobs:
+  fast:
+    name: Fast developer feedback
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/pull/{0}/merge', inputs.pr_number) || github.sha }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Verify repository contract
+        run: npm run verify:repo
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Test reader and browser contracts
+        run: npm run test:web
+      - name: Build reader
+        run: npm run build:web
+      - name: Validate document qualification gate policy
+        run: python3 -m unittest discover -s scripts/tests -p 'test_mp10c_*.py' -q
+      - name: Report draft acceptance boundary
+        if: github.event_name == 'pull_request' && github.event.pull_request.draft == true
+        run: |
+          echo '### Development checks only' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Full Windows product, security/native and storage qualification are PENDING for this Draft PR. A skipped native job does not certify acceptance. Switch to Ready for Review after freezing the candidate, or dispatch final qualification explicitly.' >> "$GITHUB_STEP_SUMMARY"
+
+  rust-fast:
+    name: Fast Rust compile and vault feedback
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      CARGO_INCREMENTAL: 0
+      CARGO_BUILD_JOBS: 2
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/pull/{0}/merge', inputs.pr_number) || github.sha }}
+      - name: Install pinned Rust 1.90
+        run: |
+          rustup toolchain install 1.90.0 --profile minimal --component rustfmt --no-self-update
+          rustup default 1.90.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: mind-place-fast-rust-190
+      - name: Rust format
+        run: cargo fmt --all -- --check
+      - name: Compile production core crates
+        run: cargo check --locked -p mind-place-security -p mind-place-state -p mind-place-index -p mind-place-integration
+      - name: Compile available SQLCipher and vault features
+        run: |
+          python3 - <<'PY'
+          import json
+          import subprocess
+          data = json.loads(subprocess.check_output(
+              ["cargo", "metadata", "--no-deps", "--format-version", "1"]))
+          packages = {p["name"]: p["features"] for p in data["packages"]}
+          for package, feature in (
+              ("mind-place-state", "sqlcipher-preview"),
+              ("mind-place-index", "sqlcipher-preview"),
+              ("mind-place-integration", "vault-mcp"),
+          ):
+              if feature in packages.get(package, {}):
+                  subprocess.run(["cargo", "check", "--locked", "-p", package,
+                                  "--features", feature], check=True)
+              else:
+                  print(f"Feature {package}/{feature} absent at this source SHA; "
+                        "normal core compilation remains mandatory")
+          PY
+      - name: Focused security tests
+        run: cargo test --locked -p mind-place-security --lib
+
   verify:
     name: Verify Windows product
+    # Drafts receive fast feedback above. Run the full native/security suite
+    # when the PR becomes reviewable, on subsequent ready-PR pushes, on main,
+    # or by explicit dispatch. This job remains the Windows acceptance signal.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    needs: rust-fast
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 90
+    concurrency:
+      group: windows-product-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: false
     env:
       CARGO_BUILD_JOBS: 1
       CARGO_INCREMENTAL: 0
@@ -24,6 +119,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/pull/{0}/merge', inputs.pr_number) || github.sha }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
@@ -79,3 +176,26 @@ jobs:
 
       - name: Verify portable MIT license and third-party notices
         run: npm run verify:distribution-license
+
+
+  native-evidence:
+    name: Native execution evidence
+    if: always() && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch')
+    needs: [fast, rust-fast, verify]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/pull/{0}/merge', inputs.pr_number) || github.sha }}
+      - name: Capture native execution provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/mp10c_native_contract.py attest --output qualification/native-contract.json
+      - name: Upload native execution evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: mp-native-contract-attempt-${{ github.run_attempt }}
+          path: qualification/native-contract.json
+          if-no-files-found: error
+          retention-days: 30
