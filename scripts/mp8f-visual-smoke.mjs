@@ -77,13 +77,21 @@ try {
           selected: selected.length === 1 && selected[0].getAttribute("data-route") === ({ library: "overview", memories: "curated-memory", graph: "hive-mind-graph", health: "settings" })[expected],
           heading: Boolean(rect && rect.width > 40 && rect.left >= 0 && rect.right <= window.innerWidth + 1),
           horizontalOverflow: screen.scrollWidth > window.innerWidth + 1,
+          overflowNodes: [...document.querySelectorAll("*")].filter((element) => {
+            const bounds = element.getBoundingClientRect();
+            return bounds.right > window.innerWidth + 1 || bounds.left < -1;
+          }).slice(0, 12).map((element) => ({
+            tag: element.tagName, id: element.id, className: typeof element.className === "string" ? element.className : "",
+            left: Math.round(element.getBoundingClientRect().left), right: Math.round(element.getBoundingClientRect().right),
+            width: Math.round(element.getBoundingClientRect().width), scrollWidth: element.scrollWidth, clientWidth: element.clientWidth,
+          })),
           scrollHeight: view.scrollHeight, clientHeight: view.clientHeight,
         };
       }, name);
-      assert.equal(metrics.selected, true, width + "x" + height + " / " + name + " navigation");
-      assert.equal(metrics.heading, true, width + "x" + height + " / " + name + " heading");
-      assert.equal(metrics.horizontalOverflow, false, width + "x" + height + " / " + name + " viewport overflow");
       await page.screenshot({ path: output + "/" + width + "x" + height + "-" + name + ".png" });
+      assert.equal(metrics.selected, true, width + "x" + height + " / " + name + " navigation: " + JSON.stringify(metrics));
+      assert.equal(metrics.heading, true, width + "x" + height + " / " + name + " heading: " + JSON.stringify(metrics));
+      assert.equal(metrics.horizontalOverflow, false, width + "x" + height + " / " + name + " viewport overflow: " + JSON.stringify(metrics));
       receipt.push({ viewport: width + "x" + height, workspace: name, ...metrics });
     }
   }
