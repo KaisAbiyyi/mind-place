@@ -6,9 +6,11 @@
 
 ## Integrated recovery — 3 November 2026
 
-The owner-directed blocker recovery reconciles this existing PR with foundation integration #132 at `44b3359d0129a000ab6896029308ceee6045b830`. The current audit covers all **10 active workflows**, including native SQLCipher and separated Windows Product qualification. The three earlier active-lock exemptions are removed. Every external action is pinned to an upstream commit, every checkout disables credential persistence, and target workflows retain read-only token permissions with no secret references or privileged triggers.
+The owner-directed blocker recovery reconciles this existing PR with foundation integration #132 at `ae483364fb9b709ecd79be92f9e9f34dbdee8cdd`. The current audit covers all **10 active workflows**, including native SQLCipher and separated Windows Product qualification. The three earlier active-lock exemptions are removed. Every external action is pinned to an upstream commit, every checkout disables credential persistence, and target workflows retain read-only token permissions with no secret references or privileged triggers.
 
 The audit script now recognizes both named `uses:` and unnamed `- uses:` steps. Adverse fixtures reproduced acceptance of mutable checkout tags on the previously excluded foundation workflows; the corrected audit rejects them, as well as persistent checkout credentials. This is source-policy regression coverage, not proof that repository settings or a deployed App are active.
+
+Hosted requalification also exposed a moving-ref race: GitHub can regenerate `refs/pull/N/merge` when a PR is retargeted or reopened, while `GITHUB_SHA` remains the event's original merge. All three CI jobs now check out that immutable event SHA for PR events. Manual dispatch still selects the explicit PR merge and validates its frozen head/base. The provenance verifier continues to reject a checkout that differs from the event SHA; no SHA or parent check was relaxed. A contract regression fails all three former checkout expressions.
 
 | Integrated workflow | Review outcome |
 |---|---|
