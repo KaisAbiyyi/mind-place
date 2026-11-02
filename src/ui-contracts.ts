@@ -38,9 +38,19 @@ export interface UiModuleDataState<T> {
   readonly permission:UiPermissionState; readonly vault:UiVaultState;
 }
 export type UiInvoke = <T>(command:string,args?:Record<string,unknown>)=>Promise<T>;
+export interface UiCommandRegistration {
+  readonly id:string;
+  readonly label:string;
+  readonly description:string;
+  readonly keywords?:readonly string[];
+  readonly route?:UiRouteId;
+  readonly action?:string;
+  readonly workspace?:UiWorkspaceAlias;
+}
 export interface UiModuleContext {
   readonly document:Document; readonly root:HTMLElement; readonly route:UiRouteId;
   readonly invoke:UiInvoke; readonly signal:AbortSignal; readonly technicalMode:boolean;
+  readonly registerCommand:(command:UiCommandRegistration)=>()=>void;
 }
 export interface UiModuleHandle {
   readonly ready:Promise<void>; state():UiModuleDataState<unknown>; refresh?():Promise<void>; destroy():void;

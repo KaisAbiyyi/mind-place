@@ -1,6 +1,6 @@
 import createDOMPurify from "dompurify";
 import { CONVERSATION_ROW_HEIGHT, VIRTUAL_LIST_THRESHOLD, WORKSPACES, bindWorkspaceNavigationKeyboard, createWorkspaceNavigation, getVirtualWindow, setActiveRoute, type WorkspaceId } from "./knowledge-os.js";
-import { isUiRouteId, routeForWorkspace, type UiRouteId } from "./ui-contracts.js";
+import { isUiRouteId, routeForWorkspace, type UiCommandRegistration, type UiRouteId } from "./ui-contracts.js";
 import { createUiButton, createUiCard, createUiStatePanel, createUiStatus, createUiTable } from "./ui-primitives.js";
 import { APPLICATION_SHELL_MARKUP, mountUiShell } from "./ui-shell.js";
 import { mountLocalMcpSetup } from "./mcp-setup.js";
@@ -128,7 +128,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
 
   root.innerHTML = APPLICATION_SHELL_MARKUP;
   root.querySelector("#knowledge-os-nav-slot")?.replaceWith(createWorkspaceNavigation(document));
-  const uiShell = mountUiShell(root, { onNavigate: navigateToRoute });
+  const uiShell = mountUiShell(root, { onNavigate: navigateToRoute, onCommand: executeShellCommand });
   let summaries: ConversationSummary[] = [];
   let selectedId: string | null = null;
   let selectionVersion = 0;
@@ -1307,6 +1307,18 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
       case "setup-onboarding": openSetupDialog(trigger, "connections", "archive", route); break;
       case "settings": openSetupDialog(trigger, "connections", "privacy", route); break;
     }
+  }
+
+
+  function executeShellCommand(command: UiCommandRegistration, trigger: HTMLElement): void {
+    if (command.route) { navigateToRoute(command.route, trigger); return; }
+    if (command.action === "open-library-workspace") { openLibraryWorkspace(); return; }
+    if (command.action === "open-entity-workspace" && (command.workspace === "projects" || command.workspace === "people" || command.workspace === "topics")) {
+      openMemoryInspector(command.workspace);
+      return;
+    }
+    if (command.action === "open-health-inspector") { openHealthWorkspace(); return; }
+    root.dispatchEvent(new document.defaultView!.CustomEvent("mp:ui-command", { detail: command, bubbles: true }));
   }
 
   const clickHandler = (event: Event) => {

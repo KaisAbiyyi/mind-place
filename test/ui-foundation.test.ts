@@ -80,7 +80,11 @@ test("shell preferences, command palette and shortcut are accessible and disposa
   const nav = createWorkspaceNavigation(dom.window.document);
   root.querySelector("#knowledge-os-nav-slot")?.replaceWith(nav);
   let selected: UiRouteId | undefined;
-  const shell = mountUiShell(root, { onNavigate: (route) => { selected = route; } });
+  let selectedCommand: string | undefined;
+  const shell = mountUiShell(root, {
+    onNavigate: (route) => { selected = route; },
+    onCommand: (command) => { selectedCommand = command.id; },
+  });
   assert.deepEqual(shell.getPreferences(), { theme: "light", density: "comfortable", technicalMode: false, sidebarCollapsed: false });
   root.querySelector<HTMLButtonElement>("[data-action='toggle-theme']")!.click();
   root.querySelector<HTMLButtonElement>("[data-action='toggle-density']")!.click();
@@ -108,6 +112,28 @@ test("shell preferences, command palette and shortcut are accessible and disposa
   assert.equal(palette.hasAttribute("open"), false);
   root.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true, cancelable: true }));
   assert.equal(palette.hasAttribute("open"), true);
+  input.value = "People";
+  input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  root.querySelector<HTMLButtonElement>("[data-action='command-palette-command'][data-command-id='people']")!.click();
+  assert.equal(selectedCommand, "people");
+  assert.equal(palette.hasAttribute("open"), false);
+
+  const unregister = shell.registerCommand({
+    id: "search-memory",
+    label: "Search memories",
+    description: "Search memory statements and evidence.",
+    keywords: ["memory", "search", "evidence"],
+    action: "open-memory-search",
+  });
+  root.querySelector<HTMLButtonElement>("[data-action='open-command-palette']")!.click();
+  input.value = "evidence";
+  input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  root.querySelector<HTMLButtonElement>("[data-action='command-palette-command'][data-command-id='search-memory']")!.click();
+  assert.equal(selectedCommand, "search-memory");
+  unregister();
+  assert.throws(() => shell.registerCommand({
+    id: "bad-command", label: "Bad", description: "Missing target.",
+  }), /MP_UI_COMMAND_INVALID/);
   shell.setActiveRoute("settings");
   assert.equal(root.querySelector("#route-breadcrumb")?.textContent, "Settings");
   shell.destroy();
