@@ -397,6 +397,56 @@ class GateTests(unittest.TestCase):
         with self.assertRaises(gate.Rejected):
             gate.snapshot(self.api, 131)
 
+    def run_manual_draft_worker(self, command, **inputs):
+        self.api.data["/pulls/131"]["draft"] = True
+        event = self.root / "manual-event.json"
+        event.write_text(json.dumps({"inputs": {
+            "pr_number": "131", "head_sha": self.current["head"],
+            "base_sha": self.current["base"], **inputs,
+        }}))
+        env = {
+            "GITHUB_EVENT_PATH": str(event), "GITHUB_EVENT_NAME": "workflow_dispatch",
+            "GITHUB_REPOSITORY": API.repo, "GITHUB_SHA": self.current["head"],
+            "GITHUB_OUTPUT": str(self.root / "manual-output"), "GITHUB_RUN_ID": "7",
+            "GITHUB_RUN_ATTEMPT": "1", "EXPECTED_SOURCE": self.current["source"],
+            "WINDOWS_PRODUCT_APP_ID": "42",
+        }
+        previous = os.getcwd()
+        try:
+            os.chdir(self.repo)
+            with patch.dict(os.environ, env), patch.object(gate, "GitHub", return_value=self.api), \
+                    patch.object(sys, "argv", ["gate", command, "--policy-root", str(self.policy)]):
+                gate.main()
+        finally:
+            os.chdir(previous)
+
+    def test_explicit_frozen_manual_draft_runs_fresh_without_publishing_authority(self):
+        for command in ("plan", "coordinate", "slot"):
+            self.run_manual_draft_worker(command)
+        self.git("checkout", "-q", self.current["source"])
+        self.run_manual_draft_worker("proof")
+        self.assertIn("mode=native", (self.root / "manual-output").read_text())
+        self.assertEqual(json.loads((self.repo / "qualification/proof.json").read_text())["source"], self.current["source"])
+        self.assertTrue(self.api.data["/pulls/131"]["draft"])
+        self.assertFalse(self.api.writes)
+        self.api.data["/pulls?state=open"] = [{"number": 131, "draft": True}]
+        gate.controller(self.api, self.sources, self.policy, self.config)
+        self.assertFalse(self.api.writes)
+
+    def test_manual_draft_stale_head_or_base_cannot_execute(self):
+        for key in ("head_sha", "base_sha"):
+            with self.subTest(key=key), self.assertRaisesRegex(gate.Rejected, "live frozen candidate"):
+                self.run_manual_draft_worker("plan", **{key: "f" * 40})
+
+    def test_manual_draft_closed_or_foreign_candidate_cannot_execute(self):
+        self.api.data["/pulls/131"]["state"] = "closed"
+        with self.assertRaises(gate.Rejected):
+            self.run_manual_draft_worker("plan")
+        self.publish_current()
+        self.api.data["/pulls/131"]["head"]["repo"]["full_name"] = "attacker/fork"
+        with self.assertRaisesRegex(gate.Rejected, "foreign PR"):
+            self.run_manual_draft_worker("plan")
+
     def test_stale_merge_and_pr_head_are_not_equivalent(self):
         self.current["source"] = self.head
         with self.assertRaisesRegex(gate.Rejected, "merge parents"):
