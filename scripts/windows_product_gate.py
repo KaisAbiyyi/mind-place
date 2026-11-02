@@ -139,9 +139,9 @@ class Sources:
         return fingerprint(commit, self.root)
 
 
-def snapshot(api, number):
+def snapshot(api, number, *, allow_draft=False):
     pr = api.request(f"/pulls/{int(number)}")
-    require(pr["state"] == "open" and not pr["draft"], "PR is not open and Ready")
+    require(pr["state"] == "open" and (allow_draft or not pr["draft"]), "PR is not open and Ready")
     require(pr["head"]["repo"]["full_name"] == api.repo == pr["base"]["repo"]["full_name"], "foreign PR")
     return {"pr": int(number), "head": sha(pr["head"]["sha"]), "base": sha(pr["base"]["sha"]),
             "source": sha(pr["merge_commit_sha"]), "base_ref": pr["base"]["ref"]}
@@ -439,7 +439,10 @@ def main():
                        "base": sha(event["pull_request"]["base"]["sha"]), "source": sha(os.environ["GITHUB_SHA"]),
                        "base_ref": event["pull_request"]["base"]["ref"]}
         else:
-            current = snapshot(api, int(number))
+            # An explicit frozen dispatch may gather fresh native evidence while
+            # the PR stays Draft. Automatic reuse/controller acceptance retains
+            # the default Ready-only snapshot and can never accept a Draft.
+            current = snapshot(api, int(number), allow_draft=os.environ["GITHUB_EVENT_NAME"] == "workflow_dispatch")
             if os.environ["GITHUB_EVENT_NAME"] == "workflow_dispatch":
                 inputs = event.get("inputs", {})
                 require(sha(inputs.get("head_sha")) == current["head"]
