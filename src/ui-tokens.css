@@ -327,3 +327,12 @@
 :root[data-theme] .settings-panel input::placeholder {
   color: var(--mp-text-muted);
 }
+
+:root[data-theme] .message-content blockquote { border-left-color: var(--mp-border-strong); }
+:root[data-theme] .brand-mark { border-color: var(--mp-border-strong); color: var(--mp-text-primary); }
+:root[data-theme] .quiet-button { border-color: var(--mp-border); color: var(--mp-text-secondary); }
+:root[data-theme] .quiet-button:hover:not(:disabled),
+:root[data-theme] .icon-button:hover:not(:disabled) { border-color: var(--mp-border-strong); background: var(--mp-bg-subtle); color: var(--mp-text-primary); }
+:root[data-theme] .primary-button { border-color: var(--mp-text-primary); background: var(--mp-text-primary); color: var(--mp-bg-app); }
+:root[data-theme] .text-button,
+:root[data-theme] .text-button:hover { color: var(--mp-text-primary); }

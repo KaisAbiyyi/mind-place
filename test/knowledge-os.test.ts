@@ -56,6 +56,30 @@ test("entity workspace buttons open scoped investigation alongside Hive and Heal
   }
 });
 
+
+test("Settings route is a usable hub and exposes diagnostics as contextual navigation", async () => {
+  const dom = new JSDOM("<!doctype html><html><body><div id='app'></div></body></html>", { url: "https://local.test/" });
+  const root = dom.window.document.querySelector<HTMLElement>("#app")!;
+  const invoke: Invoke = async <T>(command: string) => {
+    if (command === "list_conversations") return [] as T;
+    throw new Error("unexpected: " + command);
+  };
+  const app = mountReader({ root, invoke });
+  try {
+    await app.ready;
+    root.querySelector<HTMLButtonElement>('[data-route="settings"]')!.click();
+    const settings = root.querySelector("#reader-view")?.textContent ?? "";
+    assert.match(settings, /Privacy & security/);
+    assert.match(settings, /Provider connections/);
+    assert.match(settings, /Operational diagnostics/);
+    assert.equal(root.querySelector('[data-route="settings"]')?.getAttribute("aria-current"), "page");
+    assert.equal(root.querySelector('[data-nav-secondary][data-workspace="health"]')?.hasAttribute("hidden"), false);
+    assert.equal(root.querySelector('[data-nav-secondary][data-workspace="health"]')?.getAttribute("aria-pressed"), "false");
+  } finally {
+    app.destroy();
+  }
+});
+
 test("virtual viewport bounds 100k items to a small constant number of rows", () => {
   const visible = getVirtualWindow(100_000, 76_000, 304);
   assert.ok(visible.start <= 1_000 && visible.end > 1_000);
