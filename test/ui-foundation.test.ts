@@ -50,7 +50,7 @@ test("shared primitives keep caller strings inert and expose semantic states", (
   const table = createUiTable(document, { caption: "Recent items", columns: ["Name", "State"], rows: [["One", status]] });
   assert.equal(table.querySelector("caption")?.textContent, "Recent items");
   assert.equal(table.querySelectorAll("tbody tr").length, 1);
-  assert.equal(table.querySelector("tbody .ui-status")?.dataset.state, "locked");
+  assert.equal(table.querySelector<HTMLElement>("tbody .ui-status")?.dataset.state, "locked");
   const empty = createUiTable(document, { caption: "Empty", columns: ["Name"], rows: [], emptyLabel: "No items." });
   assert.equal(empty.querySelector(".ui-table-empty")?.textContent, "No items.");
   const dialog = createUiDialog(document, { id: "test-dialog", title: "Details" });
