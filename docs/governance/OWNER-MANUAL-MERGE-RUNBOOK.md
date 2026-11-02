@@ -8,6 +8,18 @@
 
 This runbook is a configuration proposal and owner handoff. MP-GOV-01 did not change branch protection, rulesets, repository settings, Apps, credentials, permissions, or any PR merge state.
 
+## Recovery handoff — 3 November 2026
+
+The proposal is now concrete: [main-ruleset.proposed.json](main-ruleset.proposed.json) contains the owner-review, strict-check and empty-bypass settings; [.github/CODEOWNERS](../../.github/CODEOWNERS) assigns every path to `@KaisAbiyyi`. These files are proposed changes on this PR, not activated protection. CODEOWNERS must reach the base branch through the approved contribution path before later PRs can rely on it.
+
+Fresh read-only inspection still reports `main.protected=false`, no repository rulesets, and `allow_auto_merge=false`. The collaborator endpoint is now readable and lists only `KaisAbiyyi` with administrator/write permission; the earlier inability to enumerate collaborators is historical. This does not remove the self-approval constraint: the current connected identity and PR author are both `KaisAbiyyi`.
+
+The original exact-head governance CI [41189232546](https://github.com/KaisAbiyyi/mind-place/actions/runs/41189232546) completed successfully on `ace799cb834e8d1a0645480bd989d714d5cefec6`. It is historical evidence for that source, not evidence for later changes to this proposal.
+
+The JSON pins the **current main** check `Verify Windows product` to GitHub Actions (integration ID 15368). Before application, MP-GOV-02 must verify the final integrated workflow/check contract. If the separated Windows workflow from PR #131/#132 is adopted, `Windows Product / candidate result` is only advisory and must never replace independently verified acceptance. The disabled independent-policy template is not a deployed App, and the trusted acceptance check requires its separately approved identity and pin. Do not apply a stale required-check configuration merely because this JSON parses.
+
+Remaining owner actions are explicit: arrange a distinct contributor-authored PR for formal owner approval, manually merge only after review/checks, then apply/read back protection under MP-GOV-04 after MP-GOV-02 acceptance. This session does not impersonate another contributor, bypass self-review rules, merge, or change repository settings.
+
 ## 1. Operating policy
 
 The approved contribution path is:
