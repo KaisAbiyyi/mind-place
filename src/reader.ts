@@ -1268,10 +1268,15 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     loadedSnapshots = [];
     selectedSnapshotId = null;
     exportedMarkdown = "";
+    const hadSearchFilter = Boolean(search.value.trim());
+    search.value = "";
     activateRoute("overview", "conversations");
     setActionStatus("");
-    renderConversationRows(search.value.trim());
-    renderOverview();
+    if (hadSearchFilter) void loadConversations();
+    else {
+      renderConversationRows("");
+      renderOverview();
+    }
     focusViewHeading();
   };
 

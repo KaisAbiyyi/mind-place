@@ -44,6 +44,7 @@ test("entity workspace buttons open scoped investigation alongside Hive and Heal
   const app = mountReader({ root, invoke });
   try {
     await app.ready;
+    root.querySelector<HTMLButtonElement>('[data-route="curated-memory"]')!.click();
     root.querySelector<HTMLButtonElement>('[data-workspace="people"]')!.click();
     assert.equal(root.querySelector('[data-workspace="people"]')?.getAttribute("aria-pressed"), "true");
     assert.equal(root.querySelector('[data-route="curated-memory"]')?.getAttribute("aria-current"), "page");

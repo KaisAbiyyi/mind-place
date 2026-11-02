@@ -90,6 +90,10 @@ test("shell preferences, command palette and shortcut are accessible and disposa
   assert.equal(dom.window.document.documentElement.dataset.theme, "dark");
   assert.equal(root.querySelector(".app-shell")?.getAttribute("data-sidebar-collapsed"), "true");
   assert.equal(root.querySelector("[data-action='toggle-sidebar']")?.getAttribute("aria-expanded"), "false");
+  assert.equal(root.querySelector('[data-subnav-for="overview"]')?.hasAttribute("hidden"), true);
+  root.querySelector<HTMLButtonElement>("[data-action='toggle-sidebar']")!.click();
+  assert.equal(root.querySelector('[data-subnav-for="overview"]')?.hasAttribute("hidden"), false);
+  root.querySelector<HTMLButtonElement>("[data-action='toggle-sidebar']")!.click();
   root.querySelector<HTMLButtonElement>("[data-action='open-command-palette']")!.click();
   const palette = root.querySelector<HTMLDialogElement>("#command-palette")!;
   assert.equal(palette.hasAttribute("open"), true);
