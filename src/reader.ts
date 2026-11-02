@@ -1,5 +1,5 @@
 import createDOMPurify from "dompurify";
-import { CONVERSATION_ROW_HEIGHT, VIRTUAL_LIST_THRESHOLD, WORKSPACES, bindWorkspaceNavigationKeyboard, createWorkspaceNavigation, getVirtualWindow, setActiveRoute, setActiveWorkspace, type WorkspaceId } from "./knowledge-os.js";
+import { CONVERSATION_ROW_HEIGHT, VIRTUAL_LIST_THRESHOLD, WORKSPACES, bindWorkspaceNavigationKeyboard, createWorkspaceNavigation, getVirtualWindow, setActiveRoute, type WorkspaceId } from "./knowledge-os.js";
 import { isUiRouteId, routeForWorkspace, type UiRouteId } from "./ui-contracts.js";
 import { createUiButton, createUiCard, createUiStatePanel, createUiStatus, createUiTable } from "./ui-primitives.js";
 import { APPLICATION_SHELL_MARKUP, mountUiShell } from "./ui-shell.js";

@@ -81,6 +81,9 @@ export function setActiveRoute(nav: HTMLElement,route: UiRouteId,workspace: Work
   for(const button of nav.querySelectorAll<HTMLButtonElement>("button[data-nav-secondary]")){
     button.setAttribute("aria-pressed",String(button.dataset.workspace===workspace));
   }
+  for(const group of nav.querySelectorAll<HTMLElement>("[data-subnav-for]")){
+    group.hidden = group.dataset.subnavFor !== route;
+  }
 }
 export function setActiveWorkspace(nav: HTMLElement,id: WorkspaceId): void { setActiveRoute(nav,routeForWorkspace(id),id); }
 export function bindWorkspaceNavigationKeyboard(nav: HTMLElement): () => void {
@@ -88,7 +91,7 @@ export function bindWorkspaceNavigationKeyboard(nav: HTMLElement): () => void {
     if(event.defaultPrevented||event.altKey||event.ctrlKey||event.metaKey)return;
     const target=event.target;
     if(!(target instanceof nav.ownerDocument.defaultView!.HTMLButtonElement)||!nav.contains(target))return;
-    const buttons=[...nav.querySelectorAll<HTMLButtonElement>("button[data-nav-item]:not(:disabled)")];
+    const buttons=[...nav.querySelectorAll<HTMLButtonElement>("button[data-nav-item]:not(:disabled)")].filter((button)=>!button.closest("[hidden]"));
     const index=buttons.indexOf(target); if(index<0)return;
     const next=event.key==="Home"?0:event.key==="End"?buttons.length-1:event.key==="ArrowDown"?Math.min(buttons.length-1,index+1):event.key==="ArrowUp"?Math.max(0,index-1):-1;
     if(next<0)return; event.preventDefault(); buttons[next]?.focus({preventScroll:true}); buttons[next]?.scrollIntoView?.({block:"nearest",inline:"nearest"});

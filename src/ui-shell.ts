@@ -94,6 +94,11 @@ export function mountUiShell(root: HTMLElement, options: UiShellOptions): UiShel
       results.append(empty);
     }
   };
+  const syncSecondaryNavigation = (): void => {
+    for (const group of root.querySelectorAll<HTMLElement>("[data-subnav-for]")) {
+      group.hidden = sidebarCollapsed || group.dataset.subnavFor !== shell.dataset.activeRoute;
+    }
+  };
   const applyPreferences = (): void => {
     html.dataset.theme = theme;
     html.dataset.density = density;
@@ -111,11 +116,13 @@ export function mountUiShell(root: HTMLElement, options: UiShellOptions): UiShel
     sidebarButton.textContent = sidebarCollapsed ? "Expand" : "Collapse";
     sidebarButton.setAttribute("aria-expanded", String(!sidebarCollapsed));
     sidebarButton.setAttribute("aria-label", sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar");
+    syncSecondaryNavigation();
   };
   const setActiveRoute = (route: UiRouteId): void => {
     shell.dataset.activeRoute = route;
     if (breadcrumb) breadcrumb.textContent = getUiRoute(route).label;
     document.title = getUiRoute(route).label + " — Mind Place";
+    syncSecondaryNavigation();
   };
   const openPalette = (): void => {
     search.value = "";
@@ -138,7 +145,7 @@ export function mountUiShell(root: HTMLElement, options: UiShellOptions): UiShel
     else if (action === "close-ui-dialog" && element.dataset.dialogId === "command-palette") closePalette();
     else if (action === "command-palette-navigate") {
       const route = element.dataset.route;
-      if (route && isUiRouteId(route)) { options.onNavigate(route, element); closePalette(); }
+      if (route && isUiRouteId(route)) { closePalette(); options.onNavigate(route, element); }
     }
   };
   const inputHandler = (): void => renderResults(search.value);

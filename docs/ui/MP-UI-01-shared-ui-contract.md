@@ -41,7 +41,7 @@ const memoryModule: UiModuleRegistration = {
 registry.register(memoryModule);
 \`\`\`
 
-The module's state must report permission and vault state from the native/backend contract. A disabled control, theme preference, technical-mode flag or route registration is never evidence of authorization or an unlocked vault.
+The initial `UI_MODULES` descriptors mark the already-reachable legacy surfaces as available; this does not claim that every legacy surface has been migrated to an independent `mount()` adapter yet. Feature lanes can register their adapter without changing the route ID. The module's state must report permission and vault state from the native/backend contract. A disabled control, theme preference, technical-mode flag or route registration is never evidence of authorization or an unlocked vault.
 
 ## Shared primitives
 

@@ -7,6 +7,7 @@
 .knowledge-os-nav-icon { display:grid; width:18px; height:18px; flex:0 0 auto; place-items:center; }
 .knowledge-os-nav-icon svg { display:block; width:18px; height:18px; }
 .knowledge-os-nav-secondary-group { display:none; gap:2px; margin:3px 0 5px 28px; }
+.knowledge-os-nav-secondary-group[hidden] { display:none !important; }
 .knowledge-os-nav[data-active-route="overview"] [data-subnav-for="overview"],
 .knowledge-os-nav[data-active-route="curated-memory"] [data-subnav-for="curated-memory"],
 .knowledge-os-nav[data-active-route="settings"] [data-subnav-for="settings"] { display:grid; }
@@ -14,4 +15,4 @@
 .knowledge-os-nav-secondary:hover,.knowledge-os-nav-secondary[aria-pressed="true"] { background:var(--mp-bg-subtle); color:var(--mp-text-primary); }
 .knowledge-os-nav-secondary[aria-pressed="true"] { border-color:var(--mp-border); }
 .knowledge-list-spacer { width:100%; pointer-events:none; }
-@media(max-width:780px){.knowledge-os-nav-group{display:contents}.knowledge-os-nav-group-label{display:none}.knowledge-os-nav-secondary-group{display:none!important}}
+@media(max-width:780px){.knowledge-os-nav-group{display:contents}.knowledge-os-nav-group-label{display:none}}

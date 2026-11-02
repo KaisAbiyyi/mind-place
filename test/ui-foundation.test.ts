@@ -69,6 +69,8 @@ test("navigation keeps one current route and marks secondary lenses separately",
   assert.equal(nav.querySelectorAll('[aria-current="page"]').length, 1);
   assert.equal(nav.querySelector('[data-route="curated-memory"]')?.getAttribute("aria-current"), "page");
   assert.equal(nav.querySelector('[data-workspace="topics"]')?.getAttribute("aria-pressed"), "true");
+  assert.equal(nav.querySelector('[data-subnav-for="curated-memory"]')?.hasAttribute("hidden"), false);
+  assert.equal(nav.querySelector('[data-subnav-for="overview"]')?.hasAttribute("hidden"), true);
 });
 
 test("shell preferences, command palette and shortcut are accessible and disposable", () => {
