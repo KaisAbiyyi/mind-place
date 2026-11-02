@@ -64,8 +64,35 @@ function createReader(invoke: Invoke, copied: string[] = []) {
     clipboard: { writeText: async (value) => { copied.push(value); } },
   });
   mounted.push(app);
+  root.querySelector<HTMLButtonElement>('[data-route="conversations"]')?.click();
   return { dom, root, app, copied };
 }
+
+
+test("overview uses live archive data and opens the selected transcript through Conversations", async () => {
+  const item = summary("overview-one", "Overview fixture");
+  const invoke: Invoke = async <T>(command: string) => {
+    if (command === "list_conversations") return [item] as T;
+    if (command === "read_conversation") return conversation(item, "Overview answer") as T;
+    if (command === "list_snapshots") return [] as T;
+    throw new Error("Unexpected command: " + command);
+  };
+  const dom = new JSDOM("<!doctype html><html><body><div id='app'></div></body></html>", { url: "https://archive.test/" });
+  const root = dom.window.document.querySelector<HTMLElement>("#app")!;
+  const app = mountReader({ root, invoke });
+  mounted.push(app);
+  await app.ready;
+  await delay(0);
+  assert.equal(root.querySelector(".app-shell")?.getAttribute("data-active-route"), "overview");
+  const overview = root.querySelector("#reader-view")?.textContent ?? "";
+  assert.match(overview, /Saved conversations/);
+  assert.match(overview, /Messages captured/);
+  assert.match(overview, /Overview fixture/);
+  assert.doesNotMatch(overview, /Overview answer/);
+  root.querySelector<HTMLButtonElement>('[data-route="conversations"]')!.click();
+  await delay(0);
+  assert.match(root.querySelector("#reader-view")?.textContent ?? "", /Overview answer/);
+});
 
 test("archived Markdown and HTML cannot execute scripts or load remote images", () => {
   const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "https://archive.test/" });

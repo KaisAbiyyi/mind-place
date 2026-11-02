@@ -1,5 +1,8 @@
 import createDOMPurify from "dompurify";
-import { CONVERSATION_ROW_HEIGHT, VIRTUAL_LIST_THRESHOLD, WORKSPACES, bindWorkspaceNavigationKeyboard, createWorkspaceNavigation, getVirtualWindow, setActiveWorkspace, type WorkspaceId } from "./knowledge-os.js";
+import { CONVERSATION_ROW_HEIGHT, VIRTUAL_LIST_THRESHOLD, WORKSPACES, bindWorkspaceNavigationKeyboard, createWorkspaceNavigation, getVirtualWindow, setActiveRoute, setActiveWorkspace, type WorkspaceId } from "./knowledge-os.js";
+import { isUiRouteId, routeForWorkspace, type UiRouteId } from "./ui-contracts.js";
+import { createUiButton, createUiCard, createUiStatePanel, createUiStatus, createUiTable } from "./ui-primitives.js";
+import { APPLICATION_SHELL_MARKUP, mountUiShell } from "./ui-shell.js";
 import { mountLocalMcpSetup } from "./mcp-setup.js";
 import { mountDocumentRootSetup } from "./document-roots.js";
 import { mountMemoryInspector, type MemoryInspectorHandle } from "./memory-inspector.js";
@@ -47,77 +50,6 @@ const ALLOWED_IMAGE_MIME_TYPES = new Set([
   "image/png",
   "image/webp",
 ]);
-
-const STATIC_APP_SHELL = `
-  <a class="skip-link" href="#reader-view">Skip to main content</a>
-  <div class="app-shell">
-    <aside class="library" aria-label="Conversation archive">
-      <div class="brand-lockup">
-        <span class="brand-mark" aria-hidden="true">m</span>
-        <span class="brand-name">Mind Place</span>
-      </div>
-      <div class="library-heading-row">
-        <h1>Archive</h1>
-        <button class="quiet-button refresh-button" type="button" data-action="refresh" aria-label="Refresh archive">Refresh</button>
-      </div>
-      <label class="search-label" for="archive-search">Search conversations</label>
-      <div class="search-field">
-        <svg aria-hidden="true" viewBox="0 0 20 20"><circle cx="8.8" cy="8.8" r="5.6"></circle><path d="m13 13 4 4"></path></svg>
-        <input id="archive-search" type="search" autocomplete="off" placeholder="Search titles and messages" />
-        <kbd aria-hidden="true">/</kbd>
-      </div>
-      <div class="list-heading">Saved conversations</div>
-      <div id="conversation-list" class="conversation-list" role="list" aria-label="Saved conversations" aria-live="polite">
-        <p class="list-note">Loading archive…</p>
-      </div>
-      <div class="library-footer">
-        <div class="offline-note"><span class="offline-dot" aria-hidden="true"></span><span>Stored on this device</span></div>
-        <button class="setup-link" type="button" data-action="open-library-workspace">Search all sources</button>
-        <button class="setup-link" type="button" data-action="open-memory-inspector">Memories &amp; evidence</button>
-        <button class="setup-link" type="button" data-action="open-document-search">Documents &amp; folders</button>
-        <button class="setup-link" type="button" data-action="open-setup">
-          <svg aria-hidden="true" viewBox="0 0 20 20"><path d="M10 2.5v2M10 15.5v2M2.5 10h2m11 0h2m-12.28-5.22 1.42 1.42m7.72 7.72 1.42 1.42m0-10.56-1.42 1.42m-7.72 7.72-1.42 1.42"></path><circle cx="10" cy="10" r="4"></circle></svg>
-          <span>Settings</span>
-        </button>
-      </div>
-    </aside>
-    <main class="reader-main">
-      <header class="reader-toolbar">
-        <div class="toolbar-context"><span class="context-mark" aria-hidden="true"></span><span>Conversation reader</span></div>
-        <div class="toolbar-actions">
-          <button class="quiet-button" type="button" data-action="lock">Lock</button>
-          <span id="action-status" class="action-status" role="status" aria-live="polite"></span>
-          <button class="quiet-button" type="button" data-action="copy-answer" disabled>Copy answer</button>
-          <button class="primary-button" type="button" data-action="export-markdown" disabled>
-            <svg aria-hidden="true" viewBox="0 0 20 20"><path d="M10 2.75v9.5m0 0 3.25-3.25M10 12.25 6.75 9M3.5 13.75v2.5c0 .55.45 1 1 1h11c.55 0 1-.45 1-1v-2.5"></path></svg>
-            <span>Export Markdown</span>
-          </button>
-        </div>
-      </header>
-      <section id="reader-view" class="reader-view" tabindex="-1" aria-live="polite" aria-busy="true">
-        <div class="state-panel loading-panel"><span class="loading-mark" aria-hidden="true"></span><p>Opening your archive…</p></div>
-      </section>
-    </main>
-  </div>
-  <dialog id="setup-dialog" class="setup-dialog" aria-labelledby="setup-title">
-    <div class="dialog-header">
-      <div><p class="eyebrow">Mind Place / Preferences</p><h2 id="setup-title">Settings</h2><p class="settings-subtitle">Manage your archive, documents and connections.</p></div>
-      <button class="icon-button" type="button" data-action="close-setup" aria-label="Close setup">×</button>
-    </div>
-    <div class="settings-layout">
-      <nav class="settings-nav" role="tablist" aria-label="Settings categories" aria-orientation="vertical">
-        <button class="settings-tab" type="button" role="tab" id="settings-tab-archive" aria-controls="settings-panel-archive" aria-selected="true" tabindex="0" data-settings-tab="archive"><span>01</span>Archive &amp; Capture</button>
-        <button class="settings-tab" type="button" role="tab" id="settings-tab-documents" aria-controls="settings-panel-documents" aria-selected="false" tabindex="-1" data-settings-tab="documents"><span>02</span>Documents &amp; Permissions</button>
-        <button class="settings-tab" type="button" role="tab" id="settings-tab-connections" aria-controls="settings-panel-connections" aria-selected="false" tabindex="-1" data-settings-tab="connections"><span>03</span>Connections &amp; MCP</button>
-        <button class="settings-tab" type="button" role="tab" id="settings-tab-privacy" aria-controls="settings-panel-privacy" aria-selected="false" tabindex="-1" data-settings-tab="privacy"><span>04</span>Privacy &amp; Security</button>
-      </nav>
-      <div id="setup-content" class="setup-content" aria-live="off">
-        <p class="list-note">Loading settings…</p>
-      </div>
-    </div>
-    <div class="dialog-footer"><button class="quiet-button" type="button" data-action="lock">Lock</button><button class="quiet-button" type="button" data-action="close-setup">Done</button></div>
-  </dialog>
-`;
 
 /** Render transcript text as inert, sanitized DOM. Attachments are handled separately via get_asset. */
 export function renderMessageContent(document: Document, message: Pick<Message, "text" | "format">): HTMLElement {
@@ -194,8 +126,9 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
       ?? Promise.reject(new Error("Clipboard access is unavailable in this app window.")),
   };
 
-  root.innerHTML = STATIC_APP_SHELL;
-  root.querySelector(".brand-lockup")?.after(createWorkspaceNavigation(document));
+  root.innerHTML = APPLICATION_SHELL_MARKUP;
+  root.querySelector("#knowledge-os-nav-slot")?.replaceWith(createWorkspaceNavigation(document));
+  const uiShell = mountUiShell(root, { onNavigate: navigateToRoute });
   let summaries: ConversationSummary[] = [];
   let selectedId: string | null = null;
   let selectionVersion = 0;
@@ -237,23 +170,32 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   const disposeWorkspaceKeys = bindWorkspaceNavigationKeyboard(workspaceNav);
   const view = get<HTMLElement>("#reader-view");
   let activeWorkspace: WorkspaceId = "conversations";
+  let activeRoute: UiRouteId = "overview";
   let modalReturnWorkspace: WorkspaceId = "conversations";
+  let modalReturnRoute: UiRouteId = "overview";
   let modalReturnFocus: HTMLElement | null = null;
+  let archiveLoadState: "loading" | "ready" | "error" = "loading";
+  const activateRoute = (route: UiRouteId, workspace: WorkspaceId = activeWorkspace) => {
+    activeWorkspace = workspace;
+    activeRoute = route;
+    setActiveRoute(workspaceNav, route, workspace);
+    uiShell.setActiveRoute(route);
+    const label = WORKSPACES.find(item => item.id === workspace)?.label ?? "Archive";
+    view.setAttribute("aria-label", label + " workspace");
+  };
   const activateWorkspace = (id: WorkspaceId) => {
     activeWorkspace = id;
-    setActiveWorkspace(workspaceNav, id);
-    const label = WORKSPACES.find(item => item.id === id)?.label ?? "Archive";
-    view.setAttribute("aria-label", label + " workspace");
+    activateRoute(routeForWorkspace(id), id);
   };
   const focusViewHeading = () => {
     view.scrollTop = 0;
-    const heading = view.querySelector<HTMLElement>("h1, .state-panel h2");
+    const heading = view.querySelector<HTMLElement>("h1, .state-panel h2, .ui-state-panel h2");
     if (heading) {
       heading.tabIndex = -1;
       heading.focus({ preventScroll: true });
     }
   };
-  activateWorkspace("conversations");
+  activateRoute("overview", "conversations");
   const search = get<HTMLInputElement>("#archive-search");
   const dialog = get<HTMLDialogElement>("#setup-dialog");
   const setupContent = get<HTMLDivElement>("#setup-content");
@@ -318,9 +260,139 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   };
 
   const updateToolbarSelection = (summary?: ConversationSummary) => {
-    toolbarTitle.textContent = summary ? "Conversation reader" : "Your archive";
+    if (activeRoute === "overview" && activeWorkspace === "conversations") toolbarTitle.textContent = "Overview";
+    else if (activeWorkspace === "library") toolbarTitle.textContent = "Library search";
+    else if (activeRoute === "conversations") toolbarTitle.textContent = summary ? "Conversation reader" : "Your archive";
     copyButton.disabled = !summary;
     exportButton.disabled = !summary;
+  };
+
+  const renderOverview = () => {
+    if (archiveLoadState === "loading") {
+      setViewBusy(true);
+      updateToolbarSelection();
+      view.replaceChildren(createUiStatePanel(document, {
+        state: "loading",
+        title: "Loading your archive",
+        detail: "Reading the saved conversation index from this device.",
+      }));
+      return;
+    }
+    if (archiveLoadState === "error") {
+      setViewBusy(false);
+      updateToolbarSelection();
+      const panel = createUiStatePanel(document, {
+        state: "error",
+        title: "Archive unavailable",
+        detail: "The local archive could not be read. Check the archive service and retry.",
+      });
+      const retry = createUiButton(document, "Refresh archive", { variant: "secondary" });
+      retry.dataset.action = "refresh";
+      panel.append(retry);
+      view.replaceChildren(panel);
+      return;
+    }
+
+    const total = summaries.length;
+    const messageCount = summaries.reduce((sum, item) => sum + item.message_count, 0);
+    const completeCount = summaries.filter((item) => item.completeness === "complete").length;
+    const partialCount = summaries.filter((item) => item.completeness === "partial").length;
+    const page = document.createElement("div");
+    page.className = "ui-overview-page";
+    const heading = document.createElement("header");
+    heading.className = "ui-overview-heading";
+    const title = document.createElement("h1");
+    title.textContent = "Overview";
+    const description = document.createElement("p");
+    description.textContent = "A live view of the conversations saved in your local archive.";
+    heading.append(title, description);
+    page.append(heading);
+
+    const metrics = document.createElement("div");
+    metrics.className = "ui-overview-grid";
+    const metricValues = [
+      { label: "Saved conversations", value: total, detail: "Available in this archive" },
+      { label: "Messages captured", value: messageCount, detail: "Across saved conversations" },
+      { label: "Complete captures", value: completeCount, detail: "Marked complete by capture metadata" },
+      { label: "Partial captures", value: partialCount, detail: "Contain capture warnings or gaps" },
+    ];
+    for (const metric of metricValues) {
+      const card = createUiCard(document, { title: metric.label, className: "ui-stat-card" });
+      const value = document.createElement("strong");
+      value.className = "ui-stat-value";
+      value.textContent = metric.value.toLocaleString();
+      const detail = document.createElement("span");
+      detail.className = "ui-stat-detail";
+      detail.textContent = metric.detail;
+      card.body.append(value, detail);
+      metrics.append(card.element);
+    }
+    page.append(metrics);
+
+    const lower = document.createElement("div");
+    lower.className = "ui-overview-lower";
+    const recentCard = createUiCard(document, {
+      title: "Recent conversations",
+      description: "Open a saved conversation to inspect its captured transcript.",
+    });
+    const recent = [...summaries]
+      .sort((left, right) => new Date(right.captured_at).getTime() - new Date(left.captured_at).getTime())
+      .slice(0, 6);
+    const rows = recent.map((item) => {
+      const link = createUiButton(document, item.title || "Untitled conversation", { variant: "link", className: "ui-table-link" });
+      link.dataset.conversationId = item.id;
+      const completeness = item.completeness === "complete" ? "complete" : item.completeness === "partial" ? "partial" : "neutral";
+      return [
+        link,
+        item.message_count.toLocaleString(),
+        formatRelativeDate(item.conversation_date || item.captured_at),
+        createUiStatus(document, item.completeness === "partial" ? "Partial" : "Complete", completeness),
+      ];
+    });
+    recentCard.body.append(createUiTable(document, {
+      caption: "Most recently captured conversations",
+      columns: ["Conversation", "Messages", "Date", "Capture"],
+      rows,
+      emptyLabel: "No saved conversations yet. Save a conversation with the browser extension to see it here.",
+    }));
+    lower.append(recentCard.element);
+
+    const actionsCard = createUiCard(document, {
+      title: "Quick access",
+      description: "Jump to an existing Mind Place workspace.",
+    });
+    const actions = document.createElement("div");
+    actions.className = "ui-overview-actions";
+    const destinations: Array<{ label: string; route: UiRouteId }> = [
+      { label: "Conversations", route: "conversations" },
+      { label: "Curated Memory", route: "curated-memory" },
+      { label: "Hive Mind Graph", route: "hive-mind-graph" },
+      { label: "Files & Secure Vault", route: "files-secure-vault" },
+      { label: "AI Providers & MCP", route: "ai-providers-mcp" },
+    ];
+    for (const destination of destinations) {
+      const button = createUiButton(document, destination.label, { variant: "secondary" });
+      button.dataset.action = "navigate-route";
+      button.dataset.route = destination.route;
+      actions.append(button);
+    }
+    const sourceSearch = createUiButton(document, "Search all sources", { variant: "quiet" });
+    sourceSearch.dataset.action = "open-library-workspace";
+    actions.append(sourceSearch);
+    actionsCard.body.append(actions);
+    lower.append(actionsCard.element);
+    page.append(lower);
+
+    if (total === 0) {
+      page.append(createUiStatePanel(document, {
+        state: "empty",
+        title: "Your archive is empty",
+        detail: "Save a conversation with the browser extension. Saved chats remain on this device.",
+      }));
+    }
+    view.replaceChildren(page);
+    setViewBusy(false);
+    updateToolbarSelection();
   };
 
   const renderConversationRows = (query: string) => {
@@ -384,7 +456,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
 
     if (summaries.length === 0) {
       renderListMessage(query ? "No conversations match this search." : "No saved conversations yet.");
-      if (!selectedId) {
+      if (!selectedId && activeRoute === "conversations") {
         renderState(
           query ? "No matches" : "Your archive is empty",
           query ? "Try another title or phrase." : "Save a conversation with the browser extension. Your saved chats stay on this device.",
@@ -823,7 +895,9 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   const loadConversations = async (reloadSelected = false): Promise<void> => {
     const version = ++listVersion;
     const query = search.value.trim();
-    if (!summaries.length && !selectedId) renderState("Loading your archive", "Looking for saved conversations…", "loading");
+    archiveLoadState = "loading";
+    if (activeRoute === "overview" && activeWorkspace === "conversations") renderOverview();
+    else if (activeRoute === "conversations" && !summaries.length && !selectedId) renderState("Loading your archive", "Looking for saved conversations…", "loading");
     renderListMessage("Searching saved conversations…");
     try {
       const result = await invoke<ConversationSummary[]>("list_conversations", query ? { query } : {});
@@ -836,13 +910,15 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
         || previous.conversation_date !== next.conversation_date || previous.date_source !== next.date_source
       );
       summaries = result;
+      archiveLoadState = "ready";
       if (selectedId && !summaries.some((item) => item.id === selectedId)) {
         selectedId = null;
         selectionVersion++;
         updateToolbarSelection();
       }
       renderConversationRows(query);
-      if (summaries.length && !selectedId) {
+      if (activeRoute === "overview" && activeWorkspace === "conversations") renderOverview();
+      if (activeRoute === "conversations" && summaries.length && !selectedId) {
         void selectConversation(summaries[0].id);
       } else if (selectedId && (selectedChanged || reloadSelected)) {
         void selectConversation(selectedId);
@@ -851,8 +927,10 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
       }
     } catch (error) {
       if (!alive || version !== listVersion) return;
+      archiveLoadState = "error";
       renderListMessage(`Couldn’t load archive: ${errorMessage(error)}`, true);
-      if (!selectedId) renderState("Archive unavailable", "Check that the local archive service is running, then try again.", "error");
+      if (activeRoute === "overview" && activeWorkspace === "conversations") renderOverview();
+      else if (activeRoute === "conversations" && !selectedId) renderState("Archive unavailable", "Check that the local archive service is running, then try again.", "error");
       setActionStatus("Archive could not be refreshed", true);
     }
   };
@@ -1035,7 +1113,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
 
   const closeSetup = () => {
     ++setupVersion; // Ignore setup responses arriving after the dialog closes.
-    activateWorkspace(modalReturnWorkspace);
+    activateRoute(modalReturnRoute, modalReturnWorkspace);
     setupContent.querySelector("[data-mcp-secret]")?.replaceChildren();
     if (typeof dialog.close === "function") {
       try { dialog.close(); } catch { dialog.removeAttribute("open"); }
@@ -1045,15 +1123,17 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     const returnFocus = modalReturnFocus;
     modalReturnFocus = null;
     if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
-    else workspaceNav.querySelector<HTMLButtonElement>(`[data-workspace="${activeWorkspace}"]`)?.focus({ preventScroll: true });
+    else workspaceNav.querySelector<HTMLButtonElement>(`[data-route="${activeRoute}"]`)?.focus({ preventScroll: true });
   };
 
-  const openSetupDialog = (trigger: HTMLElement, workspace: "connections" | "documents", tab: typeof activeSettingsTab) => {
+  const openSetupDialog = (trigger: HTMLElement, workspace: "connections" | "documents", tab: typeof activeSettingsTab, routeOverride?: UiRouteId) => {
     if (dialog.hasAttribute("open")) return;
     modalReturnWorkspace = activeWorkspace;
+    modalReturnRoute = activeRoute;
     modalReturnFocus = trigger;
     activeSettingsTab = tab;
     activateWorkspace(workspace);
+    if (routeOverride) activateRoute(routeOverride, workspace);
     if (typeof dialog.showModal === "function") {
       try { dialog.showModal(); } catch { dialog.setAttribute("open", ""); }
     } else dialog.setAttribute("open", "");
@@ -1073,7 +1153,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
       renderState("Archive is empty", "No saved conversations are available.");
       focusViewHeading();
     }
-    workspaceNav.querySelector<HTMLButtonElement>('[data-workspace="conversations"]')?.focus({ preventScroll: true });
+    workspaceNav.querySelector<HTMLButtonElement>('[data-route="conversations"]')?.focus({ preventScroll: true });
   };
 
   const openMemoryInspector = (workspace: "memories" | "projects" | "people" | "topics" = "memories") => {
@@ -1177,6 +1257,53 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     focusViewHeading();
   };
 
+  const openOverview = () => {
+    hiveWorkspace?.destroy(); hiveWorkspace = undefined;
+    libraryWorkspace?.destroy(); libraryWorkspace = undefined;
+    healthWorkspace?.destroy(); healthWorkspace = undefined;
+    memoryInspector?.destroy(); memoryInspector = undefined;
+    ++selectionVersion;
+    selectedId = null;
+    loadedConversation = null;
+    loadedSnapshots = [];
+    selectedSnapshotId = null;
+    exportedMarkdown = "";
+    activateRoute("overview", "conversations");
+    setActionStatus("");
+    renderConversationRows(search.value.trim());
+    renderOverview();
+    focusViewHeading();
+  };
+
+  const openConversations = () => {
+    hiveWorkspace?.destroy(); hiveWorkspace = undefined;
+    libraryWorkspace?.destroy(); libraryWorkspace = undefined;
+    healthWorkspace?.destroy(); healthWorkspace = undefined;
+    memoryInspector?.destroy(); memoryInspector = undefined;
+    activateRoute("conversations", "conversations");
+    if (summaries.length) void selectConversation(selectedId ?? summaries[0].id);
+    else {
+      selectedId = null;
+      loadedConversation = null;
+      updateToolbarSelection();
+      renderState("Archive is empty", "No saved conversations are available.");
+      focusViewHeading();
+    }
+  };
+
+  function navigateToRoute(route: UiRouteId, trigger: HTMLElement): void {
+    switch (route) {
+      case "overview": openOverview(); break;
+      case "conversations": openConversations(); break;
+      case "curated-memory": openMemoryInspector(); break;
+      case "hive-mind-graph": openHiveWorkspace(); break;
+      case "files-secure-vault": openSetupDialog(trigger, "documents", "documents", route); break;
+      case "ai-providers-mcp": openSetupDialog(trigger, "connections", "connections", route); break;
+      case "setup-onboarding": openSetupDialog(trigger, "connections", "archive", route); break;
+      case "settings": openSetupDialog(trigger, "connections", "privacy", route); break;
+    }
+  }
+
   const clickHandler = (event: Event) => {
     if (!alive) return;
     const target = event.target;
@@ -1184,7 +1311,11 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     const actionElement = target.closest<HTMLElement>("[data-action]");
     if (actionElement) {
       const action = actionElement.dataset.action;
-      if (action === "lock") onLock?.();
+      if (action === "navigate-route") {
+        const route = actionElement.dataset.route;
+        if (route && isUiRouteId(route)) navigateToRoute(route, actionElement);
+      }
+      else if (action === "lock") onLock?.();
       else if (action === "refresh") void refreshArchive();
       else if (action === "workspace-conversations") {
         if (summaries.length) void selectConversation(selectedId ?? summaries[0].id);
@@ -1199,8 +1330,8 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
       else if (action === "open-hive-explorer") openHiveWorkspace();
       else if (action === "open-health-inspector") openHealthWorkspace();
       else if (action === "retry-selection" && selectedId) void selectConversation(selectedId);
-      else if (action === "open-document-search") openSetupDialog(actionElement, "documents", "documents");
-      else if (action === "open-setup") openSetupDialog(actionElement, "connections", "archive");
+      else if (action === "open-document-search") openSetupDialog(actionElement, "documents", "documents", "files-secure-vault");
+      else if (action === "open-setup") openSetupDialog(actionElement, "connections", "archive", "setup-onboarding");
       else if (action === "close-setup") closeSetup();
       else if (action === "load-setup") void loadSetup();
       else if (action === "export-markdown") void exportMarkdown();
@@ -1315,6 +1446,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
         try { dialog.close(); } catch { dialog.removeAttribute("open"); }
       }
       disposeWorkspaceKeys();
+      uiShell.destroy();
       dialog.removeEventListener("cancel", modalCancelHandler);
       root.removeEventListener("click", clickHandler);
       root.removeEventListener("change", changeHandler);

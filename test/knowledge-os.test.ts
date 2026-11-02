@@ -147,6 +147,7 @@ test("reader virtualizes large archives and navigates visible rows without loadi
     throw new Error("unexpected: " + command);
   };
   const handle = mountReader({ root, invoke });
+  root.querySelector<HTMLButtonElement>('[data-route="conversations"]')!.click();
   try {
     await handle.ready;
     await Promise.resolve();
