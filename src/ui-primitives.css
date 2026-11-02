@@ -32,8 +32,8 @@
 .ui-dialog-header h2 { margin: 0; font-size: 14px; font-weight: 600; }
 .ui-dialog-description { margin: 0; padding: var(--mp-space-3) var(--mp-space-4) 0; color: var(--mp-text-muted); font-size: 11px; }
 .ui-dialog-body { display: grid; gap: var(--mp-space-3); padding: var(--mp-space-4); }
-.ui-drawer { width: min(560px, calc(100vw - 24px)); height: 100%; max-height: none; margin: 0 0 0 auto; border-radius: var(--mp-radius-xl) 0 0 var(--mp-radius-xl); }
-.ui-drawer[data-placement="left"] { margin: 0 auto 0 0; border-radius: 0 var(--mp-radius-xl) var(--mp-radius-xl) 0; }
+.ui-drawer { position: fixed; inset: 0 0 0 auto; width: min(560px, calc(100vw - 24px)); height: 100%; max-height: none; margin: 0; border-radius: var(--mp-radius-xl) 0 0 var(--mp-radius-xl); }
+.ui-drawer[data-placement="left"] { inset: 0 auto 0 0; margin: 0; border-radius: 0 var(--mp-radius-xl) var(--mp-radius-xl) 0; }
 .ui-state-panel { display: grid; max-width: 520px; gap: var(--mp-space-2); margin: auto; padding: var(--mp-space-8); border: 1px solid var(--mp-border); border-radius: var(--mp-radius-lg); background: var(--mp-bg-surface); color: var(--mp-text-primary); }
 .ui-state-panel h2 { margin: 0; font-size: 16px; font-weight: 600; }
 .ui-state-panel p { margin: 0; color: var(--mp-text-secondary); font-size: 12px; line-height: 1.65; }

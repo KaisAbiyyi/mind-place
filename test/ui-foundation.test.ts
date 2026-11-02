@@ -74,7 +74,7 @@ test("navigation keeps one current route and marks secondary lenses separately",
 });
 
 test("shell preferences, command palette and shortcut are accessible and disposable", () => {
-  const dom = new JSDOM("<!doctype html><html><body><div id='app'></div></body></html>", { url: "https://shell.test/" });
+  const dom = new JSDOM("<!doctype html><html><head><meta name='theme-color' content='#F4F4F5'></head><body><div id='app'></div></body></html>", { url: "https://shell.test/" });
   const root = dom.window.document.querySelector<HTMLElement>("#app")!;
   root.innerHTML = APPLICATION_SHELL_MARKUP;
   const nav = createWorkspaceNavigation(dom.window.document);
@@ -88,6 +88,7 @@ test("shell preferences, command palette and shortcut are accessible and disposa
   root.querySelector<HTMLButtonElement>("[data-action='toggle-sidebar']")!.click();
   assert.deepEqual(shell.getPreferences(), { theme: "dark", density: "compact", technicalMode: true, sidebarCollapsed: true });
   assert.equal(dom.window.document.documentElement.dataset.theme, "dark");
+  assert.equal(dom.window.document.querySelector("meta[name='theme-color']")?.getAttribute("content"), "#09090B");
   assert.equal(root.querySelector(".app-shell")?.getAttribute("data-sidebar-collapsed"), "true");
   assert.equal(root.querySelector("[data-action='toggle-sidebar']")?.getAttribute("aria-expanded"), "false");
   assert.equal(root.querySelector('[data-subnav-for="overview"]')?.hasAttribute("hidden"), true);

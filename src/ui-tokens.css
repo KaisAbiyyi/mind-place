@@ -70,3 +70,166 @@
 :root[data-theme] .message-content blockquote { border-color: var(--mp-border-strong); color: var(--mp-text-secondary); }
 :root[data-theme] .message-content th { background: var(--mp-bg-subtle); color: var(--mp-text-primary); }
 :root[data-theme] .message-content :not(pre) > code { border-color: var(--mp-border); background: var(--mp-bg-subtle); color: var(--mp-text-primary); }
+
+
+/* Neutralize the legacy dark/warm component layer through the shared semantic tokens. */
+:root[data-theme] body,
+:root[data-theme] .reader-main,
+:root[data-theme] .reader-view,
+:root[data-theme] .settings-layout,
+:root[data-theme] .memory-inspector,
+:root[data-theme] .hive-workspace,
+:root[data-theme] .health-workspace,
+:root[data-theme] .security-screen {
+  background: var(--mp-bg-app);
+  color: var(--mp-text-primary);
+}
+:root[data-theme] .conversation-title,
+:root[data-theme] .conversation-heading-title,
+:root[data-theme] .message-content,
+:root[data-theme] .message-content h1,
+:root[data-theme] .message-content h2,
+:root[data-theme] .message-content h3,
+:root[data-theme] .message-content h4,
+:root[data-theme] .message-content h5,
+:root[data-theme] .message-content h6,
+:root[data-theme] .state-panel h2,
+:root[data-theme] .dialog-header h2,
+:root[data-theme] .setup-section-title,
+:root[data-theme] .settings-panel h1,
+:root[data-theme] .settings-panel h2,
+:root[data-theme] .settings-panel h3,
+:root[data-theme] .settings-panel h4,
+:root[data-theme] .document-section-heading,
+:root[data-theme] .document-onboarding-steps strong,
+:root[data-theme] .memory-statement,
+:root[data-theme] .memory-card,
+:root[data-theme] .entity-lens-item,
+:root[data-theme] .security-card h1,
+:root[data-theme] .security-card h2 {
+  color: var(--mp-text-primary);
+}
+:root[data-theme] .conversation-meta,
+:root[data-theme] .message-role,
+:root[data-theme] .message-detail,
+:root[data-theme] .message-copy,
+:root[data-theme] .list-note,
+:root[data-theme] .setup-link,
+:root[data-theme] .search-label,
+:root[data-theme] .search-field input::placeholder,
+:root[data-theme] .search-field kbd,
+:root[data-theme] .capture-history label,
+:root[data-theme] .capture-warning p,
+:root[data-theme] .capture-notes,
+:root[data-theme] .export-receipt,
+:root[data-theme] .image-slot-loading,
+:root[data-theme] .attachment-caption,
+:root[data-theme] .file-detail,
+:root[data-theme] .transcript-empty,
+:root[data-theme] .setup-intro,
+:root[data-theme] .setup-paths dt,
+:root[data-theme] .setup-section-title + p,
+:root[data-theme] .registered-status,
+:root[data-theme] .import-status,
+:root[data-theme] .settings-subtitle,
+:root[data-theme] .settings-page-description,
+:root[data-theme] .document-field-help,
+:root[data-theme] .document-onboarding-steps small,
+:root[data-theme] .document-result-provenance,
+:root[data-theme] .document-result-warnings,
+:root[data-theme] .document-preview-status,
+:root[data-theme] .memory-disclaimer,
+:root[data-theme] .memory-meta,
+:root[data-theme] .memory-evidence,
+:root[data-theme] .security-note,
+:root[data-theme] .security-error {
+  color: var(--mp-text-secondary);
+}
+:root[data-theme] .state-panel,
+:root[data-theme] .settings-panel,
+:root[data-theme] .document-root-card,
+:root[data-theme] .document-root-form,
+:root[data-theme] .document-search-card,
+:root[data-theme] .memory-card,
+:root[data-theme] .entity-lens-item,
+:root[data-theme] .security-card,
+:root[data-theme] .capture-history select,
+:root[data-theme] .settings-panel input,
+:root[data-theme] .settings-panel select,
+:root[data-theme] .settings-panel textarea,
+:root[data-theme] .document-root-form input,
+:root[data-theme] .memory-search input,
+:root[data-theme] .entity-lens-form input,
+:root[data-theme] .security-input {
+  border-color: var(--mp-border);
+  background: var(--mp-bg-surface);
+  color: var(--mp-text-primary);
+}
+:root[data-theme] .search-field,
+:root[data-theme] .message-user,
+:root[data-theme] .message-content pre,
+:root[data-theme] .message-content :not(pre) > code,
+:root[data-theme] .image-slot,
+:root[data-theme] .file-reference,
+:root[data-theme] .capture-warning,
+:root[data-theme] .capture-notes,
+:root[data-theme] .export-receipt,
+:root[data-theme] .setup-paths,
+:root[data-theme] .settings-boundaries li,
+:root[data-theme] .document-onboarding-steps li,
+:root[data-theme] .document-result-snippet,
+:root[data-theme] .memory-disposition,
+:root[data-theme] .memory-correction {
+  border-color: var(--mp-border);
+  background: var(--mp-bg-subtle);
+  color: var(--mp-text-primary);
+}
+:root[data-theme] .setup-dialog,
+:root[data-theme] .setup-dialog .dialog-header,
+:root[data-theme] .setup-dialog .dialog-footer {
+  border-color: var(--mp-border);
+  background: var(--mp-bg-surface);
+  color: var(--mp-text-primary);
+}
+:root[data-theme] .settings-tab {
+  border-color: transparent;
+  background: transparent;
+  color: var(--mp-text-secondary);
+}
+:root[data-theme] .settings-tab:hover,
+:root[data-theme] .settings-tab[aria-selected="true"] {
+  border-color: var(--mp-border);
+  background: var(--mp-bg-subtle);
+  color: var(--mp-text-primary);
+}
+:root[data-theme] .document-permission-badge,
+:root[data-theme] .document-permission-badge.is-approved,
+:root[data-theme] .document-permission-badge.is-revoked,
+:root[data-theme] .document-root-setup [role="status"],
+:root[data-theme] .document-danger-button,
+:root[data-theme] .status-pill,
+:root[data-theme] .connection-status,
+:root[data-theme] .capture-status {
+  border-color: var(--mp-border-strong);
+  background: var(--mp-bg-subtle);
+  color: var(--mp-text-secondary);
+  box-shadow: none;
+}
+:root[data-theme] .document-result-snippet { border-left-color: var(--mp-border-strong); }
+:root[data-theme] .document-danger-button:hover,
+:root[data-theme] .security-input:focus,
+:root[data-theme] .search-field:focus-within {
+  border-color: var(--mp-border-strong);
+  box-shadow: none;
+}
+:root[data-theme] input:not([type="checkbox"]):not([type="radio"]),
+:root[data-theme] select,
+:root[data-theme] textarea {
+  border-color: var(--mp-border);
+  background-color: var(--mp-bg-surface);
+  color: var(--mp-text-primary);
+}
+:root[data-theme] input::placeholder,
+:root[data-theme] textarea::placeholder { color: var(--mp-text-muted); }
+:root[data-theme] hr { border-color: var(--mp-border); }
+:root[data-theme] ::selection { background: var(--mp-text-primary); color: var(--mp-bg-app); }

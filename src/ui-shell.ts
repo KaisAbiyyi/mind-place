@@ -103,6 +103,8 @@ export function mountUiShell(root: HTMLElement, options: UiShellOptions): UiShel
     html.dataset.theme = theme;
     html.dataset.density = density;
     html.dataset.technicalMode = String(technicalMode);
+    const themeColor = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+    if (themeColor) themeColor.content = theme === "dark" ? "#09090B" : "#F4F4F5";
     shell.dataset.sidebarCollapsed = String(sidebarCollapsed);
     themeButton.textContent = "Theme: " + (theme === "light" ? "Light" : "Dark");
     themeButton.setAttribute("aria-pressed", String(theme === "dark"));
