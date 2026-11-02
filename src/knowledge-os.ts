@@ -19,6 +19,7 @@ export const WORKSPACES: readonly WorkspaceDefinition[] = [
   { id: "topics", label: "Topics", action: "open-entity-workspace", phase: "available" },
   { id: "graph", label: "Hive Mind Graph", action: "open-hive-explorer", phase: "available" },
   { id: "health", label: "Diagnostics", action: "open-health-inspector", phase: "available" },
+  { id: "settings", label: "Settings", action: null, phase: "available" },
 ] as const;
 
 const ROUTE_ICON_PATHS: Readonly<Record<UiRouteId, string>> = {

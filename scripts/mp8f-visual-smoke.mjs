@@ -52,8 +52,20 @@ try {
   const sizes = [[1180, 820], [800, 520], [390, 700], [360, 520]];
   for (const [width, height] of sizes) {
     await page.setViewportSize({ width, height });
+    const navigate = {
+      library: async () => {
+        await page.locator('#knowledge-os-nav [data-route="overview"]').click();
+        await page.locator('#knowledge-os-nav [data-nav-secondary][data-workspace="library"]').click();
+      },
+      memories: async () => page.locator('#knowledge-os-nav [data-route="curated-memory"]').click(),
+      graph: async () => page.locator('#knowledge-os-nav [data-route="hive-mind-graph"]').click(),
+      health: async () => {
+        await page.locator('#knowledge-os-nav [data-route="settings"]').click();
+        await page.locator('#knowledge-os-nav [data-nav-secondary][data-workspace="health"]').click();
+      },
+    };
     for (const name of ["library", "memories", "graph", "health"]) {
-      await page.locator('[data-workspace="' + name + '"]').click();
+      await navigate[name]();
       await page.waitForTimeout(60);
       const metrics = await page.evaluate(expected => {
         const view = document.querySelector("#reader-view");
@@ -62,7 +74,7 @@ try {
         const screen = document.documentElement;
         const rect = heading?.getBoundingClientRect();
         return {
-          selected: selected.length === 1 && selected[0].getAttribute("data-workspace") === expected,
+          selected: selected.length === 1 && selected[0].getAttribute("data-route") === ({ library: "overview", memories: "curated-memory", graph: "hive-mind-graph", health: "settings" })[expected],
           heading: Boolean(rect && rect.width > 40 && rect.left >= 0 && rect.right <= window.innerWidth + 1),
           horizontalOverflow: screen.scrollWidth > window.innerWidth + 1,
           scrollHeight: view.scrollHeight, clientHeight: view.clientHeight,
@@ -75,11 +87,11 @@ try {
       receipt.push({ viewport: width + "x" + height, workspace: name, ...metrics });
     }
   }
-  await page.locator('[data-workspace="connections"]').click();
+  await page.locator('#knowledge-os-nav [data-route="ai-providers-mcp"]').click();
   assert.equal(await page.locator("#setup-dialog").getAttribute("open"), "");
   await page.keyboard.press("Escape");
   assert.equal(await page.locator("#setup-dialog").getAttribute("open"), null);
-  assert.equal(await page.locator('#knowledge-os-nav [aria-current="page"]').getAttribute("data-workspace"), "health");
+  assert.equal(await page.locator('#knowledge-os-nav [aria-current="page"]').getAttribute("data-route"), "settings");
   assert.deepEqual(faults, [], "unexpected client JS errors");
   await writeFile(output + "/receipt.json", JSON.stringify({
     status: "PASS", platform: "cloud Chromium (NOT installed Windows WebView2)",

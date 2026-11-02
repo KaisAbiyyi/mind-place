@@ -3,7 +3,7 @@ export type UiRouteId =
   | "files-secure-vault" | "ai-providers-mcp" | "setup-onboarding" | "settings";
 export type UiWorkspaceAlias =
   | "conversations" | "library" | "memories" | "documents" | "connections"
-  | "projects" | "people" | "topics" | "graph" | "health";
+  | "projects" | "people" | "topics" | "graph" | "health" | "settings";
 export type UiRouteGroup = "Knowledge OS" | "Authority & Infrastructure" | "System";
 export interface UiRouteDefinition {
   readonly id: UiRouteId; readonly label: string; readonly group: UiRouteGroup;
@@ -17,7 +17,7 @@ export const UI_ROUTES: readonly UiRouteDefinition[] = [
   { id:"files-secure-vault",label:"Files & Secure Vault",group:"Authority & Infrastructure",description:"Approved document roots, files and vault access.",moduleId:"files-secure-vault",defaultWorkspace:"documents" },
   { id:"ai-providers-mcp",label:"AI Providers & MCP",group:"Authority & Infrastructure",description:"Provider connections and Model Context Protocol setup.",moduleId:"ai-providers-mcp",defaultWorkspace:"connections" },
   { id:"setup-onboarding",label:"Setup & Onboarding",group:"System",description:"Capture setup and first-run configuration.",moduleId:"setup-onboarding",defaultWorkspace:"connections" },
-  { id:"settings",label:"Settings",group:"System",description:"Privacy, security and operational preferences.",moduleId:"settings",defaultWorkspace:"health" },
+  { id:"settings",label:"Settings",group:"System",description:"Privacy, security and operational preferences.",moduleId:"settings",defaultWorkspace:"settings" },
 ] as const;
 export function getUiRoute(id:UiRouteId):UiRouteDefinition {
   const route=UI_ROUTES.find((item)=>item.id===id); if(!route)throw new Error("MP_UI_UNKNOWN_ROUTE"); return route;
@@ -26,7 +26,7 @@ export function isUiRouteId(value:string):value is UiRouteId { return UI_ROUTES.
 const WORKSPACE_ROUTE:Readonly<Record<UiWorkspaceAlias,UiRouteId>> = {
   conversations:"conversations",library:"overview",memories:"curated-memory",documents:"files-secure-vault",
   connections:"ai-providers-mcp",projects:"curated-memory",people:"curated-memory",topics:"curated-memory",
-  graph:"hive-mind-graph",health:"settings",
+  graph:"hive-mind-graph",health:"settings",settings:"settings",
 };
 export function routeForWorkspace(workspace:UiWorkspaceAlias):UiRouteId { return WORKSPACE_ROUTE[workspace]; }
 export type UiSurfaceStatus = "idle"|"loading"|"ready"|"empty"|"error"|"permission-required"|"permission-denied"|"locked"|"disconnected"|"revoked";

@@ -16,6 +16,7 @@ test("the route registry defines eight primary destinations and maps legacy work
   assert.equal(routeForWorkspace("library"), "overview");
   assert.equal(routeForWorkspace("people"), "curated-memory");
   assert.equal(routeForWorkspace("health"), "settings");
+  assert.equal(routeForWorkspace("settings"), "settings");
   assert.equal(routeForWorkspace("graph"), "hive-mind-graph");
 });
 

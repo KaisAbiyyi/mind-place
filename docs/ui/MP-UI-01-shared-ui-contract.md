@@ -22,7 +22,7 @@ The shared shell exposes exactly eight primary destinations:
 | \`setup-onboarding\` | Setup & Onboarding | Existing archive/capture setup |
 | \`settings\` | Settings | \`health\` is a secondary diagnostics action |
 
-Legacy workspace IDs remain internal aliases. Projects, People and Topics are secondary lenses inside Curated Memory; diagnostics is a secondary Settings action; source search is a secondary Overview action.
+Legacy workspace IDs remain internal aliases. Projects, People and Topics are secondary lenses inside Curated Memory; diagnostics is a secondary Settings action; source search is a secondary Overview action. The Settings route opens a hub for Privacy & Security, Provider Connections and Operational Diagnostics.
 
 ## Route and module contracts
 
