@@ -118,6 +118,12 @@ test("shell preferences, command palette and shortcut are accessible and disposa
   assert.equal(selectedCommand, "people");
   assert.equal(palette.hasAttribute("open"), false);
 
+  root.querySelector<HTMLButtonElement>("[data-action='open-command-palette']")!.click();
+  input.value = "search memories";
+  input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  root.querySelector<HTMLButtonElement>("[data-action='command-palette-command'][data-command-id='search-all-sources']")!.click();
+  assert.equal(selectedCommand, "search-all-sources");
+
   const unregister = shell.registerCommand({
     id: "search-memory",
     label: "Search memories",

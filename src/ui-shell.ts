@@ -73,12 +73,16 @@ export function mountUiShell(root: HTMLElement, options: UiShellOptions): UiShel
 
   const commands = new Map<string, UiCommandRegistration>();
   const renderResults = (query: string): void => {
-    const normalized = query.trim().toLocaleLowerCase();
+    const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+    const matchesQuery = (value: string): boolean => {
+      const haystack = value.toLocaleLowerCase();
+      return terms.length === 0 || terms.every((term) => haystack.includes(term));
+    };
     const routes = UI_ROUTES.filter((route) =>
-      !normalized || (route.label + " " + route.description + " " + route.group).toLocaleLowerCase().includes(normalized),
+      matchesQuery(route.label + " " + route.description + " " + route.group),
     );
     const actions = [...commands.values()].filter((command) =>
-      !normalized || (command.label + " " + command.description + " " + (command.keywords ?? []).join(" ")).toLocaleLowerCase().includes(normalized),
+      matchesQuery(command.label + " " + command.description + " " + (command.keywords ?? []).join(" ")),
     );
     results.replaceChildren();
     for (const route of routes) {
