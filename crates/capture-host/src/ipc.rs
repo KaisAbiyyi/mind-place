@@ -256,10 +256,7 @@ fn read_exact_before_deadline(
 /// Read one bounded frame against a single monotonic deadline. Updating the
 /// socket timeout before every read prevents a peer from extending the frame
 /// indefinitely by delivering one byte just before each per-read timeout.
-pub fn read_frame_with_timeout(
-    input: &mut TcpStream,
-    timeout: Duration,
-) -> Result<SignedCapture> {
+pub fn read_frame_with_timeout(input: &mut TcpStream, timeout: Duration) -> Result<SignedCapture> {
     let deadline = Instant::now()
         .checked_add(timeout)
         .ok_or_else(|| invalid("IPC frame deadline is invalid"))?;

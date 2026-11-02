@@ -119,11 +119,7 @@ fn fixture() -> Fixture {
     let imported_revision = archive
         .read(&imported.id, Some(&imported.snapshot_id))
         .unwrap();
-    captures.push((
-        imported.id,
-        imported.snapshot_id,
-        imported_revision.capture,
-    ));
+    captures.push((imported.id, imported.snapshot_id, imported_revision.capture));
     let generic_raw = serde_json::to_vec(&serde_json::json!({
         "title":"Synthetic raw agent import",
         "messages":[{"role":"user", "content":"preserve original raw record", "authored_at":"2026-10-28T08:00:00Z"},

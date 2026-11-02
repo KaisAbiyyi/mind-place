@@ -457,8 +457,10 @@ impl VaultCaptureStore {
                 .map_err(|_| IndexError::InvalidEvidence)?;
             let incoming_time = chrono::DateTime::parse_from_rfc3339(&capture.captured_at)
                 .map_err(|_| IndexError::InvalidEvidence)?;
-            matches!(prior.capture_method.as_str(), "manual-dom" | "automatic-dom")
-                || prior_time >= incoming_time
+            matches!(
+                prior.capture_method.as_str(),
+                "manual-dom" | "automatic-dom"
+            ) || prior_time >= incoming_time
         } else {
             false
         };
@@ -1053,5 +1055,4 @@ mod vault_catalog_pagination_tests {
         assert!(VaultCaptureStore::verify_backup_catalog(&root, &vault, &gate, lease).is_err());
         assert!(!root.join("archive-index.sqlite3").exists());
     }
-
 }
