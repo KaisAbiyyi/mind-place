@@ -212,6 +212,21 @@ class NativeContractFingerprintTests(unittest.TestCase):
         self.commit()
         self.assertEqual(before, self.fp())
 
+    def test_canonical_workflow_signature_rejects_malformed_yaml_and_missing_jobs_mapping(self):
+        malformed = (
+            "jobs:\n"
+            "  verify:\n"
+            "    runs-on: windows-latest\n"
+            "    runs-on: ubuntu-latest\n"
+        )
+        with self.assertRaisesRegex(ValueError, "Duplicate YAML mapping key"):
+            native_contract.canonical_workflow_signature(malformed)
+
+        for source in ("name: no jobs mapping\n", "jobs: []\n"):
+            with self.subTest(source=source), self.assertRaisesRegex(
+                    ValueError, r"Native workflow(?: at .+)? has no jobs mapping"):
+                native_contract.canonical_workflow_signature(source)
+
     def test_identity_metadata_inside_command_is_not_globally_excluded(self):
         path = self.root / ".github/workflows/ci.yml"
         text = path.read_text().replace(
@@ -1200,6 +1215,38 @@ class SeparatedProductPrerequisiteTests(unittest.TestCase):
             ),
         )
         self.require()
+
+    def test_coordinator_forwards_exact_workflow_sources_unchanged(self):
+        with patch.object(gate, "require_prerequisites") as require:
+            state, _ = coordinator.classify(
+                [self.ci_run, self.product_run, self.sql_run],
+                self.candidate, REPO, True, CONTRACT,
+                self.fetch_jobs, lambda run: self.evidence,
+                workflow_sources=self.sources,
+            )
+        self.assertEqual(state, "ready")
+        self.assertIs(require.call_args.kwargs["workflow_sources"], self.sources)
+
+    def test_coordinator_uses_exact_workflow_sources_for_ready_result(self):
+        state, reason = coordinator.classify(
+            [self.ci_run, self.product_run, self.sql_run],
+            self.candidate, REPO, True, CONTRACT,
+            self.fetch_jobs, lambda run: self.evidence,
+            workflow_sources=self.sources,
+        )
+        self.assertEqual(state, "ready", reason)
+
+    def test_missing_authoritative_workflow_source_fails_closed_without_local_fallback(self):
+        missing_sources = dict(self.sources)
+        missing_sources.pop(native_contract.PRODUCT_WORKFLOW)
+        state, reason = coordinator.classify(
+            [self.ci_run, self.product_run, self.sql_run],
+            self.candidate, REPO, True, CONTRACT,
+            self.fetch_jobs, lambda run: self.evidence,
+            workflow_sources=missing_sources,
+        )
+        self.assertEqual(state, "failed")
+        self.assertIn("Missing authoritative workflow source", reason)
 
     def test_missing_separated_product_run_is_pending_not_ready(self):
         state, reason = coordinator.classify(
