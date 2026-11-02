@@ -4,7 +4,28 @@
 **Date:** 2026-10-31  
 **Scope:** workflow triggers, `GITHUB_TOKEN` permissions, secrets/environments/OIDC, checkout refs and credential persistence, fork execution, artifacts/caches, third-party action pinning, and privileged event paths.
 
-## Executive result
+## Integrated recovery — 3 November 2026
+
+The owner-directed blocker recovery reconciles this existing PR with foundation integration #132 at `44b3359d0129a000ab6896029308ceee6045b830`. The current audit covers all **10 active workflows**, including native SQLCipher and separated Windows Product qualification. The three earlier active-lock exemptions are removed. Every external action is pinned to an upstream commit, every checkout disables credential persistence, and target workflows retain read-only token permissions with no secret references or privileged triggers.
+
+The audit script now recognizes both named `uses:` and unnamed `- uses:` steps. Adverse fixtures reproduced acceptance of mutable checkout tags on the previously excluded foundation workflows; the corrected audit rejects them, as well as persistent checkout credentials. This is source-policy regression coverage, not proof that repository settings or a deployed App are active.
+
+| Integrated workflow | Review outcome |
+|---|---|
+| `ci.yml` | Fast web/Rust/native-provenance jobs only; immutable actions and nonpersistent checkout; no Windows job reintroduced |
+| `mp-10c-scale.yml` | Immutable actions/nonpersistent checkout; source-bound receipts remain parsed as data, with original run/attempt/artifact validation and exact native prerequisites |
+| `storage-qualification.yml` | Immutable checkout/upload; Draft deferral and original three-tier final qualification preserved |
+| `mp9b-sqlcipher-qualification.yml` | Both native runners and bounded regression jobs retained; all checkouts nonpersistent and actions immutable |
+| `windows-product.yml` | Existing pinned native commands, slot recheck, evidence contract and independent-acceptance boundary retained |
+| `mp10b-bakeoff.yml`, `mp8f-visual.yml`, `mp9a-security-probe.yml`, `release.yml`, `workflow-security.yml` | Existing immutable-action/no-secret/read-only boundaries retained |
+
+`Swatinem/rust-cache@v2` was resolved through its annotated tag to `d1527c8f67ef9af357290475d4af4b0fab8f12e0`; `actions/download-artifact@v4` resolves to `d3f86a106a0bac45b974a628896c90dbdf5c8093`. Cache data remains scoped to unprivileged PR execution; it is not acceptance authority. The same-run qualification artifact is never executed. Cross-run proof must still satisfy the strict existing digest, source, attempt and provenance validators.
+
+Because this PR now stacks on the vault integration, PR141 is explicitly registered as a vault candidate using the separated Product contract. It cannot take the ordinary non-vault default to omit native IPC or either SQLCipher runner. The independent-policy deployment template remains inert outside `.github/workflows/`; no settings, App, secret or permission was activated.
+
+The remainder of this document records the historical seven-workflow baseline and earlier ownership limitations. Its active-lock exceptions are superseded by this integrated audit. Final acceptance still requires exact-head CI, the owner-controlled contribution/approval path, and MP-GOV-04 protection readback.
+
+## Historical executive result
 
 The seven-workflow baseline does not contain a `pull_request_target`, `workflow_run`, `issue_comment`, or `workflow_call` trigger. Each baseline workflow explicitly grants only `contents: read`; no baseline workflow references repository secrets, requests `id-token: write`, declares a protected environment, or grants a write-scoped token permission.
 

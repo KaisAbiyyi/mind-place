@@ -6,13 +6,12 @@ import { fileURLToPath } from "node:url";
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const workflowDirectory = resolve(repositoryRoot, ".github", "workflows");
 
-const pendingActiveLocks = new Set([
+const fullyHardened = new Set([
   "ci.yml",
   "mp-10c-scale.yml",
   "storage-qualification.yml",
-]);
-
-const fullyHardened = new Set([
+  "mp9b-sqlcipher-qualification.yml",
+  "windows-product.yml",
   "mp10b-bakeoff.yml",
   "mp8f-visual.yml",
   "mp9a-security-probe.yml",
@@ -20,7 +19,7 @@ const fullyHardened = new Set([
   "workflow-security.yml",
 ]);
 
-const expectedFiles = [...pendingActiveLocks, ...fullyHardened].sort();
+const expectedFiles = [...fullyHardened].sort();
 const actualFiles = readdirSync(workflowDirectory)
   .filter((file) => /\.ya?ml$/i.test(file))
   .sort();
@@ -50,11 +49,7 @@ for (const file of actualFiles) {
     `${file}: write-scoped token permissions are forbidden in this CI trust boundary`,
   );
 
-  if (pendingActiveLocks.has(file)) {
-    continue;
-  }
-
-  const actionRefs = [...source.matchAll(/^\s*uses:\s*([^\s#]+)(?:\s+#.*)?$/gm)].map((match) => match[1]);
+  const actionRefs = [...source.matchAll(/^[ \t]*(?:-[ \t]+)?uses:[ \t]*([^\s#]+)(?:[ \t]+#.*)?$/gm)].map((match) => match[1]);
   assert.ok(actionRefs.length > 0, `${file}: expected at least one action reference`);
 
   for (const actionRef of actionRefs) {
@@ -90,5 +85,5 @@ for (const file of actualFiles) {
 }
 
 console.log(
-  `PASS: ${fullyHardened.size} workflows use immutable action SHAs and non-persistent checkout; all ${actualFiles.length} workflows enforce the read-only/no-secret/no-privileged-trigger boundary. Pending active-lock workflow files: ${[...pendingActiveLocks].join(", ")}.`,
+  `PASS: all ${actualFiles.length} workflows use immutable action SHAs and non-persistent checkout; read-only/no-secret/no-privileged-trigger boundary; zero active-lock exceptions.`,
 );

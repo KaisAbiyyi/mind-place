@@ -1,7 +1,7 @@
 //! Trusted desktop owner controls; never exposed through MCP.
-use super::{begin_unlocked, finish_unlocked, AppState};
+use super::{begin_unlocked, finish_unlocked, legacy_archive, owner_vault, AppState};
 use mind_place_integration::{transport::LocalMcpServer, ClientAuthority};
-use mind_place_state::{ClientCapability, ClientRecord, StateStore};
+use mind_place_state::{ClientCapability, ClientRecord};
 use serde::Serialize;
 use tauri::State;
 
@@ -47,13 +47,17 @@ pub(super) async fn start_local_mcp(state: State<'_, AppState>) -> Result<McpSta
             endpoint: ENDPOINT,
         });
     }
-    let server = LocalMcpServer::start(
-        state.store.clone(),
-        state.security.clone(),
-        state.state_path.clone(),
-        state.index_path.clone(),
-    )
-    .await
+    let server = if let Some(vault) = owner_vault(&state) {
+        LocalMcpServer::start_vault(vault, state.security.clone()).await
+    } else {
+        LocalMcpServer::start(
+            legacy_archive(&state)?,
+            state.security.clone(),
+            state.state_path.clone(),
+            state.index_path.clone(),
+        )
+        .await
+    }
     .map_err(|_| "MP_MCP_BIND:Local MCP port is unavailable".to_string())?;
     finish_unlocked(&state, lease)?;
     let mut slot = state.mcp.lock().unwrap_or_else(|e| e.into_inner());
@@ -83,7 +87,7 @@ pub(super) fn issue_local_mcp_reader(
     display_name: String,
 ) -> Result<McpReaderCredential, String> {
     let lease = begin_unlocked(&state)?;
-    let authority = StateStore::open(&state.state_path)
+    let authority = super::open_owner_state(&owner_vault(&state), &state.state_path)
         .map_err(|_| "MP_MCP_AUTHORITY:Unavailable".to_string())?;
     let issued = ClientAuthority::new(&authority, &state.security)
         .issue(&display_name, &[ClientCapability::Read])
@@ -104,7 +108,7 @@ pub(super) fn list_local_mcp_clients(
     after: Option<String>,
 ) -> Result<Vec<ClientRecord>, String> {
     let lease = begin_unlocked(&state)?;
-    let authority = StateStore::open(&state.state_path)
+    let authority = super::open_owner_state(&owner_vault(&state), &state.state_path)
         .map_err(|_| "MP_MCP_AUTHORITY:Unavailable".to_string())?;
     let clients = authority
         .list_credentialed_clients(after.as_deref(), 50)
@@ -123,7 +127,7 @@ pub(super) fn revoke_local_mcp_client(
         super::hosted_tunnel::stop_and_revoke(&state)?;
         return finish_unlocked(&state, lease);
     }
-    let authority = StateStore::open(&state.state_path)
+    let authority = super::open_owner_state(&owner_vault(&state), &state.state_path)
         .map_err(|_| "MP_MCP_AUTHORITY:Unavailable".to_string())?;
     ClientAuthority::new(&authority, &state.security)
         .revoke(&client_id)

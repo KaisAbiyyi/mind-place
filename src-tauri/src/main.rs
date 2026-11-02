@@ -3,6 +3,8 @@
 mod document_refresh;
 mod hosted_tunnel;
 mod mcp_commands;
+mod native_capture_ipc;
+mod vault_commands;
 
 use document_refresh::DocumentRefreshRegistry;
 
@@ -14,9 +16,10 @@ use mind_place_index::documents::{
     DocumentHit, DocumentIndex, DocumentIndexReport, DocumentPreview,
 };
 use mind_place_index::{
-    ContextInspection, ContextPack, ContextRequest, FetchInspection, FetchRequest, FetchResponse,
-    GraphDirection, GraphKind, GraphNeighborhoodRequest, GraphNodeRef, IndexError, IndexStats,
-    IndexStore, RetrievalRequest, RetrievalResponse, SearchHit, SearchInspection,
+    vault_archive::VaultCaptureStore, ContextInspection, ContextPack, ContextRequest,
+    FetchInspection, FetchRequest, FetchResponse, GraphDirection, GraphKind,
+    GraphNeighborhoodRequest, GraphNodeRef, IndexError, IndexStats, IndexStore, RetrievalRequest,
+    RetrievalResponse, SearchHit, SearchInspection,
 };
 use mind_place_integration::transport::LocalMcpServer;
 use mind_place_security::{SecurityError, SecurityGate, SecurityStatus, UnlockLease};
@@ -35,7 +38,12 @@ use zeroize::Zeroizing;
 
 #[derive(Clone)]
 struct AppState {
-    store: ArchiveStore,
+    store: Option<ArchiveStore>,
+    archive_root: PathBuf,
+    vault_root: PathBuf,
+    pending_vault: vault_commands::PendingVault,
+    vault: Arc<Mutex<Option<Arc<VaultCaptureStore>>>>,
+    native_capture: Arc<Mutex<Option<native_capture_ipc::NativeCaptureIpc>>>,
     security: SecurityGate,
     state_path: PathBuf,
     index_path: PathBuf,
@@ -63,6 +71,53 @@ struct SetupInfo {
     registered_browsers: Vec<String>,
     platform: String,
     legacy_available: bool,
+}
+
+fn legacy_archive(state: &AppState) -> Result<ArchiveStore, String> {
+    state
+        .store
+        .clone()
+        .ok_or_else(|| "MP_VAULT_NOT_READY:legacy plaintext archive disabled".to_owned())
+}
+
+// The owner vault handle pins the same epoch-bound cipher keys for each
+// invocation. No legacy plaintext open is permitted for a provisioned vault.
+fn owner_vault(state: &AppState) -> Option<Arc<VaultCaptureStore>> {
+    state
+        .vault
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone()
+}
+
+fn open_owner_state(
+    vault: &Option<Arc<VaultCaptureStore>>,
+    path: &Path,
+) -> mind_place_index::Result<StateStore> {
+    match vault {
+        Some(vault) => vault.open_state_store(),
+        None => Ok(StateStore::open(path)?),
+    }
+}
+
+fn open_owner_index(
+    vault: &Option<Arc<VaultCaptureStore>>,
+    path: &Path,
+) -> mind_place_index::Result<IndexStore> {
+    match vault {
+        Some(vault) => vault.open_index_store(),
+        None => IndexStore::open(path),
+    }
+}
+
+fn open_owner_document_index(
+    vault: &Option<Arc<VaultCaptureStore>>,
+    path: &Path,
+) -> mind_place_index::Result<DocumentIndex> {
+    match vault {
+        Some(vault) => vault.open_document_index(),
+        None => DocumentIndex::open(path),
+    }
 }
 
 fn security_error(error: SecurityError) -> String {
@@ -124,6 +179,27 @@ async fn blocking<T: Send + 'static>(
         .await
         .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())
+}
+
+async fn vaulted_blocking<T: Send + 'static>(
+    state: &AppState,
+    operation: impl FnOnce(Arc<VaultCaptureStore>) -> mind_place_index::Result<T> + Send + 'static,
+) -> Result<Option<T>, String> {
+    let adapter = state
+        .vault
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone();
+    let Some(adapter) = adapter else {
+        return Ok(None);
+    };
+    let lease = begin_unlocked(state)?;
+    let result = tauri::async_runtime::spawn_blocking(move || operation(adapter))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| format!("{}:{}", error.code(), error))?;
+    finish_unlocked(state, lease)?;
+    Ok(Some(result))
 }
 
 async fn gated_blocking<T: Send + 'static>(
@@ -210,9 +286,10 @@ async fn read_memory_authority<T: Send + 'static>(
 ) -> Result<T, String> {
     let lease = begin_unlocked(state)?;
     let state_path = state.state_path.clone();
+    let vault = owner_vault(state);
     let output = tauri::async_runtime::spawn_blocking(move || {
-        let authority = StateStore::open(state_path)?;
-        operation(authority)
+        let authority = open_owner_state(&vault, &state_path)?;
+        operation(authority).map_err(IndexError::from)
     })
     .await
     .map_err(|error| error.to_string())?
@@ -245,19 +322,29 @@ async fn get_memory_inspection(
 
 #[tauri::command]
 async fn refresh_archive_index(state: State<'_, AppState>) -> Result<IndexStats, String> {
-    let archive = state.store.clone();
+    let vault = owner_vault(&state);
+    let archive = if vault.is_none() {
+        Some(legacy_archive(&state)?)
+    } else {
+        None
+    };
     let state_path = state.state_path.clone();
     let index_path = state.index_path.clone();
     let write_gate = state.archive_index_write_gate.clone();
     index_task(&state, move |lease, security| {
         serialized_archive_index_writer(&write_gate, &security, lease, || {
-            let authority = StateStore::open(state_path)?;
-            let index = IndexStore::open(index_path)?;
-            index.sync_with_check(&archive, &authority, || {
+            let authority = open_owner_state(&vault, &state_path)?;
+            let index = open_owner_index(&vault, &index_path)?;
+            let check = || {
                 security
                     .validate_lease(lease)
                     .map_err(|_| IndexError::Revoked)
-            })
+            };
+            match (vault.as_ref(), archive.as_ref()) {
+                (Some(vault), _) => index.sync_vault_with_check(vault, &authority, check),
+                (None, Some(archive)) => index.sync_with_check(archive, &authority, check),
+                _ => Err(IndexError::Revoked),
+            }
         })
     })
     .await
@@ -265,19 +352,29 @@ async fn refresh_archive_index(state: State<'_, AppState>) -> Result<IndexStats,
 
 #[tauri::command]
 async fn rebuild_archive_index(state: State<'_, AppState>) -> Result<IndexStats, String> {
-    let archive = state.store.clone();
+    let vault = owner_vault(&state);
+    let archive = if vault.is_none() {
+        Some(legacy_archive(&state)?)
+    } else {
+        None
+    };
     let state_path = state.state_path.clone();
     let index_path = state.index_path.clone();
     let write_gate = state.archive_index_write_gate.clone();
     index_task(&state, move |lease, security| {
         serialized_archive_index_writer(&write_gate, &security, lease, || {
-            let authority = StateStore::open(state_path)?;
-            let index = IndexStore::open(index_path)?;
-            index.rebuild_with_check(&archive, &authority, || {
+            let authority = open_owner_state(&vault, &state_path)?;
+            let index = open_owner_index(&vault, &index_path)?;
+            let check = || {
                 security
                     .validate_lease(lease)
                     .map_err(|_| IndexError::Revoked)
-            })
+            };
+            match (vault.as_ref(), archive.as_ref()) {
+                (Some(vault), _) => index.rebuild_vault_with_check(vault, &authority, check),
+                (None, Some(archive)) => index.rebuild_with_check(archive, &authority, check),
+                _ => Err(IndexError::Revoked),
+            }
         })
     })
     .await
@@ -304,6 +401,7 @@ async fn read_archive_hive(
     }
     let hops = max_hops.unwrap_or(2).min(3);
     let index_path = state.index_path.clone();
+    let vault = owner_vault(&state);
     index_task(&state, move |lease, security| {
         let query = GraphNeighborhoodRequest {
             scope: "archive:chatgpt".into(),
@@ -313,11 +411,12 @@ async fn read_archive_hive(
             max_nodes: 120,
             max_edges: 240,
         };
-        let graph = IndexStore::open(index_path)?.graph_neighbors_with_check(&query, || {
-            security
-                .validate_lease(lease)
-                .map_err(|_| IndexError::Revoked)
-        })?;
+        let graph =
+            open_owner_index(&vault, &index_path)?.graph_neighbors_with_check(&query, || {
+                security
+                    .validate_lease(lease)
+                    .map_err(|_| IndexError::Revoked)
+            })?;
         let nodes = graph
             .nodes
             .iter()
@@ -361,7 +460,11 @@ async fn read_archive_hive(
 #[tauri::command]
 async fn get_archive_index_stats(state: State<'_, AppState>) -> Result<IndexStats, String> {
     let index_path = state.index_path.clone();
-    index_task(&state, move |_, _| IndexStore::open(index_path)?.stats()).await
+    let vault = owner_vault(&state);
+    index_task(&state, move |_, _| {
+        open_owner_index(&vault, &index_path)?.stats()
+    })
+    .await
 }
 
 #[tauri::command]
@@ -372,8 +475,9 @@ async fn search_archive_index(
     limit: Option<usize>,
 ) -> Result<Vec<SearchHit>, String> {
     let index_path = state.index_path.clone();
+    let vault = owner_vault(&state);
     index_task(&state, move |_, _| {
-        IndexStore::open(index_path)?.search(
+        open_owner_index(&vault, &index_path)?.search(
             &query,
             include_history.unwrap_or(false),
             limit.unwrap_or(20),
@@ -388,8 +492,9 @@ async fn search_retrieval(
     request: RetrievalRequest,
 ) -> Result<RetrievalResponse, String> {
     let index_path = state.index_path.clone();
+    let vault = owner_vault(&state);
     index_task(&state, move |_, _| {
-        IndexStore::open(index_path)?.retrieve(&request)
+        open_owner_index(&vault, &index_path)?.retrieve(&request)
     })
     .await
 }
@@ -399,14 +504,25 @@ async fn fetch_retrieval(
     state: State<'_, AppState>,
     request: FetchRequest,
 ) -> Result<FetchResponse, String> {
-    let archive = state.store.clone();
+    let vault = owner_vault(&state);
+    let archive = if vault.is_none() {
+        Some(legacy_archive(&state)?)
+    } else {
+        None
+    };
     let index_path = state.index_path.clone();
     index_task(&state, move |lease, security| {
-        IndexStore::open(index_path)?.fetch_with_check(&archive, &request, || {
+        let index = open_owner_index(&vault, &index_path)?;
+        let check = || {
             security
                 .validate_lease(lease)
                 .map_err(|_| IndexError::Revoked)
-        })
+        };
+        match (vault.as_ref(), archive.as_ref()) {
+            (Some(vault), _) => index.fetch_vault_with_check(vault, &request, check),
+            (None, Some(archive)) => index.fetch_with_check(archive, &request, check),
+            _ => Err(IndexError::Revoked),
+        }
     })
     .await
 }
@@ -416,14 +532,25 @@ async fn build_retrieval_context(
     state: State<'_, AppState>,
     request: ContextRequest,
 ) -> Result<ContextPack, String> {
-    let archive = state.store.clone();
+    let vault = owner_vault(&state);
+    let archive = if vault.is_none() {
+        Some(legacy_archive(&state)?)
+    } else {
+        None
+    };
     let index_path = state.index_path.clone();
     index_task(&state, move |lease, security| {
-        IndexStore::open(index_path)?.build_context_with_check(&archive, &request, || {
+        let index = open_owner_index(&vault, &index_path)?;
+        let check = || {
             security
                 .validate_lease(lease)
                 .map_err(|_| IndexError::Revoked)
-        })
+        };
+        match (vault.as_ref(), archive.as_ref()) {
+            (Some(vault), _) => index.build_context_vault_with_check(vault, &request, check),
+            (None, Some(archive)) => index.build_context_with_check(archive, &request, check),
+            _ => Err(IndexError::Revoked),
+        }
     })
     .await
 }
@@ -434,8 +561,9 @@ async fn inspect_retrieval(
     request: RetrievalRequest,
 ) -> Result<SearchInspection, String> {
     let index_path = state.index_path.clone();
+    let vault = owner_vault(&state);
     index_task(&state, move |lease, security| {
-        IndexStore::open(index_path)?.inspect_retrieval_with_check(&request, || {
+        open_owner_index(&vault, &index_path)?.inspect_retrieval_with_check(&request, || {
             security
                 .validate_lease(lease)
                 .map_err(|_| IndexError::Revoked)
@@ -449,14 +577,25 @@ async fn inspect_retrieval_context(
     state: State<'_, AppState>,
     request: ContextRequest,
 ) -> Result<ContextInspection, String> {
-    let archive = state.store.clone();
+    let vault = owner_vault(&state);
+    let archive = if vault.is_none() {
+        Some(legacy_archive(&state)?)
+    } else {
+        None
+    };
     let index_path = state.index_path.clone();
     index_task(&state, move |lease, security| {
-        IndexStore::open(index_path)?.inspect_context_with_check(&archive, &request, || {
+        let index = open_owner_index(&vault, &index_path)?;
+        let check = || {
             security
                 .validate_lease(lease)
                 .map_err(|_| IndexError::Revoked)
-        })
+        };
+        match (vault.as_ref(), archive.as_ref()) {
+            (Some(vault), _) => index.inspect_context_vault_with_check(vault, &request, check),
+            (None, Some(archive)) => index.inspect_context_with_check(archive, &request, check),
+            _ => Err(IndexError::Revoked),
+        }
     })
     .await
 }
@@ -466,21 +605,46 @@ async fn inspect_retrieval_fetch(
     state: State<'_, AppState>,
     request: FetchRequest,
 ) -> Result<FetchInspection, String> {
-    let archive = state.store.clone();
+    let vault = owner_vault(&state);
+    let archive = if vault.is_none() {
+        Some(legacy_archive(&state)?)
+    } else {
+        None
+    };
     let index_path = state.index_path.clone();
     index_task(&state, move |lease, security| {
-        IndexStore::open(index_path)?.inspect_fetch_with_check(&archive, &request, || {
+        let index = open_owner_index(&vault, &index_path)?;
+        let check = || {
             security
                 .validate_lease(lease)
                 .map_err(|_| IndexError::Revoked)
-        })
+        };
+        match (vault.as_ref(), archive.as_ref()) {
+            (Some(vault), _) => index.inspect_fetch_vault_with_check(vault, &request, check),
+            (None, Some(archive)) => index.inspect_fetch_with_check(archive, &request, check),
+            _ => Err(IndexError::Revoked),
+        }
     })
     .await
 }
 
+#[derive(Serialize)]
+struct DesktopSecurityStatus {
+    #[serde(flatten)]
+    status: SecurityStatus,
+    vault_mode: &'static str,
+}
+
 #[tauri::command]
-fn get_security_status(state: State<'_, AppState>) -> SecurityStatus {
-    state.security.status()
+fn get_security_status(state: State<'_, AppState>) -> DesktopSecurityStatus {
+    DesktopSecurityStatus {
+        status: state.security.status(),
+        vault_mode: if state.store.is_some() {
+            "legacy"
+        } else {
+            "encrypted"
+        },
+    }
 }
 
 #[tauri::command]
@@ -488,6 +652,11 @@ async fn initialize_security(
     state: State<'_, AppState>,
     secret: String,
 ) -> Result<SecurityStatus, String> {
+    if state.store.is_none() {
+        return Err(
+            "MP_VAULT_PROVISION_REQUIRED:new installs cannot initialize plaintext state".into(),
+        );
+    }
     let security = state.security.clone();
     let state_path = state.state_path.clone();
     let authority_ready = state.authority_ready.clone();
@@ -512,6 +681,67 @@ async fn unlock_security(
     state: State<'_, AppState>,
     secret: String,
 ) -> Result<SecurityStatus, String> {
+    if state.store.is_none() {
+        let security = state.security.clone();
+        let vault_root = state.vault_root.clone();
+        let vault = state.vault.clone();
+        let ready = state.authority_ready.clone();
+        let native_capture = state.native_capture.clone();
+        let archive_root = state.archive_root.clone();
+        let commit_gate = state.document_authority_gate.clone();
+        return tauri::async_runtime::spawn_blocking(move || {
+            let secret = Zeroizing::new(secret);
+            let status = security.unlock(secret.as_bytes()).map_err(security_error)?;
+            let lease = security.require_unlocked().map_err(security_error)?;
+            let opened = (|| -> Result<Arc<VaultCaptureStore>, String> {
+                let manifest = mind_place_security::vault::VaultManifest::read(&vault_root)
+                    .map_err(security_error)?;
+                let crypto = mind_place_security::vault::CryptoVault::restore_with_dpapi(
+                    &security, lease, &manifest,
+                )
+                .map_err(security_error)?;
+                let adapter = VaultCaptureStore::open(&vault_root, crypto, &security, lease)
+                    .map_err(|error| format!("{}:{}", error.code(), error))?;
+                Ok(Arc::new(adapter))
+            })();
+            let adapter = match opened {
+                Ok(value) => value,
+                Err(error) => {
+                    security.lock();
+                    return Err(error);
+                }
+            };
+            // The desktop alone owns the DEK. The native browser host sends
+            // short-lived HMAC-authenticated captures to this owner session.
+            // A listener startup failure cannot unlock the capture surface.
+            let receiver = match native_capture_ipc::NativeCaptureIpc::start(
+                archive_root,
+                adapter.clone(),
+                security.clone(),
+                lease,
+                commit_gate,
+            ) {
+                Ok(receiver) => receiver,
+                Err(error) => {
+                    security.lock();
+                    return Err(error);
+                }
+            };
+            if let Err(error) = security.validate_lease(lease) {
+                drop(receiver);
+                return Err(security_error(error));
+            }
+            *native_capture
+                .lock()
+                .unwrap_or_else(|error| error.into_inner()) = Some(receiver);
+            let mut session = vault.lock().unwrap_or_else(|error| error.into_inner());
+            *session = Some(adapter);
+            ready.store(true, Ordering::Release);
+            Ok(status)
+        })
+        .await
+        .map_err(|error| error.to_string())?;
+    }
     let security = state.security.clone();
     let state_path = state.state_path.clone();
     let authority_ready = state.authority_ready.clone();
@@ -539,6 +769,16 @@ fn lock_security(state: State<'_, AppState>) -> SecurityStatus {
         &state.security,
     );
     state.document_refresh.deactivate_all();
+    state
+        .vault
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .take();
+    state
+        .native_capture
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .take();
     // Invalidate all read leases before killing the outbound helper and local listener.
     // Revocation is best-effort while locked; all in-flight evidence is already blocked.
     let _ = hosted_tunnel::stop_and_revoke(&state);
@@ -551,8 +791,9 @@ fn lock_security(state: State<'_, AppState>) -> SecurityStatus {
 async fn list_document_roots(state: State<'_, AppState>) -> Result<Vec<DocumentRoot>, String> {
     let lease = begin_unlocked(&state)?;
     let db_path = state.state_path.clone();
+    let vault = owner_vault(&state);
     let roots = tauri::async_runtime::spawn_blocking(move || {
-        let db = StateStore::open(db_path).map_err(|e| format!("{}:{}", e.code(), e))?;
+        let db = open_owner_state(&vault, &db_path).map_err(|e| format!("{}:{}", e.code(), e))?;
         db.list_document_roots()
             .map_err(|e| format!("{}:{}", e.code(), e))
     })
@@ -573,8 +814,9 @@ async fn stage_document_root(
         return Err("MP_STATE_INVALID_VALUE:invalid directory path".into());
     }
     let db_path = state.state_path.clone();
+    let vault = owner_vault(&state);
     let root = tauri::async_runtime::spawn_blocking(move || {
-        let db = StateStore::open(db_path).map_err(|e| format!("{}:{}", e.code(), e))?;
+        let db = open_owner_state(&vault, &db_path).map_err(|e| format!("{}:{}", e.code(), e))?;
         db.register_document_root(Path::new(&path))
             .map_err(|e| format!("{}:{}", e.code(), e))
     })
@@ -592,12 +834,14 @@ async fn approve_document_root(
 ) -> Result<DocumentRoot, String> {
     let lease = begin_unlocked(&state)?;
     let db_path = state.state_path.clone();
+    let vault = owner_vault(&state);
     let gate = state.document_authority_gate.clone();
     let security = state.security.clone();
     let authority_ready = state.authority_ready.clone();
     let root = tauri::async_runtime::spawn_blocking(move || {
         with_document_authority(&gate, &authority_ready, &security, lease, || {
-            let db = StateStore::open(db_path).map_err(|e| format!("{}:{}", e.code(), e))?;
+            let db =
+                open_owner_state(&vault, &db_path).map_err(|e| format!("{}:{}", e.code(), e))?;
             db.approve_document_root(&root_id)
                 .map_err(|e| format!("{}:{}", e.code(), e))
         })
@@ -613,13 +857,15 @@ async fn approve_document_root(
 async fn revoke_document_root(state: State<'_, AppState>, root_id: String) -> Result<(), String> {
     let lease = begin_unlocked(&state)?;
     let db_path = state.state_path.clone();
+    let vault = owner_vault(&state);
     let gate = state.document_authority_gate.clone();
     let security = state.security.clone();
     let authority_ready = state.authority_ready.clone();
     let revoked_root = root_id.clone();
     tauri::async_runtime::spawn_blocking(move || {
         with_document_authority(&gate, &authority_ready, &security, lease, || {
-            let db = StateStore::open(db_path).map_err(|e| format!("{}:{}", e.code(), e))?;
+            let db =
+                open_owner_state(&vault, &db_path).map_err(|e| format!("{}:{}", e.code(), e))?;
             db.revoke_document_root(&root_id)
                 .map_err(|e| format!("{}:{}", e.code(), e))
         })
@@ -645,11 +891,12 @@ async fn refresh_document_root_index(
     root_id: String,
 ) -> Result<DocumentRefreshResponse, String> {
     let state_path = state.state_path.clone();
+    let vault = owner_vault(&state);
     let document_index_path = state.index_path.with_file_name("document-index.sqlite3");
     let polling_root = root_id.clone();
     let report = index_task(&state, move |lease, security| {
-        let authority = StateStore::open(state_path)?;
-        let projection = DocumentIndex::open(document_index_path)?;
+        let authority = open_owner_state(&vault, &state_path)?;
+        let projection = open_owner_document_index(&vault, &document_index_path)?;
         projection.refresh_root(&authority, &root_id, || {
             security
                 .validate_lease(lease)
@@ -688,10 +935,11 @@ async fn search_document_index(
     limit: Option<usize>,
 ) -> Result<Vec<DocumentHit>, String> {
     let state_path = state.state_path.clone();
+    let vault = owner_vault(&state);
     let document_index_path = state.index_path.with_file_name("document-index.sqlite3");
     index_task(&state, move |lease, security| {
-        let authority = StateStore::open(state_path)?;
-        let projection = DocumentIndex::open(document_index_path)?;
+        let authority = open_owner_state(&vault, &state_path)?;
+        let projection = open_owner_document_index(&vault, &document_index_path)?;
         projection.search(&authority, &query, limit.unwrap_or(20), || {
             security
                 .validate_lease(lease)
@@ -709,10 +957,11 @@ async fn preview_document_source(
     version_id: String,
 ) -> Result<DocumentPreview, String> {
     let state_path = state.state_path.clone();
+    let vault = owner_vault(&state);
     let document_index_path = state.index_path.with_file_name("document-index.sqlite3");
     index_task(&state, move |lease, security| {
-        let authority = StateStore::open(state_path)?;
-        let projection = DocumentIndex::open(document_index_path)?;
+        let authority = open_owner_state(&vault, &state_path)?;
+        let projection = open_owner_document_index(&vault, &document_index_path)?;
         projection.preview(&authority, &uri, &version_id, || {
             security
                 .validate_lease(lease)
@@ -727,7 +976,11 @@ async fn list_conversations(
     state: State<'_, AppState>,
     query: Option<String>,
 ) -> Result<Vec<ConversationSummary>, String> {
-    let store = state.store.clone();
+    let vault_query = query.clone().unwrap_or_default();
+    if let Some(result) = vaulted_blocking(&state, move |vault| vault.list(&vault_query)).await? {
+        return Ok(result);
+    }
+    let store = legacy_archive(&state)?;
     gated_blocking(&state, move || store.list(query.as_deref().unwrap_or(""))).await
 }
 
@@ -737,7 +990,16 @@ async fn read_conversation(
     id: String,
     snapshot_id: Option<String>,
 ) -> Result<Conversation, String> {
-    let store = state.store.clone();
+    let vault_id = id.clone();
+    let vault_snapshot = snapshot_id.clone();
+    if let Some(result) = vaulted_blocking(&state, move |vault| {
+        vault.read(&vault_id, vault_snapshot.as_deref())
+    })
+    .await?
+    {
+        return Ok(result);
+    }
+    let store = legacy_archive(&state)?;
     gated_blocking(&state, move || store.read(&id, snapshot_id.as_deref())).await
 }
 
@@ -746,7 +1008,11 @@ async fn list_snapshots(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<Vec<SnapshotSummary>, String> {
-    let store = state.store.clone();
+    let vault_id = id.clone();
+    if let Some(result) = vaulted_blocking(&state, move |vault| vault.snapshots(&vault_id)).await? {
+        return Ok(result);
+    }
+    let store = legacy_archive(&state)?;
     gated_blocking(&state, move || store.snapshots(&id)).await
 }
 
@@ -756,7 +1022,18 @@ async fn export_markdown(
     id: String,
     snapshot_id: Option<String>,
 ) -> Result<ExportResult, String> {
-    let store = state.store.clone();
+    let vault_id = id.clone();
+    let vault_snapshot = snapshot_id.clone();
+    if let Some(result) = vaulted_blocking(&state, move |vault| {
+        vault.export_markdown(&vault_id, vault_snapshot.as_deref())
+    })
+    .await?
+    {
+        // The encrypted route only returns plaintext to this authorized
+        // owner-session response; it never writes unencrypted export files.
+        return Ok(result);
+    }
+    let store = legacy_archive(&state)?;
     gated_blocking(&state, move || {
         store.export_snapshot(&id, snapshot_id.as_deref())
     })
@@ -769,13 +1046,20 @@ async fn get_asset(
     id: String,
     asset_path: String,
 ) -> Result<AssetResult, String> {
-    let store = state.store.clone();
+    let archive_id = id.clone();
+    let name = asset_path.clone();
+    if let Some(asset) =
+        vaulted_blocking(&state, move |vault| vault.asset(&archive_id, &name)).await?
+    {
+        return Ok(asset);
+    }
+    let store = legacy_archive(&state)?;
     gated_blocking(&state, move || store.asset(&id, &asset_path)).await
 }
 
 #[tauri::command]
 async fn import_legacy(state: State<'_, AppState>) -> Result<ImportReceipt, String> {
-    let store = state.store.clone();
+    let store = legacy_archive(&state)?;
     let source = state.legacy_path.clone();
     gated_blocking(&state, move || store.import_legacy(&source)).await
 }
@@ -788,7 +1072,7 @@ async fn import_generic_text(
     format: String,
     raw: String,
 ) -> Result<GenericImportReceipt, String> {
-    let store = state.store.clone();
+    let store = legacy_archive(&state)?;
     gated_blocking(&state, move || {
         store.import_generic(&format, raw.as_bytes())
     })
@@ -796,11 +1080,15 @@ async fn import_generic_text(
 }
 
 fn native_manifest_path(state: &AppState, browser: &str) -> PathBuf {
-    state
+    // Preserve existing registration paths for legacy installs. On new encrypted
+    // installs keep browser registration metadata outside the legacy archive root:
+    // creating archive-v1 here could incorrectly mark a first-run as legacy.
+    let parent = state
         .store
-        .root()
-        .join("native-host")
-        .join(format!("{browser}.json"))
+        .as_ref()
+        .map(ArchiveStore::root)
+        .unwrap_or_else(|| state.archive_root.parent().unwrap_or(&state.archive_root));
+    parent.join("native-host").join(format!("{browser}.json"))
 }
 
 fn setup_info(state: &AppState) -> SetupInfo {
@@ -810,7 +1098,7 @@ fn setup_info(state: &AppState) -> SetupInfo {
         .map(str::to_owned)
         .collect();
     SetupInfo {
-        archive_path: state.store.root().display().to_string(),
+        archive_path: state.archive_root.display().to_string(),
         extension_path: state.extension_path.display().to_string(),
         host_path: state.host_path.display().to_string(),
         extension_id: mind_place_archive::extension_id(),
@@ -943,11 +1231,28 @@ fn main() {
         .setup(|app| {
             let root = mind_place_archive::data_root()?;
             let security_path = root.parent().unwrap_or(&root).join("security-v1.json");
-            let state_path = root.parent().unwrap_or(&root).join("state.sqlite3");
-            let index_path = root.parent().unwrap_or(&root).join("index.sqlite3");
+            let mut state_path = root.parent().unwrap_or(&root).join("state.sqlite3");
+            let mut index_path = root.parent().unwrap_or(&root).join("index.sqlite3");
             let security = SecurityGate::open(security_path)?;
+            let vault_root = root.parent().unwrap_or(&root).join("encrypted-vault-v1");
             let legacy_path = root.parent().unwrap_or(&root).join("sessions");
-            let store = ArchiveStore::open(root)?;
+            // New installations must not create legacy plaintext archive
+            // directories before an independently verified encrypted vault is
+            // provisioned. Existing users remain in their legacy profile
+            // pending an explicitly consented migration.
+            let parent = root.parent().unwrap_or(&root);
+            let legacy_exists = root.exists() || state_path.exists() || index_path.exists();
+            let vault_exists = parent.join("vault-v1.json").exists()
+                || parent.join("encrypted-vault-v1/vault-v1.json").exists();
+            let store = if legacy_exists && !vault_exists {
+                Some(ArchiveStore::open(&root)?)
+            } else {
+                None
+            };
+            if store.is_none() {
+                state_path = vault_root.join("state.sqlite3");
+                index_path = vault_root.join("index.sqlite3");
+            }
             let host_path = std::env::current_exe()?
                 .parent()
                 .unwrap()
@@ -963,6 +1268,11 @@ fn main() {
             };
             app.manage(AppState {
                 store,
+                archive_root: root,
+                vault_root,
+                pending_vault: Arc::new(Mutex::new(None)),
+                vault: Arc::new(Mutex::new(None)),
+                native_capture: Arc::new(Mutex::new(None)),
                 security,
                 state_path,
                 index_path,
@@ -1001,6 +1311,12 @@ fn main() {
             hosted_tunnel::start_hosted_tunnel,
             hosted_tunnel::stop_hosted_tunnel,
             initialize_security,
+            vault_commands::begin_vault_setup,
+            vault_commands::resume_vault_setup,
+            vault_commands::unlock_vault_with_recovery,
+            vault_commands::create_vault_online_backup,
+            vault_commands::confirm_vault_setup,
+            vault_commands::cancel_vault_setup,
             unlock_security,
             lock_security,
             list_document_roots,

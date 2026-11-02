@@ -221,6 +221,10 @@ fn claude_conversation_id_from_url(source: &str) -> Result<String> {
     Ok(id.to_ascii_lowercase())
 }
 
+pub fn validate_capture(c: &mut Capture) -> Result<()> {
+    validate(c)
+}
+
 fn validate(c: &mut Capture) -> Result<()> {
     if c.schema_version != 1
         || !matches!(
@@ -449,6 +453,9 @@ impl ArchiveStore {
     }
 
     pub(crate) fn lock(&self) -> Result<File> {
+        // Recheck at the serialization boundary: a vault marker may have been
+        // provisioned after a desktop process opened this legacy store.
+        self.ensure_not_encrypted_vault()?;
         let path = self.root.join(".archive.lock");
         no_link(&path)?;
         let file = OpenOptions::new()
@@ -873,16 +880,24 @@ impl ArchiveStore {
         let dir = self.conversation_dir(id)?.join("assets");
         no_link(&dir)?;
         let bytes = bounded_read(&dir.join(name), MAX_IMAGE_BYTES)?;
-        let (mime, ext) =
-            image_kind(&bytes).ok_or_else(|| invalid("Invalid archive image type"))?;
-        if name != format!("{}.{}", digest(&bytes), ext) {
-            return Err(invalid("Archive image digest does not match its identity"));
-        }
-        Ok(AssetResult {
-            mime_type: mime.into(),
-            data_url: format!("data:{mime};base64,{}", STANDARD.encode(bytes)),
-        })
+        verified_image_asset(name, &bytes)
     }
+}
+
+/// Shared plaintext-in-memory validation for legacy and encrypted image reads.
+/// Never fetch a URL or trust a filename/MIME without byte and digest checks.
+pub fn verified_image_asset(name: &str, bytes: &[u8]) -> Result<AssetResult> {
+    if !asset_name(name) || bytes.len() > MAX_IMAGE_BYTES {
+        return Err(invalid("Invalid archive asset path or size"));
+    }
+    let (mime, ext) = image_kind(bytes).ok_or_else(|| invalid("Invalid archive image type"))?;
+    if name != format!("{}.{}", digest(bytes), ext) {
+        return Err(invalid("Archive image digest does not match its identity"));
+    }
+    Ok(AssetResult {
+        mime_type: mime.into(),
+        data_url: format!("data:{mime};base64,{}", STANDARD.encode(bytes)),
+    })
 }
 
 pub fn markdown(c: &Capture) -> String {
