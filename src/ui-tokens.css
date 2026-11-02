@@ -233,3 +233,97 @@
 :root[data-theme] textarea::placeholder { color: var(--mp-text-muted); }
 :root[data-theme] hr { border-color: var(--mp-border); }
 :root[data-theme] ::selection { background: var(--mp-text-primary); color: var(--mp-bg-app); }
+
+
+/* Remaining legacy details: keep selected, error and security states neutral too. */
+:root[data-theme] .conversation-row:hover,
+:root[data-theme] .conversation-row[aria-pressed="true"],
+:root[data-theme] .memory-card:hover,
+:root[data-theme] .memory-card[aria-pressed="true"] {
+  border-color: var(--mp-border-strong);
+  background: var(--mp-bg-subtle);
+}
+:root[data-theme] .partial-marker,
+:root[data-theme] .action-status,
+:root[data-theme] .action-status.is-error,
+:root[data-theme] .eyebrow,
+:root[data-theme] .source-link,
+:root[data-theme] .source-link:hover,
+:root[data-theme] .message-content blockquote,
+:root[data-theme] .image-slot-error,
+:root[data-theme] .setup-paths code,
+:root[data-theme] .registered-status,
+:root[data-theme] .import-status ul,
+:root[data-theme] .document-root-scope,
+:root[data-theme] .document-root-state,
+:root[data-theme] .document-result-source,
+:root[data-theme] .document-result-provenance,
+:root[data-theme] .document-result-warnings,
+:root[data-theme] .security-description,
+:root[data-theme] .security-error,
+:root[data-theme] .security-note {
+  color: var(--mp-text-secondary);
+}
+:root[data-theme] .conversation-row[aria-pressed="true"],
+:root[data-theme] .settings-nav,
+:root[data-theme] .entity-lens-tabs button,
+:root[data-theme] .entity-lens-tabs button[aria-selected="true"],
+:root[data-theme] .document-empty-state,
+:root[data-theme] .document-preview-text {
+  border-color: var(--mp-border);
+  background: var(--mp-bg-subtle);
+  color: var(--mp-text-primary);
+}
+:root[data-theme] .settings-nav {
+  border-right: 1px solid var(--mp-border);
+}
+:root[data-theme] .entity-lens-tabs button[aria-selected="true"] {
+  border-color: var(--mp-border-strong);
+}
+:root[data-theme] .settings-tab span,
+:root[data-theme] .setup-paths dt,
+:root[data-theme] .document-root-setup > p:first-of-type {
+  color: var(--mp-text-muted);
+}
+:root[data-theme] .setup-paths dd,
+:root[data-theme] .setup-paths code,
+:root[data-theme] .document-preview-text {
+  color: var(--mp-text-primary);
+}
+:root[data-theme] .memory-detail,
+:root[data-theme] .memory-revision {
+  border-color: var(--mp-border);
+  background: var(--mp-bg-surface);
+}
+:root[data-theme] .security-gate {
+  background: var(--mp-bg-app);
+}
+:root[data-theme] .security-card {
+  box-shadow: var(--mp-shadow-soft);
+}
+:root[data-theme] .document-empty-state {
+  border-style: dashed;
+}
+:root[data-theme] .document-result-snippet {
+  border-left-color: var(--mp-border-strong);
+}
+:root[data-theme] .image-slot-error {
+  border-color: var(--mp-border-strong);
+}
+:root[data-theme] .message-content pre {
+  color: var(--mp-text-primary);
+}
+:root[data-theme] .message-content th {
+  background: var(--mp-bg-subtle);
+  color: var(--mp-text-primary);
+}
+:root[data-theme] .message-content hr,
+:root[data-theme] .setup-content hr {
+  background: var(--mp-border);
+}
+:root[data-theme] .setup-dialog::backdrop {
+  background: rgb(9 9 11 / 46%);
+}
+:root[data-theme] .settings-panel input::placeholder {
+  color: var(--mp-text-muted);
+}
