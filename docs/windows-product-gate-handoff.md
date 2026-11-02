@@ -134,7 +134,9 @@ older source is intentional only when the effective immutable input closure is
 identical; acceptance always binds the current head, base and reconstructed merge.
 
 Main pushes always execute native work and do not mint reusable PR evidence.
-Manual dispatch requires an open same-repository Ready PR and its current head
+An explicit manual dispatch may gather fresh native evidence while a PR remains Draft. The worker freezes and rechecks the exact head/base and merge tree; it never reuses a cached proof for a manual run. This does not promote the PR or publish trusted acceptance. Automatic planning/reuse and the independent controller still require a Ready PR. Closed, foreign and stale-input candidates remain rejected.
+
+Manual dispatch requires an open same-repository PR and its current head
 branch; it always executes native tests. For a release/final enforcement window,
 set `require_fresh: true` and an immutable UTC `fresh_after` timestamp in the
 independent pinned config. Only a successful manual current-merge run created
