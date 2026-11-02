@@ -224,7 +224,7 @@ class NativeContractFingerprintTests(unittest.TestCase):
 
         for source in ("name: no jobs mapping\n", "jobs: []\n"):
             with self.subTest(source=source), self.assertRaisesRegex(
-                    ValueError, "Native workflow has no jobs mapping"):
+                    ValueError, r"Native workflow(?: at .+)? has no jobs mapping"):
                 native_contract.canonical_workflow_signature(source)
 
     def test_identity_metadata_inside_command_is_not_globally_excluded(self):
@@ -287,6 +287,135 @@ class NativeContractFingerprintTests(unittest.TestCase):
             with self.subTest(labels=labels), self.assertRaises(ValueError):
                 native_contract.validate_runner_labels({"labels": labels}, windows)
 
+
+    def test_real_ci_and_separated_product_workflows_parse_with_path_context(self):
+        root = Path(__file__).resolve().parents[2]
+        ci_source = root.joinpath(native_contract.CI_WORKFLOW).read_bytes()
+        product_source = root.joinpath(native_contract.PRODUCT_WORKFLOW).read_bytes()
+
+        ci_document = native_contract.parse_workflow_yaml(
+            ci_source, source_path=native_contract.CI_WORKFLOW)
+        product_document = native_contract.parse_workflow_yaml(
+            product_source, source_path=native_contract.PRODUCT_WORKFLOW)
+        self.assertIsInstance(ci_document.get("jobs"), dict)
+        self.assertIsInstance(product_document.get("jobs"), dict)
+        self.assertEqual(
+            native_contract.workflow_job_runner_requirements(
+                ci_source, "Native execution evidence",
+                source_path=native_contract.CI_WORKFLOW)["platform"],
+            "linux",
+        )
+        self.assertEqual(
+            native_contract.workflow_job_runner_requirements(
+                product_source, "Verify Windows product",
+                source_path=native_contract.PRODUCT_WORKFLOW)["platform"],
+            "windows",
+        )
+        product_signature = native_contract.canonical_workflow_signature(
+            product_source, source_path=native_contract.PRODUCT_WORKFLOW)
+        self.assertIsInstance(product_signature, bytes)
+        self.assertGreater(len(product_signature), 0)
+        self.assertIn(b"Verify Windows product", product_signature)
+
+    def test_multiline_double_quoted_yaml_decodes_yaml_escapes(self):
+        source = r"""jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: command
+      run: "alpha\ beta \
+        gamma"
+"""
+        document = native_contract.parse_workflow_yaml(
+            source, source_path=native_contract.PRODUCT_WORKFLOW)
+        self.assertEqual(
+            document["jobs"]["build"]["steps"][0]["run"], "alpha beta gamma")
+
+    def test_multiline_double_quoted_yaml_line_continuations_fold_correctly(self):
+        source = r"""jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: command
+      run: "echo one && \
+        echo two"
+"""
+        document = native_contract.parse_workflow_yaml(
+            source, source_path=native_contract.PRODUCT_WORKFLOW)
+        self.assertEqual(
+            document["jobs"]["build"]["steps"][0]["run"],
+            "echo one && echo two",
+        )
+
+    def test_indentless_yaml_sequences_are_supported_without_weakening_indentation(self):
+        source = (
+            "'on':\n"
+            "  pull_request:\n"
+            "    types:\n"
+            "    - opened\n"
+            "    - synchronize\n"
+            "jobs:\n"
+            "  candidate:\n"
+            "    needs:\n"
+            "    - plan\n"
+            "    - coordinate\n"
+            "    runs-on: ubuntu-latest\n"
+            "    steps:\n"
+            "    - name: Report\n"
+            "      run: echo ok\n"
+        )
+        document = native_contract.parse_workflow_yaml(
+            source, source_path=native_contract.PRODUCT_WORKFLOW)
+        self.assertEqual(
+            document["on"]["pull_request"]["types"], ["opened", "synchronize"])
+        self.assertEqual(
+            document["jobs"]["candidate"]["needs"], ["plan", "coordinate"])
+        self.assertEqual(
+            document["jobs"]["candidate"]["steps"][0]["name"], "Report")
+
+    def test_multiline_quoted_yaml_and_strict_path_diagnostics(self):
+        source = (
+            "jobs:\n"
+            "  build:\n"
+            "    runs-on: windows-latest\n"
+            "    steps:\n"
+            "      - name: Install Rust\n"
+            "        run: 'rustup toolchain install 1.90.0\n"
+            "\n"
+            "          rustup default 1.90.0\n"
+            "          '\n"
+        )
+        document = native_contract.parse_workflow_yaml(
+            source, source_path=native_contract.PRODUCT_WORKFLOW)
+        run = document["jobs"]["build"]["steps"][0]["run"]
+        self.assertIn("rustup toolchain install 1.90.0", run)
+        self.assertIn("rustup default 1.90.0", run)
+        self.assertIn("\n", run)
+
+        duplicate = (
+            "jobs:\n"
+            "  verify:\n"
+            "    runs-on: ubuntu-latest\n"
+            "  verify:\n"
+            "    runs-on: windows-latest\n"
+        )
+        with self.assertRaises(ValueError) as duplicate_error:
+            native_contract.parse_workflow_yaml(
+                duplicate, source_path=native_contract.PRODUCT_WORKFLOW)
+        self.assertIn(native_contract.PRODUCT_WORKFLOW, str(duplicate_error.exception))
+        self.assertIn("Duplicate YAML mapping key", str(duplicate_error.exception))
+
+        invalid_indent = (
+            "jobs:\n"
+            "  verify:\n"
+            "    runs-on: ubuntu-latest\n"
+            "   steps:\n"
+            "     - run: cargo test\n"
+        )
+        with self.assertRaises(ValueError) as indent_error:
+            native_contract.parse_workflow_yaml(
+                invalid_indent, source_path=native_contract.CI_WORKFLOW)
+        self.assertIn(native_contract.CI_WORKFLOW, str(indent_error.exception))
 
     def test_matrix_runner_requirements_resolve_each_expanded_sqlcipher_job(self):
         source = (
@@ -511,14 +640,38 @@ class NativeContractFingerprintTests(unittest.TestCase):
 
 
 class NativeIdentityAndPrerequisiteTests(unittest.TestCase):
+    # PR 129 retains the historical integrated workflow contract. Its fixture
+    # must not borrow PR 131's separated CI workflow from the current checkout.
+    LEGACY_CI_SOURCE = """jobs:
+  fast:
+    name: Fast developer feedback
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install dependencies
+  rust:
+    name: Fast Rust compile and vault feedback
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Install pinned Rust 1.90
+  windows:
+    name: Verify Windows product
+    runs-on: windows-latest
+    steps:
+      - name: Setup Node.js
+  evidence:
+    name: Native execution evidence
+    runs-on: ubuntu-latest
+    steps:
+      - name: Capture native execution provenance
+"""
     def setUp(self):
         self.candidate = candidate()
         self.run = native_run(self.candidate)
         self.jobs = ci_jobs()
         self.evidence = native_evidence(self.candidate, self.run)
-        ci_source = Path(__file__).resolve().parents[2].joinpath(
-            ".github/workflows/ci.yml").read_bytes()
-        self.workflow_sources = {native_contract.CI_WORKFLOW: ci_source}
+        self.workflow_sources = {
+            native_contract.CI_WORKFLOW: self.LEGACY_CI_SOURCE,
+        }
         self.args = {
             "repo": "owner/repo", "vault": False, "contract_fingerprint": CONTRACT,
             "fetch_jobs": lambda _: {"total_count": len(self.jobs), "jobs": self.jobs},
@@ -800,7 +953,8 @@ class NativeIdentityAndPrerequisiteTests(unittest.TestCase):
     def test_missing_native_workflow_times_out_and_cannot_accept_cached_proof(self):
         state, reason = coordinator.classify(
             [], self.candidate, "owner/repo", False, CONTRACT,
-            self.args["fetch_jobs"], self.args["fetch_evidence"])
+            self.args["fetch_jobs"], self.args["fetch_evidence"],
+            workflow_sources=self.workflow_sources)
         self.assertEqual(state, "pending")
         with self.assertRaises(TimeoutError):
             coordinator.wait(
@@ -817,21 +971,21 @@ class NativeIdentityAndPrerequisiteTests(unittest.TestCase):
         fetch_evidence = self.args["fetch_evidence"]
         self.assertEqual(coordinator.classify(
             [in_progress], self.candidate, "owner/repo", False, CONTRACT,
-            fetch_jobs, fetch_evidence)[0], "pending")
+            fetch_jobs, fetch_evidence, workflow_sources=self.workflow_sources)[0], "pending")
         self.assertEqual(coordinator.classify(
             [self.run], self.candidate, "owner/repo", False, CONTRACT,
-            fetch_jobs, fetch_evidence)[0], "ready")
+            fetch_jobs, fetch_evidence, workflow_sources=self.workflow_sources)[0], "ready")
         failed = dict(self.run, conclusion="failure")
         self.assertEqual(coordinator.classify(
             [failed], self.candidate, "owner/repo", False, CONTRACT,
-            fetch_jobs, fetch_evidence)[0], "failed")
+            fetch_jobs, fetch_evidence, workflow_sources=self.workflow_sources)[0], "failed")
         self.assertEqual(coordinator.classify(
             [], self.candidate, "owner/repo", False, CONTRACT,
-            fetch_jobs, fetch_evidence)[0], "pending")
+            fetch_jobs, fetch_evidence, workflow_sources=self.workflow_sources)[0], "pending")
         self.jobs[2]["steps"][0]["conclusion"] = "skipped"
         self.assertEqual(coordinator.classify(
             [self.run], self.candidate, "owner/repo", False, CONTRACT,
-            fetch_jobs, fetch_evidence)[0], "failed")
+            fetch_jobs, fetch_evidence, workflow_sources=self.workflow_sources)[0], "failed")
 
     def test_candidate_head_or_base_mutation_during_wait_fails_closed(self):
         mutations = (
@@ -1102,6 +1256,85 @@ class SeparatedProductPrerequisiteTests(unittest.TestCase):
         )
         self.assertEqual(state, "pending")
         self.assertIn("windows-product.yml", reason)
+
+    def _mp_ci_win_01_fixture(self):
+        cand = candidate(
+            131, head_repo=REPO, base_repo=REPO,
+            head_repo_id=99, base_repo_id=99,
+        )
+        ci_run = native_run(cand, run_id=401)
+        product_run = native_run(
+            cand, run_id=402, path=native_contract.PRODUCT_WORKFLOW)
+        jobs_by_run = {
+            ci_run["id"]: json.loads(json.dumps(self.ci_jobs)),
+            product_run["id"]: json.loads(json.dumps(self.product_jobs)),
+        }
+        sources = {
+            native_contract.CI_WORKFLOW: self.CI_SOURCE,
+            native_contract.PRODUCT_WORKFLOW: self.PRODUCT_SOURCE,
+        }
+        evidence = native_evidence(cand, ci_run, fingerprint=CONTRACT, vault=False)
+
+        def fetch_jobs(run):
+            jobs = jobs_by_run[run["id"]]
+            return {"total_count": len(jobs), "jobs": jobs}
+
+        return cand, ci_run, product_run, jobs_by_run, sources, evidence, fetch_jobs
+
+    def test_mp_ci_win_01_uses_separate_authoritative_windows_product_source(self):
+        cand, ci_run, product_run, jobs_by_run, sources, evidence, fetch_jobs = (
+            self._mp_ci_win_01_fixture())
+        with patch.object(
+                Path, "read_bytes",
+                side_effect=AssertionError("authoritative workflow injection was bypassed")):
+            state, reason = coordinator.classify(
+                [ci_run, product_run], cand, REPO, False, CONTRACT,
+                fetch_jobs, lambda run: evidence, workflow_sources=sources)
+        self.assertEqual(state, "ready", reason)
+        self.assertTrue(native_contract.requires_separated_product(REPO, 131))
+        self.assertEqual(
+            coordinator.required_paths(False, True),
+            (native_contract.CI_WORKFLOW, native_contract.PRODUCT_WORKFLOW),
+        )
+
+    def test_mp_ci_win_01_missing_windows_product_source_fails_closed(self):
+        cand, ci_run, product_run, jobs_by_run, sources, evidence, fetch_jobs = (
+            self._mp_ci_win_01_fixture())
+        sources.pop(native_contract.PRODUCT_WORKFLOW)
+        state, reason = coordinator.classify(
+            [ci_run, product_run], cand, REPO, False, CONTRACT,
+            fetch_jobs, lambda run: evidence, workflow_sources=sources)
+        self.assertEqual(state, "failed")
+        self.assertIn(native_contract.PRODUCT_WORKFLOW, reason)
+
+    def test_mp_ci_win_01_missing_native_evidence_fails_closed(self):
+        cand, ci_run, product_run, jobs_by_run, sources, evidence, fetch_jobs = (
+            self._mp_ci_win_01_fixture())
+        state, reason = coordinator.classify(
+            [ci_run, product_run], cand, REPO, False, CONTRACT,
+            fetch_jobs, lambda run: {}, workflow_sources=sources)
+        self.assertEqual(state, "failed")
+        self.assertIn("Native provenance mismatch", reason)
+
+    def test_mp_ci_win_01_product_prerequisite_waits_while_in_progress(self):
+        cand, ci_run, product_run, jobs_by_run, sources, evidence, fetch_jobs = (
+            self._mp_ci_win_01_fixture())
+        pending_product = dict(product_run, status="in_progress", conclusion=None)
+        state, reason = coordinator.classify(
+            [ci_run, pending_product], cand, REPO, False, CONTRACT,
+            fetch_jobs, lambda run: evidence, workflow_sources=sources)
+        self.assertEqual(state, "pending", reason)
+        self.assertIn("windows-product.yml", reason)
+
+    def test_mp_ci_win_01_failed_or_cancelled_product_prerequisite_fails(self):
+        cand, ci_run, product_run, jobs_by_run, sources, evidence, fetch_jobs = (
+            self._mp_ci_win_01_fixture())
+        for conclusion in ("failure", "cancelled"):
+            failed_product = dict(product_run, status="completed", conclusion=conclusion)
+            state, reason = coordinator.classify(
+                [ci_run, failed_product], cand, REPO, False, CONTRACT,
+                fetch_jobs, lambda run: evidence, workflow_sources=sources)
+            self.assertEqual(state, "failed", reason)
 
     def test_exact_product_job_attempt_and_complete_listing_are_required(self):
         wrong_attempt = [[dict(item) for item in self.product_jobs]]

@@ -84,7 +84,8 @@ def classify(runs, candidate, repo, vault, contract_fingerprint, fetch_jobs, fet
         return "pending", "Exact-candidate native prerequisite queued/running/missing: " + ", ".join(pending)
 
 
-def snapshot(repo, candidate, token, vault, contract_fingerprint):
+def snapshot(repo, candidate, token, vault, contract_fingerprint,
+             workflow_sources: dict[str, bytes | str] | None = None):
     try:
         gate.require_live_candidate(repo, candidate, token)
     except ValueError as error:
@@ -118,7 +119,8 @@ def snapshot(repo, candidate, token, vault, contract_fingerprint):
         return gate.fetch_native_evidence(run, repo=repo, token=token)
 
     state, reason = classify(
-        runs, candidate, repo, vault, contract_fingerprint, jobs, evidence)
+        runs, candidate, repo, vault, contract_fingerprint, jobs, evidence,
+        workflow_sources=workflow_sources)
     try:
         gate.require_live_candidate(repo, candidate, token)
     except ValueError as error:
@@ -127,7 +129,8 @@ def snapshot(repo, candidate, token, vault, contract_fingerprint):
 
 
 def wait(repo, candidate, token, vault, contract_fingerprint, timeout=4800, poll=30,
-         clock=time.monotonic, sleep=time.sleep, inspect=snapshot):
+         clock=time.monotonic, sleep=time.sleep, inspect=snapshot,
+         workflow_sources: dict[str, bytes | str] | None = None):
     if (not repo or not isinstance(candidate, dict)
             or type(candidate.get("pr")) is not int or candidate["pr"] <= 0
             or not gate.HEX40.fullmatch(candidate.get("head", ""))
@@ -139,7 +142,12 @@ def wait(repo, candidate, token, vault, contract_fingerprint, timeout=4800, poll
     deadline = clock() + timeout
     while True:
         try:
-            state, reason = inspect(repo, candidate, token, vault, contract_fingerprint)
+            if workflow_sources is None:
+                state, reason = inspect(repo, candidate, token, vault, contract_fingerprint)
+            else:
+                state, reason = inspect(
+                    repo, candidate, token, vault, contract_fingerprint,
+                    workflow_sources=workflow_sources)
         except (OSError, ValueError, KeyError, TypeError, AttributeError, urllib.error.URLError, TimeoutError) as err:
             state, reason = "pending", f"API/evidence verification unavailable: {type(err).__name__}"
         print(f"MP-10C native coordination: {state} — {reason}", flush=True)
