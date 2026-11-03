@@ -133,7 +133,11 @@ pub(super) async fn unlock_vault_with_recovery(
     let native_capture = state.native_capture.clone();
     let archive_root = state.archive_root.clone();
     let commit_gate = state.document_authority_gate.clone();
+    let shutdown_requested = state.shutdown_requested.clone();
     tauri::async_runtime::spawn_blocking(move || {
+        if shutdown_requested.load(std::sync::atomic::Ordering::Acquire) {
+            return Err("MP_APP_SHUTTING_DOWN".to_owned());
+        }
         let secret = Zeroizing::new(secret);
         let code = Zeroizing::new(code);
         let status = security
@@ -155,27 +159,21 @@ pub(super) async fn unlock_vault_with_recovery(
         })();
         match opened {
             Ok(adapter) => {
-                let receiver = match super::native_capture_ipc::NativeCaptureIpc::start(
+                // Same shutdown/publication fence as ordinary password unlock.
+                if let Err(error) = super::publish_owner_capture(
                     archive_root,
-                    adapter.clone(),
-                    security.clone(),
+                    adapter,
+                    &security,
                     lease,
-                    commit_gate,
+                    &commit_gate,
+                    &shutdown_requested,
+                    &native_capture,
+                    &holder,
+                    &ready,
                 ) {
-                    Ok(receiver) => receiver,
-                    Err(error) => {
-                        security.lock();
-                        return Err(error);
-                    }
-                };
-                security
-                    .validate_lease(lease)
-                    .map_err(|error| format!("{}:{}", error.code(), error))?;
-                *native_capture
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner()) = Some(receiver);
-                *holder.lock().unwrap_or_else(|error| error.into_inner()) = Some(adapter);
-                ready.store(true, std::sync::atomic::Ordering::Release);
+                    security.lock();
+                    return Err(error);
+                }
                 Ok(status)
             }
             Err(error) => {

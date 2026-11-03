@@ -148,6 +148,9 @@ jobs:
       - name: Native capture IPC qualification
         if: always()
         run: cargo test -p mind-place --bin mind-place native_capture_ipc::qualification -- --nocapture
+      - name: Native shutdown/unlock interleaving regressions
+        if: always()
+        run: cargo test -p mind-place --bin mind-place shutdown_race_regression_tests -- --nocapture
       - name: Check Rust formatting
         if: always()
         run: cargo fmt --all -- --check
