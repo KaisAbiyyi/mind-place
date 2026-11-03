@@ -113,10 +113,7 @@ fn validate_empty_root(root: &Path) -> Result<()> {
     }
     safe_path(root)?;
     let parent = root.parent().ok_or(SecurityError::UnsafePath)?;
-    if !parent.is_dir()
-        || root.exists()
-        || root.with_extension("mp9b-init-partial").exists()
-    {
+    if !parent.is_dir() || root.exists() || root.with_extension("mp9b-init-partial").exists() {
         return Err(SecurityError::InvalidConfig);
     }
     for name in [
@@ -166,8 +163,7 @@ fn verify_intent(path: &Path, root: &Path, secret: &[u8]) -> Result<()> {
     if json.len() as u64 > MAX_INTENT_BYTES {
         return Err(SecurityError::InvalidConfig);
     }
-    let intent: Intent =
-        serde_json::from_slice(&json).map_err(|_| SecurityError::InvalidConfig)?;
+    let intent: Intent = serde_json::from_slice(&json).map_err(|_| SecurityError::InvalidConfig)?;
     if intent.format_version != 1 {
         return Err(SecurityError::UnsupportedSchema);
     }

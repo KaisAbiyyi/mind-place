@@ -4,7 +4,8 @@
 use crate::{Result, StateError, StateStore};
 use mind_place_security::{
     vault::{CryptoVault, RecoverySecret, VaultManifest},
-    vault_first_run::FirstRunJournal, SecurityGate, UnlockLease,
+    vault_first_run::FirstRunJournal,
+    SecurityGate, UnlockLease,
 };
 use std::{
     fs,
@@ -178,7 +179,6 @@ mod tests {
         fs2::FileExt::unlock(&competing).unwrap();
         assert!(!code.is_empty());
     }
-
 
     #[test]
     fn interrupted_first_run_requires_original_secret_and_new_confirmation() {

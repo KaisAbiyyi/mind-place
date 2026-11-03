@@ -40,7 +40,9 @@ pub(super) async fn begin_vault_setup(
                 .unlock(secret.as_bytes())
                 .map_err(|error| format!("{}:{}", error.code(), error))?;
         }
-        if let Err(error) = FirstRunJournal::ensure_start(&vault_root, secret.as_bytes(), configured) {
+        if let Err(error) =
+            FirstRunJournal::ensure_start(&vault_root, secret.as_bytes(), configured)
+        {
             security.lock();
             return Err(format!("{}:{}", error.code(), error));
         }
