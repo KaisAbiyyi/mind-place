@@ -1640,9 +1640,8 @@ mod shutdown_race_regression_tests {
             let lease = security.require_unlocked().unwrap();
             let (crypto, recovery, manifest) = CryptoVault::provision(&security, lease).unwrap();
             manifest.persist_new(&vault_root).unwrap();
-            let writer = Arc::new(
-                VaultCaptureStore::open(&vault_root, crypto, &security, lease).unwrap(),
-            );
+            let writer =
+                Arc::new(VaultCaptureStore::open(&vault_root, crypto, &security, lease).unwrap());
             let state = AppState {
                 store: None,
                 archive_root,
@@ -1664,7 +1663,14 @@ mod shutdown_race_regression_tests {
                 host_path: PathBuf::new(),
                 legacy_path: home.path().join("sessions"),
             };
-            Self { state, writer, lease, manifest, recovery, _home: home }
+            Self {
+                state,
+                writer,
+                lease,
+                manifest,
+                recovery,
+                _home: home,
+            }
         }
 
         fn publish(&self) -> Result<(), String> {
@@ -1697,9 +1703,7 @@ mod shutdown_race_regression_tests {
 
         fn restart_and_unlock(&self) {
             // Independent synthetic re-open of the same preserved vault.
-            let security = SecurityGate::open(
-                self._home.path().join("security-v1.json"),
-            ).unwrap();
+            let security = SecurityGate::open(self._home.path().join("security-v1.json")).unwrap();
             security.unlock(PASSWORD).unwrap();
             let lease = security.require_unlocked().unwrap();
             let manifest = VaultManifest::read(&self.state.vault_root).unwrap();
@@ -1707,13 +1711,11 @@ mod shutdown_race_regression_tests {
                 serde_json::to_value(&manifest).unwrap(),
                 serde_json::to_value(&self.manifest).unwrap(),
             );
-            let vault = CryptoVault::restore_with_recovery(
-                &security, lease, &manifest, &self.recovery,
-            ).unwrap();
+            let vault =
+                CryptoVault::restore_with_recovery(&security, lease, &manifest, &self.recovery)
+                    .unwrap();
             let writer = Arc::new(
-                VaultCaptureStore::open(
-                    &self.state.vault_root, vault, &security, lease,
-                ).unwrap(),
+                VaultCaptureStore::open(&self.state.vault_root, vault, &security, lease).unwrap(),
             );
             let receiver = native_capture_ipc::NativeCaptureIpc::start(
                 self.state.archive_root.clone(),
@@ -1721,7 +1723,8 @@ mod shutdown_race_regression_tests {
                 security.clone(),
                 lease,
                 Arc::new(Mutex::new(())),
-            ).unwrap();
+            )
+            .unwrap();
             let first = SessionDescriptor::read(&self.state.archive_root).unwrap();
             assert_ne!(first.port, 0);
             drop(receiver);
@@ -1772,7 +1775,9 @@ mod shutdown_race_regression_tests {
             close_started_tx.send(()).unwrap();
             shutdown_owner_session(&closer_state);
         });
-        close_started_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        close_started_rx
+            .recv_timeout(Duration::from_secs(10))
+            .unwrap();
         release_tx.send(()).unwrap();
         assert!(publisher.join().unwrap().is_ok());
         closer.join().unwrap();
@@ -1788,13 +1793,21 @@ mod shutdown_race_regression_tests {
         let fixture = Fixture::new();
         let writer = {
             let vault = CryptoVault::restore_with_recovery(
-                &fixture.state.security, fixture.lease, &fixture.manifest,
-                &fixture.recovery,
-            ).unwrap();
-            Arc::new(VaultCaptureStore::open(
-                &fixture.state.vault_root, vault, &fixture.state.security,
+                &fixture.state.security,
                 fixture.lease,
-            ).unwrap())
+                &fixture.manifest,
+                &fixture.recovery,
+            )
+            .unwrap();
+            Arc::new(
+                VaultCaptureStore::open(
+                    &fixture.state.vault_root,
+                    vault,
+                    &fixture.state.security,
+                    fixture.lease,
+                )
+                .unwrap(),
+            )
         };
         let state = fixture.state.clone();
         let lease = fixture.lease;
@@ -1841,7 +1854,8 @@ mod shutdown_race_regression_tests {
             fixture.state.security.clone(),
             fixture.lease,
             Arc::new(Mutex::new(())),
-        ).is_err());
+        )
+        .is_err());
         assert_eq!(std::fs::read(fixture.descriptor_path()).unwrap(), bytes);
         assert_ne!(original.port, 0);
         assert!(teardown_owner_session(&fixture.state).locked);
@@ -1859,7 +1873,8 @@ mod shutdown_race_regression_tests {
         std::fs::write(
             fixture.descriptor_path(),
             serde_json::to_vec(&foreign).unwrap(),
-        ).unwrap();
+        )
+        .unwrap();
         shutdown_owner_session(&fixture.state);
         assert_eq!(
             SessionDescriptor::read(&fixture.state.archive_root).unwrap(),
