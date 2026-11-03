@@ -57,11 +57,11 @@ export interface UiModuleHandle {
 }
 export interface UiModuleRegistration {
   readonly id:string; readonly route:UiRouteId; readonly title:string;
-  readonly availability:"available"|"planned"; readonly mount?:(context:UiModuleContext)=>UiModuleHandle;
+  readonly availability:"available"|"legacy-workspace"|"planned"; readonly mount?:(context:UiModuleContext)=>UiModuleHandle;
 }
-/** Route metadata remains separate from module mounts so feature lanes can integrate independently. */
+/** Route reachability through Reader's legacy dispatcher is not an independently mounted module. */
 export const UI_MODULES:readonly UiModuleRegistration[]=UI_ROUTES.map((route)=>({
-  id:route.moduleId,route:route.id,title:route.label,availability:"available" as const,
+  id:route.moduleId,route:route.id,title:route.label,availability:"legacy-workspace" as const,
 }));
 export class UiModuleRegistry {
   private readonly byId=new Map<string,UiModuleRegistration>();

@@ -179,7 +179,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     activeWorkspace = workspace;
     activeRoute = route;
     setActiveRoute(workspaceNav, route, workspace);
-    uiShell.setActiveRoute(route);
+    uiShell.setActiveRoute(route, workspace);
     const label = WORKSPACES.find(item => item.id === workspace)?.label ?? "Archive";
     view.setAttribute("aria-label", label + " workspace");
   };

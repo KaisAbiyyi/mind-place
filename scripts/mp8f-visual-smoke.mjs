@@ -77,6 +77,15 @@ try {
           selected: selected.length === 1 && selected[0].getAttribute("data-route") === ({ library: "overview", memories: "curated-memory", graph: "hive-mind-graph", health: "settings" })[expected],
           heading: Boolean(rect && rect.width > 40 && rect.left >= 0 && rect.right <= window.innerWidth + 1),
           horizontalOverflow: screen.scrollWidth > window.innerWidth + 1,
+          viewportScrollWidth: screen.scrollWidth, viewportWidth: window.innerWidth,
+          horizontalScrollNodes: [...document.querySelectorAll("*")].filter((el) => el.scrollWidth > el.clientWidth + 1)
+            .slice(0, 24).map((el) => {
+              const bounds = el.getBoundingClientRect(), styles = getComputedStyle(el);
+              return { tag: el.tagName, id: el.id, className: typeof el.className === "string" ? el.className : "",
+                left: Math.round(bounds.left), right: Math.round(bounds.right),
+                scrollWidth: el.scrollWidth, clientWidth: el.clientWidth,
+                overflowX: styles.overflowX, minWidth: styles.minWidth };
+            }),
           overflowNodes: [...document.querySelectorAll("*")].filter((element) => {
             const bounds = element.getBoundingClientRect();
             return bounds.right > window.innerWidth + 1 || bounds.left < -1;

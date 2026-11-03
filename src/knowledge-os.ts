@@ -54,7 +54,10 @@ export function createWorkspaceNavigation(document: Document): HTMLElement {
     const heading=document.createElement("div"); heading.className="knowledge-os-nav-group-label"; heading.textContent=groupName; group.append(heading);
     for(const route of UI_ROUTES.filter((item)=>item.group===groupName)){
       const button=document.createElement("button"); button.type="button"; button.className="knowledge-os-nav-item";
-      button.dataset.navItem="primary"; button.dataset.route=route.id; button.dataset.workspace=route.defaultWorkspace; button.dataset.action="navigate-route";
+      button.dataset.navItem="primary"; button.dataset.route=route.id;
+      // Keep the Library secondary action and Setup distinct from their parent route's legacy aliases.
+      if(route.id!=="overview"&&route.id!=="setup-onboarding")button.dataset.workspace=route.defaultWorkspace;
+      button.dataset.action=route.id==="files-secure-vault"?"open-document-search":route.id==="setup-onboarding"?"open-setup":"navigate-route";
       button.title=route.label; button.setAttribute("aria-label",route.label);
       const icon=document.createElement("span"); icon.className="knowledge-os-nav-icon"; icon.append(createRouteIcon(document,route.id));
       const label=document.createElement("span"); label.className="nav-label"; label.textContent=route.label; button.append(icon,label); group.append(button);
@@ -94,7 +97,7 @@ export function bindWorkspaceNavigationKeyboard(nav: HTMLElement): () => void {
     if(!(target instanceof nav.ownerDocument.defaultView!.HTMLButtonElement)||!nav.contains(target))return;
     const buttons=[...nav.querySelectorAll<HTMLButtonElement>("button[data-nav-item]:not(:disabled)")].filter((button)=>!button.closest("[hidden]"));
     const index=buttons.indexOf(target); if(index<0)return;
-    const next=event.key==="Home"?0:event.key==="End"?buttons.length-1:event.key==="ArrowDown"?Math.min(buttons.length-1,index+1):event.key==="ArrowUp"?Math.max(0,index-1):-1;
+    const next=event.key==="Home"?0:event.key==="End"?buttons.length-1:event.key==="ArrowDown"||event.key==="ArrowRight"?Math.min(buttons.length-1,index+1):event.key==="ArrowUp"||event.key==="ArrowLeft"?Math.max(0,index-1):-1;
     if(next<0)return; event.preventDefault(); buttons[next]?.focus({preventScroll:true}); buttons[next]?.scrollIntoView?.({block:"nearest",inline:"nearest"});
   };
   nav.addEventListener("keydown",handler); return ()=>nav.removeEventListener("keydown",handler);

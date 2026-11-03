@@ -13,7 +13,7 @@ test("the route registry defines eight primary destinations and maps legacy work
     "Overview", "Conversations", "Curated Memory", "Hive Mind Graph",
     "Files & Secure Vault", "AI Providers & MCP", "Setup & Onboarding", "Settings",
   ]);
-  assert.equal(routeForWorkspace("library"), "overview");
+  assert.equal(routeForWorkspace("library"), "overview"); // Library search is a secondary Overview surface, not Overview itself.
   assert.equal(routeForWorkspace("people"), "curated-memory");
   assert.equal(routeForWorkspace("health"), "settings");
   assert.equal(routeForWorkspace("settings"), "settings");
@@ -23,6 +23,8 @@ test("the route registry defines eight primary destinations and maps legacy work
 test("module registry rejects duplicate ownership and resolves route registrations", () => {
   const registry = createUiModuleRegistry(UI_MODULES);
   assert.equal(registry.list().length, 8);
+  assert.ok(UI_MODULES.every((module) => module.availability === "legacy-workspace" && module.mount === undefined),
+    "Reachable legacy routes must not be advertised as independently mounted modules");
   assert.equal(registry.forRoute("curated-memory")?.id, "curated-memory");
   assert.equal(registry.get("hive-mind-graph")?.route, "hive-mind-graph");
   assert.throws(() => createUiModuleRegistry([
@@ -143,6 +145,8 @@ test("shell preferences, command palette and shortcut are accessible and disposa
   }), /MP_UI_COMMAND_INVALID/);
   shell.setActiveRoute("settings");
   assert.equal(root.querySelector("#route-breadcrumb")?.textContent, "Settings");
+  shell.setActiveRoute("overview", "library");
+  assert.equal(root.querySelector("#route-breadcrumb")?.textContent, "Overview / Library search");
   shell.destroy();
   assert.equal(root.querySelector("#command-palette"), null);
 });
