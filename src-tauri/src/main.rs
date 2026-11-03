@@ -773,8 +773,10 @@ async fn unlock_security(
     .map_err(|error| error.to_string())?
 }
 
-#[tauri::command]
-fn lock_security(state: State<'_, AppState>) -> SecurityStatus {
+// Also used by native application shutdown. Dropping the owned receiver
+// invokes its identity-checked descriptor cleanup; never unlink a session
+// descriptor directly from a window or process exit handler.
+fn teardown_owner_session(state: &AppState) -> SecurityStatus {
     // Lock cannot complete while a prior authorized grant is committing.
     // Conversely, a queued grant revalidates its lease after acquiring gate.
     let status = lock_document_authority(
@@ -798,6 +800,11 @@ fn lock_security(state: State<'_, AppState>) -> SecurityStatus {
     let _ = hosted_tunnel::stop_and_revoke(&state);
     state.mcp.lock().unwrap_or_else(|e| e.into_inner()).take();
     status
+}
+
+#[tauri::command]
+fn lock_security(state: State<'_, AppState>) -> SecurityStatus {
+    teardown_owner_session(&state)
 }
 
 /// Owner-only document root inventory. Never part of the MCP tool catalog.
@@ -1315,6 +1322,14 @@ fn main() {
                 .build()?;
             Ok(())
         })
+        // CloseRequested is handled while AppState and its native receiver are
+        // still alive. A plain window close must revoke the unlock epoch and
+        // retire the exact owned capture descriptor just like explicit Lock.
+        .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+                teardown_owner_session(&window.state::<AppState>());
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             get_security_status,
             mcp_commands::get_local_mcp_status,
@@ -1366,8 +1381,15 @@ fn main() {
             inspect_retrieval_context,
             inspect_retrieval_fetch
         ])
-        .run(tauri::generate_context!())
-        .expect("Mind Place failed to start");
+        .build(tauri::generate_context!())
+        .expect("Mind Place failed to build")
+        .run(|app, event| {
+            // Also cover application-level exits that do not originate from a
+            // webview window close. This is idempotent after CloseRequested.
+            if matches!(event, tauri::RunEvent::Exit) {
+                teardown_owner_session(&app.state::<AppState>());
+            }
+        });
 }
 
 #[cfg(test)]
