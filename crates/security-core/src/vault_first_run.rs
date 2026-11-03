@@ -60,6 +60,9 @@ impl FirstRunJournal {
     /// unlock() on a profile that has not completed its first-run ceremony.
     pub fn ensure_start(root: &Path, secret: &[u8], configured: bool) -> Result<()> {
         super::validate_secret(secret)?;
+        if !root.is_absolute() {
+            return Err(SecurityError::UnsafePath);
+        }
         if !configured {
             let parent = root.parent().ok_or(SecurityError::UnsafePath)?;
             safe_path(parent)?;
