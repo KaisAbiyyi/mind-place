@@ -60,6 +60,12 @@ impl FirstRunJournal {
     /// unlock() on a profile that has not completed its first-run ceremony.
     pub fn ensure_start(root: &Path, secret: &[u8], configured: bool) -> Result<()> {
         super::validate_secret(secret)?;
+        if !configured {
+            let parent = root.parent().ok_or(SecurityError::UnsafePath)?;
+            safe_path(parent)?;
+            fs::create_dir_all(parent)?;
+            safe_path(parent)?;
+        }
         validate_empty_root(root)?;
         let parent = root.parent().ok_or(SecurityError::UnsafePath)?;
         if parent.join(COMMITTING).exists() || parent.join(COMPLETE).exists() {
@@ -245,6 +251,17 @@ mod tests {
         assert!(FirstRunJournal::mark_committing(&root).is_err());
         let marker = fs::read(home.path().join(INTENT)).unwrap();
         assert!(!marker.windows(pass.len()).any(|w| w == pass));
+    }
+
+    #[test]
+    fn fresh_profile_directory_is_created_before_verifier() {
+        let home = tempfile::tempdir().unwrap();
+        let profile = home.path().join("new-profile");
+        let root = profile.join("encrypted-vault-v1");
+        assert!(!profile.exists());
+        FirstRunJournal::ensure_start(&root, b"synthetic correct secret", false).unwrap();
+        assert!(profile.join(INTENT).is_file());
+        assert!(FirstRunJournal::can_resume(&root, b"synthetic correct secret").unwrap());
     }
 
     #[test]
