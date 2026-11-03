@@ -167,7 +167,9 @@ export function mountUiShell(root: HTMLElement, options: UiShellOptions): UiShel
     technicalButton.textContent = "Technical: " + (technicalMode ? "On" : "Off");
     technicalButton.setAttribute("aria-pressed", String(technicalMode));
     technicalButton.setAttribute("aria-label", technicalMode ? "Hide technical details" : "Show technical details");
-    sidebarButton.textContent = sidebarCollapsed ? "Expand" : "Collapse";
+    // The icon button is 30px wide: full words silently extend its scroll width past the viewport.
+    // Use a compact glyph and preserve the explicit, stateful accessible name below.
+    sidebarButton.textContent = "☰";
     sidebarButton.setAttribute("aria-expanded", String(!sidebarCollapsed));
     sidebarButton.setAttribute("aria-label", sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar");
     syncSecondaryNavigation();
