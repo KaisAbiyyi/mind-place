@@ -636,6 +636,7 @@ mod tests {
             vault: std::sync::Arc::new(std::sync::Mutex::new(None)),
             native_capture: std::sync::Arc::new(std::sync::Mutex::new(None)),
             security: security.clone(),
+            shutdown_requested: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             state_path,
             index_path: dir.path().join("index.sqlite3"),
             archive_index_write_gate: std::sync::Arc::new(std::sync::Mutex::new(())),
