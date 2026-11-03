@@ -1257,7 +1257,9 @@ fn main() {
             let parent = root.parent().unwrap_or(&root);
             let legacy_exists = root.exists() || state_path.exists() || index_path.exists();
             let vault_exists = parent.join("vault-v1.json").exists()
-                || parent.join("encrypted-vault-v1/vault-v1.json").exists();
+                || mind_place_security::vault_first_run::FirstRunJournal::has_vault_evidence(
+                    &vault_root,
+                )?;
             let store = if legacy_exists && !vault_exists {
                 Some(ArchiveStore::open(&root)?)
             } else {

@@ -34,6 +34,29 @@ struct Intent {
 pub struct FirstRunJournal;
 
 impl FirstRunJournal {
+
+    /// Any on-disk trace of encrypted provisioning suppresses legacy fallback,
+    /// even if the manifest is absent, corrupt, or not yet published.
+    pub fn has_vault_evidence(root: &Path) -> Result<bool> {
+        if !root.is_absolute() {
+            return Err(SecurityError::UnsafePath);
+        }
+        let parent = root.parent().ok_or(SecurityError::UnsafePath)?;
+        for path in [
+            root.to_owned(),
+            root.with_extension("mp9b-init-partial"),
+            parent.join(INTENT),
+            parent.join(COMMITTING),
+            parent.join(COMPLETE),
+        ] {
+            match fs::symlink_metadata(path) {
+                Ok(_) => return Ok(true),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(SecurityError::Io(error)),
+            }
+        }
+        Ok(false)
+    }
     /// Called before initialize() on a new profile, or after authenticated
     /// unlock() on a profile that has not completed its first-run ceremony.
     pub fn ensure_start(root: &Path, secret: &[u8], configured: bool) -> Result<()> {
@@ -236,5 +259,17 @@ mod tests {
         assert!(FirstRunJournal::can_resume(&root, b"correct test secret").is_err());
         fs::write(home.path().join("index.sqlite3"), b"synthetic").unwrap();
         assert!(FirstRunJournal::can_resume(&root, b"correct test secret").is_err());
+    }
+
+    #[test]
+    fn missing_manifest_or_partial_still_blocks_legacy_fallback() {
+        let home = tempfile::tempdir().unwrap();
+        let root = home.path().join("encrypted-vault-v1");
+        assert!(!FirstRunJournal::has_vault_evidence(&root).unwrap());
+        fs::create_dir(&root).unwrap();
+        assert!(FirstRunJournal::has_vault_evidence(&root).unwrap());
+        fs::remove_dir(&root).unwrap();
+        fs::write(home.path().join(COMMITTING), b"synthetic").unwrap();
+        assert!(FirstRunJournal::has_vault_evidence(&root).unwrap());
     }
 }
