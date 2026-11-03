@@ -34,7 +34,6 @@ struct Intent {
 pub struct FirstRunJournal;
 
 impl FirstRunJournal {
-
     /// Any on-disk trace of encrypted provisioning suppresses legacy fallback,
     /// even if the manifest is absent, corrupt, or not yet published.
     pub fn has_vault_evidence(root: &Path) -> Result<bool> {
