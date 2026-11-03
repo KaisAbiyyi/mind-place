@@ -64,7 +64,9 @@
   .knowledge-os-nav-group-label { display:none; }
   .knowledge-os-nav-item { width:42px; min-width:42px; min-height:40px; justify-content:center; padding:0; }
   .knowledge-os-nav-item .nav-label { display:none; }
-  .knowledge-os-nav-secondary-group { display:flex !important; gap:4px; margin:0; overflow-x:auto; }
+  /* Secondary links must keep their hit-target width; the outer nav owns horizontal scrolling.
+     A shrinkable nested overflow scroller produced unclickable, overlapping links at 390px. */
+  .knowledge-os-nav-secondary-group { display:flex !important; flex:0 0 auto; gap:4px; margin:0; overflow:visible; }
   .knowledge-os-nav-secondary { min-height:26px; flex:0 0 auto; }
   .app-shell[data-sidebar-collapsed="true"] { grid-template-columns:minmax(0,1fr); }
   .app-shell[data-sidebar-collapsed="true"] .app-sidebar.library { align-items:center; }

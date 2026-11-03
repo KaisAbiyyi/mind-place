@@ -55,7 +55,29 @@ try {
     const navigate = {
       library: async () => {
         await page.locator('#knowledge-os-nav [data-route="overview"]').click();
-        await page.locator('#knowledge-os-nav [data-nav-secondary][data-workspace="library"]').click();
+        const libraryAction = page.locator('#knowledge-os-nav [data-nav-secondary][data-workspace="library"]');
+        try {
+          await libraryAction.click({ timeout: 10000 });
+        } catch (failure) {
+          const hitTest = await page.evaluate(() => {
+            const element = document.querySelector('#knowledge-os-nav [data-nav-secondary][data-workspace="library"]');
+            if (!element) return { missing: true };
+            const rect = element.getBoundingClientRect();
+            const x = rect.left + rect.width / 2, y = rect.top + rect.height / 2;
+            const identity = (node) => ({ tag: node.tagName, id: node.id, className: typeof node.className === "string" ? node.className : "" });
+            const ancestors = [];
+            for (let node = element; node && ancestors.length < 6; node = node.parentElement) {
+              const style = getComputedStyle(node);
+              ancestors.push({ ...identity(node), width: Math.round(node.getBoundingClientRect().width),
+                scrollWidth: node.scrollWidth, clientWidth: node.clientWidth, scrollLeft: node.scrollLeft,
+                overflowX: style.overflowX, flexShrink: style.flexShrink });
+            }
+            return { viewport: window.innerWidth, actionRect: { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom },
+              hitStack: document.elementsFromPoint(x, y).slice(0, 6).map(identity), ancestors };
+          });
+          console.error("MP-8F Library navigation pointer diagnostic: " + JSON.stringify(hitTest));
+          throw failure;
+        }
       },
       memories: async () => page.locator('#knowledge-os-nav [data-route="curated-memory"]').click(),
       graph: async () => page.locator('#knowledge-os-nav [data-route="hive-mind-graph"]').click(),
