@@ -221,3 +221,114 @@ test("already-unlocked encrypted verifier resumes recovery, never the legacy rea
   assert.equal(opened, 0);
   assert.equal(root.querySelector("#vault-code")?.textContent, "synthetic-offline-code");
 });
+
+
+test("aborted first-run restart requires authenticated fresh recovery confirmation", async () => {
+  const secret = "synthetic-first-run-password";
+  const calls: string[] = [];
+  let configured = false;
+  let published = false;
+  let pendingCode: string | null = null;
+  let ceremony = 0;
+  let opened = 0;
+  const invoke: Invoke = async <T>(command: string, args?: Record<string, unknown>) => {
+    calls.push(command);
+    if (command === "get_security_status") {
+      return { ...lockedConfigured, configured, vault_mode: "encrypted" } as T;
+    }
+    if (command === "initialize_security") throw new Error("MP_VAULT_PROVISION_REQUIRED");
+    if (command === "unlock_security") {
+      if (args?.secret !== secret) throw new Error("MP_SECURITY_INVALID_CREDENTIALS");
+      if (!published) throw new Error("MP_VAULT_INCOMPLETE_FIRST_RUN");
+      return { ...lockedConfigured, locked: false, vault_mode: "encrypted" } as T;
+    }
+    if (command === "begin_vault_setup") {
+      assert.equal(args?.secret, secret);
+      assert.equal(published, false);
+      configured = true;
+      pendingCode = "synthetic-code-" + ++ceremony;
+      return pendingCode as T;
+    }
+    if (command === "confirm_vault_setup") {
+      if (args?.code !== pendingCode) throw new Error("MP_RECOVERY_MISMATCH");
+      published = true;
+      pendingCode = null;
+      return undefined as T;
+    }
+    throw new Error("unexpected command: " + command);
+  };
+  const first = domRoot();
+  await mountSecurityGate({ root: first.root, invoke, onUnlocked: () => { opened++; } });
+  first.root.querySelector<HTMLInputElement>("#security-secret")!.value = secret;
+  first.root.querySelector<HTMLInputElement>("#security-secret-confirm")!.value = secret;
+  first.root.querySelector<HTMLFormElement>("#security-form")!.dispatchEvent(
+    new first.dom.window.Event("submit", { bubbles: true, cancelable: true }),
+  );
+  await delay(0);
+  assert.equal(first.root.querySelector("#vault-code")?.textContent, "synthetic-code-1");
+  assert.equal(opened, 0);
+
+  // Process and recovery proposal were lost, but the verifier remains.
+  pendingCode = null;
+  const restarted = domRoot();
+  await mountSecurityGate({ root: restarted.root, invoke, onUnlocked: () => { opened++; } });
+  const input = restarted.root.querySelector<HTMLInputElement>("#security-secret")!;
+  input.value = "wrong synthetic password";
+  restarted.root.querySelector<HTMLFormElement>("#security-form")!.dispatchEvent(
+    new restarted.dom.window.Event("submit", { bubbles: true, cancelable: true }),
+  );
+  await delay(0);
+  assert.match(restarted.root.querySelector("#security-error")?.textContent ?? "", /Incorrect/);
+  assert.equal(ceremony, 1);
+  input.value = secret;
+  restarted.root.querySelector<HTMLFormElement>("#security-form")!.dispatchEvent(
+    new restarted.dom.window.Event("submit", { bubbles: true, cancelable: true }),
+  );
+  await delay(0);
+  assert.equal(restarted.root.querySelector("#vault-code")?.textContent, "synthetic-code-2");
+  assert.equal(opened, 0);
+  const entered = restarted.root.querySelector<HTMLInputElement>("#vault-confirm-code")!;
+  restarted.root.querySelector<HTMLInputElement>("#vault-saved")!.checked = true;
+  entered.value = "synthetic-code-1";
+  restarted.root.querySelector<HTMLFormElement>("#vault-confirm-form")!.dispatchEvent(
+    new restarted.dom.window.Event("submit", { bubbles: true, cancelable: true }),
+  );
+  await delay(0);
+  assert.equal(published, false);
+  assert.match(restarted.root.querySelector("#vault-error")?.textContent ?? "", /confirmation failed/i);
+  entered.value = "synthetic-code-2";
+  restarted.root.querySelector<HTMLFormElement>("#vault-confirm-form")!.dispatchEvent(
+    new restarted.dom.window.Event("submit", { bubbles: true, cancelable: true }),
+  );
+  await delay(0);
+  assert.equal(published, true);
+  assert.equal(opened, 0);
+  assert.ok(restarted.root.querySelector("#security-form"));
+  restarted.root.querySelector<HTMLInputElement>("#security-secret")!.value = secret;
+  restarted.root.querySelector<HTMLFormElement>("#security-form")!.dispatchEvent(
+    new restarted.dom.window.Event("submit", { bubbles: true, cancelable: true }),
+  );
+  await delay(0);
+  assert.equal(opened, 1);
+  assert.ok(calls.includes("confirm_vault_setup"));
+});
+
+test("configured vault with missing or corrupt manifest never enters provisioning", async () => {
+  const { dom, root } = domRoot();
+  const calls: string[] = [];
+  const invoke: Invoke = async <T>(command: string) => {
+    calls.push(command);
+    if (command === "get_security_status") return { ...lockedConfigured, vault_mode: "encrypted" } as T;
+    if (command === "unlock_security") throw new Error("MP_SECURITY_IO:corrupt vault manifest");
+    throw new Error("unexpected " + command);
+  };
+  await mountSecurityGate({ root, invoke, onUnlocked: () => assert.fail("must remain locked") });
+  root.querySelector<HTMLInputElement>("#security-secret")!.value = "correct synthetic secret";
+  root.querySelector<HTMLFormElement>("#security-form")!.dispatchEvent(
+    new dom.window.Event("submit", { bubbles: true, cancelable: true }),
+  );
+  await delay(0);
+  assert.equal(root.querySelector("#vault-code"), null);
+  assert.ok(!calls.includes("begin_vault_setup"));
+  assert.match(root.querySelector("#security-error")?.textContent ?? "", /stayed locked/i);
+});

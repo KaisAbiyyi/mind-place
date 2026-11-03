@@ -90,6 +90,11 @@ jobs:
       - name: Portable backup and filesystem publication regressions
         if: always()
         run: cargo test --locked -p mind-place-security vault_backup -- --nocapture
+      - name: Authenticated first-run restart and provisioning regressions
+        if: always()
+        run: |
+          cargo test --locked -p mind-place-security vault_first_run -- --nocapture
+          cargo test --locked -p mind-place-state --features sqlcipher-preview vault_bootstrap -- --nocapture
       - name: Encrypted vault migration restart regressions
         if: always()
         run: cargo test --locked -p mind-place-index --features sqlcipher-preview --test vault_migration_restart -- --nocapture

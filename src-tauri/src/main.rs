@@ -693,6 +693,20 @@ async fn unlock_security(
             let secret = Zeroizing::new(secret);
             let status = security.unlock(secret.as_bytes()).map_err(security_error)?;
             let lease = security.require_unlocked().map_err(security_error)?;
+            if !vault_root.exists()
+                && matches!(
+                    mind_place_security::vault_first_run::FirstRunJournal::can_resume(
+                        &vault_root,
+                        secret.as_bytes(),
+                    ),
+                    Ok(true)
+                )
+            {
+                // The owner authenticated; the verifier is not an active vault.
+                // Revoke this epoch before starting a fresh offline ceremony.
+                security.lock();
+                return Err("MP_VAULT_INCOMPLETE_FIRST_RUN".to_owned());
+            }
             let opened = (|| -> Result<Arc<VaultCaptureStore>, String> {
                 let manifest = mind_place_security::vault::VaultManifest::read(&vault_root)
                     .map_err(security_error)?;

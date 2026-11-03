@@ -4,7 +4,7 @@
 use super::AppState;
 use mind_place_index::vault_archive::VaultCaptureStore;
 use mind_place_security::vault::{CryptoVault, RecoverySecret, VaultManifest};
-use mind_place_security::SecurityStatus;
+use mind_place_security::{vault_first_run::FirstRunJournal, SecurityStatus};
 use mind_place_state::vault_bootstrap::PreparedFirstRunVault;
 use std::sync::{Arc, Mutex};
 use tauri::State;
@@ -32,22 +32,34 @@ pub(super) async fn begin_vault_setup(
         if vault_root.exists() {
             return Err("MP_VAULT_EXISTS:never overwrite an existing vault".to_owned());
         }
-        // Initializing the verifier never creates legacy state or archive.
-        // After process restart, require the existing unlock secret again.
-        if security.status().configured {
+        // A durable authenticated intent MUST precede the verifier. Otherwise
+        // a crash creates an indistinguishable orphan verifier and missing vault.
+        let configured = security.status().configured;
+        if configured {
             security
                 .unlock(secret.as_bytes())
                 .map_err(|error| format!("{}:{}", error.code(), error))?;
-        } else {
-            security
-                .initialize(secret.as_bytes())
-                .map_err(|error| format!("{}:{}", error.code(), error))?;
+        }
+        if let Err(error) = FirstRunJournal::ensure_start(&vault_root, secret.as_bytes(), configured) {
+            security.lock();
+            return Err(format!("{}:{}", error.code(), error));
+        }
+        if !configured {
+            if let Err(error) = security.initialize(secret.as_bytes()) {
+                security.lock();
+                return Err(format!("{}:{}", error.code(), error));
+            }
         }
         let lease = security
             .require_unlocked()
             .map_err(|error| format!("{}:{}", error.code(), error))?;
-        let prepared = PreparedFirstRunVault::prepare(&vault_root, &security, lease)
-            .map_err(|error| format!("{}:{}", error.code(), error))?;
+        let prepared = match PreparedFirstRunVault::prepare(&vault_root, &security, lease) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                security.lock();
+                return Err(format!("{}:{}", error.code(), error));
+            }
+        };
         let display_only = prepared.recovery_code();
         *slot = Some(prepared);
         Ok(display_only.as_str().to_owned())

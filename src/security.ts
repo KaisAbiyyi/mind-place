@@ -224,7 +224,7 @@ export async function mountSecurityGate({ root, invoke, onUnlocked }: SecurityGa
       onUnlocked();
     } catch (cause) {
       const failure = cause instanceof Error ? cause.message : String(cause);
-      if (failure.includes("MP_VAULT_PROVISION_REQUIRED") || failure.includes("MP_VAULT_NOT_READY")) {
+      if (failure.includes("MP_VAULT_PROVISION_REQUIRED") || failure.includes("MP_VAULT_NOT_READY") || failure.includes("MP_VAULT_INCOMPLETE_FIRST_RUN")) {
         try {
           const recoveryCode = await invoke<string>("begin_vault_setup", { secret });
           await presentVaultRecovery(root, invoke, recoveryCode, onUnlocked);
