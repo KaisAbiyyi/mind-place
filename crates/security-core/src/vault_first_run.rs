@@ -59,6 +59,7 @@ impl FirstRunJournal {
     /// Called before initialize() on a new profile, or after authenticated
     /// unlock() on a profile that has not completed its first-run ceremony.
     pub fn ensure_start(root: &Path, secret: &[u8], configured: bool) -> Result<()> {
+        super::validate_secret(secret)?;
         validate_empty_root(root)?;
         let parent = root.parent().ok_or(SecurityError::UnsafePath)?;
         if parent.join(COMMITTING).exists() || parent.join(COMPLETE).exists() {
@@ -250,6 +251,8 @@ mod tests {
     fn unmarked_or_legacy_or_tampered_root_fails_closed() {
         let home = tempfile::tempdir().unwrap();
         let root = home.path().join("encrypted-vault-v1");
+        assert!(FirstRunJournal::ensure_start(&root, b"short", false).is_err());
+        assert!(!home.path().join(INTENT).exists());
         assert!(!FirstRunJournal::can_resume(&root, b"correct test secret").unwrap());
         assert!(FirstRunJournal::ensure_start(&root, b"correct test secret", true).is_err());
         FirstRunJournal::ensure_start(&root, b"correct test secret", false).unwrap();
