@@ -680,6 +680,15 @@ async fn initialize_security(
     .map_err(|error| error.to_string())?
 }
 
+/// A queued command submitted before an explicit Lock or a newer unlock
+/// cannot later resurrect that older session after the owner revokes it.
+fn reject_superseded_unlock(security: &SecurityGate, request_epoch: u64) -> Result<(), String> {
+    if security.status().epoch != request_epoch {
+        return Err("MP_UNLOCK_SUPERSEDED".to_owned());
+    }
+    Ok(())
+}
+
 fn owner_session_present(
     native_capture: &Arc<Mutex<Option<native_capture_ipc::NativeCaptureIpc>>>,
     vault: &Arc<Mutex<Option<Arc<VaultCaptureStore>>>>,
@@ -776,6 +785,7 @@ async fn unlock_security(
 ) -> Result<SecurityStatus, String> {
     if state.store.is_none() {
         let security = state.security.clone();
+        let request_epoch = security.status().epoch;
         let owner_unlock_gate = state.owner_unlock_gate.clone();
         let vault_root = state.vault_root.clone();
         let vault = state.vault.clone();
@@ -788,6 +798,7 @@ async fn unlock_security(
             let _attempt = owner_unlock_gate
                 .lock()
                 .unwrap_or_else(|error| error.into_inner());
+            reject_superseded_unlock(&security, request_epoch)?;
             if shutdown_requested.load(Ordering::Acquire) {
                 return Err("MP_APP_SHUTTING_DOWN".to_owned());
             }
@@ -855,6 +866,7 @@ async fn unlock_security(
         .map_err(|error| error.to_string())?;
     }
     let security = state.security.clone();
+    let request_epoch = security.status().epoch;
     let owner_unlock_gate = state.owner_unlock_gate.clone();
     let state_path = state.state_path.clone();
     let authority_ready = state.authority_ready.clone();
@@ -863,6 +875,7 @@ async fn unlock_security(
         let _attempt = owner_unlock_gate
             .lock()
             .unwrap_or_else(|error| error.into_inner());
+        reject_superseded_unlock(&security, request_epoch)?;
         if shutdown_requested.load(Ordering::Acquire) {
             return Err("MP_APP_SHUTTING_DOWN".to_owned());
         }
@@ -2002,6 +2015,70 @@ mod shutdown_race_regression_tests {
             std::fs::read(fixture.descriptor_path()).unwrap(),
             descriptor
         );
+        shutdown_owner_session(&fixture.state);
+        fixture.assert_closed();
+        fixture.restart_and_unlock();
+    }
+
+    #[test]
+    fn password_and_recovery_reauthentication_share_one_owner_gate() {
+        let fixture = Fixture::new();
+        fixture.publish().unwrap();
+        let descriptor = std::fs::read(fixture.descriptor_path()).unwrap();
+        let first_state = fixture.state.clone();
+        let recovery_state = fixture.state.clone();
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let password_worker = thread::spawn(move || {
+            let _attempt = first_state.owner_unlock_gate.lock().unwrap();
+            let epoch = first_state.security.status().epoch;
+            reject_superseded_unlock(&first_state.security, epoch).unwrap();
+            assert_eq!(first_state.security.unlock(PASSWORD).unwrap().epoch, epoch);
+            entered_tx.send(()).unwrap();
+            release_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        });
+        entered_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        let recovery_worker = thread::spawn(move || {
+            let epoch = recovery_state.security.status().epoch;
+            let _attempt = recovery_state.owner_unlock_gate.lock().unwrap();
+            reject_superseded_unlock(&recovery_state.security, epoch).unwrap();
+            assert_eq!(recovery_state.security.unlock(PASSWORD).unwrap().epoch, epoch);
+            assert!(owner_session_present(
+                &recovery_state.native_capture,
+                &recovery_state.vault
+            ));
+        });
+        release_tx.send(()).unwrap();
+        password_worker.join().unwrap();
+        recovery_worker.join().unwrap();
+        assert!(fixture.state.security.validate_lease(fixture.lease).is_ok());
+        assert_eq!(
+            std::fs::read(fixture.descriptor_path()).unwrap(),
+            descriptor
+        );
+        shutdown_owner_session(&fixture.state);
+        fixture.assert_closed();
+    }
+
+    #[test]
+    fn explicit_lock_supersedes_queued_password_or_recovery_request() {
+        let fixture = Fixture::new();
+        fixture.publish().unwrap();
+        let request_epoch = fixture.state.security.status().epoch;
+        let stale_state = fixture.state.clone();
+        let (queued_tx, queued_rx) = mpsc::channel();
+        let (resume_tx, resume_rx) = mpsc::channel();
+        let pending = thread::spawn(move || {
+            queued_tx.send(()).unwrap();
+            resume_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+            let _attempt = stale_state.owner_unlock_gate.lock().unwrap();
+            reject_superseded_unlock(&stale_state.security, request_epoch)
+        });
+        queued_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        assert!(teardown_owner_session(&fixture.state).locked);
+        resume_tx.send(()).unwrap();
+        assert_eq!(pending.join().unwrap().unwrap_err(), "MP_UNLOCK_SUPERSEDED");
+        assert!(fixture.state.native_capture.lock().unwrap().is_none());
         shutdown_owner_session(&fixture.state);
         fixture.assert_closed();
         fixture.restart_and_unlock();
