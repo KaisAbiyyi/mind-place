@@ -1914,23 +1914,38 @@ mod shutdown_race_regression_tests {
         let (release_tx, release_rx) = mpsc::channel();
         let first = thread::spawn(move || {
             let _attempt = first_state.owner_unlock_gate.lock().unwrap();
-            assert_eq!(first_state.security.unlock(PASSWORD).unwrap().epoch, owner_epoch);
-            assert!(owner_session_present(&first_state.native_capture, &first_state.vault));
+            assert_eq!(
+                first_state.security.unlock(PASSWORD).unwrap().epoch,
+                owner_epoch
+            );
+            assert!(owner_session_present(
+                &first_state.native_capture,
+                &first_state.vault
+            ));
             entered_tx.send(()).unwrap();
             release_rx.recv_timeout(Duration::from_secs(10)).unwrap();
         });
         entered_rx.recv_timeout(Duration::from_secs(10)).unwrap();
         let second = thread::spawn(move || {
             let _attempt = second_state.owner_unlock_gate.lock().unwrap();
-            assert_eq!(second_state.security.unlock(PASSWORD).unwrap().epoch, owner_epoch);
-            assert!(owner_session_present(&second_state.native_capture, &second_state.vault));
+            assert_eq!(
+                second_state.security.unlock(PASSWORD).unwrap().epoch,
+                owner_epoch
+            );
+            assert!(owner_session_present(
+                &second_state.native_capture,
+                &second_state.vault
+            ));
         });
         release_tx.send(()).unwrap();
         first.join().unwrap();
         second.join().unwrap();
         assert!(fixture.state.security.validate_lease(fixture.lease).is_ok());
         assert!(fixture.state.authority_ready.load(Ordering::Acquire));
-        assert_eq!(std::fs::read(fixture.descriptor_path()).unwrap(), descriptor);
+        assert_eq!(
+            std::fs::read(fixture.descriptor_path()).unwrap(),
+            descriptor
+        );
         shutdown_owner_session(&fixture.state);
         fixture.assert_closed();
         fixture.restart_and_unlock();
@@ -1975,11 +1990,18 @@ mod shutdown_race_regression_tests {
         let descriptor = std::fs::read(fixture.descriptor_path()).unwrap();
         assert!(!fixture.state.security.lock_if_lease(stale));
         for _ in 0..3 {
-            assert!(fixture.state.security.unlock(b"wrong-synthetic-password").is_err());
+            assert!(fixture
+                .state
+                .security
+                .unlock(b"wrong-synthetic-password")
+                .is_err());
             assert!(fixture.state.security.validate_lease(current).is_ok());
         }
         assert!(fixture.state.security.status().retry_after_ms > 0);
-        assert_eq!(std::fs::read(fixture.descriptor_path()).unwrap(), descriptor);
+        assert_eq!(
+            std::fs::read(fixture.descriptor_path()).unwrap(),
+            descriptor
+        );
         shutdown_owner_session(&fixture.state);
         fixture.assert_closed();
         fixture.restart_and_unlock();
