@@ -4,6 +4,7 @@
 use crate::{Result, StateError, StateStore};
 use mind_place_security::{
     vault::{CryptoVault, RecoverySecret, VaultManifest},
+    vault_first_run::FirstRunJournal,
     SecurityGate, UnlockLease,
 };
 use std::{
@@ -100,6 +101,7 @@ impl PreparedFirstRunVault {
                 return Err(StateError::Corrupt);
             }
         }
+        FirstRunJournal::mark_committing(&self.target).map_err(|_| StateError::Corrupt)?;
         self.manifest
             .persist_new(&partial)
             .map_err(|_| StateError::Corrupt)?;
@@ -121,7 +123,9 @@ impl PreparedFirstRunVault {
         let final_store =
             StateStore::open_encrypted(self.target.join("state.sqlite3"), raw, gate, lease);
         raw.zeroize();
-        final_store
+        let final_store = final_store?;
+        FirstRunJournal::mark_complete(&self.target).map_err(|_| StateError::Corrupt)?;
+        Ok(final_store)
     }
 }
 
@@ -141,6 +145,7 @@ mod tests {
     fn confirmation_required_before_any_ciphertext_published() {
         let (home, gate, lease) = fixture();
         let vault_root = home.path().join("new-vault");
+        FirstRunJournal::ensure_start(&vault_root, b"synthetic-first-run-password", false).unwrap();
         let pending = PreparedFirstRunVault::prepare(&vault_root, &gate, lease).unwrap();
         let code = pending.recovery_code();
         assert!(!vault_root.exists());
@@ -173,6 +178,72 @@ mod tests {
         fs2::FileExt::try_lock_exclusive(&competing).unwrap();
         fs2::FileExt::unlock(&competing).unwrap();
         assert!(!code.is_empty());
+    }
+
+    #[test]
+    fn interrupted_first_run_requires_original_secret_and_new_confirmation() {
+        let home = tempfile::tempdir().unwrap();
+        let root = home.path().join("encrypted-vault-v1");
+        let secret = b"synthetic-first-run-password";
+        FirstRunJournal::ensure_start(&root, secret, false).unwrap();
+        let original = SecurityGate::open(home.path().join("security.json")).unwrap();
+        original.initialize(secret).unwrap();
+        let lease = original.require_unlocked().unwrap();
+        let abandoned = PreparedFirstRunVault::prepare(&root, &original, lease).unwrap();
+        let original_code = abandoned.recovery_code();
+        assert!(!root.exists());
+        drop(abandoned);
+        drop(original);
+        let restarted = SecurityGate::open(home.path().join("security.json")).unwrap();
+        assert!(restarted.unlock(b"not the original password").is_err());
+        assert!(restarted.require_unlocked().is_err());
+        restarted.unlock(secret).unwrap();
+        let lease = restarted.require_unlocked().unwrap();
+        assert!(FirstRunJournal::can_resume(&root, secret).unwrap());
+        FirstRunJournal::ensure_start(&root, secret, true).unwrap();
+        let resumed = PreparedFirstRunVault::prepare(&root, &restarted, lease).unwrap();
+        let new_code = resumed.recovery_code();
+        assert_ne!(original_code.as_str(), new_code.as_str());
+        assert!(resumed
+            .confirm_and_provision(original_code.as_str(), &restarted, lease)
+            .is_err());
+        assert!(!root.exists());
+        let encrypted = resumed
+            .confirm_and_provision(new_code.as_str(), &restarted, lease)
+            .unwrap();
+        assert!(!fs::read(encrypted.path())
+            .unwrap()
+            .starts_with(b"SQLite format 3\0"));
+        restarted.lock();
+        assert!(FirstRunJournal::can_resume(&root, secret).is_err());
+        fs::remove_file(root.join("vault-v1.json")).unwrap();
+        assert!(FirstRunJournal::can_resume(&root, secret).is_err());
+        assert!(FirstRunJournal::ensure_start(&root, secret, true).is_err());
+    }
+
+    #[test]
+    fn repeated_abort_and_committing_boundary_never_replaces_keys() {
+        let (home, gate, lease) = fixture();
+        let root = home.path().join("encrypted-vault-v1");
+        let secret = b"synthetic-first-run-password";
+        FirstRunJournal::ensure_start(&root, secret, false).unwrap();
+        for _ in 0..3 {
+            let pending = PreparedFirstRunVault::prepare(&root, &gate, lease).unwrap();
+            drop(pending);
+            assert!(FirstRunJournal::can_resume(&root, secret).unwrap());
+            FirstRunJournal::ensure_start(&root, secret, true).unwrap();
+        }
+        FirstRunJournal::mark_committing(&root).unwrap();
+        assert!(FirstRunJournal::can_resume(&root, secret).is_err());
+        assert!(PreparedFirstRunVault::prepare(&root, &gate, lease).is_ok());
+        let prepared = PreparedFirstRunVault::prepare(&root, &gate, lease).unwrap();
+        let code = prepared.recovery_code();
+        assert!(prepared
+            .confirm_and_provision(code.as_str(), &gate, lease)
+            .is_err());
+        assert!(!root.exists());
+        fs::create_dir(root.with_extension("mp9b-init-partial")).unwrap();
+        assert!(FirstRunJournal::can_resume(&root, secret).is_err());
     }
 
     #[test]

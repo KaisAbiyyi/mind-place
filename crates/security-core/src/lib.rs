@@ -1,6 +1,7 @@
 pub mod vault;
 pub mod vault_backup;
 pub mod vault_fence;
+pub mod vault_first_run;
 pub mod vault_fs;
 pub mod vault_migration;
 pub mod vault_storage;
@@ -217,17 +218,22 @@ impl SecurityGate {
         let config = read_config(&self.inner.config_path)?;
         validate_config(&config)?;
         if verify_secret(secret, &config.password_hash).is_err() {
-            state.locked = true;
+            // A failed reauthentication cannot revoke an authorized owner.
+            // Failure backoff still applies to further password attempts.
             state.failed_attempts = state.failed_attempts.saturating_add(1);
             let delay = failure_delay(state.failed_attempts);
             state.blocked_until = (!delay.is_zero()).then(|| Instant::now() + delay);
             return Err(SecurityError::InvalidCredentials);
         }
 
+        let was_locked = state.locked;
         state.locked = false;
         state.failed_attempts = 0;
         state.blocked_until = None;
-        advance_epoch(&mut state);
+        // An authenticated duplicate cannot invalidate an active receiver.
+        if was_locked {
+            advance_epoch(&mut state);
+        }
         Ok(status_from(&state))
     }
 
@@ -236,6 +242,17 @@ impl SecurityGate {
         state.locked = true;
         advance_epoch(&mut state);
         status_from(&state)
+    }
+
+    /// Only a worker still owning this exact unlock epoch may revoke it.
+    pub fn lock_if_lease(&self, lease: UnlockLease) -> bool {
+        let mut state = self.lock_state();
+        if !state.configured || state.locked || state.epoch != lease.epoch {
+            return false;
+        }
+        state.locked = true;
+        advance_epoch(&mut state);
+        true
     }
 
     pub fn require_unlocked(&self) -> Result<UnlockLease> {
@@ -499,6 +516,46 @@ mod tests {
             gate.unlock(b"correct horse battery staple"),
             Err(SecurityError::RateLimited { .. })
         ));
+    }
+
+    #[test]
+    fn duplicate_and_wrong_password_do_not_revoke_a_live_owner() {
+        let (_dir, gate) = gate();
+        gate.initialize(b"correct horse battery staple").unwrap();
+        let owner = gate.require_unlocked().unwrap();
+        let duplicate = gate.unlock(b"correct horse battery staple").unwrap();
+        assert_eq!(duplicate.epoch, owner.epoch());
+        assert!(gate.validate_lease(owner).is_ok());
+        for _ in 0..3 {
+            assert!(matches!(
+                gate.unlock(b"synthetic wrong password"),
+                Err(SecurityError::InvalidCredentials)
+            ));
+            assert!(gate.validate_lease(owner).is_ok());
+        }
+        assert!(gate.status().retry_after_ms > 0);
+        assert!(matches!(
+            gate.unlock(b"correct horse battery staple"),
+            Err(SecurityError::RateLimited { .. })
+        ));
+        assert!(gate.validate_lease(owner).is_ok());
+        assert!(gate.lock().locked);
+        assert!(gate.validate_lease(owner).is_err());
+    }
+
+    #[test]
+    fn stale_worker_cannot_revoke_newer_epoch() {
+        let (_dir, gate) = gate();
+        gate.initialize(b"correct horse battery staple").unwrap();
+        let stale = gate.require_unlocked().unwrap();
+        gate.lock();
+        gate.unlock(b"correct horse battery staple").unwrap();
+        let newer = gate.require_unlocked().unwrap();
+        assert_ne!(stale.epoch(), newer.epoch());
+        assert!(!gate.lock_if_lease(stale));
+        assert!(gate.validate_lease(newer).is_ok());
+        assert!(gate.lock_if_lease(newer));
+        assert!(gate.validate_lease(newer).is_err());
     }
 
     #[test]
