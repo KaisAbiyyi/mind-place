@@ -3,6 +3,8 @@
 mod document_refresh;
 mod hosted_tunnel;
 mod mcp_commands;
+mod native_capture_ipc;
+mod vault_commands;
 
 use document_refresh::DocumentRefreshRegistry;
 
@@ -14,9 +16,10 @@ use mind_place_index::documents::{
     DocumentHit, DocumentIndex, DocumentIndexReport, DocumentPreview,
 };
 use mind_place_index::{
-    ContextInspection, ContextPack, ContextRequest, FetchInspection, FetchRequest, FetchResponse,
-    GraphDirection, GraphKind, GraphNeighborhoodRequest, GraphNodeRef, IndexError, IndexStats,
-    IndexStore, RetrievalRequest, RetrievalResponse, SearchHit, SearchInspection,
+    vault_archive::VaultCaptureStore, ContextInspection, ContextPack, ContextRequest,
+    FetchInspection, FetchRequest, FetchResponse, GraphDirection, GraphKind,
+    GraphNeighborhoodRequest, GraphNodeRef, IndexError, IndexStats, IndexStore, RetrievalRequest,
+    RetrievalResponse, SearchHit, SearchInspection,
 };
 use mind_place_integration::transport::LocalMcpServer;
 use mind_place_security::{SecurityError, SecurityGate, SecurityStatus, UnlockLease};
@@ -35,8 +38,17 @@ use zeroize::Zeroizing;
 
 #[derive(Clone)]
 struct AppState {
-    store: ArchiveStore,
+    store: Option<ArchiveStore>,
+    archive_root: PathBuf,
+    vault_root: PathBuf,
+    pending_vault: vault_commands::PendingVault,
+    vault: Arc<Mutex<Option<Arc<VaultCaptureStore>>>>,
+    native_capture: Arc<Mutex<Option<native_capture_ipc::NativeCaptureIpc>>>,
     security: SecurityGate,
+    // Serializes password/recovery unlock with explicit Lock across all workers.
+    owner_unlock_gate: Arc<Mutex<()>>,
+    // Monotonic for the lifetime of this desktop process: never reopen after Exit.
+    shutdown_requested: Arc<AtomicBool>,
     state_path: PathBuf,
     index_path: PathBuf,
     // One derived-index writer per process. Avoid competing refresh/rebuild
@@ -63,6 +75,53 @@ struct SetupInfo {
     registered_browsers: Vec<String>,
     platform: String,
     legacy_available: bool,
+}
+
+fn legacy_archive(state: &AppState) -> Result<ArchiveStore, String> {
+    state
+        .store
+        .clone()
+        .ok_or_else(|| "MP_VAULT_NOT_READY:legacy plaintext archive disabled".to_owned())
+}
+
+// The owner vault handle pins the same epoch-bound cipher keys for each
+// invocation. No legacy plaintext open is permitted for a provisioned vault.
+fn owner_vault(state: &AppState) -> Option<Arc<VaultCaptureStore>> {
+    state
+        .vault
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone()
+}
+
+fn open_owner_state(
+    vault: &Option<Arc<VaultCaptureStore>>,
+    path: &Path,
+) -> mind_place_index::Result<StateStore> {
+    match vault {
+        Some(vault) => vault.open_state_store(),
+        None => Ok(StateStore::open(path)?),
+    }
+}
+
+fn open_owner_index(
+    vault: &Option<Arc<VaultCaptureStore>>,
+    path: &Path,
+) -> mind_place_index::Result<IndexStore> {
+    match vault {
+        Some(vault) => vault.open_index_store(),
+        None => IndexStore::open(path),
+    }
+}
+
+fn open_owner_document_index(
+    vault: &Option<Arc<VaultCaptureStore>>,
+    path: &Path,
+) -> mind_place_index::Result<DocumentIndex> {
+    match vault {
+        Some(vault) => vault.open_document_index(),
+        None => DocumentIndex::open(path),
+    }
 }
 
 fn security_error(error: SecurityError) -> String {
@@ -124,6 +183,27 @@ async fn blocking<T: Send + 'static>(
         .await
         .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())
+}
+
+async fn vaulted_blocking<T: Send + 'static>(
+    state: &AppState,
+    operation: impl FnOnce(Arc<VaultCaptureStore>) -> mind_place_index::Result<T> + Send + 'static,
+) -> Result<Option<T>, String> {
+    let adapter = state
+        .vault
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone();
+    let Some(adapter) = adapter else {
+        return Ok(None);
+    };
+    let lease = begin_unlocked(state)?;
+    let result = tauri::async_runtime::spawn_blocking(move || operation(adapter))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| format!("{}:{}", error.code(), error))?;
+    finish_unlocked(state, lease)?;
+    Ok(Some(result))
 }
 
 async fn gated_blocking<T: Send + 'static>(
@@ -210,9 +290,10 @@ async fn read_memory_authority<T: Send + 'static>(
 ) -> Result<T, String> {
     let lease = begin_unlocked(state)?;
     let state_path = state.state_path.clone();
+    let vault = owner_vault(state);
     let output = tauri::async_runtime::spawn_blocking(move || {
-        let authority = StateStore::open(state_path)?;
-        operation(authority)
+        let authority = open_owner_state(&vault, &state_path)?;
+        operation(authority).map_err(IndexError::from)
     })
     .await
     .map_err(|error| error.to_string())?
@@ -245,19 +326,29 @@ async fn get_memory_inspection(
 
 #[tauri::command]
 async fn refresh_archive_index(state: State<'_, AppState>) -> Result<IndexStats, String> {
-    let archive = state.store.clone();
+    let vault = owner_vault(&state);
+    let archive = if vault.is_none() {
+        Some(legacy_archive(&state)?)
+    } else {
+        None
+    };
     let state_path = state.state_path.clone();
     let index_path = state.index_path.clone();
     let write_gate = state.archive_index_write_gate.clone();
     index_task(&state, move |lease, security| {
         serialized_archive_index_writer(&write_gate, &security, lease, || {
-            let authority = StateStore::open(state_path)?;
-            let index = IndexStore::open(index_path)?;
-            index.sync_with_check(&archive, &authority, || {
+            let authority = open_owner_state(&vault, &state_path)?;
+            let index = open_owner_index(&vault, &index_path)?;
+            let check = || {
                 security
                     .validate_lease(lease)
                     .map_err(|_| IndexError::Revoked)
-            })
+            };
+            match (vault.as_ref(), archive.as_ref()) {
+                (Some(vault), _) => index.sync_vault_with_check(vault, &authority, check),
+                (None, Some(archive)) => index.sync_with_check(archive, &authority, check),
+                _ => Err(IndexError::Revoked),
+            }
         })
     })
     .await
@@ -265,19 +356,29 @@ async fn refresh_archive_index(state: State<'_, AppState>) -> Result<IndexStats,
 
 #[tauri::command]
 async fn rebuild_archive_index(state: State<'_, AppState>) -> Result<IndexStats, String> {
-    let archive = state.store.clone();
+    let vault = owner_vault(&state);
+    let archive = if vault.is_none() {
+        Some(legacy_archive(&state)?)
+    } else {
+        None
+    };
     let state_path = state.state_path.clone();
     let index_path = state.index_path.clone();
     let write_gate = state.archive_index_write_gate.clone();
     index_task(&state, move |lease, security| {
         serialized_archive_index_writer(&write_gate, &security, lease, || {
-            let authority = StateStore::open(state_path)?;
-            let index = IndexStore::open(index_path)?;
-            index.rebuild_with_check(&archive, &authority, || {
+            let authority = open_owner_state(&vault, &state_path)?;
+            let index = open_owner_index(&vault, &index_path)?;
+            let check = || {
                 security
                     .validate_lease(lease)
                     .map_err(|_| IndexError::Revoked)
-            })
+            };
+            match (vault.as_ref(), archive.as_ref()) {
+                (Some(vault), _) => index.rebuild_vault_with_check(vault, &authority, check),
+                (None, Some(archive)) => index.rebuild_with_check(archive, &authority, check),
+                _ => Err(IndexError::Revoked),
+            }
         })
     })
     .await
@@ -304,6 +405,7 @@ async fn read_archive_hive(
     }
     let hops = max_hops.unwrap_or(2).min(3);
     let index_path = state.index_path.clone();
+    let vault = owner_vault(&state);
     index_task(&state, move |lease, security| {
         let query = GraphNeighborhoodRequest {
             scope: "archive:chatgpt".into(),
@@ -313,11 +415,12 @@ async fn read_archive_hive(
             max_nodes: 120,
             max_edges: 240,
         };
-        let graph = IndexStore::open(index_path)?.graph_neighbors_with_check(&query, || {
-            security
-                .validate_lease(lease)
-                .map_err(|_| IndexError::Revoked)
-        })?;
+        let graph =
+            open_owner_index(&vault, &index_path)?.graph_neighbors_with_check(&query, || {
+                security
+                    .validate_lease(lease)
+                    .map_err(|_| IndexError::Revoked)
+            })?;
         let nodes = graph
             .nodes
             .iter()
@@ -361,7 +464,11 @@ async fn read_archive_hive(
 #[tauri::command]
 async fn get_archive_index_stats(state: State<'_, AppState>) -> Result<IndexStats, String> {
     let index_path = state.index_path.clone();
-    index_task(&state, move |_, _| IndexStore::open(index_path)?.stats()).await
+    let vault = owner_vault(&state);
+    index_task(&state, move |_, _| {
+        open_owner_index(&vault, &index_path)?.stats()
+    })
+    .await
 }
 
 #[tauri::command]
@@ -372,8 +479,9 @@ async fn search_archive_index(
     limit: Option<usize>,
 ) -> Result<Vec<SearchHit>, String> {
     let index_path = state.index_path.clone();
+    let vault = owner_vault(&state);
     index_task(&state, move |_, _| {
-        IndexStore::open(index_path)?.search(
+        open_owner_index(&vault, &index_path)?.search(
             &query,
             include_history.unwrap_or(false),
             limit.unwrap_or(20),
@@ -388,8 +496,9 @@ async fn search_retrieval(
     request: RetrievalRequest,
 ) -> Result<RetrievalResponse, String> {
     let index_path = state.index_path.clone();
+    let vault = owner_vault(&state);
     index_task(&state, move |_, _| {
-        IndexStore::open(index_path)?.retrieve(&request)
+        open_owner_index(&vault, &index_path)?.retrieve(&request)
     })
     .await
 }
@@ -399,14 +508,25 @@ async fn fetch_retrieval(
     state: State<'_, AppState>,
     request: FetchRequest,
 ) -> Result<FetchResponse, String> {
-    let archive = state.store.clone();
+    let vault = owner_vault(&state);
+    let archive = if vault.is_none() {
+        Some(legacy_archive(&state)?)
+    } else {
+        None
+    };
     let index_path = state.index_path.clone();
     index_task(&state, move |lease, security| {
-        IndexStore::open(index_path)?.fetch_with_check(&archive, &request, || {
+        let index = open_owner_index(&vault, &index_path)?;
+        let check = || {
             security
                 .validate_lease(lease)
                 .map_err(|_| IndexError::Revoked)
-        })
+        };
+        match (vault.as_ref(), archive.as_ref()) {
+            (Some(vault), _) => index.fetch_vault_with_check(vault, &request, check),
+            (None, Some(archive)) => index.fetch_with_check(archive, &request, check),
+            _ => Err(IndexError::Revoked),
+        }
     })
     .await
 }
@@ -416,14 +536,25 @@ async fn build_retrieval_context(
     state: State<'_, AppState>,
     request: ContextRequest,
 ) -> Result<ContextPack, String> {
-    let archive = state.store.clone();
+    let vault = owner_vault(&state);
+    let archive = if vault.is_none() {
+        Some(legacy_archive(&state)?)
+    } else {
+        None
+    };
     let index_path = state.index_path.clone();
     index_task(&state, move |lease, security| {
-        IndexStore::open(index_path)?.build_context_with_check(&archive, &request, || {
+        let index = open_owner_index(&vault, &index_path)?;
+        let check = || {
             security
                 .validate_lease(lease)
                 .map_err(|_| IndexError::Revoked)
-        })
+        };
+        match (vault.as_ref(), archive.as_ref()) {
+            (Some(vault), _) => index.build_context_vault_with_check(vault, &request, check),
+            (None, Some(archive)) => index.build_context_with_check(archive, &request, check),
+            _ => Err(IndexError::Revoked),
+        }
     })
     .await
 }
@@ -434,8 +565,9 @@ async fn inspect_retrieval(
     request: RetrievalRequest,
 ) -> Result<SearchInspection, String> {
     let index_path = state.index_path.clone();
+    let vault = owner_vault(&state);
     index_task(&state, move |lease, security| {
-        IndexStore::open(index_path)?.inspect_retrieval_with_check(&request, || {
+        open_owner_index(&vault, &index_path)?.inspect_retrieval_with_check(&request, || {
             security
                 .validate_lease(lease)
                 .map_err(|_| IndexError::Revoked)
@@ -449,14 +581,25 @@ async fn inspect_retrieval_context(
     state: State<'_, AppState>,
     request: ContextRequest,
 ) -> Result<ContextInspection, String> {
-    let archive = state.store.clone();
+    let vault = owner_vault(&state);
+    let archive = if vault.is_none() {
+        Some(legacy_archive(&state)?)
+    } else {
+        None
+    };
     let index_path = state.index_path.clone();
     index_task(&state, move |lease, security| {
-        IndexStore::open(index_path)?.inspect_context_with_check(&archive, &request, || {
+        let index = open_owner_index(&vault, &index_path)?;
+        let check = || {
             security
                 .validate_lease(lease)
                 .map_err(|_| IndexError::Revoked)
-        })
+        };
+        match (vault.as_ref(), archive.as_ref()) {
+            (Some(vault), _) => index.inspect_context_vault_with_check(vault, &request, check),
+            (None, Some(archive)) => index.inspect_context_with_check(archive, &request, check),
+            _ => Err(IndexError::Revoked),
+        }
     })
     .await
 }
@@ -466,21 +609,46 @@ async fn inspect_retrieval_fetch(
     state: State<'_, AppState>,
     request: FetchRequest,
 ) -> Result<FetchInspection, String> {
-    let archive = state.store.clone();
+    let vault = owner_vault(&state);
+    let archive = if vault.is_none() {
+        Some(legacy_archive(&state)?)
+    } else {
+        None
+    };
     let index_path = state.index_path.clone();
     index_task(&state, move |lease, security| {
-        IndexStore::open(index_path)?.inspect_fetch_with_check(&archive, &request, || {
+        let index = open_owner_index(&vault, &index_path)?;
+        let check = || {
             security
                 .validate_lease(lease)
                 .map_err(|_| IndexError::Revoked)
-        })
+        };
+        match (vault.as_ref(), archive.as_ref()) {
+            (Some(vault), _) => index.inspect_fetch_vault_with_check(vault, &request, check),
+            (None, Some(archive)) => index.inspect_fetch_with_check(archive, &request, check),
+            _ => Err(IndexError::Revoked),
+        }
     })
     .await
 }
 
+#[derive(Serialize)]
+struct DesktopSecurityStatus {
+    #[serde(flatten)]
+    status: SecurityStatus,
+    vault_mode: &'static str,
+}
+
 #[tauri::command]
-fn get_security_status(state: State<'_, AppState>) -> SecurityStatus {
-    state.security.status()
+fn get_security_status(state: State<'_, AppState>) -> DesktopSecurityStatus {
+    DesktopSecurityStatus {
+        status: state.security.status(),
+        vault_mode: if state.store.is_some() {
+            "legacy"
+        } else {
+            "encrypted"
+        },
+    }
 }
 
 #[tauri::command]
@@ -488,6 +656,11 @@ async fn initialize_security(
     state: State<'_, AppState>,
     secret: String,
 ) -> Result<SecurityStatus, String> {
+    if state.store.is_none() {
+        return Err(
+            "MP_VAULT_PROVISION_REQUIRED:new installs cannot initialize plaintext state".into(),
+        );
+    }
     let security = state.security.clone();
     let state_path = state.state_path.clone();
     let authority_ready = state.authority_ready.clone();
@@ -507,19 +680,216 @@ async fn initialize_security(
     .map_err(|error| error.to_string())?
 }
 
+/// A queued command submitted before an explicit Lock or a newer unlock
+/// cannot later resurrect that older session after the owner revokes it.
+fn reject_superseded_unlock(security: &SecurityGate, request_epoch: u64) -> Result<(), String> {
+    if security.status().epoch != request_epoch {
+        return Err("MP_UNLOCK_SUPERSEDED".to_owned());
+    }
+    Ok(())
+}
+
+fn owner_session_present(
+    native_capture: &Arc<Mutex<Option<native_capture_ipc::NativeCaptureIpc>>>,
+    vault: &Arc<Mutex<Option<Arc<VaultCaptureStore>>>>,
+) -> bool {
+    native_capture
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .is_some()
+        || vault
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .is_some()
+}
+
+fn publish_owner_capture_with_hook(
+    archive_root: PathBuf,
+    writer: Arc<VaultCaptureStore>,
+    security: &SecurityGate,
+    lease: UnlockLease,
+    commit_gate: &Arc<Mutex<()>>,
+    shutdown_requested: &AtomicBool,
+    native_capture: &Arc<Mutex<Option<native_capture_ipc::NativeCaptureIpc>>>,
+    vault: &Arc<Mutex<Option<Arc<VaultCaptureStore>>>>,
+    ready: &AtomicBool,
+    before_start: impl FnOnce(),
+) -> Result<(), String> {
+    // Shutdown sets its monotonic fence under this SAME gate. Until we
+    // release the gate, it cannot revoke/teardown between descriptor
+    // publication and native receiver installation.
+    let publish_guard = commit_gate
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    if shutdown_requested.load(Ordering::Acquire) {
+        return Err("MP_APP_SHUTTING_DOWN".to_owned());
+    }
+    if owner_session_present(native_capture, vault) {
+        return Err("MP_VAULT_IPC_SESSION_ALREADY_PRESENT".to_owned());
+    }
+
+    // This callback is a no-op in production; tests use it to force a
+    // deterministic overlap while the real publication gate is held.
+    before_start();
+    let receiver = native_capture_ipc::NativeCaptureIpc::start(
+        archive_root,
+        writer.clone(),
+        security.clone(),
+        lease,
+        commit_gate.clone(),
+    )?;
+    if let Err(error) = security.validate_lease(lease) {
+        // A live receiver's Drop joins a worker which may need commit_gate.
+        // NEVER drop that receiver while holding the publication gate.
+        drop(publish_guard);
+        drop(receiver);
+        return Err(security_error(error));
+    }
+    *native_capture
+        .lock()
+        .unwrap_or_else(|error| error.into_inner()) = Some(receiver);
+    *vault.lock().unwrap_or_else(|error| error.into_inner()) = Some(writer);
+    ready.store(true, Ordering::Release);
+    Ok(())
+}
+
+fn publish_owner_capture(
+    archive_root: PathBuf,
+    writer: Arc<VaultCaptureStore>,
+    security: &SecurityGate,
+    lease: UnlockLease,
+    commit_gate: &Arc<Mutex<()>>,
+    shutdown_requested: &AtomicBool,
+    native_capture: &Arc<Mutex<Option<native_capture_ipc::NativeCaptureIpc>>>,
+    vault: &Arc<Mutex<Option<Arc<VaultCaptureStore>>>>,
+    ready: &AtomicBool,
+) -> Result<(), String> {
+    publish_owner_capture_with_hook(
+        archive_root,
+        writer,
+        security,
+        lease,
+        commit_gate,
+        shutdown_requested,
+        native_capture,
+        vault,
+        ready,
+        || {},
+    )
+}
+
 #[tauri::command]
 async fn unlock_security(
     state: State<'_, AppState>,
     secret: String,
 ) -> Result<SecurityStatus, String> {
+    if state.store.is_none() {
+        let security = state.security.clone();
+        let request_epoch = security.status().epoch;
+        let owner_unlock_gate = state.owner_unlock_gate.clone();
+        let vault_root = state.vault_root.clone();
+        let vault = state.vault.clone();
+        let ready = state.authority_ready.clone();
+        let native_capture = state.native_capture.clone();
+        let archive_root = state.archive_root.clone();
+        let commit_gate = state.document_authority_gate.clone();
+        let shutdown_requested = state.shutdown_requested.clone();
+        return tauri::async_runtime::spawn_blocking(move || {
+            let _attempt = owner_unlock_gate
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            reject_superseded_unlock(&security, request_epoch)?;
+            if shutdown_requested.load(Ordering::Acquire) {
+                return Err("MP_APP_SHUTTING_DOWN".to_owned());
+            }
+            let secret = Zeroizing::new(secret);
+            let status = security.unlock(secret.as_bytes()).map_err(security_error)?;
+            let lease = security.require_unlocked().map_err(security_error)?;
+            if shutdown_requested.load(Ordering::Acquire) {
+                security.lock_if_lease(lease);
+                return Err("MP_APP_SHUTTING_DOWN".to_owned());
+            }
+            if owner_session_present(&native_capture, &vault) {
+                return Err("MP_VAULT_IPC_SESSION_ALREADY_PRESENT".to_owned());
+            }
+            if !vault_root.exists()
+                && matches!(
+                    mind_place_security::vault_first_run::FirstRunJournal::can_resume(
+                        &vault_root,
+                        secret.as_bytes(),
+                    ),
+                    Ok(true)
+                )
+            {
+                // The owner authenticated; the verifier is not an active vault.
+                // Revoke this epoch before starting a fresh offline ceremony.
+                security.lock_if_lease(lease);
+                return Err("MP_VAULT_INCOMPLETE_FIRST_RUN".to_owned());
+            }
+            let opened = (|| -> Result<Arc<VaultCaptureStore>, String> {
+                let manifest = mind_place_security::vault::VaultManifest::read(&vault_root)
+                    .map_err(security_error)?;
+                let crypto = mind_place_security::vault::CryptoVault::restore_with_dpapi(
+                    &security, lease, &manifest,
+                )
+                .map_err(security_error)?;
+                let adapter = VaultCaptureStore::open(&vault_root, crypto, &security, lease)
+                    .map_err(|error| format!("{}:{}", error.code(), error))?;
+                Ok(Arc::new(adapter))
+            })();
+            let adapter = match opened {
+                Ok(value) => value,
+                Err(error) => {
+                    security.lock_if_lease(lease);
+                    return Err(error);
+                }
+            };
+            // Serialize startup, no-clobber publication and installation with
+            // the same gate used by owner shutdown and filesystem grants.
+            if let Err(error) = publish_owner_capture(
+                archive_root,
+                adapter,
+                &security,
+                lease,
+                &commit_gate,
+                &shutdown_requested,
+                &native_capture,
+                &vault,
+                &ready,
+            ) {
+                security.lock_if_lease(lease);
+                return Err(error);
+            }
+            Ok(status)
+        })
+        .await
+        .map_err(|error| error.to_string())?;
+    }
     let security = state.security.clone();
+    let request_epoch = security.status().epoch;
+    let owner_unlock_gate = state.owner_unlock_gate.clone();
     let state_path = state.state_path.clone();
     let authority_ready = state.authority_ready.clone();
+    let shutdown_requested = state.shutdown_requested.clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let _attempt = owner_unlock_gate
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        reject_superseded_unlock(&security, request_epoch)?;
+        if shutdown_requested.load(Ordering::Acquire) {
+            return Err("MP_APP_SHUTTING_DOWN".to_owned());
+        }
         let secret = Zeroizing::new(secret);
         let status = security.unlock(secret.as_bytes()).map_err(security_error)?;
+        let lease = security.require_unlocked().map_err(security_error)?;
+        if shutdown_requested.load(Ordering::Acquire) {
+            security.lock_if_lease(lease);
+            return Err("MP_APP_SHUTTING_DOWN".to_owned());
+        }
         if let Err(error) = StateStore::open(&state_path) {
-            security.lock();
+            if !authority_ready.load(Ordering::Acquire) {
+                security.lock_if_lease(lease);
+            }
             return Err(format!("{}:{}", error.code(), error));
         }
         authority_ready.store(true, Ordering::Release);
@@ -529,21 +899,68 @@ async fn unlock_security(
     .map_err(|error| error.to_string())?
 }
 
-#[tauri::command]
-fn lock_security(state: State<'_, AppState>) -> SecurityStatus {
-    // Lock cannot complete while a prior authorized grant is committing.
-    // Conversely, a queued grant revalidates its lease after acquiring gate.
+// Also used by native application shutdown. Dropping the owned receiver
+// invokes its identity-checked descriptor cleanup; never unlink a session
+// descriptor directly from a window or process exit handler.
+fn retire_owner_handles(state: &AppState) {
+    state.document_refresh.deactivate_all();
+    state
+        .vault
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .take();
+    state
+        .native_capture
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .take();
+    let _ = hosted_tunnel::stop_and_revoke(state);
+    state
+        .mcp
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .take();
+}
+
+fn teardown_owner_session(state: &AppState) -> SecurityStatus {
+    // Lock must complete after any credential worker already in flight.
+    let _attempt = state
+        .owner_unlock_gate
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    // Explicit Lock retains its existing serialized lease revocation.
     let status = lock_document_authority(
         &state.document_authority_gate,
         &state.authority_ready,
         &state.security,
     );
-    state.document_refresh.deactivate_all();
-    // Invalidate all read leases before killing the outbound helper and local listener.
-    // Revocation is best-effort while locked; all in-flight evidence is already blocked.
-    let _ = hosted_tunnel::stop_and_revoke(&state);
-    state.mcp.lock().unwrap_or_else(|e| e.into_inner()).take();
+    // Never join the IPC worker while holding document_authority_gate.
+    retire_owner_handles(state);
     status
+}
+
+fn shutdown_owner_session(state: &AppState) {
+    // Acquiring the same gate as receiver startup makes the shutdown fence
+    // monotonic with respect to publication: after the fence is set, no new
+    // native capture descriptor can be published or installed by this process.
+    let guard = state
+        .document_authority_gate
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    if state.shutdown_requested.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    state.authority_ready.store(false, Ordering::Release);
+    state.security.lock();
+    drop(guard);
+    // The receiver's Drop may join an in-flight capture worker which itself
+    // waits on document_authority_gate, so resource retirement is outside it.
+    retire_owner_handles(state);
+}
+
+#[tauri::command]
+fn lock_security(state: State<'_, AppState>) -> SecurityStatus {
+    teardown_owner_session(&state)
 }
 
 /// Owner-only document root inventory. Never part of the MCP tool catalog.
@@ -551,8 +968,9 @@ fn lock_security(state: State<'_, AppState>) -> SecurityStatus {
 async fn list_document_roots(state: State<'_, AppState>) -> Result<Vec<DocumentRoot>, String> {
     let lease = begin_unlocked(&state)?;
     let db_path = state.state_path.clone();
+    let vault = owner_vault(&state);
     let roots = tauri::async_runtime::spawn_blocking(move || {
-        let db = StateStore::open(db_path).map_err(|e| format!("{}:{}", e.code(), e))?;
+        let db = open_owner_state(&vault, &db_path).map_err(|e| format!("{}:{}", e.code(), e))?;
         db.list_document_roots()
             .map_err(|e| format!("{}:{}", e.code(), e))
     })
@@ -573,8 +991,9 @@ async fn stage_document_root(
         return Err("MP_STATE_INVALID_VALUE:invalid directory path".into());
     }
     let db_path = state.state_path.clone();
+    let vault = owner_vault(&state);
     let root = tauri::async_runtime::spawn_blocking(move || {
-        let db = StateStore::open(db_path).map_err(|e| format!("{}:{}", e.code(), e))?;
+        let db = open_owner_state(&vault, &db_path).map_err(|e| format!("{}:{}", e.code(), e))?;
         db.register_document_root(Path::new(&path))
             .map_err(|e| format!("{}:{}", e.code(), e))
     })
@@ -592,12 +1011,14 @@ async fn approve_document_root(
 ) -> Result<DocumentRoot, String> {
     let lease = begin_unlocked(&state)?;
     let db_path = state.state_path.clone();
+    let vault = owner_vault(&state);
     let gate = state.document_authority_gate.clone();
     let security = state.security.clone();
     let authority_ready = state.authority_ready.clone();
     let root = tauri::async_runtime::spawn_blocking(move || {
         with_document_authority(&gate, &authority_ready, &security, lease, || {
-            let db = StateStore::open(db_path).map_err(|e| format!("{}:{}", e.code(), e))?;
+            let db =
+                open_owner_state(&vault, &db_path).map_err(|e| format!("{}:{}", e.code(), e))?;
             db.approve_document_root(&root_id)
                 .map_err(|e| format!("{}:{}", e.code(), e))
         })
@@ -613,13 +1034,15 @@ async fn approve_document_root(
 async fn revoke_document_root(state: State<'_, AppState>, root_id: String) -> Result<(), String> {
     let lease = begin_unlocked(&state)?;
     let db_path = state.state_path.clone();
+    let vault = owner_vault(&state);
     let gate = state.document_authority_gate.clone();
     let security = state.security.clone();
     let authority_ready = state.authority_ready.clone();
     let revoked_root = root_id.clone();
     tauri::async_runtime::spawn_blocking(move || {
         with_document_authority(&gate, &authority_ready, &security, lease, || {
-            let db = StateStore::open(db_path).map_err(|e| format!("{}:{}", e.code(), e))?;
+            let db =
+                open_owner_state(&vault, &db_path).map_err(|e| format!("{}:{}", e.code(), e))?;
             db.revoke_document_root(&root_id)
                 .map_err(|e| format!("{}:{}", e.code(), e))
         })
@@ -645,11 +1068,12 @@ async fn refresh_document_root_index(
     root_id: String,
 ) -> Result<DocumentRefreshResponse, String> {
     let state_path = state.state_path.clone();
+    let vault = owner_vault(&state);
     let document_index_path = state.index_path.with_file_name("document-index.sqlite3");
     let polling_root = root_id.clone();
     let report = index_task(&state, move |lease, security| {
-        let authority = StateStore::open(state_path)?;
-        let projection = DocumentIndex::open(document_index_path)?;
+        let authority = open_owner_state(&vault, &state_path)?;
+        let projection = open_owner_document_index(&vault, &document_index_path)?;
         projection.refresh_root(&authority, &root_id, || {
             security
                 .validate_lease(lease)
@@ -688,10 +1112,11 @@ async fn search_document_index(
     limit: Option<usize>,
 ) -> Result<Vec<DocumentHit>, String> {
     let state_path = state.state_path.clone();
+    let vault = owner_vault(&state);
     let document_index_path = state.index_path.with_file_name("document-index.sqlite3");
     index_task(&state, move |lease, security| {
-        let authority = StateStore::open(state_path)?;
-        let projection = DocumentIndex::open(document_index_path)?;
+        let authority = open_owner_state(&vault, &state_path)?;
+        let projection = open_owner_document_index(&vault, &document_index_path)?;
         projection.search(&authority, &query, limit.unwrap_or(20), || {
             security
                 .validate_lease(lease)
@@ -709,10 +1134,11 @@ async fn preview_document_source(
     version_id: String,
 ) -> Result<DocumentPreview, String> {
     let state_path = state.state_path.clone();
+    let vault = owner_vault(&state);
     let document_index_path = state.index_path.with_file_name("document-index.sqlite3");
     index_task(&state, move |lease, security| {
-        let authority = StateStore::open(state_path)?;
-        let projection = DocumentIndex::open(document_index_path)?;
+        let authority = open_owner_state(&vault, &state_path)?;
+        let projection = open_owner_document_index(&vault, &document_index_path)?;
         projection.preview(&authority, &uri, &version_id, || {
             security
                 .validate_lease(lease)
@@ -727,7 +1153,11 @@ async fn list_conversations(
     state: State<'_, AppState>,
     query: Option<String>,
 ) -> Result<Vec<ConversationSummary>, String> {
-    let store = state.store.clone();
+    let vault_query = query.clone().unwrap_or_default();
+    if let Some(result) = vaulted_blocking(&state, move |vault| vault.list(&vault_query)).await? {
+        return Ok(result);
+    }
+    let store = legacy_archive(&state)?;
     gated_blocking(&state, move || store.list(query.as_deref().unwrap_or(""))).await
 }
 
@@ -737,7 +1167,16 @@ async fn read_conversation(
     id: String,
     snapshot_id: Option<String>,
 ) -> Result<Conversation, String> {
-    let store = state.store.clone();
+    let vault_id = id.clone();
+    let vault_snapshot = snapshot_id.clone();
+    if let Some(result) = vaulted_blocking(&state, move |vault| {
+        vault.read(&vault_id, vault_snapshot.as_deref())
+    })
+    .await?
+    {
+        return Ok(result);
+    }
+    let store = legacy_archive(&state)?;
     gated_blocking(&state, move || store.read(&id, snapshot_id.as_deref())).await
 }
 
@@ -746,7 +1185,11 @@ async fn list_snapshots(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<Vec<SnapshotSummary>, String> {
-    let store = state.store.clone();
+    let vault_id = id.clone();
+    if let Some(result) = vaulted_blocking(&state, move |vault| vault.snapshots(&vault_id)).await? {
+        return Ok(result);
+    }
+    let store = legacy_archive(&state)?;
     gated_blocking(&state, move || store.snapshots(&id)).await
 }
 
@@ -756,7 +1199,18 @@ async fn export_markdown(
     id: String,
     snapshot_id: Option<String>,
 ) -> Result<ExportResult, String> {
-    let store = state.store.clone();
+    let vault_id = id.clone();
+    let vault_snapshot = snapshot_id.clone();
+    if let Some(result) = vaulted_blocking(&state, move |vault| {
+        vault.export_markdown(&vault_id, vault_snapshot.as_deref())
+    })
+    .await?
+    {
+        // The encrypted route only returns plaintext to this authorized
+        // owner-session response; it never writes unencrypted export files.
+        return Ok(result);
+    }
+    let store = legacy_archive(&state)?;
     gated_blocking(&state, move || {
         store.export_snapshot(&id, snapshot_id.as_deref())
     })
@@ -769,13 +1223,20 @@ async fn get_asset(
     id: String,
     asset_path: String,
 ) -> Result<AssetResult, String> {
-    let store = state.store.clone();
+    let archive_id = id.clone();
+    let name = asset_path.clone();
+    if let Some(asset) =
+        vaulted_blocking(&state, move |vault| vault.asset(&archive_id, &name)).await?
+    {
+        return Ok(asset);
+    }
+    let store = legacy_archive(&state)?;
     gated_blocking(&state, move || store.asset(&id, &asset_path)).await
 }
 
 #[tauri::command]
 async fn import_legacy(state: State<'_, AppState>) -> Result<ImportReceipt, String> {
-    let store = state.store.clone();
+    let store = legacy_archive(&state)?;
     let source = state.legacy_path.clone();
     gated_blocking(&state, move || store.import_legacy(&source)).await
 }
@@ -788,7 +1249,7 @@ async fn import_generic_text(
     format: String,
     raw: String,
 ) -> Result<GenericImportReceipt, String> {
-    let store = state.store.clone();
+    let store = legacy_archive(&state)?;
     gated_blocking(&state, move || {
         store.import_generic(&format, raw.as_bytes())
     })
@@ -796,11 +1257,15 @@ async fn import_generic_text(
 }
 
 fn native_manifest_path(state: &AppState, browser: &str) -> PathBuf {
-    state
+    // Preserve existing registration paths for legacy installs. On new encrypted
+    // installs keep browser registration metadata outside the legacy archive root:
+    // creating archive-v1 here could incorrectly mark a first-run as legacy.
+    let parent = state
         .store
-        .root()
-        .join("native-host")
-        .join(format!("{browser}.json"))
+        .as_ref()
+        .map(ArchiveStore::root)
+        .unwrap_or_else(|| state.archive_root.parent().unwrap_or(&state.archive_root));
+    parent.join("native-host").join(format!("{browser}.json"))
 }
 
 fn setup_info(state: &AppState) -> SetupInfo {
@@ -810,7 +1275,7 @@ fn setup_info(state: &AppState) -> SetupInfo {
         .map(str::to_owned)
         .collect();
     SetupInfo {
-        archive_path: state.store.root().display().to_string(),
+        archive_path: state.archive_root.display().to_string(),
         extension_path: state.extension_path.display().to_string(),
         host_path: state.host_path.display().to_string(),
         extension_id: mind_place_archive::extension_id(),
@@ -943,11 +1408,30 @@ fn main() {
         .setup(|app| {
             let root = mind_place_archive::data_root()?;
             let security_path = root.parent().unwrap_or(&root).join("security-v1.json");
-            let state_path = root.parent().unwrap_or(&root).join("state.sqlite3");
-            let index_path = root.parent().unwrap_or(&root).join("index.sqlite3");
+            let mut state_path = root.parent().unwrap_or(&root).join("state.sqlite3");
+            let mut index_path = root.parent().unwrap_or(&root).join("index.sqlite3");
             let security = SecurityGate::open(security_path)?;
+            let vault_root = root.parent().unwrap_or(&root).join("encrypted-vault-v1");
             let legacy_path = root.parent().unwrap_or(&root).join("sessions");
-            let store = ArchiveStore::open(root)?;
+            // New installations must not create legacy plaintext archive
+            // directories before an independently verified encrypted vault is
+            // provisioned. Existing users remain in their legacy profile
+            // pending an explicitly consented migration.
+            let parent = root.parent().unwrap_or(&root);
+            let legacy_exists = root.exists() || state_path.exists() || index_path.exists();
+            let vault_exists = parent.join("vault-v1.json").exists()
+                || mind_place_security::vault_first_run::FirstRunJournal::has_vault_evidence(
+                    &vault_root,
+                )?;
+            let store = if legacy_exists && !vault_exists {
+                Some(ArchiveStore::open(&root)?)
+            } else {
+                None
+            };
+            if store.is_none() {
+                state_path = vault_root.join("state.sqlite3");
+                index_path = vault_root.join("index.sqlite3");
+            }
             let host_path = std::env::current_exe()?
                 .parent()
                 .unwrap()
@@ -963,7 +1447,14 @@ fn main() {
             };
             app.manage(AppState {
                 store,
+                archive_root: root,
+                vault_root,
+                pending_vault: Arc::new(Mutex::new(None)),
+                vault: Arc::new(Mutex::new(None)),
+                native_capture: Arc::new(Mutex::new(None)),
                 security,
+                owner_unlock_gate: Arc::new(Mutex::new(())),
+                shutdown_requested: Arc::new(AtomicBool::new(false)),
                 state_path,
                 index_path,
                 archive_index_write_gate: Arc::new(Mutex::new(())),
@@ -989,6 +1480,14 @@ fn main() {
                 .build()?;
             Ok(())
         })
+        // CloseRequested is handled while AppState and its native receiver are
+        // still alive. A plain window close must revoke the unlock epoch and
+        // retire the exact owned capture descriptor just like explicit Lock.
+        .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+                shutdown_owner_session(&window.state::<AppState>());
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             get_security_status,
             mcp_commands::get_local_mcp_status,
@@ -1001,6 +1500,12 @@ fn main() {
             hosted_tunnel::start_hosted_tunnel,
             hosted_tunnel::stop_hosted_tunnel,
             initialize_security,
+            vault_commands::begin_vault_setup,
+            vault_commands::resume_vault_setup,
+            vault_commands::unlock_vault_with_recovery,
+            vault_commands::create_vault_online_backup,
+            vault_commands::confirm_vault_setup,
+            vault_commands::cancel_vault_setup,
             unlock_security,
             lock_security,
             list_document_roots,
@@ -1034,8 +1539,15 @@ fn main() {
             inspect_retrieval_context,
             inspect_retrieval_fetch
         ])
-        .run(tauri::generate_context!())
-        .expect("Mind Place failed to start");
+        .build(tauri::generate_context!())
+        .expect("Mind Place failed to build")
+        .run(|app, event| {
+            // Also cover application-level exits that do not originate from a
+            // webview window close. This is idempotent after CloseRequested.
+            if matches!(event, tauri::RunEvent::Exit) {
+                shutdown_owner_session(&app.state::<AppState>());
+            }
+        });
 }
 
 #[cfg(test)]
@@ -1145,6 +1657,456 @@ mod document_authority_regression_tests {
             db.document_root(&root_id).unwrap().unwrap().approval_state,
             "pending",
             "queued approval must never persist after Lock"
+        );
+    }
+}
+
+#[cfg(test)]
+mod shutdown_race_regression_tests {
+    use super::*;
+    use mind_place_capture_host::ipc::SessionDescriptor;
+    use mind_place_security::vault::{CryptoVault, RecoverySecret, VaultManifest};
+    use std::{sync::mpsc, thread, time::Duration};
+
+    const PASSWORD: &[u8] = b"synthetic-shutdown-concurrent-unlock";
+
+    struct Fixture {
+        state: AppState,
+        writer: Arc<VaultCaptureStore>,
+        lease: UnlockLease,
+        manifest: VaultManifest,
+        recovery: RecoverySecret,
+        _home: tempfile::TempDir,
+    }
+
+    impl Fixture {
+        fn new() -> Self {
+            let home = tempfile::tempdir().unwrap();
+            let archive_root = home.path().join("archive-v1");
+            let vault_root = home.path().join("encrypted-vault-v1");
+            let security = SecurityGate::open(home.path().join("security-v1.json")).unwrap();
+            security.initialize(PASSWORD).unwrap();
+            let lease = security.require_unlocked().unwrap();
+            let (crypto, recovery, manifest) = CryptoVault::provision(&security, lease).unwrap();
+            manifest.persist_new(&vault_root).unwrap();
+            let writer =
+                Arc::new(VaultCaptureStore::open(&vault_root, crypto, &security, lease).unwrap());
+            let state = AppState {
+                store: None,
+                archive_root,
+                vault_root: vault_root.clone(),
+                pending_vault: Arc::new(Mutex::new(None)),
+                vault: Arc::new(Mutex::new(None)),
+                native_capture: Arc::new(Mutex::new(None)),
+                security,
+                owner_unlock_gate: Arc::new(Mutex::new(())),
+                shutdown_requested: Arc::new(AtomicBool::new(false)),
+                state_path: vault_root.join("state.sqlite3"),
+                index_path: vault_root.join("index.sqlite3"),
+                archive_index_write_gate: Arc::new(Mutex::new(())),
+                authority_ready: Arc::new(AtomicBool::new(false)),
+                document_authority_gate: Arc::new(Mutex::new(())),
+                document_refresh: Arc::new(DocumentRefreshRegistry::default()),
+                mcp: Arc::new(Mutex::new(None)),
+                hosted: Arc::new(Mutex::new(None)),
+                extension_path: PathBuf::new(),
+                host_path: PathBuf::new(),
+                legacy_path: home.path().join("sessions"),
+            };
+            Self {
+                state,
+                writer,
+                lease,
+                manifest,
+                recovery,
+                _home: home,
+            }
+        }
+
+        fn publish(&self) -> Result<(), String> {
+            publish_owner_capture(
+                self.state.archive_root.clone(),
+                self.writer.clone(),
+                &self.state.security,
+                self.lease,
+                &self.state.document_authority_gate,
+                &self.state.shutdown_requested,
+                &self.state.native_capture,
+                &self.state.vault,
+                &self.state.authority_ready,
+            )
+        }
+
+        fn descriptor_path(&self) -> PathBuf {
+            self._home.path().join("capture-ipc-v1.json")
+        }
+
+        fn assert_closed(&self) {
+            assert!(self.state.shutdown_requested.load(Ordering::Acquire));
+            assert!(self.state.security.status().locked);
+            assert!(!self.state.authority_ready.load(Ordering::Acquire));
+            assert!(self.state.native_capture.lock().unwrap().is_none());
+            assert!(self.state.vault.lock().unwrap().is_none());
+            assert!(!self.descriptor_path().exists());
+            assert!(VaultManifest::read(&self.state.vault_root).is_ok());
+        }
+
+        fn restart_and_unlock(&self) {
+            // Independent synthetic re-open of the same preserved vault.
+            let security = SecurityGate::open(self._home.path().join("security-v1.json")).unwrap();
+            security.unlock(PASSWORD).unwrap();
+            let lease = security.require_unlocked().unwrap();
+            let manifest = VaultManifest::read(&self.state.vault_root).unwrap();
+            assert_eq!(
+                serde_json::to_value(&manifest).unwrap(),
+                serde_json::to_value(&self.manifest).unwrap(),
+            );
+            let vault =
+                CryptoVault::restore_with_recovery(&security, lease, &manifest, &self.recovery)
+                    .unwrap();
+            let writer = Arc::new(
+                VaultCaptureStore::open(&self.state.vault_root, vault, &security, lease).unwrap(),
+            );
+            let receiver = native_capture_ipc::NativeCaptureIpc::start(
+                self.state.archive_root.clone(),
+                writer,
+                security.clone(),
+                lease,
+                Arc::new(Mutex::new(())),
+            )
+            .unwrap();
+            let first = SessionDescriptor::read(&self.state.archive_root).unwrap();
+            assert_ne!(first.port, 0);
+            drop(receiver);
+            assert!(!self.descriptor_path().exists());
+            security.lock();
+            assert!(security.unlock(b"synthetic-incorrect-password").is_err());
+        }
+    }
+
+    #[test]
+    fn shutdown_before_ipc_publication_denies_password_unlock() {
+        let fixture = Fixture::new();
+        shutdown_owner_session(&fixture.state);
+        assert_eq!(fixture.publish().unwrap_err(), "MP_APP_SHUTTING_DOWN");
+        fixture.assert_closed();
+        fixture.restart_and_unlock();
+    }
+
+    #[test]
+    fn ordinary_close_during_password_unlock_drains_publication() {
+        let fixture = Fixture::new();
+        let publisher_state = fixture.state.clone();
+        let writer = fixture.writer.clone();
+        let lease = fixture.lease;
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let publisher = thread::spawn(move || {
+            publish_owner_capture_with_hook(
+                publisher_state.archive_root.clone(),
+                writer,
+                &publisher_state.security,
+                lease,
+                &publisher_state.document_authority_gate,
+                &publisher_state.shutdown_requested,
+                &publisher_state.native_capture,
+                &publisher_state.vault,
+                &publisher_state.authority_ready,
+                || {
+                    entered_tx.send(()).unwrap(); // production gate held
+                    release_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+                },
+            )
+        });
+        entered_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        let closer_state = fixture.state.clone();
+        let (close_started_tx, close_started_rx) = mpsc::channel();
+        let closer = thread::spawn(move || {
+            close_started_tx.send(()).unwrap();
+            shutdown_owner_session(&closer_state);
+        });
+        close_started_rx
+            .recv_timeout(Duration::from_secs(10))
+            .unwrap();
+        release_tx.send(()).unwrap();
+        assert!(publisher.join().unwrap().is_ok());
+        closer.join().unwrap();
+        fixture.assert_closed();
+        // Repeated CloseRequested / RunEvent::Exit must not reactivate capture.
+        shutdown_owner_session(&fixture.state);
+        fixture.assert_closed();
+        fixture.restart_and_unlock();
+    }
+
+    #[test]
+    fn app_exit_during_recovery_publication_drains_receiver() {
+        let fixture = Fixture::new();
+        let writer = {
+            let vault = CryptoVault::restore_with_recovery(
+                &fixture.state.security,
+                fixture.lease,
+                &fixture.manifest,
+                &fixture.recovery,
+            )
+            .unwrap();
+            Arc::new(
+                VaultCaptureStore::open(
+                    &fixture.state.vault_root,
+                    vault,
+                    &fixture.state.security,
+                    fixture.lease,
+                )
+                .unwrap(),
+            )
+        };
+        let state = fixture.state.clone();
+        let lease = fixture.lease;
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let recovering = thread::spawn(move || {
+            publish_owner_capture_with_hook(
+                state.archive_root.clone(),
+                writer,
+                &state.security,
+                lease,
+                &state.document_authority_gate,
+                &state.shutdown_requested,
+                &state.native_capture,
+                &state.vault,
+                &state.authority_ready,
+                || {
+                    entered_tx.send(()).unwrap();
+                    release_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+                },
+            )
+        });
+        entered_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        let closer_state = fixture.state.clone();
+        let exit = thread::spawn(move || shutdown_owner_session(&closer_state));
+        release_tx.send(()).unwrap();
+        assert!(recovering.join().unwrap().is_ok());
+        exit.join().unwrap();
+        fixture.assert_closed();
+        assert_eq!(fixture.publish().unwrap_err(), "MP_APP_SHUTTING_DOWN");
+    }
+
+    #[test]
+    fn shutdown_after_publication_and_explicit_lock_then_exit() {
+        let fixture = Fixture::new();
+        fixture.publish().unwrap();
+        let original = SessionDescriptor::read(&fixture.state.archive_root).unwrap();
+        assert!(fixture.descriptor_path().exists());
+        // Overlapping owner app cannot clobber the existing capability.
+        let bytes = std::fs::read(fixture.descriptor_path()).unwrap();
+        assert!(native_capture_ipc::NativeCaptureIpc::start(
+            fixture.state.archive_root.clone(),
+            fixture.writer.clone(),
+            fixture.state.security.clone(),
+            fixture.lease,
+            Arc::new(Mutex::new(())),
+        )
+        .is_err());
+        assert_eq!(std::fs::read(fixture.descriptor_path()).unwrap(), bytes);
+        assert_ne!(original.port, 0);
+        assert!(teardown_owner_session(&fixture.state).locked);
+        shutdown_owner_session(&fixture.state);
+        shutdown_owner_session(&fixture.state);
+        fixture.assert_closed();
+        fixture.restart_and_unlock();
+    }
+
+    #[test]
+    fn concurrent_reauthentication_preserves_active_native_receiver() {
+        let fixture = Fixture::new();
+        fixture.publish().unwrap();
+        let descriptor = std::fs::read(fixture.descriptor_path()).unwrap();
+        let owner_epoch = fixture.lease.epoch();
+        let first_state = fixture.state.clone();
+        let second_state = fixture.state.clone();
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let first = thread::spawn(move || {
+            let _attempt = first_state.owner_unlock_gate.lock().unwrap();
+            assert_eq!(
+                first_state.security.unlock(PASSWORD).unwrap().epoch,
+                owner_epoch
+            );
+            assert!(owner_session_present(
+                &first_state.native_capture,
+                &first_state.vault
+            ));
+            entered_tx.send(()).unwrap();
+            release_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        });
+        entered_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        let second = thread::spawn(move || {
+            let _attempt = second_state.owner_unlock_gate.lock().unwrap();
+            assert_eq!(
+                second_state.security.unlock(PASSWORD).unwrap().epoch,
+                owner_epoch
+            );
+            assert!(owner_session_present(
+                &second_state.native_capture,
+                &second_state.vault
+            ));
+        });
+        release_tx.send(()).unwrap();
+        first.join().unwrap();
+        second.join().unwrap();
+        assert!(fixture.state.security.validate_lease(fixture.lease).is_ok());
+        assert!(fixture.state.authority_ready.load(Ordering::Acquire));
+        assert_eq!(
+            std::fs::read(fixture.descriptor_path()).unwrap(),
+            descriptor
+        );
+        shutdown_owner_session(&fixture.state);
+        fixture.assert_closed();
+        fixture.restart_and_unlock();
+    }
+
+    #[test]
+    fn stale_worker_and_wrong_password_cannot_revoke_native_owner() {
+        let fixture = Fixture::new();
+        let stale = fixture.lease;
+        fixture.state.security.lock();
+        fixture.state.security.unlock(PASSWORD).unwrap();
+        let current = fixture.state.security.require_unlocked().unwrap();
+        assert_ne!(stale.epoch(), current.epoch());
+        let crypto = CryptoVault::restore_with_recovery(
+            &fixture.state.security,
+            current,
+            &fixture.manifest,
+            &fixture.recovery,
+        )
+        .unwrap();
+        let writer = Arc::new(
+            VaultCaptureStore::open(
+                &fixture.state.vault_root,
+                crypto,
+                &fixture.state.security,
+                current,
+            )
+            .unwrap(),
+        );
+        publish_owner_capture(
+            fixture.state.archive_root.clone(),
+            writer,
+            &fixture.state.security,
+            current,
+            &fixture.state.document_authority_gate,
+            &fixture.state.shutdown_requested,
+            &fixture.state.native_capture,
+            &fixture.state.vault,
+            &fixture.state.authority_ready,
+        )
+        .unwrap();
+        let descriptor = std::fs::read(fixture.descriptor_path()).unwrap();
+        assert!(!fixture.state.security.lock_if_lease(stale));
+        for _ in 0..3 {
+            assert!(fixture
+                .state
+                .security
+                .unlock(b"wrong-synthetic-password")
+                .is_err());
+            assert!(fixture.state.security.validate_lease(current).is_ok());
+        }
+        assert!(fixture.state.security.status().retry_after_ms > 0);
+        assert_eq!(
+            std::fs::read(fixture.descriptor_path()).unwrap(),
+            descriptor
+        );
+        shutdown_owner_session(&fixture.state);
+        fixture.assert_closed();
+        fixture.restart_and_unlock();
+    }
+
+    #[test]
+    fn password_and_recovery_reauthentication_share_one_owner_gate() {
+        let fixture = Fixture::new();
+        fixture.publish().unwrap();
+        let descriptor = std::fs::read(fixture.descriptor_path()).unwrap();
+        let first_state = fixture.state.clone();
+        let recovery_state = fixture.state.clone();
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let password_worker = thread::spawn(move || {
+            let _attempt = first_state.owner_unlock_gate.lock().unwrap();
+            let epoch = first_state.security.status().epoch;
+            reject_superseded_unlock(&first_state.security, epoch).unwrap();
+            assert_eq!(first_state.security.unlock(PASSWORD).unwrap().epoch, epoch);
+            entered_tx.send(()).unwrap();
+            release_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        });
+        entered_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        let recovery_worker = thread::spawn(move || {
+            let epoch = recovery_state.security.status().epoch;
+            let _attempt = recovery_state.owner_unlock_gate.lock().unwrap();
+            reject_superseded_unlock(&recovery_state.security, epoch).unwrap();
+            assert_eq!(
+                recovery_state.security.unlock(PASSWORD).unwrap().epoch,
+                epoch
+            );
+            assert!(owner_session_present(
+                &recovery_state.native_capture,
+                &recovery_state.vault
+            ));
+        });
+        release_tx.send(()).unwrap();
+        password_worker.join().unwrap();
+        recovery_worker.join().unwrap();
+        assert!(fixture.state.security.validate_lease(fixture.lease).is_ok());
+        assert_eq!(
+            std::fs::read(fixture.descriptor_path()).unwrap(),
+            descriptor
+        );
+        shutdown_owner_session(&fixture.state);
+        fixture.assert_closed();
+    }
+
+    #[test]
+    fn explicit_lock_supersedes_queued_password_or_recovery_request() {
+        let fixture = Fixture::new();
+        fixture.publish().unwrap();
+        let request_epoch = fixture.state.security.status().epoch;
+        let stale_state = fixture.state.clone();
+        let (queued_tx, queued_rx) = mpsc::channel();
+        let (resume_tx, resume_rx) = mpsc::channel();
+        let pending = thread::spawn(move || {
+            queued_tx.send(()).unwrap();
+            resume_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+            let _attempt = stale_state.owner_unlock_gate.lock().unwrap();
+            reject_superseded_unlock(&stale_state.security, request_epoch)
+        });
+        queued_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        assert!(teardown_owner_session(&fixture.state).locked);
+        resume_tx.send(()).unwrap();
+        assert_eq!(pending.join().unwrap().unwrap_err(), "MP_UNLOCK_SUPERSEDED");
+        assert!(fixture.state.native_capture.lock().unwrap().is_none());
+        shutdown_owner_session(&fixture.state);
+        fixture.assert_closed();
+        fixture.restart_and_unlock();
+    }
+
+    #[test]
+    fn replaced_descriptor_remains_untouched_on_shutdown() {
+        let fixture = Fixture::new();
+        fixture.publish().unwrap();
+        let foreign = SessionDescriptor::new(65534, &[0x7d; 32]);
+        std::fs::write(
+            fixture.descriptor_path(),
+            serde_json::to_vec(&foreign).unwrap(),
+        )
+        .unwrap();
+        shutdown_owner_session(&fixture.state);
+        assert_eq!(
+            SessionDescriptor::read(&fixture.state.archive_root).unwrap(),
+            foreign,
+        );
+        assert!(fixture.state.security.status().locked);
+        assert!(fixture.publish().is_err());
+        assert_eq!(
+            SessionDescriptor::read(&fixture.state.archive_root).unwrap(),
+            foreign,
         );
     }
 }

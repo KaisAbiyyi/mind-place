@@ -9,7 +9,9 @@
 use crate::{
     DocumentMetadata, DocumentObjectStore, Result, StateError, StateStore, VirtualDocumentPath,
 };
+use mind_place_security::{vault::CryptoVault, SecurityGate, UnlockLease};
 use serde::Serialize;
+use std::sync::Arc;
 use std::{
     collections::{BTreeMap, BTreeSet},
     io,
@@ -122,6 +124,25 @@ impl DocumentScanner {
     pub fn new(state: StateStore, policy: ScanPolicy) -> Result<Self> {
         policy.validate()?;
         let objects = DocumentObjectStore::open(state.clone())?;
+        Ok(Self {
+            state,
+            objects,
+            policy,
+            known: BTreeMap::new(),
+            dirty: BTreeSet::new(),
+        })
+    }
+
+    pub fn new_encrypted(
+        state: StateStore,
+        policy: ScanPolicy,
+        root: impl AsRef<Path>,
+        vault: Arc<CryptoVault>,
+        gate: &SecurityGate,
+        lease: UnlockLease,
+    ) -> Result<Self> {
+        policy.validate()?;
+        let objects = DocumentObjectStore::open_encrypted(state.clone(), root, vault, gate, lease)?;
         Ok(Self {
             state,
             objects,

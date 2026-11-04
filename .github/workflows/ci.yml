@@ -171,6 +171,9 @@ jobs:
       - name: Test hosted tunnel desktop boundaries
         run: cargo test -p mind-place --bin mind-place hosted_tunnel::tests -- --nocapture
 
+      - name: Qualify native capture encrypted IPC and revoked owner epoch
+        run: cargo test -p mind-place --bin mind-place native_capture_ipc::qualification -- --nocapture
+
       - name: Build desktop app
         run: npm run build
 

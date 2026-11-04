@@ -4,14 +4,21 @@
 //! writer transactions, because they also run inside an authority transaction.
 //! Virtual URIs never become source filesystem paths here.
 use crate::{safe_path, Result, StateError, StateStore, VirtualDocumentPath};
+use mind_place_security::{
+    vault::{ContentKind, CryptoVault},
+    vault_storage::ImmutableVaultStorage,
+    SecurityGate, UnlockLease,
+};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::sync::Arc;
 use std::{
     fs::{self, File},
     io::{Read, Write},
     path::{Path, PathBuf},
 };
+use zeroize::Zeroizing;
 
 pub const MAX_DOCUMENT_OBJECT_BYTES: u64 = 64 * 1024 * 1024;
 const BUFFER_BYTES: usize = 64 * 1024;
@@ -54,11 +61,24 @@ pub struct DocumentPreserveReceipt {
     pub new_version: bool,
     pub reused_object: bool,
 }
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct DocumentObjectStore {
     state: StateStore,
     objects: PathBuf,
     limit: u64,
+    vault: Option<VaultDocumentContext>,
+}
+#[derive(Clone)]
+struct VaultDocumentContext {
+    root: PathBuf,
+    vault: Arc<CryptoVault>,
+    gate: SecurityGate,
+    lease: UnlockLease,
+}
+impl std::fmt::Debug for DocumentObjectStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("DocumentObjectStore([redacted])")
+    }
 }
 
 fn valid_hash(hash: &str) -> Result<()> {
@@ -150,6 +170,13 @@ impl DocumentObjectStore {
         Self::with_limit(state, MAX_DOCUMENT_OBJECT_BYTES)
     }
     pub fn with_limit(state: StateStore, limit: u64) -> Result<Self> {
+        // This legacy object store writes raw source bytes into
+        // document-objects/v1/sha256. An encrypted SQLCipher authority must
+        // never authorize that cleartext path. The production adapter must
+        // use ImmutableVaultStorage before enabling encrypted documents.
+        if state.cipher_key.is_some() {
+            return Err(StateError::ObjectCorrupt);
+        }
         if limit == 0 || limit > MAX_DOCUMENT_OBJECT_BYTES {
             return Err(StateError::DocumentLimit);
         }
@@ -162,8 +189,58 @@ impl DocumentObjectStore {
             state,
             objects,
             limit,
+            vault: None,
         })
     }
+    /// Vault objects require both keyed SQLCipher authority and the matching
+    /// AEAD vault. Never serialize raw source bytes to a temporary file.
+    pub fn open_encrypted(
+        state: StateStore,
+        root: impl AsRef<Path>,
+        vault: Arc<CryptoVault>,
+        gate: &SecurityGate,
+        lease: UnlockLease,
+    ) -> Result<Self> {
+        let root = root.as_ref();
+        if state.cipher_key.is_none() || state.path().parent() != Some(root) {
+            return Err(StateError::ObjectCorrupt);
+        }
+        ImmutableVaultStorage::new(root, &vault, gate, lease)
+            .map_err(|_| StateError::ObjectCorrupt)?;
+        Ok(Self {
+            state,
+            objects: root.join("document-objects"),
+            limit: MAX_DOCUMENT_OBJECT_BYTES,
+            vault: Some(VaultDocumentContext {
+                root: root.to_owned(),
+                vault,
+                gate: gate.clone(),
+                lease,
+            }),
+        })
+    }
+
+    fn encrypted_storage(&self) -> Result<Option<ImmutableVaultStorage<'_>>> {
+        match &self.vault {
+            None => Ok(None),
+            Some(context) => {
+                context
+                    .gate
+                    .validate_lease(context.lease)
+                    .map_err(|_| StateError::DocumentDenied)?;
+                Ok(Some(
+                    ImmutableVaultStorage::new(
+                        &context.root,
+                        &context.vault,
+                        &context.gate,
+                        context.lease,
+                    )
+                    .map_err(|_| StateError::ObjectCorrupt)?,
+                ))
+            }
+        }
+    }
+
     fn authorize(&self, uri: &str, guard: &mut impl FnMut() -> Result<()>) -> Result<String> {
         guard()?;
         let (_, path) = self
@@ -203,6 +280,26 @@ impl DocumentObjectStore {
         if size > self.limit {
             return Err(StateError::DocumentLimit);
         }
+        if let Some(storage) = self.encrypted_storage()? {
+            guard()?;
+            let context = self.vault.as_ref().ok_or(StateError::ObjectCorrupt)?;
+            let identity = format!("document/{hash}");
+            let bytes = storage
+                .read(
+                    &context.gate,
+                    context.lease,
+                    ContentKind::DocumentObject,
+                    identity.as_bytes(),
+                )
+                .map_err(|_| StateError::ObjectCorrupt)?;
+            if bytes.len() as u64 != size
+                || format!("{:x}", Sha256::digest(bytes.as_slice())) != hash
+            {
+                return Err(StateError::ObjectCorrupt);
+            }
+            guard()?;
+            return Ok(bytes.to_vec());
+        }
         let path = self.object_path(hash)?;
         self.check_file(&path, size)?;
         let mut file = File::open(&path)?;
@@ -238,8 +335,15 @@ impl DocumentObjectStore {
     ) -> Result<DocumentPreserveReceipt> {
         let root = self.authorize(uri, &mut guard)?;
         let signature = metadata.encode(self.limit)?;
-        ensure_dir(&self.objects)?;
-        let mut temp = tempfile::NamedTempFile::new_in(&self.objects)?;
+        if self.vault.is_none() {
+            ensure_dir(&self.objects)?;
+        }
+        let mut temp = if self.vault.is_none() {
+            Some(tempfile::NamedTempFile::new_in(&self.objects)?)
+        } else {
+            None
+        };
+        let mut vault_plaintext = Zeroizing::new(Vec::new());
         let mut digest = Sha256::new();
         let mut length = 0u64;
         let mut buffer = [0; BUFFER_BYTES];
@@ -257,17 +361,28 @@ impl DocumentObjectStore {
                 return Err(StateError::DocumentChanged);
             }
             digest.update(&buffer[..n]);
-            temp.write_all(&buffer[..n])?;
+            if let Some(temp) = temp.as_mut() {
+                temp.write_all(&buffer[..n])?;
+            } else {
+                vault_plaintext.extend_from_slice(&buffer[..n]);
+            }
         }
         if length != metadata.byte_length {
             return Err(StateError::DocumentChanged);
         }
         self.authorize(uri, &mut guard)?;
-        temp.as_file().sync_all()?;
+        if let Some(temp) = temp.as_ref() {
+            temp.as_file().sync_all()?;
+        }
         let hash = format!("{:x}", digest.finalize());
-        let path = self.object_path(&hash)?;
-        ensure_dir(path.parent().ok_or(StateError::UnsafePath)?)?;
-        safe_path(&path)?;
+        let path = if self.vault.is_none() {
+            let path = self.object_path(&hash)?;
+            ensure_dir(path.parent().ok_or(StateError::UnsafePath)?)?;
+            safe_path(&path)?;
+            Some(path)
+        } else {
+            None
+        };
         // Hold the authority transaction during publication, never during source
         // reads. Nonmutating guards fence lock/source changes across SQLite waits
         // and publication. Evidence may be orphaned on rollback; never GC.
@@ -275,20 +390,43 @@ impl DocumentObjectStore {
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
         guard()?;
         active_in_transaction(&tx, &root)?;
-        let reused_object = match temp.persist_noclobber(&path) {
-            Ok(file) => {
-                file.sync_all()?;
-                false
+        let reused_object = if let Some(storage) = self.encrypted_storage()? {
+            let context = self.vault.as_ref().ok_or(StateError::ObjectCorrupt)?;
+            let identity = format!("document/{hash}");
+            if vault_plaintext.len() as u64 != length {
+                return Err(StateError::ObjectCorrupt);
             }
-            Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => {
-                // Reuse verification is bounded; the nonmutating guard before
-                // commit revalidates the session/source after this work.
-                self.verified_bytes(&hash, length, &mut || Ok(()))?;
-                true
-            }
-            Err(error) => return Err(error.error.into()),
+            // Authenticated immutable ciphertext is published within the vault
+            // writer fence, before committing the keyed state metadata.
+            storage
+                .write_immutable(
+                    &context.gate,
+                    context.lease,
+                    ContentKind::DocumentObject,
+                    identity.as_bytes(),
+                    vault_plaintext.as_slice(),
+                )
+                .map_err(|_| StateError::ObjectCorrupt)?;
+            // The encryption adapter never infers object reuse from an
+            // untrusted filesystem pathname.
+            false
+        } else {
+            let path = path.as_ref().ok_or(StateError::UnsafePath)?;
+            let temp = temp.ok_or(StateError::ObjectCorrupt)?;
+            let reused = match temp.persist_noclobber(path) {
+                Ok(file) => {
+                    file.sync_all()?;
+                    false
+                }
+                Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    self.verified_bytes(&hash, length, &mut || Ok(()))?;
+                    true
+                }
+                Err(error) => return Err(error.error.into()),
+            };
+            sync_dir(path.parent().ok_or(StateError::UnsafePath)?)?;
+            reused
         };
-        sync_dir(path.parent().ok_or(StateError::UnsafePath)?)?;
         tx.execute(
             "INSERT INTO document_objects(content_hash,format_version,byte_length)
             VALUES(?1,1,?2) ON CONFLICT(content_hash) DO NOTHING",
@@ -372,7 +510,11 @@ impl DocumentObjectStore {
                     if v.byte_length != metadata.byte_length {
                         return Err(StateError::ObjectCorrupt);
                     }
-                    self.check_file(&self.object_path(&v.content_hash)?, v.byte_length)?;
+                    if self.vault.is_some() {
+                        self.verified_bytes(&v.content_hash, v.byte_length, &mut guard)?;
+                    } else {
+                        self.check_file(&self.object_path(&v.content_hash)?, v.byte_length)?;
+                    }
                     Some(v)
                 } else {
                     None

@@ -10,6 +10,8 @@ use hyper::service::service_fn;
 use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use mind_place_archive::ArchiveStore;
+#[cfg(feature = "vault-mcp")]
+use mind_place_index::vault_archive::VaultCaptureStore;
 use mind_place_index::IndexStore;
 use mind_place_security::SecurityGate;
 use mind_place_state::StateStore;
@@ -70,10 +72,19 @@ fn exactly_one<'a>(
 }
 
 #[derive(Clone)]
+enum ServerSource {
+    Legacy {
+        archive: ArchiveStore,
+        state_path: PathBuf,
+        index_path: PathBuf,
+    },
+    #[cfg(feature = "vault-mcp")]
+    Vault(Arc<VaultCaptureStore>),
+}
+
+#[derive(Clone)]
 struct ServerContext {
-    archive: ArchiveStore,
-    state_path: PathBuf,
-    index_path: PathBuf,
+    source: ServerSource,
     security: SecurityGate,
     active: Arc<AtomicBool>,
 }
@@ -199,24 +210,53 @@ async fn handle_bounded(request: Request<Incoming>, ctx: ServerContext) -> WireR
         if !active_for_task.load(Ordering::Acquire) {
             return error(503);
         }
-        let state = match StateStore::open(ctx.state_path) {
-            Ok(value) => value,
-            Err(_) => return error(503),
+        let reply: McpReply = match &ctx.source {
+            ServerSource::Legacy {
+                archive,
+                state_path,
+                index_path,
+            } => {
+                let state = match StateStore::open(state_path) {
+                    Ok(value) => value,
+                    Err(_) => return error(503),
+                };
+                let index = match IndexStore::open(index_path) {
+                    Ok(value) => value,
+                    Err(_) => return error(503),
+                };
+                let core = crate::IntegrationCore::new(archive, &index, &ctx.security);
+                mcp::dispatch(
+                    &core,
+                    &state,
+                    &authorization,
+                    parsed,
+                    &version,
+                    method.as_deref(),
+                    name.as_deref(),
+                )
+            }
+            #[cfg(feature = "vault-mcp")]
+            ServerSource::Vault(archive) => {
+                let state = match archive.open_state_store() {
+                    Ok(value) => value,
+                    Err(_) => return error(503),
+                };
+                let index = match archive.open_index_store() {
+                    Ok(value) => value,
+                    Err(_) => return error(503),
+                };
+                let core = crate::IntegrationCore::new_vault(archive, &index, &ctx.security);
+                mcp::dispatch(
+                    &core,
+                    &state,
+                    &authorization,
+                    parsed,
+                    &version,
+                    method.as_deref(),
+                    name.as_deref(),
+                )
+            }
         };
-        let index = match IndexStore::open(ctx.index_path) {
-            Ok(value) => value,
-            Err(_) => return error(503),
-        };
-        let core = crate::IntegrationCore::new(&ctx.archive, &index, &ctx.security);
-        let reply: McpReply = mcp::dispatch(
-            &core,
-            &state,
-            &authorization,
-            parsed,
-            &version,
-            method.as_deref(),
-            name.as_deref(),
-        );
         if !active_for_task.load(Ordering::Acquire) || ctx.security.validate_lease(lease).is_err() {
             return error(403);
         }
@@ -250,6 +290,26 @@ impl LocalMcpServer {
         state_path: PathBuf,
         index_path: PathBuf,
     ) -> std::io::Result<Self> {
+        Self::start_source(
+            ServerSource::Legacy {
+                archive,
+                state_path,
+                index_path,
+            },
+            security,
+        )
+        .await
+    }
+
+    #[cfg(feature = "vault-mcp")]
+    pub async fn start_vault(
+        archive: Arc<VaultCaptureStore>,
+        security: SecurityGate,
+    ) -> std::io::Result<Self> {
+        Self::start_source(ServerSource::Vault(archive), security).await
+    }
+
+    async fn start_source(source: ServerSource, security: SecurityGate) -> std::io::Result<Self> {
         security.require_unlocked().map_err(std::io::Error::other)?;
         // Fixed loopback-only port gives local MCP clients a stable endpoint.
         // Occupied port fails; it NEVER falls back to a public interface.
@@ -262,9 +322,7 @@ impl LocalMcpServer {
         let shutdown = Arc::new(Notify::new());
         let gate = security.clone();
         let context = ServerContext {
-            archive,
-            state_path,
-            index_path,
+            source,
             security,
             active: active.clone(),
         };

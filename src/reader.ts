@@ -913,20 +913,72 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
         receipt.className = "export-receipt";
         receipt.setAttribute("role", "status");
         const saved = document.createElement("span");
-        saved.textContent = `Markdown saved to ${result.path}`;
+        saved.textContent = result.path
+          ? `Markdown saved to ${result.path}`
+          : "Markdown is ready in memory, not saved to disk. Copy or explicitly save an unencrypted file.";
         const copy = document.createElement("button");
         copy.type = "button";
         copy.className = "text-button export-copy-button";
         copy.dataset.action = "copy-markdown";
         copy.textContent = "Copy Markdown";
         receipt.append(saved, copy);
+        if (!result.path) {
+          const save = document.createElement("button");
+          save.type = "button";
+          save.className = "text-button export-save-button";
+          save.dataset.action = "save-markdown";
+          save.textContent = "Save Markdown as…";
+          receipt.append(save);
+        }
         heading.append(receipt);
       }
-      setActionStatus(`Saved Markdown to ${result.path}`);
+      setActionStatus(result.path
+        ? `Saved Markdown to ${result.path}`
+        : "Markdown is in memory only; choose Copy or Save as… to export plaintext.");
     } catch (error) {
       if (alive) setActionStatus(`Couldn’t export Markdown: ${errorMessage(error)}`, true);
     } finally {
       if (alive) exportButton.disabled = !selectedId;
+    }
+  };
+
+  // Writing decrypted content to disk requires an explicit owner click and
+  // browser/OS file picker. Never automatically persist a plaintext export.
+  const saveMarkdown = async () => {
+    if (!exportedMarkdown) return;
+    type Picker = {
+      showSaveFilePicker?: (options: {
+        suggestedName: string;
+        types: Array<{ description: string; accept: Record<string, string[]> }>;
+      }) => Promise<{
+        createWritable(): Promise<{
+          write(content: string): Promise<void>;
+          close(): Promise<void>;
+        }>;
+      }>;
+    };
+    const host = document.defaultView as (Window & Picker) | null;
+    if (!host?.showSaveFilePicker) {
+      setActionStatus("Save-as is unavailable in this WebView. Use Copy Markdown instead.", true);
+      return;
+    }
+    const title = selectedId
+      ? summaries.find(item => item.id === selectedId)?.title ?? "Mind Place"
+      : "Mind Place";
+    const suggestedName = (title.replace(/[<>:"/\\|?*\x00-\x1f]/g, "_")
+      .replace(/[. ]+$/g, "").slice(0, 80) || "mind-place") + ".md";
+    try {
+      const handle = await host.showSaveFilePicker({
+        suggestedName,
+        types: [{ description: "Markdown", accept: { "text/markdown": [".md"] } }],
+      });
+      const output = await handle.createWritable();
+      await output.write(exportedMarkdown);
+      await output.close();
+      setActionStatus("Markdown saved to the location you selected (unencrypted).");
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") return;
+      setActionStatus(`Couldn’t save Markdown: ${errorMessage(error)}`, true);
     }
   };
 
@@ -1205,6 +1257,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
       else if (action === "load-setup") void loadSetup();
       else if (action === "export-markdown") void exportMarkdown();
       else if (action === "copy-markdown") void copyMarkdown();
+      else if (action === "save-markdown") void saveMarkdown();
       else if (action === "copy-answer") void copyAnswer();
       else if (action === "copy-message") {
         const messageId = actionElement.dataset.messageId;
