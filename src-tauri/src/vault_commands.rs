@@ -127,6 +127,7 @@ pub(super) async fn unlock_vault_with_recovery(
         return Err("MP_VAULT_LEGACY_MIGRATION_REQUIRED".into());
     }
     let security = state.security.clone();
+    let request_epoch = security.status().epoch;
     let owner_unlock_gate = state.owner_unlock_gate.clone();
     let root = state.vault_root.clone();
     let holder = state.vault.clone();
@@ -139,6 +140,7 @@ pub(super) async fn unlock_vault_with_recovery(
         let _attempt = owner_unlock_gate
             .lock()
             .unwrap_or_else(|error| error.into_inner());
+        super::reject_superseded_unlock(&security, request_epoch)?;
         if shutdown_requested.load(std::sync::atomic::Ordering::Acquire) {
             return Err("MP_APP_SHUTTING_DOWN".to_owned());
         }
