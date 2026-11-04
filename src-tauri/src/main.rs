@@ -2042,7 +2042,10 @@ mod shutdown_race_regression_tests {
             let epoch = recovery_state.security.status().epoch;
             let _attempt = recovery_state.owner_unlock_gate.lock().unwrap();
             reject_superseded_unlock(&recovery_state.security, epoch).unwrap();
-            assert_eq!(recovery_state.security.unlock(PASSWORD).unwrap().epoch, epoch);
+            assert_eq!(
+                recovery_state.security.unlock(PASSWORD).unwrap().epoch,
+                epoch
+            );
             assert!(owner_session_present(
                 &recovery_state.native_capture,
                 &recovery_state.vault
