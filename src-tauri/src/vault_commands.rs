@@ -127,6 +127,7 @@ pub(super) async fn unlock_vault_with_recovery(
         return Err("MP_VAULT_LEGACY_MIGRATION_REQUIRED".into());
     }
     let security = state.security.clone();
+    let owner_unlock_gate = state.owner_unlock_gate.clone();
     let root = state.vault_root.clone();
     let holder = state.vault.clone();
     let ready = state.authority_ready.clone();
@@ -135,6 +136,9 @@ pub(super) async fn unlock_vault_with_recovery(
     let commit_gate = state.document_authority_gate.clone();
     let shutdown_requested = state.shutdown_requested.clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let _attempt = owner_unlock_gate
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         if shutdown_requested.load(std::sync::atomic::Ordering::Acquire) {
             return Err("MP_APP_SHUTTING_DOWN".to_owned());
         }
@@ -146,6 +150,13 @@ pub(super) async fn unlock_vault_with_recovery(
         let lease = security
             .require_unlocked()
             .map_err(|error| format!("{}:{}", error.code(), error))?;
+        if shutdown_requested.load(std::sync::atomic::Ordering::Acquire) {
+            security.lock_if_lease(lease);
+            return Err("MP_APP_SHUTTING_DOWN".to_owned());
+        }
+        if super::owner_session_present(&native_capture, &holder) {
+            return Err("MP_VAULT_IPC_SESSION_ALREADY_PRESENT".to_owned());
+        }
         let opened = (|| -> Result<Arc<VaultCaptureStore>, String> {
             let parsed = RecoverySecret::from_export_code(code.as_str())
                 .map_err(|error| format!("{}:{}", error.code(), error))?;
@@ -171,13 +182,13 @@ pub(super) async fn unlock_vault_with_recovery(
                     &holder,
                     &ready,
                 ) {
-                    security.lock();
+                    security.lock_if_lease(lease);
                     return Err(error);
                 }
                 Ok(status)
             }
             Err(error) => {
-                security.lock();
+                security.lock_if_lease(lease);
                 Err(error)
             }
         }
