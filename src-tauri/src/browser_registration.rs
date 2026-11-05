@@ -176,7 +176,7 @@ fn register_at(
     }
     let (key, disposition) = roots
         .user
-        .create_subkey_with_flags(registry, KEY_WRITE | KEY_WOW64_64KEY)
+        .create_subkey_with_flags(registry, KEY_READ | KEY_WRITE | KEY_WOW64_64KEY)
         .map_err(|error| error.to_string())?;
     if disposition != REG_CREATED_NEW_KEY {
         // The key appeared since preflight. Even if its default is absent, do
@@ -332,7 +332,6 @@ mod browser_registration_tests {
 
     impl Drop for Fixture {
         fn drop(&mut self) {
-            let _ = self.user.open_subkey("").map(drop);
             let _ = RegKey::predef(HKEY_CURRENT_USER).delete_subkey_all(&self.base);
         }
     }
