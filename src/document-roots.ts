@@ -168,14 +168,16 @@ export function mountDocumentRootSetup(parent: HTMLElement, invoke: Invoke): voi
   let searchEpoch = 0;
   let previewEpoch = 0;
   let revocationPending = false;
+  let refreshEpoch = 0;
   const lastReports = new Map<string, { report: DocumentIndexReport; indexedAt: string; paused: boolean }>();
   section.append(heading, explanation, steps, authorize, authorizeDialog, status, folderHeading, toolbar, list, inspector, searchHeading, searchNote, searchForm, searchStatus, results);
   parent.append(section);
 
   const refresh = async (): Promise<void> => {
+    const epoch = ++refreshEpoch;
     try {
       const roots = await invoke<DocumentRoot[]>("list_document_roots");
-      if (!section.isConnected) return;
+      if (!section.isConnected || epoch !== refreshEpoch) return;
       list.replaceChildren();
       const query = folderQuery.value.trim().toLocaleLowerCase();
       const matching = roots.filter(root => {
@@ -388,7 +390,7 @@ export function mountDocumentRootSetup(parent: HTMLElement, invoke: Invoke): voi
         list.append(item);
       }
     } catch {
-      if (section.isConnected) status.textContent = "Document registry unavailable while locked or offline.";
+      if (section.isConnected && epoch === refreshEpoch) status.textContent = "Document registry unavailable while locked or offline.";
     }
   };
 
@@ -463,6 +465,17 @@ export function mountDocumentRootSetup(parent: HTMLElement, invoke: Invoke): voi
                 }
                 previewText.textContent = response.text;
                 previewText.hidden = false;
+                inspector.replaceChildren();
+                const title = doc.createElement("h4"); title.textContent = "Verified document source";
+                const identity = doc.createElement("p");
+                identity.textContent = "URI: " + response.uri + " · exact version " + response.version_id +
+                  " · extractor " + response.extractor_revision;
+                const warnings = doc.createElement("p");
+                warnings.textContent = response.warnings.length ? "Parser warnings: " + response.warnings.join("; ") : "No parser warnings reported.";
+                const close = doc.createElement("button"); close.type = "button"; close.className = "quiet-button";
+                close.textContent = "Close inspector";
+                close.addEventListener("click", () => { inspector.hidden = true; inspector.replaceChildren(); preview.focus(); });
+                inspector.append(title, identity, warnings, close); inspector.hidden = false;
                 previewStatus.textContent = response.truncated
                   ? "Verified current source excerpt (first 4,096 characters; truncated)."
                   : "Verified current source extraction. Displayed as inert text.";
