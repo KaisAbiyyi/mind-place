@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(windows)]
+mod browser_registration;
 mod document_refresh;
 mod hosted_tunnel;
 mod mcp_commands;
@@ -45,6 +47,10 @@ struct AppState {
     vault: Arc<Mutex<Option<Arc<VaultCaptureStore>>>>,
     native_capture: Arc<Mutex<Option<native_capture_ipc::NativeCaptureIpc>>>,
     security: SecurityGate,
+    // Serializes password/recovery unlock with explicit Lock across all workers.
+    owner_unlock_gate: Arc<Mutex<()>>,
+    // Monotonic for the lifetime of this desktop process: never reopen after Exit.
+    shutdown_requested: Arc<AtomicBool>,
     state_path: PathBuf,
     index_path: PathBuf,
     // One derived-index writer per process. Avoid competing refresh/rebuild
@@ -676,6 +682,104 @@ async fn initialize_security(
     .map_err(|error| error.to_string())?
 }
 
+/// A queued command submitted before an explicit Lock or a newer unlock
+/// cannot later resurrect that older session after the owner revokes it.
+fn reject_superseded_unlock(security: &SecurityGate, request_epoch: u64) -> Result<(), String> {
+    if security.status().epoch != request_epoch {
+        return Err("MP_UNLOCK_SUPERSEDED".to_owned());
+    }
+    Ok(())
+}
+
+fn owner_session_present(
+    native_capture: &Arc<Mutex<Option<native_capture_ipc::NativeCaptureIpc>>>,
+    vault: &Arc<Mutex<Option<Arc<VaultCaptureStore>>>>,
+) -> bool {
+    native_capture
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .is_some()
+        || vault
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .is_some()
+}
+
+fn publish_owner_capture_with_hook(
+    archive_root: PathBuf,
+    writer: Arc<VaultCaptureStore>,
+    security: &SecurityGate,
+    lease: UnlockLease,
+    commit_gate: &Arc<Mutex<()>>,
+    shutdown_requested: &AtomicBool,
+    native_capture: &Arc<Mutex<Option<native_capture_ipc::NativeCaptureIpc>>>,
+    vault: &Arc<Mutex<Option<Arc<VaultCaptureStore>>>>,
+    ready: &AtomicBool,
+    before_start: impl FnOnce(),
+) -> Result<(), String> {
+    // Shutdown sets its monotonic fence under this SAME gate. Until we
+    // release the gate, it cannot revoke/teardown between descriptor
+    // publication and native receiver installation.
+    let publish_guard = commit_gate
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    if shutdown_requested.load(Ordering::Acquire) {
+        return Err("MP_APP_SHUTTING_DOWN".to_owned());
+    }
+    if owner_session_present(native_capture, vault) {
+        return Err("MP_VAULT_IPC_SESSION_ALREADY_PRESENT".to_owned());
+    }
+
+    // This callback is a no-op in production; tests use it to force a
+    // deterministic overlap while the real publication gate is held.
+    before_start();
+    let receiver = native_capture_ipc::NativeCaptureIpc::start(
+        archive_root,
+        writer.clone(),
+        security.clone(),
+        lease,
+        commit_gate.clone(),
+    )?;
+    if let Err(error) = security.validate_lease(lease) {
+        // A live receiver's Drop joins a worker which may need commit_gate.
+        // NEVER drop that receiver while holding the publication gate.
+        drop(publish_guard);
+        drop(receiver);
+        return Err(security_error(error));
+    }
+    *native_capture
+        .lock()
+        .unwrap_or_else(|error| error.into_inner()) = Some(receiver);
+    *vault.lock().unwrap_or_else(|error| error.into_inner()) = Some(writer);
+    ready.store(true, Ordering::Release);
+    Ok(())
+}
+
+fn publish_owner_capture(
+    archive_root: PathBuf,
+    writer: Arc<VaultCaptureStore>,
+    security: &SecurityGate,
+    lease: UnlockLease,
+    commit_gate: &Arc<Mutex<()>>,
+    shutdown_requested: &AtomicBool,
+    native_capture: &Arc<Mutex<Option<native_capture_ipc::NativeCaptureIpc>>>,
+    vault: &Arc<Mutex<Option<Arc<VaultCaptureStore>>>>,
+    ready: &AtomicBool,
+) -> Result<(), String> {
+    publish_owner_capture_with_hook(
+        archive_root,
+        writer,
+        security,
+        lease,
+        commit_gate,
+        shutdown_requested,
+        native_capture,
+        vault,
+        ready,
+        || {},
+    )
+}
+
 #[tauri::command]
 async fn unlock_security(
     state: State<'_, AppState>,
@@ -683,16 +787,47 @@ async fn unlock_security(
 ) -> Result<SecurityStatus, String> {
     if state.store.is_none() {
         let security = state.security.clone();
+        let request_epoch = security.status().epoch;
+        let owner_unlock_gate = state.owner_unlock_gate.clone();
         let vault_root = state.vault_root.clone();
         let vault = state.vault.clone();
         let ready = state.authority_ready.clone();
         let native_capture = state.native_capture.clone();
         let archive_root = state.archive_root.clone();
         let commit_gate = state.document_authority_gate.clone();
+        let shutdown_requested = state.shutdown_requested.clone();
         return tauri::async_runtime::spawn_blocking(move || {
+            let _attempt = owner_unlock_gate
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            reject_superseded_unlock(&security, request_epoch)?;
+            if shutdown_requested.load(Ordering::Acquire) {
+                return Err("MP_APP_SHUTTING_DOWN".to_owned());
+            }
             let secret = Zeroizing::new(secret);
             let status = security.unlock(secret.as_bytes()).map_err(security_error)?;
             let lease = security.require_unlocked().map_err(security_error)?;
+            if shutdown_requested.load(Ordering::Acquire) {
+                security.lock_if_lease(lease);
+                return Err("MP_APP_SHUTTING_DOWN".to_owned());
+            }
+            if owner_session_present(&native_capture, &vault) {
+                return Err("MP_VAULT_IPC_SESSION_ALREADY_PRESENT".to_owned());
+            }
+            if !vault_root.exists()
+                && matches!(
+                    mind_place_security::vault_first_run::FirstRunJournal::can_resume(
+                        &vault_root,
+                        secret.as_bytes(),
+                    ),
+                    Ok(true)
+                )
+            {
+                // The owner authenticated; the verifier is not an active vault.
+                // Revoke this epoch before starting a fresh offline ceremony.
+                security.lock_if_lease(lease);
+                return Err("MP_VAULT_INCOMPLETE_FIRST_RUN".to_owned());
+            }
             let opened = (|| -> Result<Arc<VaultCaptureStore>, String> {
                 let manifest = mind_place_security::vault::VaultManifest::read(&vault_root)
                     .map_err(security_error)?;
@@ -707,49 +842,56 @@ async fn unlock_security(
             let adapter = match opened {
                 Ok(value) => value,
                 Err(error) => {
-                    security.lock();
+                    security.lock_if_lease(lease);
                     return Err(error);
                 }
             };
-            // The desktop alone owns the DEK. The native browser host sends
-            // short-lived HMAC-authenticated captures to this owner session.
-            // A listener startup failure cannot unlock the capture surface.
-            let receiver = match native_capture_ipc::NativeCaptureIpc::start(
+            // Serialize startup, no-clobber publication and installation with
+            // the same gate used by owner shutdown and filesystem grants.
+            if let Err(error) = publish_owner_capture(
                 archive_root,
-                adapter.clone(),
-                security.clone(),
+                adapter,
+                &security,
                 lease,
-                commit_gate,
+                &commit_gate,
+                &shutdown_requested,
+                &native_capture,
+                &vault,
+                &ready,
             ) {
-                Ok(receiver) => receiver,
-                Err(error) => {
-                    security.lock();
-                    return Err(error);
-                }
-            };
-            if let Err(error) = security.validate_lease(lease) {
-                drop(receiver);
-                return Err(security_error(error));
+                security.lock_if_lease(lease);
+                return Err(error);
             }
-            *native_capture
-                .lock()
-                .unwrap_or_else(|error| error.into_inner()) = Some(receiver);
-            let mut session = vault.lock().unwrap_or_else(|error| error.into_inner());
-            *session = Some(adapter);
-            ready.store(true, Ordering::Release);
             Ok(status)
         })
         .await
         .map_err(|error| error.to_string())?;
     }
     let security = state.security.clone();
+    let request_epoch = security.status().epoch;
+    let owner_unlock_gate = state.owner_unlock_gate.clone();
     let state_path = state.state_path.clone();
     let authority_ready = state.authority_ready.clone();
+    let shutdown_requested = state.shutdown_requested.clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let _attempt = owner_unlock_gate
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        reject_superseded_unlock(&security, request_epoch)?;
+        if shutdown_requested.load(Ordering::Acquire) {
+            return Err("MP_APP_SHUTTING_DOWN".to_owned());
+        }
         let secret = Zeroizing::new(secret);
         let status = security.unlock(secret.as_bytes()).map_err(security_error)?;
+        let lease = security.require_unlocked().map_err(security_error)?;
+        if shutdown_requested.load(Ordering::Acquire) {
+            security.lock_if_lease(lease);
+            return Err("MP_APP_SHUTTING_DOWN".to_owned());
+        }
         if let Err(error) = StateStore::open(&state_path) {
-            security.lock();
+            if !authority_ready.load(Ordering::Acquire) {
+                security.lock_if_lease(lease);
+            }
             return Err(format!("{}:{}", error.code(), error));
         }
         authority_ready.store(true, Ordering::Release);
@@ -759,15 +901,10 @@ async fn unlock_security(
     .map_err(|error| error.to_string())?
 }
 
-#[tauri::command]
-fn lock_security(state: State<'_, AppState>) -> SecurityStatus {
-    // Lock cannot complete while a prior authorized grant is committing.
-    // Conversely, a queued grant revalidates its lease after acquiring gate.
-    let status = lock_document_authority(
-        &state.document_authority_gate,
-        &state.authority_ready,
-        &state.security,
-    );
+// Also used by native application shutdown. Dropping the owned receiver
+// invokes its identity-checked descriptor cleanup; never unlink a session
+// descriptor directly from a window or process exit handler.
+fn retire_owner_handles(state: &AppState) {
     state.document_refresh.deactivate_all();
     state
         .vault
@@ -779,11 +916,53 @@ fn lock_security(state: State<'_, AppState>) -> SecurityStatus {
         .lock()
         .unwrap_or_else(|error| error.into_inner())
         .take();
-    // Invalidate all read leases before killing the outbound helper and local listener.
-    // Revocation is best-effort while locked; all in-flight evidence is already blocked.
-    let _ = hosted_tunnel::stop_and_revoke(&state);
-    state.mcp.lock().unwrap_or_else(|e| e.into_inner()).take();
+    let _ = hosted_tunnel::stop_and_revoke(state);
+    state
+        .mcp
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .take();
+}
+
+fn teardown_owner_session(state: &AppState) -> SecurityStatus {
+    // Lock must complete after any credential worker already in flight.
+    let _attempt = state
+        .owner_unlock_gate
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    // Explicit Lock retains its existing serialized lease revocation.
+    let status = lock_document_authority(
+        &state.document_authority_gate,
+        &state.authority_ready,
+        &state.security,
+    );
+    // Never join the IPC worker while holding document_authority_gate.
+    retire_owner_handles(state);
     status
+}
+
+fn shutdown_owner_session(state: &AppState) {
+    // Acquiring the same gate as receiver startup makes the shutdown fence
+    // monotonic with respect to publication: after the fence is set, no new
+    // native capture descriptor can be published or installed by this process.
+    let guard = state
+        .document_authority_gate
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    if state.shutdown_requested.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    state.authority_ready.store(false, Ordering::Release);
+    state.security.lock();
+    drop(guard);
+    // The receiver's Drop may join an in-flight capture worker which itself
+    // waits on document_authority_gate, so resource retirement is outside it.
+    retire_owner_handles(state);
+}
+
+#[tauri::command]
+fn lock_security(state: State<'_, AppState>) -> SecurityStatus {
+    teardown_owner_session(&state)
 }
 
 /// Owner-only document root inventory. Never part of the MCP tool catalog.
@@ -1119,39 +1298,16 @@ fn get_setup(state: State<'_, AppState>) -> Result<SetupInfo, String> {
 
 #[cfg(windows)]
 fn registry_path(browser: &str) -> Option<String> {
-    let prefix = match browser {
-        "chrome" => "Software\\Google\\Chrome",
-        "edge" => "Software\\Microsoft\\Edge",
-        "brave" => "Software\\BraveSoftware\\Brave-Browser",
-        _ => return None,
-    };
-    Some(format!(
-        "{prefix}\\NativeMessagingHosts\\{NATIVE_HOST_NAME}"
-    ))
+    browser_registration::registry_path(browser)
 }
 
 #[cfg(windows)]
 fn is_registered(state: &AppState, browser: &str) -> bool {
-    use winreg::{enums::HKEY_CURRENT_USER, RegKey};
-    let Some(key) = registry_path(browser) else {
-        return false;
-    };
-    let Ok(key) = RegKey::predef(HKEY_CURRENT_USER).open_subkey(key) else {
-        return false;
-    };
-    let Ok(path) = key.get_value::<String, _>("") else {
-        return false;
-    };
-    if Path::new(&path) != native_manifest_path(state, browser) {
-        return false;
-    }
-    let Ok(expected) = mind_place_archive::native_host_manifest(&state.host_path) else {
-        return false;
-    };
-    std::fs::read(&path)
-        .ok()
-        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
-        .is_some_and(|value| value == expected)
+    browser_registration::is_registered(
+        &native_manifest_path(state, browser),
+        &state.host_path,
+        browser,
+    )
 }
 
 #[cfg(not(windows))]
@@ -1161,45 +1317,35 @@ fn is_registered(_state: &AppState, _browser: &str) -> bool {
 
 #[tauri::command]
 fn register_extension(state: State<'_, AppState>, browser: String) -> Result<SetupInfo, String> {
-    let lease = begin_unlocked(&state)?;
     if !matches!(browser.as_str(), "chrome" | "edge" | "brave") {
         return Err("Choose Chrome, Edge or Brave".into());
     }
     #[cfg(windows)]
     {
-        use winreg::{enums::HKEY_CURRENT_USER, RegKey};
-        let manifest = mind_place_archive::native_host_manifest(&state.host_path)
-            .map_err(|e| e.to_string())?;
-        let target = native_manifest_path(&state, &browser);
-        let parent = target.parent().unwrap();
-        if parent.symlink_metadata().is_ok_and(|m| {
-            use std::os::windows::fs::MetadataExt;
-            m.file_attributes() & 0x400 != 0
-        }) {
-            return Err("Native registration directory cannot be a reparse point".into());
+        // Lock cannot interleave a registration write between authorization
+        // and its completion. The registry writer additionally serializes
+        // concurrent Chrome/Brave requests within the process.
+        let _owner_gate = state
+            .owner_unlock_gate
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let lease = begin_unlocked(&state)?;
+        if state.shutdown_requested.load(Ordering::Acquire) {
+            return Err("MP_SHUTDOWN:registration unavailable during shutdown".into());
         }
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-        let mut file = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
-        file.write_all(&serde_json::to_vec_pretty(&manifest).map_err(|e| e.to_string())?)
-            .map_err(|e| e.to_string())?;
-        file.as_file().sync_all().map_err(|e| e.to_string())?;
-        file.persist(&target).map_err(|e| e.to_string())?;
-        let (key, _) = RegKey::predef(HKEY_CURRENT_USER)
-            .create_subkey(registry_path(&browser).unwrap())
-            .map_err(|e| e.to_string())?;
-        key.set_value("", &target.display().to_string())
-            .map_err(|e| e.to_string())?;
+        browser_registration::register(
+            &native_manifest_path(&state, &browser),
+            &state.host_path,
+            &browser,
+        )?;
         let info = setup_info(&state);
         finish_unlocked(&state, lease)?;
         Ok(info)
     }
     #[cfg(not(windows))]
     {
-        let _ = lease;
-        Err(
-            "Browser native-host registration is currently implemented for Windows Chrome, Edge and Brave"
-                .into(),
-        )
+        let _lease = begin_unlocked(&state)?;
+        Err("Browser native-host registration is currently implemented for Windows Chrome, Edge and Brave".into())
     }
 }
 
@@ -1211,7 +1357,7 @@ mod browser_registration_tests {
     fn native_host_registry_paths_are_browser_specific_and_unknown_browsers_rejected() {
         assert_eq!(
             registry_path("brave").as_deref(),
-            Some("Software\\BraveSoftware\\Brave-Browser\\NativeMessagingHosts\\com.mindplace.capture")
+            Some("Software\\Google\\Chrome\\NativeMessagingHosts\\com.mindplace.capture")
         );
         assert_eq!(
             registry_path("chrome").as_deref(),
@@ -1243,7 +1389,9 @@ fn main() {
             let parent = root.parent().unwrap_or(&root);
             let legacy_exists = root.exists() || state_path.exists() || index_path.exists();
             let vault_exists = parent.join("vault-v1.json").exists()
-                || parent.join("encrypted-vault-v1/vault-v1.json").exists();
+                || mind_place_security::vault_first_run::FirstRunJournal::has_vault_evidence(
+                    &vault_root,
+                )?;
             let store = if legacy_exists && !vault_exists {
                 Some(ArchiveStore::open(&root)?)
             } else {
@@ -1274,6 +1422,8 @@ fn main() {
                 vault: Arc::new(Mutex::new(None)),
                 native_capture: Arc::new(Mutex::new(None)),
                 security,
+                owner_unlock_gate: Arc::new(Mutex::new(())),
+                shutdown_requested: Arc::new(AtomicBool::new(false)),
                 state_path,
                 index_path,
                 archive_index_write_gate: Arc::new(Mutex::new(())),
@@ -1298,6 +1448,14 @@ fn main() {
                 })
                 .build()?;
             Ok(())
+        })
+        // CloseRequested is handled while AppState and its native receiver are
+        // still alive. A plain window close must revoke the unlock epoch and
+        // retire the exact owned capture descriptor just like explicit Lock.
+        .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+                shutdown_owner_session(&window.state::<AppState>());
+            }
         })
         .invoke_handler(tauri::generate_handler![
             get_security_status,
@@ -1350,8 +1508,15 @@ fn main() {
             inspect_retrieval_context,
             inspect_retrieval_fetch
         ])
-        .run(tauri::generate_context!())
-        .expect("Mind Place failed to start");
+        .build(tauri::generate_context!())
+        .expect("Mind Place failed to build")
+        .run(|app, event| {
+            // Also cover application-level exits that do not originate from a
+            // webview window close. This is idempotent after CloseRequested.
+            if matches!(event, tauri::RunEvent::Exit) {
+                shutdown_owner_session(&app.state::<AppState>());
+            }
+        });
 }
 
 #[cfg(test)]
@@ -1461,6 +1626,456 @@ mod document_authority_regression_tests {
             db.document_root(&root_id).unwrap().unwrap().approval_state,
             "pending",
             "queued approval must never persist after Lock"
+        );
+    }
+}
+
+#[cfg(test)]
+mod shutdown_race_regression_tests {
+    use super::*;
+    use mind_place_capture_host::ipc::SessionDescriptor;
+    use mind_place_security::vault::{CryptoVault, RecoverySecret, VaultManifest};
+    use std::{sync::mpsc, thread, time::Duration};
+
+    const PASSWORD: &[u8] = b"synthetic-shutdown-concurrent-unlock";
+
+    struct Fixture {
+        state: AppState,
+        writer: Arc<VaultCaptureStore>,
+        lease: UnlockLease,
+        manifest: VaultManifest,
+        recovery: RecoverySecret,
+        _home: tempfile::TempDir,
+    }
+
+    impl Fixture {
+        fn new() -> Self {
+            let home = tempfile::tempdir().unwrap();
+            let archive_root = home.path().join("archive-v1");
+            let vault_root = home.path().join("encrypted-vault-v1");
+            let security = SecurityGate::open(home.path().join("security-v1.json")).unwrap();
+            security.initialize(PASSWORD).unwrap();
+            let lease = security.require_unlocked().unwrap();
+            let (crypto, recovery, manifest) = CryptoVault::provision(&security, lease).unwrap();
+            manifest.persist_new(&vault_root).unwrap();
+            let writer =
+                Arc::new(VaultCaptureStore::open(&vault_root, crypto, &security, lease).unwrap());
+            let state = AppState {
+                store: None,
+                archive_root,
+                vault_root: vault_root.clone(),
+                pending_vault: Arc::new(Mutex::new(None)),
+                vault: Arc::new(Mutex::new(None)),
+                native_capture: Arc::new(Mutex::new(None)),
+                security,
+                owner_unlock_gate: Arc::new(Mutex::new(())),
+                shutdown_requested: Arc::new(AtomicBool::new(false)),
+                state_path: vault_root.join("state.sqlite3"),
+                index_path: vault_root.join("index.sqlite3"),
+                archive_index_write_gate: Arc::new(Mutex::new(())),
+                authority_ready: Arc::new(AtomicBool::new(false)),
+                document_authority_gate: Arc::new(Mutex::new(())),
+                document_refresh: Arc::new(DocumentRefreshRegistry::default()),
+                mcp: Arc::new(Mutex::new(None)),
+                hosted: Arc::new(Mutex::new(None)),
+                extension_path: PathBuf::new(),
+                host_path: PathBuf::new(),
+                legacy_path: home.path().join("sessions"),
+            };
+            Self {
+                state,
+                writer,
+                lease,
+                manifest,
+                recovery,
+                _home: home,
+            }
+        }
+
+        fn publish(&self) -> Result<(), String> {
+            publish_owner_capture(
+                self.state.archive_root.clone(),
+                self.writer.clone(),
+                &self.state.security,
+                self.lease,
+                &self.state.document_authority_gate,
+                &self.state.shutdown_requested,
+                &self.state.native_capture,
+                &self.state.vault,
+                &self.state.authority_ready,
+            )
+        }
+
+        fn descriptor_path(&self) -> PathBuf {
+            self._home.path().join("capture-ipc-v1.json")
+        }
+
+        fn assert_closed(&self) {
+            assert!(self.state.shutdown_requested.load(Ordering::Acquire));
+            assert!(self.state.security.status().locked);
+            assert!(!self.state.authority_ready.load(Ordering::Acquire));
+            assert!(self.state.native_capture.lock().unwrap().is_none());
+            assert!(self.state.vault.lock().unwrap().is_none());
+            assert!(!self.descriptor_path().exists());
+            assert!(VaultManifest::read(&self.state.vault_root).is_ok());
+        }
+
+        fn restart_and_unlock(&self) {
+            // Independent synthetic re-open of the same preserved vault.
+            let security = SecurityGate::open(self._home.path().join("security-v1.json")).unwrap();
+            security.unlock(PASSWORD).unwrap();
+            let lease = security.require_unlocked().unwrap();
+            let manifest = VaultManifest::read(&self.state.vault_root).unwrap();
+            assert_eq!(
+                serde_json::to_value(&manifest).unwrap(),
+                serde_json::to_value(&self.manifest).unwrap(),
+            );
+            let vault =
+                CryptoVault::restore_with_recovery(&security, lease, &manifest, &self.recovery)
+                    .unwrap();
+            let writer = Arc::new(
+                VaultCaptureStore::open(&self.state.vault_root, vault, &security, lease).unwrap(),
+            );
+            let receiver = native_capture_ipc::NativeCaptureIpc::start(
+                self.state.archive_root.clone(),
+                writer,
+                security.clone(),
+                lease,
+                Arc::new(Mutex::new(())),
+            )
+            .unwrap();
+            let first = SessionDescriptor::read(&self.state.archive_root).unwrap();
+            assert_ne!(first.port, 0);
+            drop(receiver);
+            assert!(!self.descriptor_path().exists());
+            security.lock();
+            assert!(security.unlock(b"synthetic-incorrect-password").is_err());
+        }
+    }
+
+    #[test]
+    fn shutdown_before_ipc_publication_denies_password_unlock() {
+        let fixture = Fixture::new();
+        shutdown_owner_session(&fixture.state);
+        assert_eq!(fixture.publish().unwrap_err(), "MP_APP_SHUTTING_DOWN");
+        fixture.assert_closed();
+        fixture.restart_and_unlock();
+    }
+
+    #[test]
+    fn ordinary_close_during_password_unlock_drains_publication() {
+        let fixture = Fixture::new();
+        let publisher_state = fixture.state.clone();
+        let writer = fixture.writer.clone();
+        let lease = fixture.lease;
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let publisher = thread::spawn(move || {
+            publish_owner_capture_with_hook(
+                publisher_state.archive_root.clone(),
+                writer,
+                &publisher_state.security,
+                lease,
+                &publisher_state.document_authority_gate,
+                &publisher_state.shutdown_requested,
+                &publisher_state.native_capture,
+                &publisher_state.vault,
+                &publisher_state.authority_ready,
+                || {
+                    entered_tx.send(()).unwrap(); // production gate held
+                    release_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+                },
+            )
+        });
+        entered_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        let closer_state = fixture.state.clone();
+        let (close_started_tx, close_started_rx) = mpsc::channel();
+        let closer = thread::spawn(move || {
+            close_started_tx.send(()).unwrap();
+            shutdown_owner_session(&closer_state);
+        });
+        close_started_rx
+            .recv_timeout(Duration::from_secs(10))
+            .unwrap();
+        release_tx.send(()).unwrap();
+        assert!(publisher.join().unwrap().is_ok());
+        closer.join().unwrap();
+        fixture.assert_closed();
+        // Repeated CloseRequested / RunEvent::Exit must not reactivate capture.
+        shutdown_owner_session(&fixture.state);
+        fixture.assert_closed();
+        fixture.restart_and_unlock();
+    }
+
+    #[test]
+    fn app_exit_during_recovery_publication_drains_receiver() {
+        let fixture = Fixture::new();
+        let writer = {
+            let vault = CryptoVault::restore_with_recovery(
+                &fixture.state.security,
+                fixture.lease,
+                &fixture.manifest,
+                &fixture.recovery,
+            )
+            .unwrap();
+            Arc::new(
+                VaultCaptureStore::open(
+                    &fixture.state.vault_root,
+                    vault,
+                    &fixture.state.security,
+                    fixture.lease,
+                )
+                .unwrap(),
+            )
+        };
+        let state = fixture.state.clone();
+        let lease = fixture.lease;
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let recovering = thread::spawn(move || {
+            publish_owner_capture_with_hook(
+                state.archive_root.clone(),
+                writer,
+                &state.security,
+                lease,
+                &state.document_authority_gate,
+                &state.shutdown_requested,
+                &state.native_capture,
+                &state.vault,
+                &state.authority_ready,
+                || {
+                    entered_tx.send(()).unwrap();
+                    release_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+                },
+            )
+        });
+        entered_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        let closer_state = fixture.state.clone();
+        let exit = thread::spawn(move || shutdown_owner_session(&closer_state));
+        release_tx.send(()).unwrap();
+        assert!(recovering.join().unwrap().is_ok());
+        exit.join().unwrap();
+        fixture.assert_closed();
+        assert_eq!(fixture.publish().unwrap_err(), "MP_APP_SHUTTING_DOWN");
+    }
+
+    #[test]
+    fn shutdown_after_publication_and_explicit_lock_then_exit() {
+        let fixture = Fixture::new();
+        fixture.publish().unwrap();
+        let original = SessionDescriptor::read(&fixture.state.archive_root).unwrap();
+        assert!(fixture.descriptor_path().exists());
+        // Overlapping owner app cannot clobber the existing capability.
+        let bytes = std::fs::read(fixture.descriptor_path()).unwrap();
+        assert!(native_capture_ipc::NativeCaptureIpc::start(
+            fixture.state.archive_root.clone(),
+            fixture.writer.clone(),
+            fixture.state.security.clone(),
+            fixture.lease,
+            Arc::new(Mutex::new(())),
+        )
+        .is_err());
+        assert_eq!(std::fs::read(fixture.descriptor_path()).unwrap(), bytes);
+        assert_ne!(original.port, 0);
+        assert!(teardown_owner_session(&fixture.state).locked);
+        shutdown_owner_session(&fixture.state);
+        shutdown_owner_session(&fixture.state);
+        fixture.assert_closed();
+        fixture.restart_and_unlock();
+    }
+
+    #[test]
+    fn concurrent_reauthentication_preserves_active_native_receiver() {
+        let fixture = Fixture::new();
+        fixture.publish().unwrap();
+        let descriptor = std::fs::read(fixture.descriptor_path()).unwrap();
+        let owner_epoch = fixture.lease.epoch();
+        let first_state = fixture.state.clone();
+        let second_state = fixture.state.clone();
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let first = thread::spawn(move || {
+            let _attempt = first_state.owner_unlock_gate.lock().unwrap();
+            assert_eq!(
+                first_state.security.unlock(PASSWORD).unwrap().epoch,
+                owner_epoch
+            );
+            assert!(owner_session_present(
+                &first_state.native_capture,
+                &first_state.vault
+            ));
+            entered_tx.send(()).unwrap();
+            release_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        });
+        entered_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        let second = thread::spawn(move || {
+            let _attempt = second_state.owner_unlock_gate.lock().unwrap();
+            assert_eq!(
+                second_state.security.unlock(PASSWORD).unwrap().epoch,
+                owner_epoch
+            );
+            assert!(owner_session_present(
+                &second_state.native_capture,
+                &second_state.vault
+            ));
+        });
+        release_tx.send(()).unwrap();
+        first.join().unwrap();
+        second.join().unwrap();
+        assert!(fixture.state.security.validate_lease(fixture.lease).is_ok());
+        assert!(fixture.state.authority_ready.load(Ordering::Acquire));
+        assert_eq!(
+            std::fs::read(fixture.descriptor_path()).unwrap(),
+            descriptor
+        );
+        shutdown_owner_session(&fixture.state);
+        fixture.assert_closed();
+        fixture.restart_and_unlock();
+    }
+
+    #[test]
+    fn stale_worker_and_wrong_password_cannot_revoke_native_owner() {
+        let fixture = Fixture::new();
+        let stale = fixture.lease;
+        fixture.state.security.lock();
+        fixture.state.security.unlock(PASSWORD).unwrap();
+        let current = fixture.state.security.require_unlocked().unwrap();
+        assert_ne!(stale.epoch(), current.epoch());
+        let crypto = CryptoVault::restore_with_recovery(
+            &fixture.state.security,
+            current,
+            &fixture.manifest,
+            &fixture.recovery,
+        )
+        .unwrap();
+        let writer = Arc::new(
+            VaultCaptureStore::open(
+                &fixture.state.vault_root,
+                crypto,
+                &fixture.state.security,
+                current,
+            )
+            .unwrap(),
+        );
+        publish_owner_capture(
+            fixture.state.archive_root.clone(),
+            writer,
+            &fixture.state.security,
+            current,
+            &fixture.state.document_authority_gate,
+            &fixture.state.shutdown_requested,
+            &fixture.state.native_capture,
+            &fixture.state.vault,
+            &fixture.state.authority_ready,
+        )
+        .unwrap();
+        let descriptor = std::fs::read(fixture.descriptor_path()).unwrap();
+        assert!(!fixture.state.security.lock_if_lease(stale));
+        for _ in 0..3 {
+            assert!(fixture
+                .state
+                .security
+                .unlock(b"wrong-synthetic-password")
+                .is_err());
+            assert!(fixture.state.security.validate_lease(current).is_ok());
+        }
+        assert!(fixture.state.security.status().retry_after_ms > 0);
+        assert_eq!(
+            std::fs::read(fixture.descriptor_path()).unwrap(),
+            descriptor
+        );
+        shutdown_owner_session(&fixture.state);
+        fixture.assert_closed();
+        fixture.restart_and_unlock();
+    }
+
+    #[test]
+    fn password_and_recovery_reauthentication_share_one_owner_gate() {
+        let fixture = Fixture::new();
+        fixture.publish().unwrap();
+        let descriptor = std::fs::read(fixture.descriptor_path()).unwrap();
+        let first_state = fixture.state.clone();
+        let recovery_state = fixture.state.clone();
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let password_worker = thread::spawn(move || {
+            let _attempt = first_state.owner_unlock_gate.lock().unwrap();
+            let epoch = first_state.security.status().epoch;
+            reject_superseded_unlock(&first_state.security, epoch).unwrap();
+            assert_eq!(first_state.security.unlock(PASSWORD).unwrap().epoch, epoch);
+            entered_tx.send(()).unwrap();
+            release_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        });
+        entered_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        let recovery_worker = thread::spawn(move || {
+            let epoch = recovery_state.security.status().epoch;
+            let _attempt = recovery_state.owner_unlock_gate.lock().unwrap();
+            reject_superseded_unlock(&recovery_state.security, epoch).unwrap();
+            assert_eq!(
+                recovery_state.security.unlock(PASSWORD).unwrap().epoch,
+                epoch
+            );
+            assert!(owner_session_present(
+                &recovery_state.native_capture,
+                &recovery_state.vault
+            ));
+        });
+        release_tx.send(()).unwrap();
+        password_worker.join().unwrap();
+        recovery_worker.join().unwrap();
+        assert!(fixture.state.security.validate_lease(fixture.lease).is_ok());
+        assert_eq!(
+            std::fs::read(fixture.descriptor_path()).unwrap(),
+            descriptor
+        );
+        shutdown_owner_session(&fixture.state);
+        fixture.assert_closed();
+    }
+
+    #[test]
+    fn explicit_lock_supersedes_queued_password_or_recovery_request() {
+        let fixture = Fixture::new();
+        fixture.publish().unwrap();
+        let request_epoch = fixture.state.security.status().epoch;
+        let stale_state = fixture.state.clone();
+        let (queued_tx, queued_rx) = mpsc::channel();
+        let (resume_tx, resume_rx) = mpsc::channel();
+        let pending = thread::spawn(move || {
+            queued_tx.send(()).unwrap();
+            resume_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+            let _attempt = stale_state.owner_unlock_gate.lock().unwrap();
+            reject_superseded_unlock(&stale_state.security, request_epoch)
+        });
+        queued_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        assert!(teardown_owner_session(&fixture.state).locked);
+        resume_tx.send(()).unwrap();
+        assert_eq!(pending.join().unwrap().unwrap_err(), "MP_UNLOCK_SUPERSEDED");
+        assert!(fixture.state.native_capture.lock().unwrap().is_none());
+        shutdown_owner_session(&fixture.state);
+        fixture.assert_closed();
+        fixture.restart_and_unlock();
+    }
+
+    #[test]
+    fn replaced_descriptor_remains_untouched_on_shutdown() {
+        let fixture = Fixture::new();
+        fixture.publish().unwrap();
+        let foreign = SessionDescriptor::new(65534, &[0x7d; 32]);
+        std::fs::write(
+            fixture.descriptor_path(),
+            serde_json::to_vec(&foreign).unwrap(),
+        )
+        .unwrap();
+        shutdown_owner_session(&fixture.state);
+        assert_eq!(
+            SessionDescriptor::read(&fixture.state.archive_root).unwrap(),
+            foreign,
+        );
+        assert!(fixture.state.security.status().locked);
+        assert!(fixture.publish().is_err());
+        assert_eq!(
+            SessionDescriptor::read(&fixture.state.archive_root).unwrap(),
+            foreign,
         );
     }
 }

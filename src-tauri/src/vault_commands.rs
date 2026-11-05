@@ -4,7 +4,7 @@
 use super::AppState;
 use mind_place_index::vault_archive::VaultCaptureStore;
 use mind_place_security::vault::{CryptoVault, RecoverySecret, VaultManifest};
-use mind_place_security::SecurityStatus;
+use mind_place_security::{vault_first_run::FirstRunJournal, SecurityStatus};
 use mind_place_state::vault_bootstrap::PreparedFirstRunVault;
 use std::sync::{Arc, Mutex};
 use tauri::State;
@@ -32,22 +32,36 @@ pub(super) async fn begin_vault_setup(
         if vault_root.exists() {
             return Err("MP_VAULT_EXISTS:never overwrite an existing vault".to_owned());
         }
-        // Initializing the verifier never creates legacy state or archive.
-        // After process restart, require the existing unlock secret again.
-        if security.status().configured {
+        // A durable authenticated intent MUST precede the verifier. Otherwise
+        // a crash creates an indistinguishable orphan verifier and missing vault.
+        let configured = security.status().configured;
+        if configured {
             security
                 .unlock(secret.as_bytes())
                 .map_err(|error| format!("{}:{}", error.code(), error))?;
-        } else {
-            security
-                .initialize(secret.as_bytes())
-                .map_err(|error| format!("{}:{}", error.code(), error))?;
+        }
+        if let Err(error) =
+            FirstRunJournal::ensure_start(&vault_root, secret.as_bytes(), configured)
+        {
+            security.lock();
+            return Err(format!("{}:{}", error.code(), error));
+        }
+        if !configured {
+            if let Err(error) = security.initialize(secret.as_bytes()) {
+                security.lock();
+                return Err(format!("{}:{}", error.code(), error));
+            }
         }
         let lease = security
             .require_unlocked()
             .map_err(|error| format!("{}:{}", error.code(), error))?;
-        let prepared = PreparedFirstRunVault::prepare(&vault_root, &security, lease)
-            .map_err(|error| format!("{}:{}", error.code(), error))?;
+        let prepared = match PreparedFirstRunVault::prepare(&vault_root, &security, lease) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                security.lock();
+                return Err(format!("{}:{}", error.code(), error));
+            }
+        };
         let display_only = prepared.recovery_code();
         *slot = Some(prepared);
         Ok(display_only.as_str().to_owned())
@@ -113,13 +127,23 @@ pub(super) async fn unlock_vault_with_recovery(
         return Err("MP_VAULT_LEGACY_MIGRATION_REQUIRED".into());
     }
     let security = state.security.clone();
+    let request_epoch = security.status().epoch;
+    let owner_unlock_gate = state.owner_unlock_gate.clone();
     let root = state.vault_root.clone();
     let holder = state.vault.clone();
     let ready = state.authority_ready.clone();
     let native_capture = state.native_capture.clone();
     let archive_root = state.archive_root.clone();
     let commit_gate = state.document_authority_gate.clone();
+    let shutdown_requested = state.shutdown_requested.clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let _attempt = owner_unlock_gate
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        super::reject_superseded_unlock(&security, request_epoch)?;
+        if shutdown_requested.load(std::sync::atomic::Ordering::Acquire) {
+            return Err("MP_APP_SHUTTING_DOWN".to_owned());
+        }
         let secret = Zeroizing::new(secret);
         let code = Zeroizing::new(code);
         let status = security
@@ -128,6 +152,13 @@ pub(super) async fn unlock_vault_with_recovery(
         let lease = security
             .require_unlocked()
             .map_err(|error| format!("{}:{}", error.code(), error))?;
+        if shutdown_requested.load(std::sync::atomic::Ordering::Acquire) {
+            security.lock_if_lease(lease);
+            return Err("MP_APP_SHUTTING_DOWN".to_owned());
+        }
+        if super::owner_session_present(&native_capture, &holder) {
+            return Err("MP_VAULT_IPC_SESSION_ALREADY_PRESENT".to_owned());
+        }
         let opened = (|| -> Result<Arc<VaultCaptureStore>, String> {
             let parsed = RecoverySecret::from_export_code(code.as_str())
                 .map_err(|error| format!("{}:{}", error.code(), error))?;
@@ -141,31 +172,25 @@ pub(super) async fn unlock_vault_with_recovery(
         })();
         match opened {
             Ok(adapter) => {
-                let receiver = match super::native_capture_ipc::NativeCaptureIpc::start(
+                // Same shutdown/publication fence as ordinary password unlock.
+                if let Err(error) = super::publish_owner_capture(
                     archive_root,
-                    adapter.clone(),
-                    security.clone(),
+                    adapter,
+                    &security,
                     lease,
-                    commit_gate,
+                    &commit_gate,
+                    &shutdown_requested,
+                    &native_capture,
+                    &holder,
+                    &ready,
                 ) {
-                    Ok(receiver) => receiver,
-                    Err(error) => {
-                        security.lock();
-                        return Err(error);
-                    }
-                };
-                security
-                    .validate_lease(lease)
-                    .map_err(|error| format!("{}:{}", error.code(), error))?;
-                *native_capture
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner()) = Some(receiver);
-                *holder.lock().unwrap_or_else(|error| error.into_inner()) = Some(adapter);
-                ready.store(true, std::sync::atomic::Ordering::Release);
+                    security.lock_if_lease(lease);
+                    return Err(error);
+                }
                 Ok(status)
             }
             Err(error) => {
-                security.lock();
+                security.lock_if_lease(lease);
                 Err(error)
             }
         }

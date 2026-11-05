@@ -4,9 +4,13 @@
 **Date:** 2026-10-31  
 **Scope:** workflow triggers, `GITHUB_TOKEN` permissions, secrets/environments/OIDC, checkout refs and credential persistence, fork execution, artifacts/caches, third-party action pinning, and privileged event paths.
 
+## WIN-10 / BRAVE-REG-01 reconciliation — 5 November 2026
+
+Reconciled with current #132 source `3c95460d0b381909263082003ab0722c70a8cfe0`. The 11th workflow, `.github/workflows/brave-registration.yml`, is in the exact audited inventory with mutable-checkout and persistent-credentials negative tests. This workflow uses read-only token permissions, immutable action SHAs, nonpersistent checkout and a PR132-only job filter. It does not certify owner-installed Brave or the independent policy App. Preserve the newer first-run and shutdown-race native regressions from #132's SQLCipher workflow. PR-event SQLCipher checkout now uses immutable event SHA; manual dispatch still checks out a validated PR merge. Previous #141 hosted CI covered the prior 10-workflow source only.
+
 ## Integrated recovery — 3 November 2026
 
-The owner-directed blocker recovery reconciles this existing PR with foundation integration #132 at `ae483364fb9b709ecd79be92f9e9f34dbdee8cdd`. The current audit covers all **10 active workflows**, including native SQLCipher and separated Windows Product qualification. The three earlier active-lock exemptions are removed. Every external action is pinned to an upstream commit, every checkout disables credential persistence, and target workflows retain read-only token permissions with no secret references or privileged triggers.
+The owner-directed blocker recovery reconciles this existing PR with foundation integration #132 at `ae483364fb9b709ecd79be92f9e9f34dbdee8cdd`. The current audit covers all **11 active workflows**, including native SQLCipher and separated Windows Product qualification. The three earlier active-lock exemptions are removed. Every external action is pinned to an upstream commit, every checkout disables credential persistence, and target workflows retain read-only token permissions with no secret references or privileged triggers.
 
 The audit script now recognizes both named `uses:` and unnamed `- uses:` steps. Adverse fixtures reproduced acceptance of mutable checkout tags on the previously excluded foundation workflows; the corrected audit rejects them, as well as persistent checkout credentials. This is source-policy regression coverage, not proof that repository settings or a deployed App are active.
 

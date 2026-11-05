@@ -39,7 +39,7 @@ function checkMutatedWorkflow(t, filename, mutate) {
   return spawnSync(process.execPath, [join(root, "scripts/verify-workflow-security.mjs")], { encoding: "utf8" });
 }
 
-for (const file of ["ci.yml", "mp-10c-scale.yml", "storage-qualification.yml", "mp9b-sqlcipher-qualification.yml", "windows-product.yml"]) {
+for (const file of ["ci.yml", "mp-10c-scale.yml", "storage-qualification.yml", "mp9b-sqlcipher-qualification.yml", "windows-product.yml", "brave-registration.yml"]) {
   test(`${file}: mutable checkout references cannot bypass the workflow audit`, (t) => {
     const result = checkMutatedWorkflow(t, file, (source) => source.replace(/actions\/checkout@[0-9a-f]{40}/, "actions/checkout@v5"));
     assert.notEqual(result.status, 0, "A mutable checkout tag must fail even on an unnamed '- uses' step");
@@ -49,6 +49,13 @@ for (const file of ["ci.yml", "mp-10c-scale.yml", "storage-qualification.yml", "
 
 test("foundation checkout credentials cannot be persisted", (t) => {
   const result = checkMutatedWorkflow(t, "mp9b-sqlcipher-qualification.yml", (source) => source.replace("persist-credentials: false", "persist-credentials: true"));
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /must not persist its token/);
+});
+
+
+test("BRAVE-REG-01 checkout credentials cannot be persisted", (t) => {
+  const result = checkMutatedWorkflow(t, "brave-registration.yml", (source) => source.replace("persist-credentials: false", "persist-credentials: true"));
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /must not persist its token/);
 });

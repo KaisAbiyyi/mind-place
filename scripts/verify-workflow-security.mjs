@@ -17,6 +17,7 @@ const fullyHardened = new Set([
   "mp9a-security-probe.yml",
   "release.yml",
   "workflow-security.yml",
+  "brave-registration.yml",
 ]);
 
 const expectedFiles = [...fullyHardened].sort();

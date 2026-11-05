@@ -719,7 +719,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     const registered = document.createElement("p");
     registered.className = "registered-status";
     registered.textContent = info.registered_browsers.length
-      ? `Registered in ${info.registered_browsers.map(titleCase).join(" and ")}.`
+      ? `Configured for ${info.registered_browsers.map(titleCase).join(" and ")}; browser connection has not been tested.`
       : "The browser extension has not been registered yet.";
 
     const register = document.createElement("div");
@@ -999,7 +999,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
       const info = await invoke<SetupInfo>("register_extension", { browser });
       if (!alive) return;
       renderSetup(info);
-      setActionStatus(`${titleCase(browser)} extension registered`);
+      setActionStatus(`${titleCase(browser)} native-host configuration saved; browser connection has not been tested`);
     } catch (error) {
       if (alive) setActionStatus(`Couldn’t register ${titleCase(browser)}: ${errorMessage(error)}`, true);
     } finally {
