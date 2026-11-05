@@ -537,6 +537,6 @@ test("Register Brave is an explicit Settings action and reports native host regi
   root.querySelector<HTMLButtonElement>("[data-action='register-brave']")!.click();
   await delay(0);
   assert.equal(registeredBrowser, "brave");
-  assert.match(root.querySelector<HTMLElement>(".registered-status")?.textContent ?? "", /Registered in Brave/);
+  assert.match(root.querySelector<HTMLElement>(".registered-status")?.textContent ?? "", /Configured for Brave.*browser connection has not been tested/);
   assert.equal(root.querySelector<HTMLButtonElement>("[data-action='register-chrome']")?.disabled, false);
 });

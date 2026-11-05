@@ -1388,7 +1388,7 @@ mod browser_registration_tests {
     fn native_host_registry_paths_are_browser_specific_and_unknown_browsers_rejected() {
         assert_eq!(
             registry_path("brave").as_deref(),
-            Some("Software\\BraveSoftware\\Brave-Browser\\NativeMessagingHosts\\com.mindplace.capture")
+            Some("Software\\Google\\Chrome\\NativeMessagingHosts\\com.mindplace.capture")
         );
         assert_eq!(
             registry_path("chrome").as_deref(),
