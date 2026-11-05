@@ -75,6 +75,43 @@ try {
       receipt.push({ viewport: width + "x" + height, workspace: name, ...metrics });
     }
   }
+  // MP-8L1: Windows DPI of 100/125/150/175% reduces available CSS pixels.
+  // Do not let fixed sidebar sections shrink the archive viewport to zero.
+  // Chromium can catch layout regressions; the owner still qualifies native WebView2.
+  const desktopScalingSizes = [
+    [1700, 900, "100%"], [1360, 720, "125%"],
+    [1133, 600, "150%"], [971, 514, "175%"],
+  ];
+  for (const [width, height, label] of desktopScalingSizes) {
+    await page.setViewportSize({ width, height });
+    const metrics = await page.evaluate(() => {
+      const sidebar = document.querySelector(".library");
+      const list = document.querySelector("#conversation-list");
+      const footer = document.querySelector(".library-footer");
+      const listHeight = list.getBoundingClientRect().height;
+      const scrollable = sidebar.scrollHeight > sidebar.clientHeight;
+      list.scrollIntoView({ block: "center" });
+      const listBounds = list.getBoundingClientRect();
+      const sidebarBounds = sidebar.getBoundingClientRect();
+      const visibleListHeight = Math.max(0, Math.min(listBounds.bottom, sidebarBounds.bottom) -
+        Math.max(listBounds.top, sidebarBounds.top));
+      sidebar.scrollTop = sidebar.scrollHeight;
+      const footerBounds = footer.getBoundingClientRect();
+      const footerReachable = footerBounds.top < sidebarBounds.bottom + 1 &&
+        footerBounds.bottom > sidebarBounds.top;
+      return { listHeight, visibleListHeight, scrollable, footerReachable };
+    });
+    const minHeight = label === "150%" || label === "175%" ? 164 : 76;
+    assert.ok(metrics.listHeight >= minHeight - 1, label + " conversation list collapsed: " + JSON.stringify(metrics));
+    assert.ok(metrics.visibleListHeight >= 76, label + " conversation list inaccessible: " + JSON.stringify(metrics));
+    assert.equal(metrics.footerReachable, true, label + " footer inaccessible");
+    if (label === "150%" || label === "175%") {
+      assert.equal(metrics.scrollable, true, label + " should allow scrolling the full sidebar");
+    }
+    receipt.push({ viewport: width + "x" + height, desktopScaling: label, ...metrics });
+  }
+  await page.setViewportSize({ width: 1180, height: 820 });
+
   await page.locator('[data-workspace="connections"]').click();
   assert.equal(await page.locator("#setup-dialog").getAttribute("open"), "");
   await page.keyboard.press("Escape");

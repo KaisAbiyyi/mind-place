@@ -86,6 +86,17 @@
   .conversation-list.is-virtualized .conversation-row { width: 100%; }
   .conversation-list.is-virtualized { align-items: initial; }
 }
+/* Short desktop WebView2 viewports (e.g. 150% and 175% Windows DPI)
+   must retain an operable conversation list. Its parent sidebar can scroll
+   when navigation + footer exceed the available CSS-pixel height. */
+@media (min-width: 701px) and (max-height: 640px) {
+  .library {
+    grid-template-rows: auto auto auto auto auto auto minmax(164px, 1fr) auto;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+  }
+}
 @media (forced-colors: active) {
   .knowledge-os-nav-item[aria-current="page"] { border: 2px solid Highlight; color: Highlight; }
 }
