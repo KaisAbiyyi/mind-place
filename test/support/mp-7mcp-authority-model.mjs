@@ -73,11 +73,11 @@ export function canRead(state, authenticated, collectionId) {
 }
 
 export function simulateWrite(state, authenticated, request, options = {}) {
-  const initial = authorizeWrite(state, authenticated, request);
-  if (!initial.ok) return initial;
-
   const receiptKey = JSON.stringify([state.vaultId, authenticated.clientId, request.operationId]);
   const previous = state.receipts.get(receiptKey);
+  // Idempotent replay checks LIVE authority without reapplying the old pre-commit revision.
+  const initial = authorizeWrite(state, authenticated, request, { skipObjectPrecondition: !!previous });
+  if (!initial.ok) return initial;
   if (previous) {
     if (previous.bodyDigest !== request.bodyDigest ||
         previous.operation !== request.operation ||
