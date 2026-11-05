@@ -93,6 +93,28 @@ export function mountDocumentRootSetup(parent: HTMLElement, invoke: Invoke): voi
   stage.className = "quiet-button";
   stage.textContent = "Stage folder";
   form.append(label, pathHelp, stage);
+  const authorize = doc.createElement("button"); authorize.type = "button";
+  authorize.className = "quiet-button document-authorize-open";
+  authorize.dataset.action = "authorize-document-folder"; authorize.textContent = "Authorize folder";
+  const authorizeDialog = doc.createElement("dialog"); authorizeDialog.className = "document-authorize-dialog";
+  authorizeDialog.setAttribute("aria-label", "Stage a document folder for owner approval");
+  const dialogTitle = doc.createElement("h4"); dialogTitle.textContent = "Stage folder identity";
+  const dialogInfo = doc.createElement("p");
+  dialogInfo.textContent = "Enter an existing absolute path. A native folder picker is not yet exposed. This stage neither grants access nor scans files.";
+  const closeDialog = doc.createElement("button"); closeDialog.type = "button";
+  closeDialog.className = "quiet-button"; closeDialog.textContent = "Cancel";
+  const dismissDialog = () => {
+    if (typeof authorizeDialog.close === "function" && authorizeDialog.open) authorizeDialog.close();
+    else authorizeDialog.removeAttribute("open");
+    authorize.focus();
+  };
+  closeDialog.addEventListener("click", dismissDialog);
+  authorize.addEventListener("click", () => {
+    if (typeof authorizeDialog.showModal === "function") authorizeDialog.showModal();
+    else authorizeDialog.setAttribute("open", "");
+    input.focus();
+  });
+  authorizeDialog.append(dialogTitle, dialogInfo, form, closeDialog);
   const status = doc.createElement("p");
   status.setAttribute("role", "status");
   status.setAttribute("aria-live", "polite");
@@ -101,6 +123,21 @@ export function mountDocumentRootSetup(parent: HTMLElement, invoke: Invoke): voi
   folderHeading.textContent = "Managed folders";
   const list = doc.createElement("ul");
   list.className = "document-root-list";
+  const toolbar = doc.createElement("div"); toolbar.className = "document-root-toolbar";
+  const filterLabel = doc.createElement("label"); filterLabel.textContent = "Folder status";
+  const filter = doc.createElement("select"); filter.setAttribute("aria-label", "Filter managed folders");
+  for (const [value, title] of [["all", "All folders"], ["pending", "Pending"], ["approved", "Approved"], ["watching", "Watching (confirmed)"], ["paused", "Paused (confirmed)"], ["revoked", "Revoked"]]) {
+    const option = doc.createElement("option"); option.value = value; option.textContent = title; filter.append(option);
+  }
+  filterLabel.append(filter);
+  const folderQueryLabel = doc.createElement("label"); folderQueryLabel.textContent = "Find folder";
+  const folderQuery = doc.createElement("input"); folderQuery.type = "search"; folderQuery.maxLength = 256;
+  folderQuery.placeholder = "Folder path or namespace"; folderQueryLabel.append(folderQuery);
+  const filterSummary = doc.createElement("p"); filterSummary.setAttribute("role", "status");
+  filterSummary.setAttribute("aria-live", "polite");
+  toolbar.append(filterLabel, folderQueryLabel, filterSummary);
+  const inspector = doc.createElement("aside"); inspector.className = "document-inspector"; inspector.hidden = true;
+  inspector.setAttribute("aria-label", "Selected folder or document provenance");
   const searchHeading = doc.createElement("h4");
   searchHeading.className = "document-section-heading";
   searchHeading.textContent = "Search indexed content";
@@ -132,7 +169,7 @@ export function mountDocumentRootSetup(parent: HTMLElement, invoke: Invoke): voi
   let previewEpoch = 0;
   let revocationPending = false;
   const lastReports = new Map<string, { report: DocumentIndexReport; indexedAt: string; paused: boolean }>();
-  section.append(heading, explanation, steps, form, status, folderHeading, list, searchHeading, searchNote, searchForm, searchStatus, results);
+  section.append(heading, explanation, steps, authorize, authorizeDialog, status, folderHeading, toolbar, list, inspector, searchHeading, searchNote, searchForm, searchStatus, results);
   parent.append(section);
 
   const refresh = async (): Promise<void> => {
@@ -429,6 +466,7 @@ export function mountDocumentRootSetup(parent: HTMLElement, invoke: Invoke): voi
       .then(async (root) => {
         if (!section.isConnected) return;
         input.value = "";
+        dismissDialog();
         status.textContent = `Staged: ${root.approval_state}. No files were read or indexed.`;
         await refresh();
       })
