@@ -9,8 +9,8 @@ use std::{
 };
 use winreg::{
     enums::{
-        HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WRITE, KEY_WOW64_32KEY,
-        KEY_WOW64_64KEY, REG_CREATED_NEW_KEY, REG_SZ,
+        HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_32KEY, KEY_WOW64_64KEY,
+        KEY_WRITE, REG_CREATED_NEW_KEY, REG_SZ,
     },
     RegKey,
 };
@@ -190,7 +190,11 @@ fn register_at(
     }
     match key.get_raw_value("") {
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-        _ => return Err("Native registration changed or cannot be inspected before publication".into()),
+        _ => {
+            return Err(
+                "Native registration changed or cannot be inspected before publication".into(),
+            )
+        }
     }
     key.set_value("", &target.display().to_string())
         .map_err(|error| error.to_string())?;
