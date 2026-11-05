@@ -11,7 +11,7 @@
 .archive-table-content .ui-table button { font-size:13px; line-height:1.5; overflow-wrap:anywhere; }
 .archive-table-content .ui-table caption { padding:12px; text-align:left; color:var(--mp-text-secondary); }
 .archive-table-content .ui-table td { padding-block:16px; font-size:12px; }
-.app-shell:has(.conversation-archive-page) .sidebar-context { display:none; }
+.app-shell[data-active-route="conversations"]:has(.conversation-archive-page) .sidebar-context { display:none; }
 .app-shell[data-active-route="conversations"] .sidebar-context { flex-basis:0; }
 .conversation-heading:has(.conversation-detail-actions) { max-width:1400px; padding:28px clamp(16px,3vw,36px); border-bottom:0; }
 .conversation-heading:has(.conversation-detail-actions) .conversation-heading-title { font-size:26px; font-weight:650; }
