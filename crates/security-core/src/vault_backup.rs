@@ -746,6 +746,94 @@ mod tests {
         PortableBackup::create(&gate, lease, &vault, &root, &destination, 32).unwrap();
     }
 
+
+    #[test]
+    fn restore_rejects_unlisted_payload_and_unexpected_bundle_files() {
+        let (temp, gate, lease, vault, recovery) = fixture();
+        let source = temp.path().join("vault");
+        let backup = temp.path().join("complete-bundle");
+        PortableBackup::create(&gate, lease, &vault, &source, &backup, 104).unwrap();
+
+        let foreign = backup.join("payload/backups/ff/foreign");
+        fs::create_dir_all(foreign.parent().unwrap()).unwrap();
+        fs::write(&foreign, b"MPOS\\x01unlisted").unwrap();
+        let target = temp.path().join("must-not-restore");
+        assert!(PortableBackup::restore(&gate, lease, &backup, &target, &recovery).is_err());
+        assert!(!target.exists(), "unlisted payload published a recovery root");
+        fs::remove_file(&foreign).unwrap();
+
+        let extra = backup.join("unlisted-metadata.json");
+        fs::write(&extra, b"{}").unwrap();
+        assert!(PortableBackup::restore(&gate, lease, &backup, &target, &recovery).is_err());
+        assert!(!target.exists(), "unlisted package content was accepted");
+        fs::remove_file(&extra).unwrap();
+
+        PortableBackup::restore(&gate, lease, &backup, &target, &recovery).unwrap();
+        assert_eq!(fs::read(target.join("state.sqlite3")).unwrap(),
+            fs::read(source.join("state.sqlite3")).unwrap());
+    }
+
+    #[test]
+    fn restore_never_replaces_ambiguous_partial_or_existing_destination() {
+        let (temp, gate, lease, vault, recovery) = fixture();
+        let source = temp.path().join("vault");
+        let backup = temp.path().join("good-bundle");
+        PortableBackup::create(&gate, lease, &vault, &source, &backup, 105).unwrap();
+        let target = temp.path().join("recovery");
+        let partial = target.with_extension("mp9b-restore-partial");
+        fs::create_dir(&partial).unwrap();
+        fs::write(partial.join("owner-kept"), b"keep").unwrap();
+        assert!(PortableBackup::restore(&gate, lease, &backup, &target, &recovery).is_err());
+        assert!(!target.exists());
+        assert_eq!(fs::read(partial.join("owner-kept")).unwrap(), b"keep");
+
+        fs::remove_dir_all(&partial).unwrap();
+        fs::create_dir(&target).unwrap();
+        fs::write(target.join("owner-kept"), b"keep").unwrap();
+        assert!(PortableBackup::restore(&gate, lease, &backup, &target, &recovery).is_err());
+        assert_eq!(fs::read(target.join("owner-kept")).unwrap(), b"keep");
+    }
+
+    #[test]
+    fn stale_unlock_and_corrupted_authenticated_manifest_never_publish() {
+        let (temp, gate, lease, vault, recovery) = fixture();
+        let source = temp.path().join("vault");
+        let backup = temp.path().join("authenticated-bundle");
+        PortableBackup::create(&gate, lease, &vault, &source, &backup, 106).unwrap();
+        let manifest_file = backup.join("manifest.enc");
+        let mut encrypted = fs::read(&manifest_file).unwrap();
+        *encrypted.last_mut().unwrap() ^= 0x01;
+        fs::write(&manifest_file, encrypted).unwrap();
+        let target = temp.path().join("corrupt-recovery");
+        assert!(PortableBackup::restore(&gate, lease, &backup, &target, &recovery).is_err());
+        assert!(!target.exists());
+
+        gate.lock();
+        let denied = temp.path().join("locked-backup");
+        assert!(PortableBackup::create(&gate, lease, &vault, &source, &denied, 107).is_err());
+        assert!(!denied.exists());
+        assert!(!denied.with_extension("mp9b-partial").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restore_rejects_symlinked_package_payload_without_touching_target() {
+        use std::os::unix::fs::symlink;
+        let (temp, gate, lease, vault, recovery) = fixture();
+        let source = temp.path().join("vault");
+        let backup = temp.path().join("good-bundle");
+        PortableBackup::create(&gate, lease, &vault, &source, &backup, 108).unwrap();
+        let untouched = temp.path().join("untouched");
+        fs::write(&untouched, b"outside").unwrap();
+        let foreign = backup.join("payload/backups/aa/foreign");
+        fs::create_dir_all(foreign.parent().unwrap()).unwrap();
+        symlink(&untouched, &foreign).unwrap();
+        let target = temp.path().join("should-not-restore");
+        assert!(PortableBackup::restore(&gate, lease, &backup, &target, &recovery).is_err());
+        assert!(!target.exists());
+        assert_eq!(fs::read(&untouched).unwrap(), b"outside");
+    }
+
     #[test]
     fn never_mistake_legacy_plaintext_for_an_encrypted_state() {
         let (temp, gate, lease, vault, _) = fixture();
