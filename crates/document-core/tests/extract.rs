@@ -432,7 +432,10 @@ fn deterministic_adversarial_document_mutations_remain_bounded() {
             b"%PDF-1.7\n1 0 obj\n<< /Length 22 >>\nstream\nBT (fixture) Tj ET\nendstream\nendobj"
                 .to_vec(),
         ),
-        (\n            DocumentFormat::Markdown,\n            b"# Fixture\nsynthetic text".to_vec(),\n        ),
+        (
+            DocumentFormat::Markdown,
+            b"# Fixture\nsynthetic text".to_vec(),
+        ),
     ];
     let limits = ExtractionLimits {
         max_input_bytes: 128 * 1024,
