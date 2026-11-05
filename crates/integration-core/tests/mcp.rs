@@ -160,6 +160,130 @@ fn legacy_handshake_and_modern_header_guards() {
         200
     );
 }
+#[test]
+fn claude_handshake_versions_keep_authenticated_read_and_cursor_contract() {
+    let f = Fixture::new();
+    // Simulate Claude's initial POST without MCP-Protocol-Version. The
+    // client's requested handshake version must be negotiated and echoed.
+    for version in [mcp::FIRST_HTTP_LEGACY, mcp::CLAUDE_LEGACY, LEGACY] {
+        let hello = dispatch(
+            &f.core(),
+            &f.state,
+            &f.token,
+            json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
+                "protocolVersion":version,"capabilities":{},
+                "clientInfo":{"name":"claude-code","version":"synthetic"}
+            }}),
+            mcp::FIRST_HTTP_LEGACY,
+            None,
+            None,
+        );
+        assert_eq!(hello.status, 200, "{version}");
+        assert_eq!(hello.body.unwrap()["result"]["protocolVersion"], version);
+        let listed = dispatch(
+            &f.core(),
+            &f.state,
+            &f.token,
+            json!({"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}),
+            version,
+            None,
+            None,
+        );
+        assert_eq!(listed.status, 200, "{version}");
+        let tools = listed.body.unwrap()["result"]["tools"].as_array().unwrap().clone();
+        assert_eq!(tools.len(), 3);
+        assert!(tools.iter().all(|tool| tool["annotations"]["readOnlyHint"] == true));
+
+        let search = dispatch(
+            &f.core(),
+            &f.state,
+            &f.token,
+            json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{
+                "name":"memory_search","arguments":{"queries":["amber eclipse"]}
+            }}),
+            version,
+            None,
+            None,
+        );
+        assert_eq!(search.status, 200, "{version}");
+        let body = search.body.unwrap();
+        let hit = &body["result"]["structuredContent"]["hits"][0];
+        assert_eq!(hit["message_id"], "m1");
+        let source_id = hit["source_id"].clone();
+        let archive_id = hit["archive_id"].clone();
+        let snapshot_id = hit["snapshot_id"].clone();
+        let mut cursor = Value::Null;
+        let mut assembled = String::new();
+        let mut saw_continuation = false;
+        for _ in 0..16 {
+            let fetch = dispatch(
+                &f.core(),
+                &f.state,
+                &f.token,
+                json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{
+                    "name":"memory_fetch","arguments":{
+                        "source_id":source_id,"archive_id":archive_id,
+                        "snapshot_id":snapshot_id,"granularity":"revision",
+                        "budget":{"max_bytes":8,"max_estimated_tokens":2,"max_latency_ms":2000},
+                        "cursor":cursor
+                    }
+                }}),
+                version,
+                None,
+                None,
+            );
+            assert_eq!(fetch.status, 200, "{version}");
+            let result = fetch.body.unwrap()["result"]["structuredContent"].clone();
+            for segment in result["segments"].as_array().unwrap() {
+                assembled.push_str(segment["text"].as_str().unwrap());
+            }
+            if result["truncated"] == false {
+                assert!(result["next_cursor"].is_null());
+                break;
+            }
+            saw_continuation = true;
+            cursor = result["next_cursor"].clone();
+            assert!(!cursor.is_null(), "truncated result needs next_cursor");
+        }
+        assert!(saw_continuation, "{version}");
+        assert_eq!(assembled, "amber eclipse knowledge", "{version}");
+
+        let context = dispatch(
+            &f.core(), &f.state, &f.token,
+            json!({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{
+                "name":"context_build","arguments":{"queries":["amber eclipse"]}
+            }}),
+            version, None, None,
+        );
+        assert_eq!(context.status, 200, "{version}");
+        assert!(context.body.unwrap().to_string().contains("m1"));
+
+        let initialized = dispatch(
+            &f.core(), &f.state, &f.token,
+            json!({"jsonrpc":"2.0","method":"notifications/initialized","params":{}}),
+            version, None, None,
+        );
+        assert_eq!(initialized.status, 202);
+        assert!(initialized.body.is_none());
+    }
+
+    let unsupported = dispatch(
+        &f.core(), &f.state, &f.token,
+        json!({"jsonrpc":"2.0","id":9,"method":"tools/list","params":{}}),
+        "2025-01-01", None, None,
+    );
+    assert_eq!(unsupported.status, 400);
+    assert_eq!(unsupported.body.unwrap()["error"]["code"], -32022);
+
+    let unauthenticated = dispatch(
+        &f.core(), &f.state, "not-a-token",
+        json!({"jsonrpc":"2.0","id":10,"method":"initialize",
+            "params":{"protocolVersion":mcp::CLAUDE_LEGACY,"capabilities":{}}}),
+        mcp::FIRST_HTTP_LEGACY, None, None,
+    );
+    assert_eq!(unauthenticated.status, 401);
+}
+
 fn tcp_request_result(payload: String) -> std::io::Result<String> {
     let mut connection = std::net::TcpStream::connect(("127.0.0.1", mcp::MCP_PORT))?;
     connection.set_read_timeout(Some(std::time::Duration::from_secs(8)))?;
