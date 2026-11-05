@@ -187,8 +187,13 @@ impl StateStore {
         // Scope labels alone must never act as model-client permissions.
         let scoped_write = matches!(
             operation,
-            MemoryWrite::Create { scope_id: Some(_), .. }
-                | MemoryWrite::Supersede { scope_id: Some(_), .. }
+            MemoryWrite::Create {
+                scope_id: Some(_),
+                ..
+            } | MemoryWrite::Supersede {
+                scope_id: Some(_),
+                ..
+            }
         );
         if scoped_write {
             let admin: bool = tx.query_row(
