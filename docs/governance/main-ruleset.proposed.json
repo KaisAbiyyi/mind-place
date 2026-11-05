@@ -1,17 +1,23 @@
 {
   "name": "main — owner-approved PR admission",
   "target": "branch",
-  "enforcement": "active",
+  "enforcement": "disabled",
   "bypass_actors": [],
   "conditions": {
     "ref_name": {
-      "include": ["refs/heads/main"],
+      "include": [
+        "refs/heads/main"
+      ],
       "exclude": []
     }
   },
   "rules": [
-    { "type": "deletion" },
-    { "type": "non_fast_forward" },
+    {
+      "type": "deletion"
+    },
+    {
+      "type": "non_fast_forward"
+    },
     {
       "type": "pull_request",
       "parameters": {
@@ -28,8 +34,8 @@
         "strict_required_status_checks_policy": true,
         "required_status_checks": [
           {
-            "context": "Verify Windows product",
-            "integration_id": 15368
+            "context": "Windows Product / trusted acceptance",
+            "integration_id": null
           }
         ]
       }

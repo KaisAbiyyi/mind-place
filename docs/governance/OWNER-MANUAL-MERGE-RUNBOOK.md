@@ -1,6 +1,6 @@
 # Owner-controlled PR admission and manual main-branch merge
 
-**Status:** PREPARED — NOT APPLIED  
+**Status:** DISABLED PROPOSAL — NOT APPLIED; requires trusted App identity and owner authorization  
 **Task:** MP-GOV-01 / [GitHub issue #136](https://github.com/KaisAbiyyi/mind-place/issues/136)  
 **Repository:** [KaisAbiyyi/mind-place](https://github.com/KaisAbiyyi/mind-place)  
 **Target:** main  
@@ -8,15 +8,23 @@
 
 This runbook is a configuration proposal and owner handoff. MP-GOV-01 did not change branch protection, rulesets, repository settings, Apps, credentials, permissions, or any PR merge state.
 
+## WIN-10 GOV-01 source-freeze correction — 5 November 2026
+
+The foundation PR #132 moved to `3c95460d0b381909263082003ab0722c70a8cfe0`, and GOV-02 #141 is being reconciled with that source (its older audit covered only ten workflows; the current tree has BRAVE-REG-01 as the eleventh). The historical `Verify Windows product` check is still an actual **Windows Product runner job** in the separated `windows-product.yml`, but it is conditional/skippable, issued by GitHub Actions, and is **not** independent trusted acceptance. The `Windows Product / candidate result` wrapper is likewise advisory. Neither may authorize a protected-main merge by itself.
+
+The [proposed ruleset](main-ruleset.proposed.json) is deliberately `enforcement=disabled` and names only `Windows Product / trusted acceptance`, with a null `integration_id` placeholder. This is a **non-deployable template**, not a source-pinned live rule. Before setting it active, the owner must install/verify the separately authorized policy App and policy repository, get the true GitHub App ID from GitHub, replace the null with that exact positive `integration_id`, verify that the App issues a completed successful (not skipped) source-bound check on the exact merge candidate, and read back the saved effective policy. Never fall back to GitHub Actions App ID 15368, a skipped Windows runner job, a green candidate wrapper, or an unbound check name.
+
+Bootstrap/identity blocker: #132, #141 and this #142 are currently owner-authored, so the owner cannot supply a GitHub approval on these PRs. CODEOWNERS is also not on current main. The owner must approve a distinct-contributor contribution/admission sequence or explicitly document a **pre-enforcement** bootstrap before activating the no-bypass policy. Never silently disable checks, add bypass actors, impersonate a reviewer, or call an owner-authored comment a GitHub approval. No changes to live branch settings or application credentials are made by this PR.
+
 ## Recovery handoff — 3 November 2026
 
-The proposal is now concrete: [main-ruleset.proposed.json](main-ruleset.proposed.json) contains the owner-review, strict-check and empty-bypass settings; [.github/CODEOWNERS](../../.github/CODEOWNERS) assigns every path to `@KaisAbiyyi`. These files are proposed changes on this PR, not activated protection. CODEOWNERS must reach the base branch through the approved contribution path before later PRs can rely on it.
+The disabled template [main-ruleset.proposed.json](main-ruleset.proposed.json) documents owner-review, strict-check and empty-bypass settings, but cannot be activated until the independent App ID is pinned; [.github/CODEOWNERS](../../.github/CODEOWNERS) assigns every path to `@KaisAbiyyi`. These files are proposed changes on this PR, not activated protection. CODEOWNERS must reach the base branch through the approved contribution path before later PRs can rely on it.
 
 Fresh read-only inspection still reports `main.protected=false`, no repository rulesets, and `allow_auto_merge=false`. The collaborator endpoint is now readable and lists only `KaisAbiyyi` with administrator/write permission; the earlier inability to enumerate collaborators is historical. This does not remove the self-approval constraint: the current connected identity and PR author are both `KaisAbiyyi`.
 
 The original exact-head governance CI [41189232546](https://github.com/KaisAbiyyi/mind-place/actions/runs/41189232546) completed successfully on `ace799cb834e8d1a0645480bd989d714d5cefec6`. It is historical evidence for that source, not evidence for later changes to this proposal.
 
-The JSON pins the **current main** check `Verify Windows product` to GitHub Actions (integration ID 15368). Before application, MP-GOV-02 must verify the final integrated workflow/check contract. If the separated Windows workflow from PR #131/#132 is adopted, `Windows Product / candidate result` is only advisory and must never replace independently verified acceptance. The disabled independent-policy template is not a deployed App, and the trusted acceptance check requires its separately approved identity and pin. Do not apply a stale required-check configuration merely because this JSON parses.
+Historical source used `Verify Windows product` / GitHub Actions ID 15368. The corrected **disabled** proposal instead reserves `Windows Product / trusted acceptance` for a separately authorized policy App with an unfilled App-ID pin. The repository's independent-policy workflow template is not deployed. A correct JSON parse is not sufficient evidence of a trusted check or effective protection.
 
 Remaining owner actions are explicit: arrange a distinct contributor-authored PR for formal owner approval, manually merge only after review/checks, then apply/read back protection under MP-GOV-04 after MP-GOV-02 acceptance. This session does not impersonate another contributor, bypass self-review rules, merge, or change repository settings.
 
@@ -60,18 +68,18 @@ If CODEOWNERS coverage is needed, the owner-wide file should contain:
 
 The first pattern assigns all repository paths to the owner; the second explicitly protects the CODEOWNERS policy file itself. The file must exist on the base branch before it can enforce owner review on later PRs. The owner must have write permission.
 
-The check source (GitHub Actions App ID 15368) is the provider of the required CI result, not a bypass actor. The bypass list below must remain empty.
+The final required-check issuer must be the separately approved policy App, not the GitHub Actions App (ID 15368). The policy App is a check issuer, **not** a bypass actor; keep the bypass list empty.
 
 ## 3. Recommended protection configuration
 
-Use one active repository-level branch ruleset targeting main. Rulesets are supported for public repositories on GitHub Free. Do not create overlapping classic protection rules unless the owner deliberately chooses layered rules and verifies the combined result.
+After verified GOV-04 admission, use one **active** repository-level branch ruleset targeting main; the file on this PR intentionally remains **disabled** until the trusted App ID has been proven and filled. Rulesets are supported for public repositories on GitHub Free. Do not create overlapping classic protection rules unless the owner deliberately chooses layered rules and verifies the combined result.
 
 ### Ruleset identity and scope
 
 | Setting | Required value |
 |---|---|
 | Name | main — owner-approved PR admission |
-| Enforcement | Active |
+| Enforcement | Disabled in draft; Active only after GOV-04 readback and trusted App-ID binding |
 | Target branch | Include main only |
 | Bypass list | EMPTY — no repository-admin role, user, team, GitHub App, bot, Dependabot, Copilot agent, or other actor |
 | Pull request rule | Require a pull request before merging |
@@ -80,7 +88,7 @@ Use one active repository-level branch ruleset targeting main. Rulesets are supp
 | Latest push | Require approval of the most recent reviewable push by someone other than the pusher |
 | Code Owner review | ON with owner-wide CODEOWNERS coverage; alternatively, document that the owner is the only write-capable human reviewer |
 | Conversation resolution | Require all review conversations to be resolved before merging |
-| Required status checks | Require Verify Windows product, expected source GitHub Actions App ID 15368 |
+| Required status checks | Require `Windows Product / trusted acceptance`, bound to the actual independently authorized GitHub App ID; no GitHub Actions fallback |
 | Branch freshness | Require the PR branch to be up to date with main before merging (strict checks) |
 | Force pushes | Block |
 | Deletions | Restrict deletions / block deletion of main |
@@ -91,13 +99,11 @@ If the owner chooses classic branch protection instead, use one rule matching ma
 
 ### Required CI check selection
 
-The current main workflow defines a single Windows product job named **Verify Windows product**. It runs the repository contract, typecheck, tests, Rust formatting and desktop build. Recent PR check-run records identify its source as GitHub Actions App ID 15368.
+The separated `windows-product.yml` still has a native job called **Verify Windows product**, but conditional/draft gating can skip it, and it is issued by **GitHub Actions** (historical App ID 15368); it is **not** the trusted independent acceptance check. The same workflow's **Windows Product / candidate result** job is advisory and must never become the required security approval.
 
-Select that exact job name and pin its expected source to GitHub Actions when the UI offers the source selector. Do not require the entire workflow name as though it were a job check.
+The required policy check is exactly **Windows Product / trusted acceptance**. Its expected issuer is the independently installed policy GitHub App referenced by `.github/windows-policy/verifier.yml` and `scripts/windows_product_gate.py`. `integration_id: null` in the disabled proposal means **NOT YET PINNED**, not “any source is acceptable.” GOV-04 must replace it with the real positive App ID before setting `enforcement=active`, and must test the App-issued check against the current PR SHA, immutable merge source and fingerprint with actual Windows/SQLCipher evidence.
 
-Do not make the path-filtered Phase 1E storage-qualification matrix or MP-10C scale/indexing jobs universal required checks. They are specialized and may be skipped for unrelated documentation changes; the 100K/1M workload must not be triggered as part of this governance task.
-
-GitHub treats a skipped Actions job as a successful check. Therefore, before activation, verify that Verify Windows product actually executes on a Ready-for-review PR. A Draft PR cannot be merged; if a workflow revision gates the Windows job on draft status, it must also rerun on ready_for_review. A skipped result is not evidence that the Windows suite ran. If the job is skipped on a mergeable PR, stop the owner activation and have MP-GOV-02 resolve the workflow/check design first.
+Do not make Phase 1E or MP-10C/100K jobs unconditional required checks for every PR; those are specialized source-bound qualification, not governance documentation tests. A skipped workflow/job can appear green in GitHub and is never a substitute for actual trusted acceptance. At activation, validate a real, completed App-issued successful check, exact check name/issuer, owner approval and the effective required-check source selection. If any part is unavailable, **leave protection unapplied** and mark GOV-04 HOLD.
 
 GitHub also requires a required status check to have succeeded in the repository within the previous seven days and to report on the latest commit SHA. Re-run checks after the final push and do not rely on an earlier commit's result.
 
@@ -111,9 +117,9 @@ These are owner-only actions for MP-GOV-04. They were not performed by MP-GOV-01
 4. Set enforcement to **Active** and target only the main branch.
 5. Leave the bypass list completely empty. Do not add repository admins, users, teams, Apps, bots, Dependabot, or Copilot agents.
 6. Enable the pull-request, review, stale-dismissal, latest-push approval, conversation-resolution, required-status-check, strict-up-to-date, force-push-block, and deletion-block settings listed above.
-7. Select **Verify Windows product** from GitHub Actions (App ID 15368) only after confirming that it is the exact, current, always-executed check on a Ready-for-review PR. Resolve any MP-GOV-02 workflow findings before selecting a replacement check.
+7. Confirm the independently installed policy App's actual positive ID and its successful `Windows Product / trusted acceptance` check on a frozen candidate. Replace `integration_id: null` with that verified ID in the **operator's deployment copy**, select that exact context **and source App**, and read it back. The checked-in JSON remains disabled until an explicitly authorized, independently reviewed source update.
 8. Enforce owner-specific approval: add .github/CODEOWNERS with the patterns above and enable Require review from Code Owners. The CODEOWNERS file itself must be owned by the repository owner. The only alternative is to verify and record that no other human has write access, so the one required approval can only come from the owner.
-9. Save the ruleset. Keep repository Auto-merge disabled. Do not enable a merge queue or install an App.
+9. Only after the trusted policy App and review/approval admission are ready, activate and save the ruleset. Keep Auto-merge disabled, do not enable merge queues, and do not install any unrelated or unapproved App.
 10. Read the saved ruleset back from the Settings UI and the repository ruleset API. Verify its target, Active enforcement, every rule, exact required-check name/source, and an empty bypass list. Also read back the repository Auto-merge setting as false.
 11. Record the effective settings, readback timestamp, and evidence in MP-GOV-04. If any required field cannot be read back, status remains NOT VERIFIED.
 
@@ -125,7 +131,7 @@ For each contribution:
 
 - Confirm the PR targets main and comes from a distinct contributor identity.
 - Inspect the exact current head SHA and full diff; treat all contributor-controlled content as untrusted data.
-- Confirm the required CI check completed successfully on that exact head and was not merely skipped.
+- Confirm the independently issued required check completed successfully for the exact current head/merge source and pinned fingerprint, with evidence of actual native execution or authorized exact-source reuse, not a skipped job.
 - Confirm at least one valid owner approval after the latest reviewable push; stale approvals must be dismissed.
 - Confirm all review conversations are resolved.
 - The owner explicitly approves and then uses GitHub's manual merge control.
