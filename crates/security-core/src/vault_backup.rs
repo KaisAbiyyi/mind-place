@@ -177,8 +177,17 @@ impl PortableBackup {
         // before publishing the complete snapshot via atomic rename.
         drop(metadata_file);
         drop(encrypted_manifest);
-        #[cfg(unix)]
-        File::open(&staging)?.sync_all()?;
+        // An authenticated manifest alone must not excuse unlisted ciphertext
+        // appearing inside the staged package (or missing payload files).
+        let expected = manifest
+            .files
+            .iter()
+            .map(|file| file.path.clone())
+            .collect();
+        verify_package_inventory(&staging, &expected)?;
+        // File sync alone does not persist freshly created parent-directory
+        // entries on POSIX. Sync nested dirs before the nonreplacing rename.
+        sync_directory_tree(&staging)?;
         gate.validate_lease(lease)?;
         crate::vault_fs::publish_new_directory(&staging, destination)?;
         Ok(meta)
@@ -260,6 +269,9 @@ impl PortableBackup {
         if !seen.contains("state.sqlite3") {
             return Err(SecurityError::Crypto);
         }
+        // Reject unmanifested files, hidden payload additions, unexpected
+        // package metadata or unsafe entries before creating a restore root.
+        verify_package_inventory(backup_root, &seen)?;
         let staging = destination.with_extension("mp9b-restore-partial");
         if staging.exists() {
             return Err(SecurityError::AlreadyConfigured);
@@ -284,11 +296,84 @@ impl PortableBackup {
         // Close the restored manifest handle before directory publication.
         // Otherwise Windows reports ERROR_ACCESS_DENIED on the rename.
         drop(config);
+        sync_directory_tree(&staging)?;
         gate.validate_lease(lease)?;
         crate::vault_fs::publish_new_directory(&staging, destination)?;
         Ok(meta)
     }
 }
+/// Verify that every backed-up byte belongs to the authenticated file list.
+/// A digest match for every declared receipt alone is insufficient: a
+/// portable bundle may otherwise smuggle unlisted files that will be ignored
+/// by one reader and accidentally adopted by another.
+fn verify_package_inventory(
+    root: &Path,
+    expected: &std::collections::HashSet<String>,
+) -> Result<()> {
+    safe(root)?;
+    let mut metadata = std::collections::HashSet::new();
+    for entry in fs::read_dir(root)? {
+        let entry = entry?;
+        let path = entry.path();
+        safe(&path)?;
+        let name = entry
+            .file_name()
+            .to_str()
+            .ok_or(SecurityError::Crypto)?
+            .to_owned();
+        let kind = fs::symlink_metadata(&path)?;
+        match name.as_str() {
+            "vault-v1.json" | "bundle.json" | "manifest.enc" if kind.is_file() => {}
+            "payload" if kind.is_dir() => {}
+            _ => return Err(SecurityError::Crypto),
+        }
+        if !metadata.insert(name) {
+            return Err(SecurityError::Crypto);
+        }
+    }
+    if metadata.len() != 4 {
+        return Err(SecurityError::Crypto);
+    }
+    let payload = root.join("payload");
+    let mut files = Vec::new();
+    gather(&payload, &payload, &mut files)?;
+    if files.len() != expected.len() {
+        return Err(SecurityError::Crypto);
+    }
+    let mut actual = std::collections::HashSet::new();
+    for relative in files {
+        valid_relative(&relative)?;
+        let normalized = relative
+            .to_str()
+            .ok_or(SecurityError::Crypto)?
+            .replace('\\', "/");
+        if !actual.insert(normalized) {
+            return Err(SecurityError::Crypto);
+        }
+    }
+    if &actual != expected {
+        return Err(SecurityError::Crypto);
+    }
+    Ok(())
+}
+
+/// Persist directory entries bottom-up before publishing a complete new
+/// generation. On Windows each file is synced and the final rename uses
+/// MoveFileExW WRITE_THROUGH; directory handles cannot be flushed portably.
+fn sync_directory_tree(directory: &Path) -> Result<()> {
+    safe(directory)?;
+    for entry in fs::read_dir(directory)? {
+        let path = entry?.path();
+        safe(&path)?;
+        if fs::symlink_metadata(&path)?.is_dir() {
+            sync_directory_tree(&path)?;
+        }
+    }
+    #[cfg(unix)]
+    File::open(directory)?.sync_all()?;
+    Ok(())
+}
+
 fn allowed(relative: &Path) -> bool {
     let mut components = relative.components();
     match components.next() {
