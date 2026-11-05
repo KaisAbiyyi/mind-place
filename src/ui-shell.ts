@@ -71,6 +71,10 @@ export function mountUiShell(root: HTMLElement, options: UiShellOptions): UiShel
   let technicalMode = html.dataset.technicalMode === "true";
   let sidebarCollapsed = shell.dataset.sidebarCollapsed === "true";
 
+  let lastFocusedElement: HTMLElement | null = null;
+  let resultLimit = 15;
+  let showAllResults = false;
+
   const commands = new Map<string, UiCommandRegistration>();
   const renderResults = (query: string): void => {
     const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
@@ -78,13 +82,24 @@ export function mountUiShell(root: HTMLElement, options: UiShellOptions): UiShel
       const haystack = value.toLocaleLowerCase();
       return terms.length === 0 || terms.every((term) => haystack.includes(term));
     };
-    const routes = UI_ROUTES.filter((route) =>
+    const allRoutes = UI_ROUTES.filter((route) =>
       matchesQuery(route.label + " " + route.description + " " + route.group),
     );
-    const actions = [...commands.values()].filter((command) =>
+    const allActions = [...commands.values()].filter((command) =>
       matchesQuery(command.label + " " + command.description + " " + (command.keywords ?? []).join(" ")),
     );
+    const totalMatches = allRoutes.length + allActions.length;
+    const routes = showAllResults ? allRoutes : allRoutes.slice(0, resultLimit);
+    const actions = showAllResults ? allActions : allActions.slice(0, resultLimit);
     results.replaceChildren();
+
+    if (routes.length > 0) {
+      const groupHeading = document.createElement("div");
+      groupHeading.className = "ui-command-group-heading";
+      groupHeading.setAttribute("role", "presentation");
+      groupHeading.textContent = "Destinations";
+      results.append(groupHeading);
+    }
     for (const route of routes) {
       const row = document.createElement("div");
       row.className = "ui-command-result";
@@ -98,6 +113,14 @@ export function mountUiShell(root: HTMLElement, options: UiShellOptions): UiShel
       description.textContent = route.group + " · " + route.description;
       row.append(button, description);
       results.append(row);
+    }
+
+    if (actions.length > 0) {
+      const groupHeading = document.createElement("div");
+      groupHeading.className = "ui-command-group-heading";
+      groupHeading.setAttribute("role", "presentation");
+      groupHeading.textContent = "Actions";
+      results.append(groupHeading);
     }
     for (const command of actions) {
       const row = document.createElement("div");
@@ -113,7 +136,20 @@ export function mountUiShell(root: HTMLElement, options: UiShellOptions): UiShel
       row.append(button, description);
       results.append(row);
     }
-    if (routes.length + actions.length === 0) {
+
+    if (!showAllResults && totalMatches > routes.length + actions.length) {
+      const moreRow = document.createElement("div");
+      moreRow.className = "ui-command-more-row";
+      const moreButton = createUiButton(document, `Show all ${totalMatches} results`, {
+        variant: "link",
+        className: "ui-command-more-button",
+      });
+      moreButton.dataset.action = "command-palette-show-all";
+      moreRow.append(moreButton);
+      results.append(moreRow);
+    }
+
+    if (totalMatches === 0) {
       const empty = document.createElement("p");
       empty.className = "ui-command-empty";
       empty.textContent = "No matching destinations or actions.";
@@ -185,25 +221,40 @@ export function mountUiShell(root: HTMLElement, options: UiShellOptions): UiShel
     document.title = visibleTitle + " — Mind Place";
     syncSecondaryNavigation();
   };
-  const openPalette = (): void => {
+  const openPalette = (trigger?: HTMLElement): void => {
+    lastFocusedElement = trigger ?? (document.activeElement as HTMLElement | null);
     search.value = "";
+    showAllResults = false;
     renderResults("");
     showDialog(palette);
     search.focus();
   };
-  const closePalette = (): void => hideDialog(palette);
+  const closePalette = (): void => {
+    hideDialog(palette);
+    if (lastFocusedElement && typeof lastFocusedElement.focus === "function") {
+      try {
+        lastFocusedElement.focus();
+      } catch {
+        // Safe fallback in test DOMs
+      }
+    }
+  };
   const clickHandler = (event: Event): void => {
     const target = event.target;
     if (!(target instanceof document.defaultView!.Element)) return;
     const element = target.closest<HTMLElement>("[data-action]");
     if (!element) return;
     const action = element.dataset.action;
-    if (action === "open-command-palette") openPalette();
+    if (action === "open-command-palette") openPalette(element);
     else if (action === "toggle-theme") { theme = theme === "light" ? "dark" : "light"; applyPreferences(); }
     else if (action === "toggle-density") { density = density === "comfortable" ? "compact" : "comfortable"; applyPreferences(); }
     else if (action === "toggle-technical") { technicalMode = !technicalMode; applyPreferences(); }
     else if (action === "toggle-sidebar") { sidebarCollapsed = !sidebarCollapsed; applyPreferences(); }
     else if (action === "close-ui-dialog" && element.dataset.dialogId === "command-palette") closePalette();
+    else if (action === "command-palette-show-all") {
+      showAllResults = true;
+      renderResults(search.value);
+    }
     else if (action === "command-palette-navigate") {
       const route = element.dataset.route;
       if (route && isUiRouteId(route)) { closePalette(); options.onNavigate(route, element); }
@@ -220,9 +271,27 @@ export function mountUiShell(root: HTMLElement, options: UiShellOptions): UiShel
     }
     if (!palette.open) return;
     if (event.key === "Escape") { event.preventDefault(); closePalette(); return; }
+    const optionsList = Array.from(results.querySelectorAll<HTMLButtonElement>(".ui-command-option"));
     if (event.target === search && event.key === "ArrowDown") {
-      const first = results.querySelector<HTMLButtonElement>("button[data-route]");
+      const first = optionsList[0];
       if (first) { event.preventDefault(); first.focus(); }
+    } else if (event.target instanceof document.defaultView!.HTMLButtonElement && event.target.classList.contains("ui-command-option")) {
+      const currentIndex = optionsList.indexOf(event.target);
+      if (currentIndex !== -1) {
+        if (event.key === "ArrowDown") {
+          event.preventDefault();
+          const next = optionsList[currentIndex + 1] ?? optionsList[0];
+          next?.focus();
+        } else if (event.key === "ArrowUp") {
+          event.preventDefault();
+          if (currentIndex === 0) {
+            search.focus();
+          } else {
+            const prev = optionsList[currentIndex - 1];
+            prev?.focus();
+          }
+        }
+      }
     }
   };
   search.addEventListener("input", inputHandler);

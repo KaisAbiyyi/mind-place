@@ -54,6 +54,9 @@
 .ui-command-option { width: 100%; justify-content: flex-start; border: 0; text-align: left; }
 .ui-command-description { padding: 0 12px 5px; color: var(--mp-text-muted); font-size: 10px; }
 .ui-command-empty { margin: 0; padding: var(--mp-space-4); color: var(--mp-text-muted); font-size: 12px; }
+.ui-command-group-heading { padding: var(--mp-space-2) var(--mp-space-3) var(--mp-space-1); color: var(--mp-text-muted); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+.ui-command-more-row { padding: var(--mp-space-2) var(--mp-space-3); }
+.ui-command-more-button { color: var(--mp-text-secondary); font-size: 11px; }
 .technical-only { display: none; }
 :root[data-technical-mode="true"] .technical-only { display: inline-flex; }
 @media (max-width: 1120px) { .ui-overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
