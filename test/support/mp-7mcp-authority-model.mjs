@@ -39,7 +39,13 @@ export function authorizeWrite(state, authenticated, request, options = {}) {
     (grant) => sameGrant(grant, authenticated.clientId, request, collection)
   ) === true;
   if (!hasGrant(request.collectionId)) return DENIED;
-  if (request.operation === 'delete' && request.ownerConfirmedDestruction !== true) return DENIED;
+  // A model-controlled boolean is NEVER an owner confirmation.
+  if (request.operation === 'delete' && !state.destructiveApprovals?.some((approval) =>
+    approval.ownerApproved === true && approval.clientId === authenticated.clientId &&
+    approval.vaultId === state.vaultId && approval.collectionId === request.collectionId &&
+    approval.objectId === request.objectId && approval.policyRevision === state.policyRevision &&
+    approval.epoch === state.epoch && approval.expiresAt > request.now
+  )) return DENIED;
 
   const requiresExisting = ['update', 'move', 'delete'].includes(request.operation);
   const existing = request.objectId === undefined ? undefined : state.objects?.[request.objectId];
@@ -72,6 +78,14 @@ export function canRead(state, authenticated, collectionId) {
   ) === true;
 }
 
+function currentReceiptScope(state, authenticated, request) {
+  const id = request.objectId ?? 'obj:' + authenticated.clientId + ':' + request.operationId;
+  const object = state.objects?.[id];
+  const allowedCollection = request.operation === 'move' ? request.destinationCollectionId : request.collectionId;
+  return !!object && object.vaultId === state.vaultId &&
+    object.collectionId === allowedCollection && object.objectKind === request.objectKind;
+}
+
 export function simulateWrite(state, authenticated, request, options = {}) {
   const receiptKey = JSON.stringify([state.vaultId, authenticated.clientId, request.operationId]);
   const previous = state.receipts.get(receiptKey);
@@ -84,7 +98,8 @@ export function simulateWrite(state, authenticated, request, options = {}) {
         previous.collectionId !== request.collectionId ||
         previous.objectKind !== request.objectKind ||
         previous.destinationCollectionId !== (request.destinationCollectionId ?? null)) return CONFLICT;
-    // Existing receipt is disclosed only after *fresh* authorization, never merely by operation_id.
+    // Existing receipt is disclosed only after fresh authorization AND current membership check.
+    if (!currentReceiptScope(state, authenticated, request)) return DENIED;
     return { ok: true, code: 'REPLAY', receipt: { ...previous } };
   }
 
@@ -117,6 +132,7 @@ export function simulateWrite(state, authenticated, request, options = {}) {
 
   if (options.fault === 'after-commit') return { ok: false, code: 'UNCERTAIN' };
   if (typeof options.beforeDisclosure === 'function') options.beforeDisclosure(state);
-  if (!authorizeWrite(state, authenticated, request, { skipObjectPrecondition: true }).ok) return DENIED;
+  if (!authorizeWrite(state, authenticated, request, { skipObjectPrecondition: true }).ok ||
+      !currentReceiptScope(state, authenticated, request)) return DENIED;
   return { ok: true, code: 'COMMITTED', receipt: { ...receipt } };
 }
