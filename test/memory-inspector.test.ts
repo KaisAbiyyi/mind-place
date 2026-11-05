@@ -107,3 +107,32 @@ test("forgotten/no-visible result never displays stale memory details", async ()
   assert.match(view.textContent ?? "", /unavailable or forgotten/i);
   handle.destroy();
 });
+
+test("memory collections filter visible dispositions without inventing persisted taxonomy", async () => {
+  const entries = [candidate("a", "Current hypothesis", "current_candidate"), candidate("b", "Disputed hypothesis", "contested")];
+  const invoke: Invoke = async <T>() => entries as T;
+  const { view, handle } = fixture(invoke); await delay(0);
+  const collection = view.querySelector<HTMLButtonElement>('[data-memory-collection="contested"]');
+  assert.ok(collection, "visible disposition collection is reachable"); collection.click();
+  assert.equal(view.querySelectorAll("[data-memory-claim]").length, 1);
+  assert.match(view.querySelector(".memory-cards")!.textContent!, /Disputed hypothesis/);
+  assert.match(view.textContent!, /view collections/i);
+  handle.destroy();
+});
+
+test("memory quick drawer restores focus and history selects the authorized revision", async () => {
+  const item = candidate("a", "Current statement"); const data = detail(item);
+  data.history.push({ ...data.history[0], revision: 2, recorded_at_ms: 1792760010000, status: "challenged", reason: "New evidence" });
+  const invoke: Invoke = async <T>(cmd: string) => (cmd === "list_memory_inspection" ? [item] : data) as T;
+  const { view, handle } = fixture(invoke); await delay(0);
+  const quick = view.querySelector<HTMLButtonElement>('[data-memory-quick="a"]'); assert.ok(quick); quick.focus(); quick.click(); await delay(0);
+  const drawer = view.querySelector<HTMLDialogElement>(".memory-quick-drawer"); assert.ok(drawer); assert.ok(drawer.hasAttribute("open"));
+  drawer.dispatchEvent(new view.ownerDocument.defaultView!.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  assert.equal(view.ownerDocument.activeElement, quick);
+  view.querySelector<HTMLButtonElement>("[data-memory-claim]")!.click(); await delay(0);
+  const revision = view.querySelector<HTMLSelectElement>("[data-memory-as-of]"); assert.ok(revision);
+  revision.value = "2"; revision.dispatchEvent(new view.ownerDocument.defaultView!.Event("change"));
+  assert.match(view.querySelector("[data-memory-historical]")!.textContent!, /challenged/);
+  assert.ok(view.querySelector<HTMLButtonElement>('[data-memory-write="forget"]')!.disabled);
+  handle.destroy();
+});

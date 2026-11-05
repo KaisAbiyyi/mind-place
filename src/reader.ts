@@ -23,6 +23,8 @@ import type {
   Message,
   SetupInfo,
 } from "./contracts.js";
+import { createArchiveFilters, createConversationArchive } from "./conversation-archive.js";
+import { mountProvidersWorkspace, type ProvidersHandle } from "./providers-workspace.js";
 
 export type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
 
@@ -143,6 +145,8 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   let healthWorkspace: HealthWorkspaceHandle | undefined;
   let libraryWorkspace: LibraryHandle | undefined;
   let hiveWorkspace: HiveHandle | undefined;
+  let providersWorkspace: ProvidersHandle | undefined;
+  let setupMcp: { destroy(): void } | undefined;
   let alive = true;
   const invoke: Invoke = async <T>(command: string, args?: Record<string, unknown>) => {
     if (!alive) throw new Error("MP_UI_SESSION_EXPIRED");
@@ -175,6 +179,9 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   let modalReturnRoute: UiRouteId = "overview";
   let modalReturnFocus: HTMLElement | null = null;
   let archiveLoadState: "loading" | "ready" | "error" = "loading";
+  const archiveFilters = createArchiveFilters();
+  let archiveTableVisible = false;
+  let transcriptPage = 0;
   const activateRoute = (route: UiRouteId, workspace: WorkspaceId = activeWorkspace) => {
     activeWorkspace = workspace;
     activeRoute = route;
@@ -466,6 +473,9 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   };
 
   const selectConversation = async (id: string) => {
+    archiveTableVisible = false;
+    transcriptPage = 0;
+    providersWorkspace?.destroy(); providersWorkspace = undefined;
     hiveWorkspace?.destroy(); hiveWorkspace = undefined;
     libraryWorkspace?.destroy(); libraryWorkspace = undefined;
     healthWorkspace?.destroy();
@@ -504,6 +514,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
 
   const loadSnapshot = async (snapshotId: string) => {
     if (!selectedId || !snapshotId || snapshotId === selectedSnapshotId) return;
+    transcriptPage = 0;
     const id = selectedId;
     const version = ++selectionVersion;
     exportedMarkdown = "";
@@ -641,6 +652,10 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     );
     metadata.append(...metadataParts);
     top.append(eyebrow, heading, metadata);
+    const detailActions = document.createElement("div"); detailActions.className = "conversation-detail-actions";
+    const back = createUiButton(document, "Back to Conversations"); back.dataset.action = "archive-table";
+    const copyTranscript = createUiButton(document, "Copy transcript"); copyTranscript.dataset.action = "copy-transcript";
+    detailActions.append(back, copyTranscript); top.append(detailActions);
     if (snapshots.length > 1) {
       const history = document.createElement("div");
       history.className = "capture-history";
@@ -689,7 +704,8 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
 
     const messageList = document.createElement("div");
     messageList.className = "message-list";
-    for (const message of capture.messages) {
+    const messageStart = transcriptPage * 40;
+    for (const [index, message] of capture.messages.slice(messageStart, messageStart + 40).entries()) {
       const card = document.createElement("article");
       card.className = `message message-${message.role}`;
       card.dataset.messageId = message.id;
@@ -711,7 +727,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
         copy.dataset.action = "copy-message";
         copy.dataset.messageId = message.id;
         copy.textContent = "Copy answer";
-        copy.setAttribute("aria-label", `Copy answer ${messageList.querySelectorAll(".message-assistant").length + 1}`);
+        copy.setAttribute("aria-label", `Copy answer at message ${messageStart + index + 1}`);
         messageHeader.append(copy);
       }
 
@@ -727,7 +743,30 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
       messageList.append(empty);
     }
     transcript.append(messageList);
-    view.replaceChildren(top, transcript);
+    if (capture.messages.length > 40) {
+      const pagination = document.createElement("nav"); pagination.className = "transcript-pagination";
+      pagination.setAttribute("aria-label", "Transcript messages");
+      const previous = createUiButton(document, "Previous messages", { disabled: transcriptPage === 0 }); previous.dataset.action = "transcript-previous";
+      const range = document.createElement("span"); range.setAttribute("role", "status");
+      range.textContent = `Messages ${messageStart + 1}–${Math.min(messageStart + 40, capture.messages.length)} of ${capture.messages.length}`;
+      const next = createUiButton(document, "Next messages", { disabled: messageStart + 40 >= capture.messages.length }); next.dataset.action = "transcript-next";
+      pagination.append(previous, range, next); transcript.append(pagination);
+    }
+    const provenance = document.createElement("aside"); provenance.className = "conversation-provenance";
+    const provenanceTitle = document.createElement("h2"); provenanceTitle.textContent = "Provenance & Metadata";
+    const fields = document.createElement("dl");
+    for (const [label, value] of [["Provider", summary.provider], ["Conversation ID", capture.conversation_id],
+      ["Archive ID", summary.id], ["Saved revision", activeSnapshotId ?? "Not supplied by archive"], ["Captured", capture.captured_at],
+      ["Capture method", capture.capture_method], ["Completeness", capture.completeness]]) {
+      const term = document.createElement("dt"); term.textContent = label;
+      const definition = document.createElement("dd"); definition.textContent = value; fields.append(term, definition);
+    }
+    const branches = document.createElement("p"); branches.textContent = "Saved captures preserve the branches exposed by the source. A separate branch map is not supplied by this archive.";
+    const related = document.createElement("p"); related.textContent = "Related memories are not supplied by this archive response. Inspect global claims in Curated Memory.";
+    const memories = createUiButton(document, "Open Curated Memory"); memories.dataset.action = "open-memory-inspector";
+    provenance.append(provenanceTitle, fields, branches, related, memories);
+    const grid = document.createElement("div"); grid.className = "conversation-detail-grid"; grid.append(transcript, provenance);
+    view.replaceChildren(top, grid);
     setViewBusy(false);
     updateToolbarSelection(summary);
   }
@@ -746,6 +785,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   };
 
   const renderSetup = (info: SetupInfo) => {
+    setupMcp?.destroy(); setupMcp = undefined;
     setupContent.replaceChildren();
     const makePanel = (tab: typeof activeSettingsTab, title: string, description: string) => {
       const panel = document.createElement("section");
@@ -846,7 +886,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     genericStatus.setAttribute("role", "status");
     genericStatus.setAttribute("aria-live", "polite");
     archivePanel.append(document.createElement("hr"), genericTitle, genericInfo, genericFile, genericButton, genericStatus);
-    mountLocalMcpSetup(connectionPanel, invoke, safeClipboard);
+    setupMcp = mountLocalMcpSetup(connectionPanel, invoke, safeClipboard);
     mountDocumentRootSetup(documentPanel, invoke);
     const boundaries = document.createElement("ul");
     boundaries.className = "settings-boundaries";
@@ -918,7 +958,9 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
       }
       renderConversationRows(query);
       if (activeRoute === "overview" && activeWorkspace === "conversations") renderOverview();
-      if (activeRoute === "conversations" && summaries.length && !selectedId) {
+      if (activeRoute === "conversations" && archiveTableVisible) {
+        renderArchiveTable();
+      } else if (activeRoute === "conversations" && summaries.length && !selectedId) {
         void selectConversation(summaries[0].id);
       } else if (selectedId && (selectedChanged || reloadSelected)) {
         void selectConversation(selectedId);
@@ -1165,6 +1207,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
 
   const closeSetup = () => {
     ++setupVersion; // Ignore setup responses arriving after the dialog closes.
+    setupMcp?.destroy(); setupMcp = undefined;
     activateRoute(modalReturnRoute, modalReturnWorkspace);
     setupContent.querySelector("[data-mcp-secret]")?.replaceChildren();
     if (typeof dialog.close === "function") {
@@ -1209,6 +1252,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   };
 
   const openMemoryInspector = (workspace: "memories" | "projects" | "people" | "topics" = "memories") => {
+    providersWorkspace?.destroy(); providersWorkspace = undefined;
     hiveWorkspace?.destroy(); hiveWorkspace = undefined;
     libraryWorkspace?.destroy(); libraryWorkspace = undefined;
     healthWorkspace?.destroy();
@@ -1237,6 +1281,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   };
 
   const openHealthWorkspace = () => {
+    providersWorkspace?.destroy(); providersWorkspace = undefined;
     hiveWorkspace?.destroy(); hiveWorkspace = undefined;
     libraryWorkspace?.destroy(); libraryWorkspace = undefined;
     memoryInspector?.destroy();
@@ -1263,6 +1308,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   };
 
   const openLibraryWorkspace = () => {
+    providersWorkspace?.destroy(); providersWorkspace = undefined;
     hiveWorkspace?.destroy(); hiveWorkspace = undefined;
     memoryInspector?.destroy(); memoryInspector = undefined;
     healthWorkspace?.destroy(); healthWorkspace = undefined;
@@ -1290,6 +1336,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     libraryWorkspace?.destroy(); libraryWorkspace = undefined;
     memoryInspector?.destroy(); memoryInspector = undefined;
     healthWorkspace?.destroy(); healthWorkspace = undefined;
+    providersWorkspace?.destroy(); providersWorkspace = undefined;
     hiveWorkspace?.destroy(); hiveWorkspace = undefined;
     ++selectionVersion;
     selectedId = null;
@@ -1303,6 +1350,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     activateWorkspace("graph");
     toolbarTitle.textContent = "Hive graph";
     hiveWorkspace = mountHiveWorkspace(view, invoke, () => {
+      providersWorkspace?.destroy(); providersWorkspace = undefined;
       hiveWorkspace?.destroy(); hiveWorkspace = undefined;
       returnToConversations();
     }, initialKey);
@@ -1310,6 +1358,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   };
 
   const openOverview = () => {
+    providersWorkspace?.destroy(); providersWorkspace = undefined;
     hiveWorkspace?.destroy(); hiveWorkspace = undefined;
     libraryWorkspace?.destroy(); libraryWorkspace = undefined;
     healthWorkspace?.destroy(); healthWorkspace = undefined;
@@ -1333,22 +1382,42 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   };
 
   const openConversations = () => {
+    providersWorkspace?.destroy(); providersWorkspace = undefined;
     hiveWorkspace?.destroy(); hiveWorkspace = undefined;
     libraryWorkspace?.destroy(); libraryWorkspace = undefined;
     healthWorkspace?.destroy(); healthWorkspace = undefined;
     memoryInspector?.destroy(); memoryInspector = undefined;
+    archiveTableVisible = true;
+    ++selectionVersion;
+    selectedId = null;
+    loadedConversation = null;
+    selectedSnapshotId = null;
+    exportedMarkdown = "";
     activateRoute("conversations", "conversations");
-    if (summaries.length) void selectConversation(selectedId ?? summaries[0].id);
-    else {
-      selectedId = null;
-      loadedConversation = null;
-      updateToolbarSelection();
-      renderState("Archive is empty", "No saved conversations are available.");
-      focusViewHeading();
-    }
+    renderArchiveTable();
+    focusViewHeading();
   };
 
+  function renderArchiveTable() {
+    view.replaceChildren(createConversationArchive(document, summaries, archiveFilters));
+    setViewBusy(false); updateToolbarSelection();
+  }
+
+  function openProvidersWorkspace() {
+    providersWorkspace?.destroy(); providersWorkspace = undefined;
+    hiveWorkspace?.destroy(); hiveWorkspace = undefined;
+    memoryInspector?.destroy(); memoryInspector = undefined;
+    libraryWorkspace?.destroy(); libraryWorkspace = undefined;
+    healthWorkspace?.destroy(); healthWorkspace = undefined;
+    ++selectionVersion;
+    selectedId = null; loadedConversation = null; loadedSnapshots = []; selectedSnapshotId = null; exportedMarkdown = "";
+    activateRoute("ai-providers-mcp", "connections"); updateToolbarSelection(); setActionStatus("");
+    providersWorkspace = mountProvidersWorkspace(view, invoke, safeClipboard);
+    toolbarTitle.textContent = "AI Providers & MCP"; focusViewHeading();
+  }
+
   const openSettingsOverview = () => {
+    providersWorkspace?.destroy(); providersWorkspace = undefined;
     hiveWorkspace?.destroy(); hiveWorkspace = undefined;
     libraryWorkspace?.destroy(); libraryWorkspace = undefined;
     healthWorkspace?.destroy(); healthWorkspace = undefined;
@@ -1395,7 +1464,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
       case "curated-memory": openMemoryInspector(); break;
       case "hive-mind-graph": openHiveWorkspace(); break;
       case "files-secure-vault": openSetupDialog(trigger, "documents", "documents", route); break;
-      case "ai-providers-mcp": openSetupDialog(trigger, "connections", "connections", route); break;
+      case "ai-providers-mcp": openProvidersWorkspace(); break;
       case "setup-onboarding": openSetupDialog(trigger, "connections", "archive", route); break;
       case "settings": openSettingsOverview(); break;
     }
@@ -1425,6 +1494,18 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
         if (route && isUiRouteId(route)) navigateToRoute(route, actionElement);
       }
       else if (action === "lock") onLock?.();
+      else if (action === "archive-table") openConversations();
+      else if (action === "copy-transcript" && loadedConversation) {
+        const text = loadedConversation.capture.messages.map(message => `${titleCase(message.role)}\n${message.text}`).join("\n\n");
+        void safeClipboard.writeText(text).then(() => { if (alive) setActionStatus("Transcript copied"); })
+          .catch(() => { if (alive) setActionStatus("Clipboard unavailable", true); });
+      }
+      else if ((action === "transcript-next" || action === "transcript-previous") && loadedConversation) {
+        transcriptPage = Math.max(0, Math.min(Math.ceil(loadedConversation.capture.messages.length / 40) - 1,
+          transcriptPage + (action === "transcript-next" ? 1 : -1)));
+        renderConversation(loadedConversation, selectionVersion, loadedSnapshots, selectedSnapshotId);
+        focusViewHeading();
+      }
       else if (action === "refresh") void refreshArchive();
       else if (action === "workspace-conversations") {
         if (summaries.length) void selectConversation(selectedId ?? summaries[0].id);
@@ -1520,7 +1601,9 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
       const active = document.activeElement;
       if (active instanceof document.defaultView!.HTMLElement && (active.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName))) return;
       event.preventDefault();
-      search.focus();
+      const visibleSearch = view.querySelector<HTMLInputElement>('input[type="search"]');
+      if (visibleSearch) visibleSearch.focus();
+      else if (activeRoute === "conversations") search.focus();
     }
   };
 
@@ -1538,6 +1621,8 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     ready,
     refresh: refreshArchive,
     destroy: () => {
+      setupMcp?.destroy(); setupMcp = undefined;
+      providersWorkspace?.destroy(); providersWorkspace = undefined;
       hiveWorkspace?.destroy(); hiveWorkspace = undefined;
       libraryWorkspace?.destroy(); libraryWorkspace = undefined;
       healthWorkspace?.destroy();

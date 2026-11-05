@@ -65,6 +65,8 @@ function createReader(invoke: Invoke, copied: string[] = []) {
   });
   mounted.push(app);
   root.querySelector<HTMLButtonElement>('[data-route="conversations"]')?.click();
+  // Reader assertions exercise an explicitly opened transcript; the route itself is now an archive table.
+  void app.ready.then(() => root.querySelector<HTMLButtonElement>("#conversation-list [data-conversation-id]")?.click());
   return { dom, root, app, copied };
 }
 
@@ -90,6 +92,9 @@ test("overview uses live archive data and opens the selected transcript through 
   assert.match(overview, /Overview fixture/);
   assert.doesNotMatch(overview, /Overview answer/);
   root.querySelector<HTMLButtonElement>('[data-route="conversations"]')!.click();
+  await delay(0);
+  assert.equal(root.querySelector("#reader-view h1")?.textContent, "Conversations Archive");
+  root.querySelector<HTMLButtonElement>("#reader-view [data-conversation-id]")!.click();
   await delay(0);
   assert.match(root.querySelector("#reader-view")?.textContent ?? "", /Overview answer/);
 });
