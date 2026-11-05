@@ -117,8 +117,9 @@ impl StateStore {
                 "SELECT id,name,parent_scope_id FROM scopes
                  WHERE id>?1 ORDER BY id LIMIT ?2",
             )?;
-            stmt.query_map(params![after_id.unwrap_or(""), limit as i64], scope_row)?
-                .collect::<std::result::Result<Vec<_>, _>>()?
+            let rows = stmt.query_map(params![after_id.unwrap_or(""), limit as i64], scope_row)?;
+            let scopes = rows.collect::<std::result::Result<Vec<_>, _>>()?;
+            scopes
         };
         tx.commit()?;
         Ok(result)
