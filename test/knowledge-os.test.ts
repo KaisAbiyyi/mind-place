@@ -18,17 +18,19 @@ function sample(id: number): ConversationSummary {
   };
 }
 
-test("workspace registry is explicit, accessible and does not imply unfinished panels exist", () => {
+test("route registry exposes eight accessible destinations and keeps legacy workspaces as secondary navigation", () => {
   const doc = new JSDOM("<!doctype html><html><body></body></html>").window.document;
   const nav = createWorkspaceNavigation(doc);
-  assert.equal(nav.getAttribute("aria-label"), "Knowledge workspaces");
-  assert.equal(nav.querySelectorAll("button").length, 10);
+  assert.equal(nav.getAttribute("aria-label"), "Main navigation");
+  assert.equal(nav.querySelectorAll("button[data-route]").length, 8);
+  assert.equal(nav.querySelectorAll("button[data-nav-secondary]").length, 5);
   assert.equal(WORKSPACES.filter(x => x.phase === "planned").length, 0);
   assert.equal(nav.querySelector("button[disabled]"), null);
-  assert.ok(nav.querySelector('[data-workspace="graph"]'));
+  assert.ok(nav.querySelector('[data-route="hive-mind-graph"]'));
   assert.equal(nav.querySelectorAll('[aria-current="page"]').length, 1);
-  setActiveWorkspace(nav, "memories");
-  assert.equal(nav.querySelector('[data-workspace="memories"]')?.getAttribute("aria-current"), "page");
+  setActiveWorkspace(nav, "people");
+  assert.equal(nav.querySelector('[data-route="curated-memory"]')?.getAttribute("aria-current"), "page");
+  assert.equal(nav.querySelector('[data-workspace="people"]')?.getAttribute("aria-pressed"), "true");
   assert.equal(nav.querySelectorAll('[aria-current="page"]').length, 1);
 });
 
@@ -42,11 +44,37 @@ test("entity workspace buttons open scoped investigation alongside Hive and Heal
   const app = mountReader({ root, invoke });
   try {
     await app.ready;
+    root.querySelector<HTMLButtonElement>('[data-route="curated-memory"]')!.click();
     root.querySelector<HTMLButtonElement>('[data-workspace="people"]')!.click();
-    assert.equal(root.querySelector('[data-workspace="people"]')?.getAttribute("aria-current"), "page");
+    assert.equal(root.querySelector('[data-workspace="people"]')?.getAttribute("aria-pressed"), "true");
+    assert.equal(root.querySelector('[data-route="curated-memory"]')?.getAttribute("aria-current"), "page");
     assert.equal(root.querySelector("#entity-lens-name")?.previousElementSibling?.textContent, "Person name");
     assert.equal(root.querySelector<HTMLButtonElement>('[data-entity-lens="people"]')?.getAttribute("aria-pressed"), "true");
     assert.ok(root.querySelector('[data-workspace="health"]'));
+  } finally {
+    app.destroy();
+  }
+});
+
+
+test("Settings route is a usable hub and exposes diagnostics as contextual navigation", async () => {
+  const dom = new JSDOM("<!doctype html><html><body><div id='app'></div></body></html>", { url: "https://local.test/" });
+  const root = dom.window.document.querySelector<HTMLElement>("#app")!;
+  const invoke: Invoke = async <T>(command: string) => {
+    if (command === "list_conversations") return [] as T;
+    throw new Error("unexpected: " + command);
+  };
+  const app = mountReader({ root, invoke });
+  try {
+    await app.ready;
+    root.querySelector<HTMLButtonElement>('[data-route="settings"]')!.click();
+    const settings = root.querySelector("#reader-view")?.textContent ?? "";
+    assert.match(settings, /Privacy & security/);
+    assert.match(settings, /Provider connections/);
+    assert.match(settings, /Operational diagnostics/);
+    assert.equal(root.querySelector('[data-route="settings"]')?.getAttribute("aria-current"), "page");
+    assert.equal(root.querySelector('[data-nav-secondary][data-workspace="health"]')?.hasAttribute("hidden"), false);
+    assert.equal(root.querySelector('[data-nav-secondary][data-workspace="health"]')?.getAttribute("aria-pressed"), "false");
   } finally {
     app.destroy();
   }
@@ -144,6 +172,7 @@ test("reader virtualizes large archives and navigates visible rows without loadi
     throw new Error("unexpected: " + command);
   };
   const handle = mountReader({ root, invoke });
+  root.querySelector<HTMLButtonElement>('[data-route="conversations"]')!.click();
   try {
     await handle.ready;
     await Promise.resolve();

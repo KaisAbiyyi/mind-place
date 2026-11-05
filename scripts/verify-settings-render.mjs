@@ -36,7 +36,8 @@ try {
       };
       const handle = mountReader({ root, invoke });
       await handle.ready;
-      const button = root.querySelector('[data-action="open-setup"]');
+      const button = root.querySelector('[data-route="setup-onboarding"]');
+      if (!button) throw new Error('Setup & Onboarding route is missing');
       button.click();
     });
     await page.waitForSelector('#settings-panel-archive [data-action="import-generic"]');

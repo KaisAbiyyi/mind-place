@@ -9,6 +9,9 @@ import "./hive-workspace.css";
 import "./health-workspace.css";
 import "./workspace-integration.css";
 import "./security.css";
+import "./ui-tokens.css";
+import "./ui-primitives.css";
+import "./ui-shell.css";
 import type { Invoke } from "./reader.js";
 import { mountApplication } from "./app.js";
 

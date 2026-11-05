@@ -1,0 +1,338 @@
+:root {
+  color-scheme: light;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  --mp-font-ui: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --mp-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  --mp-space-1: 4px; --mp-space-2: 8px; --mp-space-3: 12px; --mp-space-4: 16px;
+  --mp-space-5: 20px; --mp-space-6: 24px; --mp-space-8: 32px; --mp-space-10: 40px;
+  --mp-radius-sm: 5px; --mp-radius-md: 7px; --mp-radius-lg: 10px; --mp-radius-xl: 14px;
+  --mp-sidebar-width: 264px;
+  --mp-bg-app: #F4F4F5; --mp-bg-surface: #FFFFFF; --mp-text-primary: #09090B;
+  --mp-bg-raised: #FFFFFF;
+  --mp-bg-subtle: color-mix(in srgb, #FFFFFF 94%, #09090B);
+  --mp-border: color-mix(in srgb, #09090B 12%, transparent);
+  --mp-border-strong: color-mix(in srgb, #09090B 22%, transparent);
+  --mp-text-secondary: color-mix(in srgb, #09090B 66%, #FFFFFF);
+  --mp-text-muted: color-mix(in srgb, #09090B 44%, #FFFFFF);
+  --mp-focus: #09090B; --mp-danger: #09090B; --mp-shadow: 0 10px 30px rgb(9 9 11 / .06);
+  --mp-control-height: 36px; --mp-card-padding: 16px;
+  --bg: var(--mp-bg-app); --sidebar: var(--mp-bg-surface); --surface: var(--mp-bg-surface);
+  --surface-raised: var(--mp-bg-raised); --surface-hover: var(--mp-bg-subtle);
+  --line: var(--mp-border); --line-soft: var(--mp-border);
+  --text: var(--mp-text-primary); --muted: var(--mp-text-secondary); --subtle: var(--mp-text-muted);
+  --accent: var(--mp-text-secondary); --accent-strong: var(--mp-text-primary);
+  --danger: var(--mp-danger); --radius: var(--mp-radius-lg);
+  background: var(--mp-bg-app); color: var(--mp-text-primary); font-size: 14px; line-height: 1.5;
+}
+:root[data-theme="light"] {
+  color-scheme: light; --mp-bg-app: #F4F4F5; --mp-bg-surface: #FFFFFF; --mp-text-primary: #09090B;
+  --mp-bg-raised: #FFFFFF; --mp-bg-subtle: color-mix(in srgb, #FFFFFF 94%, #09090B);
+  --mp-border: color-mix(in srgb, #09090B 12%, transparent); --mp-border-strong: color-mix(in srgb, #09090B 22%, transparent);
+  --mp-text-secondary: color-mix(in srgb, #09090B 66%, #FFFFFF); --mp-text-muted: color-mix(in srgb, #09090B 44%, #FFFFFF);
+  --mp-focus: #09090B; --mp-danger: #09090B; --mp-shadow: 0 10px 30px rgb(9 9 11 / .06);
+}
+:root[data-theme="dark"] {
+  color-scheme: dark; --mp-bg-app: #09090B; --mp-bg-surface: #121215; --mp-text-primary: #FAFAFA;
+  --mp-bg-raised: color-mix(in srgb, #121215 78%, #FAFAFA); --mp-bg-subtle: color-mix(in srgb, #121215 86%, #FAFAFA);
+  --mp-border: color-mix(in srgb, #FAFAFA 13%, transparent); --mp-border-strong: color-mix(in srgb, #FAFAFA 24%, transparent);
+  --mp-text-secondary: color-mix(in srgb, #FAFAFA 68%, #09090B); --mp-text-muted: color-mix(in srgb, #FAFAFA 44%, #09090B);
+  --mp-focus: #FAFAFA; --mp-danger: #FAFAFA; --mp-shadow: 0 10px 30px rgb(0 0 0 / .28);
+}
+:root[data-density="comfortable"] { --mp-control-height: 36px; --mp-card-padding: 16px; }
+:root[data-density="compact"] { --mp-control-height: 32px; --mp-card-padding: 12px; }
+:root[data-technical-mode="true"] .technical-only { display: inline-flex !important; }
+:root:not([data-technical-mode="true"]) .technical-only { display: none !important; }
+:root[data-theme] button:focus-visible, :root[data-theme] input:focus-visible,
+:root[data-theme] select:focus-visible, :root[data-theme] a:focus-visible {
+  outline: 2px solid var(--mp-focus); outline-offset: 3px;
+}
+:root[data-theme] .brand-mark, :root[data-theme] .brand-name, :root[data-theme] .eyebrow,
+:root[data-theme] .text-button, :root[data-theme] .source-link, :root[data-theme] .message-assistant .message-role,
+:root[data-theme] .message-content a, :root[data-theme] .message-copy:hover, :root[data-theme] .partial-marker,
+:root[data-theme] .setup-link:hover, :root[data-theme] .offline-dot {
+  color: var(--mp-text-secondary); border-color: var(--mp-border-strong);
+}
+:root[data-theme] .primary-button { border-color: var(--mp-text-primary); background: var(--mp-text-primary); color: var(--mp-bg-app); }
+:root[data-theme] .primary-button:hover:not(:disabled) { border-color: var(--mp-text-primary); background: var(--mp-text-secondary); color: var(--mp-bg-app); }
+:root[data-theme] .quiet-button, :root[data-theme] .icon-button { border-color: var(--mp-border); color: var(--mp-text-secondary); }
+:root[data-theme] .quiet-button:hover:not(:disabled), :root[data-theme] .icon-button:hover:not(:disabled) {
+  border-color: var(--mp-border-strong); background: var(--mp-bg-subtle); color: var(--mp-text-primary);
+}
+:root[data-theme] .conversation-row:hover, :root[data-theme] .conversation-row[aria-pressed="true"],
+:root[data-theme] .message-user, :root[data-theme] .message-content pre, :root[data-theme] .file-reference,
+:root[data-theme] .image-slot { border-color: var(--mp-border); background: var(--mp-bg-subtle); }
+:root[data-theme] .conversation-row[aria-pressed="true"]::before { background: var(--mp-text-primary); }
+:root[data-theme] .capture-warning, :root[data-theme] .capture-notes, :root[data-theme] .export-receipt {
+  border-color: var(--mp-border-strong); background: var(--mp-bg-subtle); color: var(--mp-text-secondary);
+}
+:root[data-theme] .message-content blockquote { border-color: var(--mp-border-strong); color: var(--mp-text-secondary); }
+:root[data-theme] .message-content th { background: var(--mp-bg-subtle); color: var(--mp-text-primary); }
+:root[data-theme] .message-content :not(pre) > code { border-color: var(--mp-border); background: var(--mp-bg-subtle); color: var(--mp-text-primary); }
+
+
+/* Neutralize the legacy dark/warm component layer through the shared semantic tokens. */
+:root[data-theme] body,
+:root[data-theme] .reader-main,
+:root[data-theme] .reader-view,
+:root[data-theme] .settings-layout,
+:root[data-theme] .memory-inspector,
+:root[data-theme] .hive-workspace,
+:root[data-theme] .health-workspace,
+:root[data-theme] .security-screen {
+  background: var(--mp-bg-app);
+  color: var(--mp-text-primary);
+}
+:root[data-theme] .conversation-title,
+:root[data-theme] .conversation-heading-title,
+:root[data-theme] .message-content,
+:root[data-theme] .message-content h1,
+:root[data-theme] .message-content h2,
+:root[data-theme] .message-content h3,
+:root[data-theme] .message-content h4,
+:root[data-theme] .message-content h5,
+:root[data-theme] .message-content h6,
+:root[data-theme] .state-panel h2,
+:root[data-theme] .dialog-header h2,
+:root[data-theme] .setup-section-title,
+:root[data-theme] .settings-panel h1,
+:root[data-theme] .settings-panel h2,
+:root[data-theme] .settings-panel h3,
+:root[data-theme] .settings-panel h4,
+:root[data-theme] .document-section-heading,
+:root[data-theme] .document-onboarding-steps strong,
+:root[data-theme] .memory-statement,
+:root[data-theme] .memory-card,
+:root[data-theme] .entity-lens-item,
+:root[data-theme] .security-card h1,
+:root[data-theme] .security-card h2 {
+  color: var(--mp-text-primary);
+}
+:root[data-theme] .conversation-meta,
+:root[data-theme] .message-role,
+:root[data-theme] .message-detail,
+:root[data-theme] .message-copy,
+:root[data-theme] .list-note,
+:root[data-theme] .setup-link,
+:root[data-theme] .search-label,
+:root[data-theme] .search-field input::placeholder,
+:root[data-theme] .search-field kbd,
+:root[data-theme] .capture-history label,
+:root[data-theme] .capture-warning p,
+:root[data-theme] .capture-notes,
+:root[data-theme] .export-receipt,
+:root[data-theme] .image-slot-loading,
+:root[data-theme] .attachment-caption,
+:root[data-theme] .file-detail,
+:root[data-theme] .transcript-empty,
+:root[data-theme] .setup-intro,
+:root[data-theme] .setup-paths dt,
+:root[data-theme] .setup-section-title + p,
+:root[data-theme] .registered-status,
+:root[data-theme] .import-status,
+:root[data-theme] .settings-subtitle,
+:root[data-theme] .settings-page-description,
+:root[data-theme] .document-field-help,
+:root[data-theme] .document-onboarding-steps small,
+:root[data-theme] .document-result-provenance,
+:root[data-theme] .document-result-warnings,
+:root[data-theme] .document-preview-status,
+:root[data-theme] .memory-disclaimer,
+:root[data-theme] .memory-meta,
+:root[data-theme] .memory-evidence,
+:root[data-theme] .security-note,
+:root[data-theme] .security-error {
+  color: var(--mp-text-secondary);
+}
+:root[data-theme] .state-panel,
+:root[data-theme] .settings-panel,
+:root[data-theme] .document-root-card,
+:root[data-theme] .document-root-form,
+:root[data-theme] .document-search-card,
+:root[data-theme] .memory-card,
+:root[data-theme] .entity-lens-item,
+:root[data-theme] .security-card,
+:root[data-theme] .capture-history select,
+:root[data-theme] .settings-panel input,
+:root[data-theme] .settings-panel select,
+:root[data-theme] .settings-panel textarea,
+:root[data-theme] .document-root-form input,
+:root[data-theme] .memory-search input,
+:root[data-theme] .entity-lens-form input,
+:root[data-theme] .security-input {
+  border-color: var(--mp-border);
+  background: var(--mp-bg-surface);
+  color: var(--mp-text-primary);
+}
+:root[data-theme] .search-field,
+:root[data-theme] .message-user,
+:root[data-theme] .message-content pre,
+:root[data-theme] .message-content :not(pre) > code,
+:root[data-theme] .image-slot,
+:root[data-theme] .file-reference,
+:root[data-theme] .capture-warning,
+:root[data-theme] .capture-notes,
+:root[data-theme] .export-receipt,
+:root[data-theme] .setup-paths,
+:root[data-theme] .settings-boundaries li,
+:root[data-theme] .document-onboarding-steps li,
+:root[data-theme] .document-result-snippet,
+:root[data-theme] .memory-disposition,
+:root[data-theme] .memory-correction {
+  border-color: var(--mp-border);
+  background: var(--mp-bg-subtle);
+  color: var(--mp-text-primary);
+}
+:root[data-theme] .setup-dialog,
+:root[data-theme] .setup-dialog .dialog-header,
+:root[data-theme] .setup-dialog .dialog-footer {
+  border-color: var(--mp-border);
+  background: var(--mp-bg-surface);
+  color: var(--mp-text-primary);
+}
+:root[data-theme] .settings-tab {
+  border-color: transparent;
+  background: transparent;
+  color: var(--mp-text-secondary);
+}
+:root[data-theme] .settings-tab:hover,
+:root[data-theme] .settings-tab[aria-selected="true"] {
+  border-color: var(--mp-border);
+  background: var(--mp-bg-subtle);
+  color: var(--mp-text-primary);
+}
+:root[data-theme] .document-permission-badge,
+:root[data-theme] .document-permission-badge.is-approved,
+:root[data-theme] .document-permission-badge.is-revoked,
+:root[data-theme] .document-root-setup [role="status"],
+:root[data-theme] .document-danger-button,
+:root[data-theme] .status-pill,
+:root[data-theme] .connection-status,
+:root[data-theme] .capture-status {
+  border-color: var(--mp-border-strong);
+  background: var(--mp-bg-subtle);
+  color: var(--mp-text-secondary);
+  box-shadow: none;
+}
+:root[data-theme] .document-result-snippet { border-left-color: var(--mp-border-strong); }
+:root[data-theme] .document-danger-button:hover,
+:root[data-theme] .security-input:focus,
+:root[data-theme] .search-field:focus-within {
+  border-color: var(--mp-border-strong);
+  box-shadow: none;
+}
+:root[data-theme] input:not([type="checkbox"]):not([type="radio"]),
+:root[data-theme] select,
+:root[data-theme] textarea {
+  border-color: var(--mp-border);
+  background-color: var(--mp-bg-surface);
+  color: var(--mp-text-primary);
+}
+:root[data-theme] input::placeholder,
+:root[data-theme] textarea::placeholder { color: var(--mp-text-muted); }
+:root[data-theme] hr { border-color: var(--mp-border); }
+:root[data-theme] ::selection { background: var(--mp-text-primary); color: var(--mp-bg-app); }
+
+
+/* Remaining legacy details: keep selected, error and security states neutral too. */
+:root[data-theme] .conversation-row:hover,
+:root[data-theme] .conversation-row[aria-pressed="true"],
+:root[data-theme] .memory-card:hover,
+:root[data-theme] .memory-card[aria-pressed="true"] {
+  border-color: var(--mp-border-strong);
+  background: var(--mp-bg-subtle);
+}
+:root[data-theme] .partial-marker,
+:root[data-theme] .action-status,
+:root[data-theme] .action-status.is-error,
+:root[data-theme] .eyebrow,
+:root[data-theme] .source-link,
+:root[data-theme] .source-link:hover,
+:root[data-theme] .message-content blockquote,
+:root[data-theme] .image-slot-error,
+:root[data-theme] .setup-paths code,
+:root[data-theme] .registered-status,
+:root[data-theme] .import-status ul,
+:root[data-theme] .document-root-scope,
+:root[data-theme] .document-root-state,
+:root[data-theme] .document-result-source,
+:root[data-theme] .document-result-provenance,
+:root[data-theme] .document-result-warnings,
+:root[data-theme] .security-description,
+:root[data-theme] .security-error,
+:root[data-theme] .security-note {
+  color: var(--mp-text-secondary);
+}
+:root[data-theme] .conversation-row[aria-pressed="true"],
+:root[data-theme] .settings-nav,
+:root[data-theme] .entity-lens-tabs button,
+:root[data-theme] .entity-lens-tabs button[aria-selected="true"],
+:root[data-theme] .document-empty-state,
+:root[data-theme] .document-preview-text {
+  border-color: var(--mp-border);
+  background: var(--mp-bg-subtle);
+  color: var(--mp-text-primary);
+}
+:root[data-theme] .settings-nav {
+  border-right: 1px solid var(--mp-border);
+}
+:root[data-theme] .entity-lens-tabs button[aria-selected="true"] {
+  border-color: var(--mp-border-strong);
+}
+:root[data-theme] .settings-tab span,
+:root[data-theme] .setup-paths dt,
+:root[data-theme] .document-root-setup > p:first-of-type {
+  color: var(--mp-text-muted);
+}
+:root[data-theme] .setup-paths dd,
+:root[data-theme] .setup-paths code,
+:root[data-theme] .document-preview-text {
+  color: var(--mp-text-primary);
+}
+:root[data-theme] .memory-detail,
+:root[data-theme] .memory-revision {
+  border-color: var(--mp-border);
+  background: var(--mp-bg-surface);
+}
+:root[data-theme] .security-gate {
+  background: var(--mp-bg-app);
+}
+:root[data-theme] .security-card {
+  box-shadow: var(--mp-shadow-soft);
+}
+:root[data-theme] .document-empty-state {
+  border-style: dashed;
+}
+:root[data-theme] .document-result-snippet {
+  border-left-color: var(--mp-border-strong);
+}
+:root[data-theme] .image-slot-error {
+  border-color: var(--mp-border-strong);
+}
+:root[data-theme] .message-content pre {
+  color: var(--mp-text-primary);
+}
+:root[data-theme] .message-content th {
+  background: var(--mp-bg-subtle);
+  color: var(--mp-text-primary);
+}
+:root[data-theme] .message-content hr,
+:root[data-theme] .setup-content hr {
+  background: var(--mp-border);
+}
+:root[data-theme] .setup-dialog::backdrop {
+  background: rgb(9 9 11 / 46%);
+}
+:root[data-theme] .settings-panel input::placeholder {
+  color: var(--mp-text-muted);
+}
+
+:root[data-theme] .message-content blockquote { border-left-color: var(--mp-border-strong); }
+:root[data-theme] .brand-mark { border-color: var(--mp-border-strong); color: var(--mp-text-primary); }
+:root[data-theme] .quiet-button { border-color: var(--mp-border); color: var(--mp-text-secondary); }
+:root[data-theme] .quiet-button:hover:not(:disabled),
+:root[data-theme] .icon-button:hover:not(:disabled) { border-color: var(--mp-border-strong); background: var(--mp-bg-subtle); color: var(--mp-text-primary); }
+:root[data-theme] .primary-button { border-color: var(--mp-text-primary); background: var(--mp-text-primary); color: var(--mp-bg-app); }
+:root[data-theme] .text-button,
+:root[data-theme] .text-button:hover { color: var(--mp-text-primary); }
