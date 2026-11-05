@@ -1,8 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod document_refresh;
 #[cfg(windows)]
 mod browser_registration;
+mod document_refresh;
 mod hosted_tunnel;
 mod mcp_commands;
 mod native_capture_ipc;
@@ -1303,7 +1303,11 @@ fn registry_path(browser: &str) -> Option<String> {
 
 #[cfg(windows)]
 fn is_registered(state: &AppState, browser: &str) -> bool {
-    browser_registration::is_registered(&native_manifest_path(state, browser), &state.host_path, browser)
+    browser_registration::is_registered(
+        &native_manifest_path(state, browser),
+        &state.host_path,
+        browser,
+    )
 }
 
 #[cfg(not(windows))]
@@ -1321,7 +1325,9 @@ fn register_extension(state: State<'_, AppState>, browser: String) -> Result<Set
         // Lock cannot interleave a registration write between authorization
         // and its completion. The registry writer additionally serializes
         // concurrent Chrome/Brave requests within the process.
-        let _owner_gate = state.owner_unlock_gate.lock()
+        let _owner_gate = state
+            .owner_unlock_gate
+            .lock()
             .unwrap_or_else(|error| error.into_inner());
         let lease = begin_unlocked(&state)?;
         if state.shutdown_requested.load(Ordering::Acquire) {

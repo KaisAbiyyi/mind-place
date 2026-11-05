@@ -9,7 +9,7 @@ use std::{
 };
 use winreg::{
     enums::{
-        HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_SET_VALUE, KEY_WOW64_32KEY,
+        HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WRITE, KEY_WOW64_32KEY,
         KEY_WOW64_64KEY, REG_CREATED_NEW_KEY, REG_SZ,
     },
     RegKey,
@@ -36,7 +36,9 @@ struct RegistryRoots<'a> {
 }
 
 fn permitted_paths(target: &Path, browser: &str) -> Result<Vec<PathBuf>, String> {
-    let parent = target.parent().ok_or("Native manifest directory is missing")?;
+    let parent = target
+        .parent()
+        .ok_or("Native manifest directory is missing")?;
     let files: &[&str] = match browser {
         "chrome" | "brave" => &["chrome.json", "brave.json"],
         "edge" => &["edge.json"],
@@ -61,14 +63,18 @@ fn no_reparse(path: &Path, file: bool) -> Result<(), String> {
 }
 
 fn validate_manifest(path: &Path, expected: &serde_json::Value) -> Result<(), String> {
-    let parent = path.parent().ok_or("Native manifest directory is missing")?;
+    let parent = path
+        .parent()
+        .ok_or("Native manifest directory is missing")?;
     no_reparse(parent, false)?;
     no_reparse(path, true)?;
     let bytes = fs::read(path).map_err(|error| error.to_string())?;
     let actual: serde_json::Value = serde_json::from_slice(&bytes)
         .map_err(|_| "Native registration manifest contains invalid JSON".to_owned())?;
     if &actual != expected {
-        return Err("Native registration manifest does not match the approved executable and origin".into());
+        return Err(
+            "Native registration manifest does not match the approved executable and origin".into(),
+        );
     }
     Ok(())
 }
@@ -89,17 +95,21 @@ fn inspect(
                 Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
                 Err(_) => return Err(format!("{scope} native registration is inaccessible")),
             };
-            let raw = key.get_raw_value("").map_err(|_| format!(
-                "{scope} native registration has a missing or inaccessible default value"
-            ))?;
+            let raw = key.get_raw_value("").map_err(|_| {
+                format!("{scope} native registration has a missing or inaccessible default value")
+            })?;
             if raw.vtype != REG_SZ {
-                return Err(format!("{scope} native registration default value is not REG_SZ"));
+                return Err(format!(
+                    "{scope} native registration default value is not REG_SZ"
+                ));
             }
-            let path: String = key.get_value("").map_err(|_| format!(
-                "{scope} native registration string is malformed"
-            ))?;
+            let path: String = key
+                .get_value("")
+                .map_err(|_| format!("{scope} native registration string is malformed"))?;
             if path.is_empty() || !allowed.iter().any(|item| item == Path::new(&path)) {
-                return Err(format!("{scope} native registration belongs to a foreign or unknown manifest"));
+                return Err(format!(
+                    "{scope} native registration belongs to a foreign or unknown manifest"
+                ));
             }
             validate_manifest(Path::new(&path), expected)
                 .map_err(|error| format!("{scope} native registration conflict: {error}"))?;
@@ -112,7 +122,9 @@ fn inspect(
 }
 
 fn publish_manifest(target: &Path, expected: &serde_json::Value) -> Result<(), String> {
-    let parent = target.parent().ok_or("Native manifest directory is missing")?;
+    let parent = target
+        .parent()
+        .ok_or("Native manifest directory is missing")?;
     if fs::symlink_metadata(parent).is_ok() {
         no_reparse(parent, false)?;
     } else {
@@ -125,10 +137,13 @@ fn publish_manifest(target: &Path, expected: &serde_json::Value) -> Result<(), S
         Err(error) => return Err(error.to_string()),
     }
     let mut staged = tempfile::NamedTempFile::new_in(parent).map_err(|error| error.to_string())?;
-    staged.write_all(
-        &serde_json::to_vec_pretty(expected).map_err(|error| error.to_string())?,
-    ).map_err(|error| error.to_string())?;
-    staged.as_file().sync_all().map_err(|error| error.to_string())?;
+    staged
+        .write_all(&serde_json::to_vec_pretty(expected).map_err(|error| error.to_string())?)
+        .map_err(|error| error.to_string())?;
+    staged
+        .as_file()
+        .sync_all()
+        .map_err(|error| error.to_string())?;
     // persist() would replace existing files. A concurrent/foreign file must
     // never be clobbered; only an independently validated existing one is safe.
     if let Err(error) = staged.persist_noclobber(target) {
@@ -148,7 +163,8 @@ fn register_at(
     browser: &str,
 ) -> Result<(), String> {
     let allowed = permitted_paths(target, browser)?;
-    let expected = mind_place_archive::native_host_manifest(host).map_err(|error| error.to_string())?;
+    let expected =
+        mind_place_archive::native_host_manifest(host).map_err(|error| error.to_string())?;
     if inspect(roots, registry, &allowed, &expected)?.is_some() {
         return Ok(());
     }
@@ -158,21 +174,26 @@ fn register_at(
     if inspect(roots, registry, &allowed, &expected)?.is_some() {
         return Ok(());
     }
-    let (key, disposition) = roots.user
-        .create_subkey_with_flags(registry, KEY_SET_VALUE | KEY_WOW64_64KEY)
+    let (key, disposition) = roots
+        .user
+        .create_subkey_with_flags(registry, KEY_WRITE | KEY_WOW64_64KEY)
         .map_err(|error| error.to_string())?;
     if disposition != REG_CREATED_NEW_KEY {
         // The key appeared since preflight. Even if its default is absent, do
         // not take ownership of it or change an existing registration.
         return match inspect(roots, registry, &allowed, &expected)? {
             Some(_) => Ok(()),
-            None => Err("Native registration appeared concurrently without an approved pointer".into()),
+            None => {
+                Err("Native registration appeared concurrently without an approved pointer".into())
+            }
         };
     }
-    if key.get_raw_value("").is_ok() {
-        return Err("Native registration changed before publication".into());
+    match key.get_raw_value("") {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        _ => return Err("Native registration changed or cannot be inspected before publication".into()),
     }
-    key.set_value("", &target.display().to_string()).map_err(|error| error.to_string())?;
+    key.set_value("", &target.display().to_string())
+        .map_err(|error| error.to_string())?;
     // A parallel machine-scope or other-view conflict invalidates success.
     if inspect(roots, registry, &allowed, &expected)?.is_none() {
         return Err("Native registration was not observable after publication".into());
@@ -181,21 +202,38 @@ fn register_at(
 }
 
 pub fn is_registered(target: &Path, host: &Path, browser: &str) -> bool {
-    let Some(registry) = registry_path(browser) else { return false };
-    let Ok(allowed) = permitted_paths(target, browser) else { return false };
-    let Ok(expected) = mind_place_archive::native_host_manifest(host) else { return false };
+    let Some(registry) = registry_path(browser) else {
+        return false;
+    };
+    let Ok(allowed) = permitted_paths(target, browser) else {
+        return false;
+    };
+    let Ok(expected) = mind_place_archive::native_host_manifest(host) else {
+        return false;
+    };
     let user = RegKey::predef(HKEY_CURRENT_USER);
     let machine = RegKey::predef(HKEY_LOCAL_MACHINE);
-    let roots = RegistryRoots { user: &user, machine: &machine };
-    inspect(&roots, &registry, &allowed, &expected).ok().flatten().is_some()
+    let roots = RegistryRoots {
+        user: &user,
+        machine: &machine,
+    };
+    inspect(&roots, &registry, &allowed, &expected)
+        .ok()
+        .flatten()
+        .is_some()
 }
 
 pub fn register(target: &Path, host: &Path, browser: &str) -> Result<(), String> {
     let registry = registry_path(browser).ok_or("Choose Chrome, Edge or Brave")?;
-    let _guard = REGISTRATION_GATE.lock().unwrap_or_else(|error| error.into_inner());
+    let _guard = REGISTRATION_GATE
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
     let user = RegKey::predef(HKEY_CURRENT_USER);
     let machine = RegKey::predef(HKEY_LOCAL_MACHINE);
-    let roots = RegistryRoots { user: &user, machine: &machine };
+    let roots = RegistryRoots {
+        user: &user,
+        machine: &machine,
+    };
     register_at(&roots, &registry, target, host, browser)
 }
 
@@ -224,28 +262,54 @@ mod browser_registration_tests {
             let base = format!(
                 r"Software\MindPlace_BRAVE_REG_01_Tests\{}-{}",
                 std::process::id(),
-                SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
             );
             let hive = RegKey::predef(HKEY_CURRENT_USER);
             let (user, _) = hive.create_subkey(format!(r"{base}\user")).unwrap();
             let (machine, _) = hive.create_subkey(format!(r"{base}\machine")).unwrap();
-            Self { manifest_dir: dir.path().join("native-host"), _dir: dir, base, user, machine, host }
+            Self {
+                manifest_dir: dir.path().join("native-host"),
+                _dir: dir,
+                base,
+                user,
+                machine,
+                host,
+            }
         }
         fn roots(&self) -> RegistryRoots<'_> {
-            RegistryRoots { user: &self.user, machine: &self.machine }
+            RegistryRoots {
+                user: &self.user,
+                machine: &self.machine,
+            }
         }
         fn target(&self, browser: &str) -> PathBuf {
             self.manifest_dir.join(format!("{browser}.json"))
         }
         fn register(&self, browser: &str) -> Result<(), String> {
             let registry = if browser == "edge" { EDGE } else { SHARED };
-            register_at(&self.roots(), registry, &self.target(browser), &self.host, browser)
+            register_at(
+                &self.roots(),
+                registry,
+                &self.target(browser),
+                &self.host,
+                browser,
+            )
         }
         fn visible(&self, browser: &str) -> bool {
             let registry = if browser == "edge" { EDGE } else { SHARED };
             let expected = mind_place_archive::native_host_manifest(&self.host).unwrap();
-            inspect(&self.roots(), registry, &permitted_paths(&self.target(browser), browser).unwrap(), &expected)
-                .ok().flatten().is_some()
+            inspect(
+                &self.roots(),
+                registry,
+                &permitted_paths(&self.target(browser), browser).unwrap(),
+                &expected,
+            )
+            .ok()
+            .flatten()
+            .is_some()
         }
         fn put(&self, machine: bool, registry: &str, path: &Path) {
             let root = if machine { &self.machine } else { &self.user };
@@ -253,7 +317,11 @@ mod browser_registration_tests {
             key.set_value("", &path.display().to_string()).unwrap();
         }
         fn pointer(&self, registry: &str) -> String {
-            self.user.open_subkey(registry).unwrap().get_value("").unwrap()
+            self.user
+                .open_subkey(registry)
+                .unwrap()
+                .get_value("")
+                .unwrap()
         }
         fn expected_file(&self, path: &Path) {
             fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -311,7 +379,10 @@ mod browser_registration_tests {
         fixture.user.delete_subkey_all(SHARED).unwrap();
         assert!(!fixture.visible("brave"));
         fixture.register("brave").unwrap();
-        assert_eq!(fixture.pointer(SHARED), fixture.target("brave").display().to_string());
+        assert_eq!(
+            fixture.pointer(SHARED),
+            fixture.target("brave").display().to_string()
+        );
         assert_eq!(fs::read(&target).unwrap(), bytes);
     }
 
@@ -334,7 +405,11 @@ mod browser_registration_tests {
         let fixture = Fixture::new();
         fixture.register("chrome").unwrap();
         let pointer = fixture.pointer(SHARED);
-        fixture.put(true, SHARED, &fixture._dir.path().join("foreign-machine.json"));
+        fixture.put(
+            true,
+            SHARED,
+            &fixture._dir.path().join("foreign-machine.json"),
+        );
         assert!(fixture.register("brave").is_err());
         assert!(!fixture.visible("chrome"));
         assert_eq!(fixture.pointer(SHARED), pointer);
@@ -346,11 +421,20 @@ mod browser_registration_tests {
             let fixture = Fixture::new();
             let target = fixture.target("chrome");
             fixture.expected_file(&target);
-            if mutation == "missing" { fs::remove_file(&target).unwrap(); }
-            if mutation == "malformed" { fs::write(&target, b"{not-json").unwrap(); }
+            if mutation == "missing" {
+                fs::remove_file(&target).unwrap();
+            }
+            if mutation == "malformed" {
+                fs::write(&target, b"{not-json").unwrap();
+            }
             if mutation == "origin" || mutation == "binary" {
-                let mut value: serde_json::Value = serde_json::from_slice(&fs::read(&target).unwrap()).unwrap();
-                let field = if mutation == "origin" { "allowed_origins" } else { "path" };
+                let mut value: serde_json::Value =
+                    serde_json::from_slice(&fs::read(&target).unwrap()).unwrap();
+                let field = if mutation == "origin" {
+                    "allowed_origins"
+                } else {
+                    "path"
+                };
                 value[field] = if mutation == "origin" {
                     serde_json::json!(["chrome-extension://foreign/"])
                 } else {
