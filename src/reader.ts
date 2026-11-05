@@ -1236,7 +1236,11 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     const focusVersion = setupVersion;
     void pendingSetup.then(() => {
       if (!alive || !dialog.hasAttribute("open") || focusVersion !== setupVersion) return;
-      if (tab === "documents") setupContent.querySelector<HTMLInputElement>(".document-search-form input")?.focus();
+      if (trigger.dataset.action === "open-import-setup") {
+        const fileInput = setupContent.querySelector<HTMLInputElement>("[data-generic-file]");
+        fileInput?.focus(); fileInput?.scrollIntoView?.({ block: "nearest" });
+      }
+      else if (tab === "documents") setupContent.querySelector<HTMLInputElement>(".document-search-form input")?.focus();
       else get<HTMLButtonElement>("[data-action='close-setup']").focus();
     });
   };
@@ -1394,7 +1398,12 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     selectedSnapshotId = null;
     exportedMarkdown = "";
     activateRoute("conversations", "conversations");
-    renderArchiveTable();
+    const hadLegacyQuery = Boolean(search.value.trim());
+    search.value = "";
+    if (hadLegacyQuery) {
+      renderState("Loading your archive", "Clearing the previous sidebar search…", "loading");
+      void loadConversations();
+    } else renderArchiveTable();
     focusViewHeading();
   };
 
@@ -1526,6 +1535,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
       }
       else if (action === "open-document-search") openSetupDialog(actionElement, "documents", "documents", "files-secure-vault");
       else if (action === "open-setup") openSetupDialog(actionElement, "connections", "archive", "setup-onboarding");
+      else if (action === "open-import-setup") openSetupDialog(actionElement, "connections", "archive", "setup-onboarding");
       else if (action === "close-setup") closeSetup();
       else if (action === "load-setup") void loadSetup();
       else if (action === "export-markdown") void exportMarkdown();

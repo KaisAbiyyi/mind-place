@@ -143,6 +143,10 @@ export function mountMemoryInspector({ view, invoke, copyText, onClose, initialL
   const entityLenses = mountEntityLenses(shell, invoke, initialLens);
 
   function showCards() {
+    const focused = document.activeElement;
+    const focusAttribute = ["data-memory-collection", "data-memory-claim", "data-memory-quick"]
+      .find(attribute => focused?.hasAttribute(attribute));
+    const focusValue = focusAttribute ? focused?.getAttribute(focusAttribute) : null;
     cards.replaceChildren();
     collections.replaceChildren();
     const groups = ["all", ...new Set(items.map(item => item.disposition))];
@@ -171,6 +175,11 @@ export function mountMemoryInspector({ view, invoke, copyText, onClose, initialL
       wrapper.append(row, quick); cards.append(wrapper);
     }
     if (!ordered.length) cards.append(element(document, "p", "memory-meta", "No visible memories in this view collection."));
+    if (focusAttribute && focused && !focused.isConnected) {
+      const replacement = [...shell.querySelectorAll<HTMLElement>(`[${focusAttribute}]`)]
+        .find(button => button.getAttribute(focusAttribute) === focusValue);
+      replacement?.focus({ preventScroll: true });
+    }
   }
 
   function evidenceBlock(parent: HTMLElement, evidence: MemoryRevision["evidence"]) {

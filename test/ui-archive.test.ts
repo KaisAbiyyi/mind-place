@@ -65,3 +65,22 @@ test("transcript pages reach every message and preserve exact snapshot provenanc
   assert.equal(root.querySelector("#reader-view h1")?.textContent, "Conversations Archive");
   reader.destroy(); assert.equal(root.textContent, ""); dom.window.close();
 });
+
+test("archive table clears the hidden legacy sidebar search before enumerating conversations", async () => {
+  const dom = new JSDOM("<div id='app'></div>", { url: "https://fixture.test" });
+  const root = dom.window.document.querySelector<HTMLElement>("#app")!;
+  const items = [summary("one"), summary("two")];
+  const invoke: Invoke = async <T>(cmd: string, args?: Record<string, unknown>) => {
+    if (cmd === "list_conversations") return (args?.query ? items.slice(0, 1) : items) as T;
+    if (cmd === "read_conversation") return conversation(items[0]) as T;
+    if (cmd === "list_snapshots") return [] as T;
+    throw new Error(cmd);
+  };
+  const reader = mountReader({ root, invoke }); await reader.ready;
+  root.querySelector<HTMLButtonElement>("[data-conversation-id='one']")!.click(); await delay(0);
+  const legacySearch = root.querySelector<HTMLInputElement>("#archive-search")!;
+  legacySearch.value = "prior sidebar query"; legacySearch.dispatchEvent(new dom.window.Event("input")); await delay(0);
+  root.querySelector<HTMLButtonElement>('#knowledge-os-nav [data-route="conversations"]')!.click(); await delay(0);
+  assert.equal(root.querySelectorAll("[data-archive-row]").length, 2);
+  assert.equal(legacySearch.value, ""); reader.destroy(); dom.window.close();
+});

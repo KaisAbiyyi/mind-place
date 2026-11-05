@@ -42,7 +42,7 @@ export function mountProvidersWorkspace(view: HTMLElement, invoke: Invoke, clipb
   const setup = createUiCard(doc, { title: "Browser capture & imports" });
   const captureNote = doc.createElement("p"); captureNote.textContent = "Register the native host for Chrome, Edge or Brave and load the extension. Manual capture runs in the active browser tab. Generic imports preserve their raw source.";
   const openSetup = createUiButton(doc, "Browser & host setup"); openSetup.dataset.action = "open-setup";
-  const imports = createUiButton(doc, "Import a transcript"); imports.dataset.action = "import-generic";
+  const imports = createUiButton(doc, "Import a transcript"); imports.dataset.action = "open-import-setup";
   setup.body.append(captureNote, openSetup, imports);
   const audit = createUiCard(doc, { title: "MCP activity & audit" });
   const auditNote = doc.createElement("p"); auditNote.textContent = "No per-provider handshake or tool-call audit feed is exposed by the desktop API. Registered clients below show actual identity state; registration is not proof of a connected session.";

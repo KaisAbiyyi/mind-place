@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { JSDOM } from "jsdom";
 import { mountProvidersWorkspace } from "../src/providers-workspace.js";
-import type { Invoke } from "../src/reader.js";
+import { mountReader, type Invoke } from "../src/reader.js";
 
 test("provider capture support never implies an MCP handshake or write authority", async () => {
   const dom = new JSDOM("<main></main>"); const view = dom.window.document.querySelector("main")!;
@@ -34,4 +34,23 @@ test("late provider statuses cannot repopulate a destroyed page", async () => {
   const handle = mountProvidersWorkspace(view, invoke, { writeText: async () => {} });
   handle.destroy(); finish({ running: true, connection_verified: false }); await delay(0);
   assert.equal(view.textContent, ""); await handle.ready; dom.window.close();
+});
+
+test("provider Import a transcript opens the existing file-selection workflow", async () => {
+  const dom = new JSDOM("<div id='app'></div>", { url: "https://fixture.test" });
+  const root = dom.window.document.querySelector<HTMLElement>("#app")!;
+  const invoke: Invoke = async <T>(cmd: string) => {
+    if (cmd === "list_conversations" || cmd === "list_local_mcp_clients") return [] as T;
+    if (cmd === "get_setup") return { archive_path: "fixture", extension_path: "fixture", host_path: "fixture", extension_id: "fixture", native_host_name: "fixture", registered_browsers: [], platform: "windows", legacy_available: false } as T;
+    return { running: false, connection_verified: false } as T;
+  };
+  const handle = mountReader({ root, invoke }); await handle.ready;
+  root.querySelector<HTMLButtonElement>('#knowledge-os-nav [data-route="ai-providers-mcp"]')!.click(); await delay(0);
+  const button = [...root.querySelectorAll<HTMLButtonElement>(".providers-workspace button")].find(button => button.textContent === "Import a transcript")!;
+  button.click(); await delay(0);
+  assert.ok(root.querySelector("#setup-dialog")!.hasAttribute("open"));
+  const input = root.querySelector<HTMLInputElement>("[data-generic-file]"); assert.ok(input);
+  assert.equal(input.closest<HTMLElement>("[data-settings-panel]")!.hidden, false);
+  assert.equal(root.ownerDocument.activeElement, input);
+  handle.destroy(); dom.window.close();
 });

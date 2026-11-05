@@ -113,7 +113,8 @@ test("memory collections filter visible dispositions without inventing persisted
   const invoke: Invoke = async <T>() => entries as T;
   const { view, handle } = fixture(invoke); await delay(0);
   const collection = view.querySelector<HTMLButtonElement>('[data-memory-collection="contested"]');
-  assert.ok(collection, "visible disposition collection is reachable"); collection.click();
+  assert.ok(collection, "visible disposition collection is reachable"); collection.focus(); collection.click();
+  assert.equal(view.ownerDocument.activeElement?.getAttribute("data-memory-collection"), "contested");
   assert.equal(view.querySelectorAll("[data-memory-claim]").length, 1);
   assert.match(view.querySelector(".memory-cards")!.textContent!, /Disputed hypothesis/);
   assert.match(view.textContent!, /view collections/i);
