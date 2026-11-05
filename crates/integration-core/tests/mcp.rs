@@ -190,9 +190,14 @@ fn claude_handshake_versions_keep_authenticated_read_and_cursor_contract() {
             None,
         );
         assert_eq!(listed.status, 200, "{version}");
-        let tools = listed.body.unwrap()["result"]["tools"].as_array().unwrap().clone();
+        let tools = listed.body.unwrap()["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .clone();
         assert_eq!(tools.len(), 3);
-        assert!(tools.iter().all(|tool| tool["annotations"]["readOnlyHint"] == true));
+        assert!(tools
+            .iter()
+            .all(|tool| tool["annotations"]["readOnlyHint"] == true));
 
         let search = dispatch(
             &f.core(),
@@ -249,37 +254,53 @@ fn claude_handshake_versions_keep_authenticated_read_and_cursor_contract() {
         assert_eq!(assembled, "amber eclipse knowledge", "{version}");
 
         let context = dispatch(
-            &f.core(), &f.state, &f.token,
+            &f.core(),
+            &f.state,
+            &f.token,
             json!({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{
                 "name":"context_build","arguments":{"queries":["amber eclipse"]}
             }}),
-            version, None, None,
+            version,
+            None,
+            None,
         );
         assert_eq!(context.status, 200, "{version}");
         assert!(context.body.unwrap().to_string().contains("m1"));
 
         let initialized = dispatch(
-            &f.core(), &f.state, &f.token,
+            &f.core(),
+            &f.state,
+            &f.token,
             json!({"jsonrpc":"2.0","method":"notifications/initialized","params":{}}),
-            version, None, None,
+            version,
+            None,
+            None,
         );
         assert_eq!(initialized.status, 202);
         assert!(initialized.body.is_none());
     }
 
     let unsupported = dispatch(
-        &f.core(), &f.state, &f.token,
+        &f.core(),
+        &f.state,
+        &f.token,
         json!({"jsonrpc":"2.0","id":9,"method":"tools/list","params":{}}),
-        "2025-01-01", None, None,
+        "2025-01-01",
+        None,
+        None,
     );
     assert_eq!(unsupported.status, 400);
     assert_eq!(unsupported.body.unwrap()["error"]["code"], -32022);
 
     let unauthenticated = dispatch(
-        &f.core(), &f.state, "not-a-token",
+        &f.core(),
+        &f.state,
+        "not-a-token",
         json!({"jsonrpc":"2.0","id":10,"method":"initialize",
             "params":{"protocolVersion":mcp::CLAUDE_LEGACY,"capabilities":{}}}),
-        mcp::FIRST_HTTP_LEGACY, None, None,
+        mcp::FIRST_HTTP_LEGACY,
+        None,
+        None,
     );
     assert_eq!(unauthenticated.status, 401);
 }
