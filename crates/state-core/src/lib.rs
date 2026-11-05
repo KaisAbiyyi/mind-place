@@ -20,6 +20,7 @@ mod memory_inspection;
 mod memory_ranking;
 mod memory_writes;
 mod ntfs;
+mod private_scopes;
 #[cfg(feature = "sqlcipher-preview")]
 pub mod vault_bootstrap;
 pub use clients::{ClientAuditEvent, ClientCapability, ClientRecord};
@@ -37,6 +38,7 @@ pub use memory_ranking::{
     RankingPolicy, RelationKind,
 };
 pub use memory_writes::{MemoryWrite, MemoryWriteReceipt};
+pub use private_scopes::PrivateScope;
 
 pub const APPLICATION_ID: i64 = 0x4D504C43;
 pub const SCHEMA_VERSION: i64 = 9;
