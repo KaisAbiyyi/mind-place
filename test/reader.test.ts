@@ -511,7 +511,7 @@ test("Settings contains only the selected panel at accessible tab focus", async 
   assert.match(root.querySelector<HTMLElement>("#settings-panel-privacy")!.textContent ?? "", /Lock closes owner-only retrieval/);
 });
 
-test("Register Brave is an explicit Settings action and reports native host registration", async () => {
+test("Register Brave is an explicit Settings action and reports unverified configuration", async () => {
   let registeredBrowser: string | null = null;
   const invoke: Invoke = async <T>(command: string, args?: Record<string, unknown>) => {
     if (command === "list_conversations" || command === "list_document_roots" || command === "list_local_mcp_clients") return [] as T;

@@ -1,6 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod document_refresh;
+#[cfg(windows)]
+mod browser_registration;
 mod hosted_tunnel;
 mod mcp_commands;
 mod native_capture_ipc;
@@ -1296,39 +1298,12 @@ fn get_setup(state: State<'_, AppState>) -> Result<SetupInfo, String> {
 
 #[cfg(windows)]
 fn registry_path(browser: &str) -> Option<String> {
-    let prefix = match browser {
-        "chrome" => "Software\\Google\\Chrome",
-        "edge" => "Software\\Microsoft\\Edge",
-        "brave" => "Software\\BraveSoftware\\Brave-Browser",
-        _ => return None,
-    };
-    Some(format!(
-        "{prefix}\\NativeMessagingHosts\\{NATIVE_HOST_NAME}"
-    ))
+    browser_registration::registry_path(browser)
 }
 
 #[cfg(windows)]
 fn is_registered(state: &AppState, browser: &str) -> bool {
-    use winreg::{enums::HKEY_CURRENT_USER, RegKey};
-    let Some(key) = registry_path(browser) else {
-        return false;
-    };
-    let Ok(key) = RegKey::predef(HKEY_CURRENT_USER).open_subkey(key) else {
-        return false;
-    };
-    let Ok(path) = key.get_value::<String, _>("") else {
-        return false;
-    };
-    if Path::new(&path) != native_manifest_path(state, browser) {
-        return false;
-    }
-    let Ok(expected) = mind_place_archive::native_host_manifest(&state.host_path) else {
-        return false;
-    };
-    std::fs::read(&path)
-        .ok()
-        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
-        .is_some_and(|value| value == expected)
+    browser_registration::is_registered(&native_manifest_path(state, browser), &state.host_path, browser)
 }
 
 #[cfg(not(windows))]
@@ -1338,45 +1313,33 @@ fn is_registered(_state: &AppState, _browser: &str) -> bool {
 
 #[tauri::command]
 fn register_extension(state: State<'_, AppState>, browser: String) -> Result<SetupInfo, String> {
-    let lease = begin_unlocked(&state)?;
     if !matches!(browser.as_str(), "chrome" | "edge" | "brave") {
         return Err("Choose Chrome, Edge or Brave".into());
     }
     #[cfg(windows)]
     {
-        use winreg::{enums::HKEY_CURRENT_USER, RegKey};
-        let manifest = mind_place_archive::native_host_manifest(&state.host_path)
-            .map_err(|e| e.to_string())?;
-        let target = native_manifest_path(&state, &browser);
-        let parent = target.parent().unwrap();
-        if parent.symlink_metadata().is_ok_and(|m| {
-            use std::os::windows::fs::MetadataExt;
-            m.file_attributes() & 0x400 != 0
-        }) {
-            return Err("Native registration directory cannot be a reparse point".into());
+        // Lock cannot interleave a registration write between authorization
+        // and its completion. The registry writer additionally serializes
+        // concurrent Chrome/Brave requests within the process.
+        let _owner_gate = state.owner_unlock_gate.lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let lease = begin_unlocked(&state)?;
+        if state.shutdown_requested.load(Ordering::Acquire) {
+            return Err("MP_SHUTDOWN:registration unavailable during shutdown".into());
         }
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-        let mut file = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
-        file.write_all(&serde_json::to_vec_pretty(&manifest).map_err(|e| e.to_string())?)
-            .map_err(|e| e.to_string())?;
-        file.as_file().sync_all().map_err(|e| e.to_string())?;
-        file.persist(&target).map_err(|e| e.to_string())?;
-        let (key, _) = RegKey::predef(HKEY_CURRENT_USER)
-            .create_subkey(registry_path(&browser).unwrap())
-            .map_err(|e| e.to_string())?;
-        key.set_value("", &target.display().to_string())
-            .map_err(|e| e.to_string())?;
+        browser_registration::register(
+            &native_manifest_path(&state, &browser),
+            &state.host_path,
+            &browser,
+        )?;
         let info = setup_info(&state);
         finish_unlocked(&state, lease)?;
         Ok(info)
     }
     #[cfg(not(windows))]
     {
-        let _ = lease;
-        Err(
-            "Browser native-host registration is currently implemented for Windows Chrome, Edge and Brave"
-                .into(),
-        )
+        let _lease = begin_unlocked(&state)?;
+        Err("Browser native-host registration is currently implemented for Windows Chrome, Edge and Brave".into())
     }
 }
 
