@@ -177,16 +177,26 @@ export function mountDocumentRootSetup(parent: HTMLElement, invoke: Invoke): voi
       const roots = await invoke<DocumentRoot[]>("list_document_roots");
       if (!section.isConnected) return;
       list.replaceChildren();
+      const query = folderQuery.value.trim().toLocaleLowerCase();
+      const matching = roots.filter(root => {
+        const latest = lastReports.get(root.id);
+        const stateMatches = filter.value === "all" ||
+          (filter.value === "watching" && root.approval_state === "approved" && !!latest?.report.auto_refresh_active && !latest.paused) ||
+          (filter.value === "paused" && root.approval_state === "approved" && !!latest?.paused) ||
+          filter.value === root.approval_state;
+        return stateMatches && (!query || (root.canonical_path + " " + root.virtual_prefix).toLocaleLowerCase().includes(query));
+      });
+      filterSummary.textContent = matching.length + " of " + roots.length + " registered folders shown. Watching/paused is confirmed only for operations in this session.";
       for (const known of [...lastReports.keys()]) {
         if (!roots.some((root) => root.id === known && root.approval_state === "approved")) lastReports.delete(known);
       }
-      if (!roots.length) {
+      if (!matching.length) {
         const item = doc.createElement("li");
         item.className = "document-empty-state";
-        item.textContent = "No document folders staged. Start with a folder path above.";
+        item.textContent = !roots.length ? "No document folders staged. Start with a folder path above." : "No folders match these filters.";
         list.append(item);
       }
-      for (const root of roots) {
+      for (const root of matching) {
         const item = doc.createElement("li");
         item.className = "document-root-card";
         const top = doc.createElement("div");
@@ -214,6 +224,29 @@ export function mountDocumentRootSetup(parent: HTMLElement, invoke: Invoke): voi
         const actions = doc.createElement("div");
         actions.className = "document-root-actions";
         item.append(top, details, note, actions);
+        const inspect = doc.createElement("button"); inspect.type = "button";
+        inspect.className = "quiet-button"; inspect.dataset.action = "inspect-document-root";
+        inspect.textContent = "Inspect folder";
+        inspect.addEventListener("click", () => {
+          if (!section.isConnected || revocationPending) return;
+          inspector.replaceChildren();
+          const label = doc.createElement("h4"); label.textContent = "Folder permission & index evidence";
+          const path = doc.createElement("p"); path.textContent = root.canonical_path;
+          const permission = doc.createElement("p");
+          permission.textContent = "State: " + root.approval_state + " · namespace: " + root.virtual_prefix;
+          const info = doc.createElement("p");
+          const report = lastReports.get(root.id);
+          info.textContent = root.approval_state !== "approved" ? "No authorized search/index access." :
+            report ? "Session index generation " + report.report.generation + " · " + report.report.indexed_files +
+              " indexed, " + report.report.skipped_files + " skipped · refresh " +
+              (report.paused ? "paused" : report.report.auto_refresh_active ? "active" : "inactive") :
+              "Approval verified; historical index data is not exposed by this contract. No scan implied.";
+          const close = doc.createElement("button"); close.type = "button"; close.className = "quiet-button";
+          close.textContent = "Close inspector";
+          close.addEventListener("click", () => { inspector.hidden = true; inspector.replaceChildren(); inspect.focus(); });
+          inspector.append(label, path, permission, info, close); inspector.hidden = false;
+        });
+        actions.append(inspect);
         if (root.approval_state === "pending") {
           const approve = doc.createElement("button");
           approve.type = "button";
@@ -322,6 +355,7 @@ export function mountDocumentRootSetup(parent: HTMLElement, invoke: Invoke): voi
             disarm();
             revoke.disabled = true;
             revocationPending = true;
+            inspector.hidden = true; inspector.replaceChildren();
             searchEpoch++;
             previewEpoch++;
             results.replaceChildren();
@@ -358,6 +392,8 @@ export function mountDocumentRootSetup(parent: HTMLElement, invoke: Invoke): voi
     }
   };
 
+  filter.addEventListener("change", () => { void refresh(); });
+  folderQuery.addEventListener("input", () => { void refresh(); });
   searchForm.addEventListener("submit", (event) => {
     event.preventDefault();
     const query = searchInput.value.trim();
