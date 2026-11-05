@@ -19,7 +19,7 @@ function sameGrant(grant, client, request, collectionId) {
     (grant.expiresAt === null || grant.expiresAt === undefined || grant.expiresAt > request.now);
 }
 
-export function authorizeWrite(state, authenticated, request) {
+export function authorizeWrite(state, authenticated, request, options = {}) {
   if (!state || !authenticated || !request || state.locked || state.paused) return DENIED;
   if (authenticated.valid !== true || authenticated.revoked === true ||
       authenticated.audience !== state.audience || authenticated.vaultId !== state.vaultId ||
@@ -43,7 +43,7 @@ export function authorizeWrite(state, authenticated, request) {
 
   const requiresExisting = ['update', 'move', 'delete'].includes(request.operation);
   const existing = request.objectId === undefined ? undefined : state.objects?.[request.objectId];
-  if (requiresExisting || request.operation === 'append') {
+  if (!options.skipObjectPrecondition && (requiresExisting || request.operation === 'append')) {
     if (!existing || existing.vaultId !== request.vaultId ||
         existing.objectKind !== request.objectKind ||
         existing.collectionId !== request.collectionId) return DENIED;
@@ -53,7 +53,7 @@ export function authorizeWrite(state, authenticated, request) {
     if (typeof request.destinationCollectionId !== 'string' ||
         !request.destinationCollectionId || !hasGrant(request.destinationCollectionId)) return DENIED;
   }
-  if (request.operation === 'create_import' && request.objectId !== undefined &&
+  if (!options.skipObjectPrecondition && request.operation === 'create_import' && request.objectId !== undefined &&
       state.objects?.[request.objectId]) return CONFLICT;
   return { ok: true, code: 'ALLOWED' };
 }
@@ -117,6 +117,6 @@ export function simulateWrite(state, authenticated, request, options = {}) {
 
   if (options.fault === 'after-commit') return { ok: false, code: 'UNCERTAIN' };
   if (typeof options.beforeDisclosure === 'function') options.beforeDisclosure(state);
-  if (!authorizeWrite(state, authenticated, request).ok) return DENIED;
+  if (!authorizeWrite(state, authenticated, request, { skipObjectPrecondition: true }).ok) return DENIED;
   return { ok: true, code: 'COMMITTED', receipt: { ...receipt } };
 }
