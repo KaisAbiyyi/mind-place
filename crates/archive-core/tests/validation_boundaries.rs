@@ -176,6 +176,32 @@ fn test_validate_capture_wrapper_routes_correctly() {
     takeout.capture_method = "takeout-import".into();
     takeout.completeness = "complete".into();
     assert!(validate_capture(&mut takeout).is_ok());
+
+    // Forged URL in historical method must be rejected by validate_capture
+    let mut forged = base_chatgpt_capture();
+    forged.capture_method = "export-import".into();
+    forged.source_url = "https://attacker.example/not-official".into();
+    assert!(validate_capture(&mut forged).is_err());
+}
+
+#[test]
+fn test_ordinary_save_rejects_historical_import_methods() {
+    let d = tempfile::tempdir().unwrap();
+    let store = mind_place_archive::ArchiveStore::open(d.path().join("archive")).unwrap();
+
+    let mut cap_export = base_chatgpt_capture();
+    cap_export.capture_method = "export-import".into();
+    cap_export.completeness = "complete".into();
+    assert!(store.save(cap_export.clone()).is_err());
+
+    let mut cap_takeout = base_gemini_capture();
+    cap_takeout.capture_method = "takeout-import".into();
+    cap_takeout.completeness = "complete".into();
+    assert!(store.save(cap_takeout.clone()).is_err());
+
+    // Authorized entry point succeeds
+    assert!(store.save_historical_import(cap_export, "chatgpt").is_ok());
+    assert!(store.save_historical_import(cap_takeout, "gemini").is_ok());
 }
 
 #[test]

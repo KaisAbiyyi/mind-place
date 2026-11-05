@@ -226,11 +226,10 @@ pub fn validate_capture(c: &mut Capture) -> Result<()> {
         validate_historical_capture(c, "generic")
     } else if c.capture_method == "legacy-import" {
         validate_stored_capture(c)
-    } else if matches!(
-        c.capture_method.as_str(),
-        "takeout-import" | "export-import"
-    ) {
-        validate_stored_capture(c)
+    } else if c.capture_method == "takeout-import" {
+        validate_historical_capture(c, "gemini")
+    } else if c.capture_method == "export-import" {
+        validate_historical_capture(c, "chatgpt")
     } else {
         validate_live_capture(c)
     }
@@ -637,6 +636,27 @@ impl ArchiveStore {
 
     pub fn save(&self, mut capture: Capture) -> Result<SaveReceipt> {
         validate_capture(&mut capture)?;
+        if matches!(
+            capture.capture_method.as_str(),
+            "takeout-import" | "export-import"
+        ) {
+            return Err(invalid(
+                "Historical imports cannot be saved through ordinary save; use authorized historical import entry point",
+            ));
+        }
+        self.save_validated(capture)
+    }
+
+    pub fn save_historical_import(
+        &self,
+        mut capture: Capture,
+        expected_provider: &str,
+    ) -> Result<SaveReceipt> {
+        validate_historical_capture(&mut capture, expected_provider)?;
+        self.save_validated(capture)
+    }
+
+    fn save_validated(&self, mut capture: Capture) -> Result<SaveReceipt> {
         if capture.provider == "generic" {
             // A generic locator is meaningful only when its immutable raw source exists.
             // Do not accept a fabricated generic capture without preserved evidence.
