@@ -1,0 +1,28 @@
+.files-vault-workspace { display: grid; gap: 20px; max-width: 1320px; margin: 0 auto; padding: 24px; }
+.files-vault-heading h1 { font-size: clamp(1.4rem, 2vw, 2rem); margin: 0 0 6px; letter-spacing: -.035em; }
+.files-vault-heading p { margin: 0; color: var(--muted); }
+.files-vault-protection { padding: 18px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); display: grid; gap: 10px; }
+.files-vault-protection h2 { margin: 0; font-size: 1rem; }
+.files-vault-protection p { margin: 0; overflow-wrap: anywhere; }
+.files-vault-protection button { justify-self: start; }
+.files-vault-boundary { font-size: .85rem; color: var(--muted); }
+.files-vault-roots .document-root-setup { display: grid; gap: 16px; }
+.files-vault-roots .document-root-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 12px; padding: 0; }
+.files-vault-roots .document-root-card { margin: 0; min-width: 0; }
+.document-root-toolbar { display: flex; gap: 12px; align-items: end; flex-wrap: wrap; }
+.document-root-toolbar label { display: grid; gap: 4px; min-width: 155px; flex: 1; }
+.document-root-toolbar input, .document-root-toolbar select { min-height: 36px; width: 100%; }
+.document-root-toolbar p { flex-basis: 100%; margin: 0; font-size: .83rem; color: var(--muted); }
+.document-authorize-open { justify-self: start; }
+.document-authorize-dialog { border: 1px solid var(--border); border-radius: 12px; padding: 24px; width: min(90vw, 600px); background: var(--surface); color: var(--text); }
+.document-authorize-dialog::backdrop { background: rgb(0 0 0 / .55); }
+.document-authorize-dialog .document-root-form { margin: 12px 0; }
+.document-inspector { display: grid; gap: 8px; min-width: 0; padding: 14px; border: 1px solid var(--border); background: var(--surface); border-radius: 10px; }
+.document-inspector[hidden] { display: none; }
+.document-inspector h4 { margin: 0; }
+.document-inspector p, .document-inspector code { margin: 0; overflow-wrap: anywhere; }
+.document-inspector button { justify-self: start; }
+@media (max-width: 780px) {
+  .files-vault-workspace { padding: 12px; }
+  .files-vault-roots .document-root-list { grid-template-columns: 1fr; }
+}
