@@ -362,7 +362,7 @@ async fn real_http_deny_rebinding_origin_and_locked_epoch() {
         }})
         .to_string();
         let request = format!(
-            "POST /mcp HTTP/1.1\\r\\nHost: 127.0.0.1:43731\\r\\nContent-Type: application/json\\r\\nAccept: application/json, text/event-stream\\r\\nAuthorization: Bearer {}\\r\\nContent-Length: {}\\r\\nConnection: close\\r\\n\\r\\n{}",
+            "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:43731\r\nContent-Type: application/json\r\nAccept: application/json, text/event-stream\r\nAuthorization: Bearer {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
             f.token, body.len(), body
         );
         let reply = tokio::task::spawn_blocking(move || tcp_request(request))
