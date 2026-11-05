@@ -353,6 +353,27 @@ async fn real_http_deny_rebinding_origin_and_locked_epoch() {
             .unwrap();
     assert!(response.starts_with("HTTP/1.1 200"), "{response}");
     assert!(response.contains("supportedVersions"));
+    // Actual TCP contract for a handshake-era client: the first HTTP POST
+    // does not require a version header or modern Mcp-Method mirrors.
+    for requested in [mcp::FIRST_HTTP_LEGACY, mcp::CLAUDE_LEGACY, LEGACY] {
+        let body = json!({"jsonrpc":"2.0","id":41,"method":"initialize","params":{
+            "protocolVersion":requested,"capabilities":{},
+            "clientInfo":{"name":"claude-code","version":"synthetic"}
+        }})
+        .to_string();
+        let request = format!(
+            "POST /mcp HTTP/1.1\\r\\nHost: 127.0.0.1:43731\\r\\nContent-Type: application/json\\r\\nAccept: application/json, text/event-stream\\r\\nAuthorization: Bearer {}\\r\\nContent-Length: {}\\r\\nConnection: close\\r\\n\\r\\n{}",
+            f.token, body.len(), body
+        );
+        let reply = tokio::task::spawn_blocking(move || tcp_request(request))
+            .await
+            .unwrap();
+        assert!(reply.starts_with("HTTP/1.1 200"), "{requested}: {reply}");
+        assert_eq!(
+            response_json(&reply)["result"]["protocolVersion"],
+            requested
+        );
+    }
     let token = f.token.clone();
     let denied = tokio::task::spawn_blocking(move || tcp_request(raw(&token, "evil.example", "")))
         .await
