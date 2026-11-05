@@ -129,7 +129,13 @@ test('destructive operation denied without separate grant and confirmation', () 
   assert.equal(authorizeWrite(f.state, f.auth, { ...req, ownerConfirmedDestruction: true }).code, 'DENIED');
   f.grant();
   assert.equal(authorizeWrite(f.state, f.auth, req).code, 'DENIED');
-  const result = simulateWrite(f.state, f.auth, { ...req, ownerConfirmedDestruction: true });
+  assert.equal(authorizeWrite(f.state, f.auth, { ...req, ownerConfirmedDestruction: true }).code, 'DENIED');
+  f.state.destructiveApprovals = [{
+    ownerApproved: true, clientId: 'client-A', vaultId: 'vault-A',
+    collectionId: 'curated-A', objectId: 'prior', policyRevision: 4,
+    epoch: 17, expiresAt: 3000
+  }];
+  const result = simulateWrite(f.state, f.auth, req);
   assert.equal(result.code, 'COMMITTED');
   assert.equal(f.state.objects.prior.tombstoned, true);
 });
@@ -212,4 +218,32 @@ test('no model grants external path, admin, or raw source mutation in policy ope
   for (const operation of ['raw_delete', 'root_approve', 'sql_execute', 'filesystem_write', 'backup_restore', 'unlock']) {
     assert.equal(authorizeWrite(f.state, f.auth, { ...f.req, operation }).code, 'DENIED');
   }
+});
+
+
+test('replay receipt denies disclosure if object has moved outside current collection scope', () => {
+  const f = fixture('update');
+  f.grant();
+  const req = { ...f.req, objectId: 'prior', expectedRevision: 3 };
+  assert.equal(simulateWrite(f.state, f.auth, req).code, 'COMMITTED');
+  f.state.objects.prior.collectionId = 'curated-B'; // another authorized actor subsequently reclassified it
+  assert.equal(simulateWrite(f.state, f.auth, req).code, 'DENIED');
+});
+
+test('delete owner approval is exact-client, exact-object and epoch-bound', () => {
+  const f = fixture('delete');
+  f.grant();
+  const req = { ...f.req, objectId: 'prior', expectedRevision: 3 };
+  f.state.destructiveApprovals = [{
+    ownerApproved: true, clientId: 'client-B', vaultId: 'vault-A',
+    collectionId: 'curated-A', objectId: 'prior', policyRevision: 4,
+    epoch: 17, expiresAt: 3000
+  }];
+  assert.equal(authorizeWrite(f.state, f.auth, req).code, 'DENIED');
+  f.state.destructiveApprovals[0].clientId = 'client-A';
+  f.state.destructiveApprovals[0].objectId = 'another-object';
+  assert.equal(authorizeWrite(f.state, f.auth, req).code, 'DENIED');
+  f.state.destructiveApprovals[0].objectId = 'prior';
+  f.state.destructiveApprovals[0].epoch = 16;
+  assert.equal(authorizeWrite(f.state, f.auth, req).code, 'DENIED');
 });
