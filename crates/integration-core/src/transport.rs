@@ -29,6 +29,9 @@ use zeroize::Zeroizing;
 const MAX_WIRE_BYTES: usize = 1024 * 1024;
 const IO_DEADLINE: Duration = Duration::from_secs(35);
 const MAX_CONNECTIONS: usize = 8;
+// Outlive HTTP deadlines: timed-out spawn_blocking queries must retain a slot
+// until they actually finish, rather than spawning unlimited work on retries.
+const MAX_DISPATCH_TASKS: usize = 4;
 
 type WireResponse = Response<Full<Bytes>>;
 
@@ -62,6 +65,18 @@ fn error(status: u16) -> WireResponse {
     wire(status, None)
 }
 
+fn accepts_mcp_media_types(value: &str) -> bool {
+    let mut json = false;
+    let mut events = false;
+    for part in value.split(',') {
+        // Substring matching admits fake media types such as application/json-evil.
+        let name = part.split(';').next().unwrap_or_default().trim();
+        json |= name.eq_ignore_ascii_case("application/json");
+        events |= name.eq_ignore_ascii_case("text/event-stream");
+    }
+    json && events
+}
+
 fn exactly_one<'a>(
     headers: &'a hyper::HeaderMap,
     name: hyper::header::HeaderName,
@@ -87,6 +102,7 @@ struct ServerContext {
     source: ServerSource,
     security: SecurityGate,
     active: Arc<AtomicBool>,
+    dispatch_slots: Arc<Semaphore>,
 }
 
 async fn handle(
@@ -113,6 +129,9 @@ async fn handle_bounded(request: Request<Incoming>, ctx: ServerContext) -> WireR
         || request.headers().contains_key(ORIGIN)
         || request.headers().contains_key("forwarded")
         || request.headers().contains_key("x-forwarded-host")
+        || request.headers().contains_key("x-forwarded-proto")
+        || request.headers().contains_key("x-forwarded-for")
+        || request.headers().contains_key("x-real-ip")
     {
         return error(403);
     }
@@ -131,7 +150,7 @@ async fn handle_bounded(request: Request<Incoming>, ctx: ServerContext) -> WireR
     let accepts = exactly_one(request.headers(), ACCEPT)
         .unwrap_or_default()
         .to_ascii_lowercase();
-    if !(accepts.contains("application/json") && accepts.contains("text/event-stream")) {
+    if !accepts_mcp_media_types(&accepts) {
         return error(406);
     }
     if request.headers().get_all(CONTENT_LENGTH).iter().count() > 1
@@ -203,10 +222,17 @@ async fn handle_bounded(request: Request<Incoming>, ctx: ServerContext) -> WireR
     if !ctx.active.load(Ordering::Acquire) {
         return error(503);
     }
+    // Unlike a per-connection limit, this permit is owned by the blocking
+    // worker. Disconnects and Tokio deadlines cannot release it prematurely.
+    let dispatch_permit = match ctx.dispatch_slots.clone().try_acquire_owned() {
+        Ok(permit) => permit,
+        Err(_) => return error(503),
+    };
     let post_security = ctx.security.clone();
     let active = ctx.active.clone();
     let active_for_task = active.clone();
     let task = tokio::task::spawn_blocking(move || {
+        let _dispatch_permit = dispatch_permit;
         if !active_for_task.load(Ordering::Acquire) {
             return error(503);
         }
@@ -325,6 +351,7 @@ impl LocalMcpServer {
             source,
             security,
             active: active.clone(),
+            dispatch_slots: Arc::new(Semaphore::new(MAX_DISPATCH_TASKS)),
         };
         let keep_active = active.clone();
         let stop = shutdown.clone();
