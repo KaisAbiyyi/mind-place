@@ -15,16 +15,24 @@ fn find(haystack: &[u8], needle: &[u8], from: usize) -> Option<usize> {
         .map(|p| p + from)
 }
 
-fn string_literal(bytes: &[u8], start: usize) -> Result<(Vec<u8>, usize)> {
+fn string_literal(ctx: &mut Context<'_>, bytes: &[u8], start: usize) -> Result<(Vec<u8>, usize)> {
     let mut out = Vec::new();
     let mut depth = 1usize;
     let mut at = start + 1;
+    let mut next_poll = at.saturating_add(4096);
     while at < bytes.len() {
+        if at >= next_poll {
+            ctx.poll()?;
+            next_poll = at.saturating_add(4096);
+        }
         let c = bytes[at];
         at += 1;
         match c {
             b'(' => {
                 depth += 1;
+                if depth > 64 {
+                    return Err(ExtractionError::Limit("pdf_string_depth"));
+                }
                 out.push(c);
             }
             b')' => {
@@ -67,6 +75,9 @@ fn string_literal(bytes: &[u8], start: usize) -> Result<(Vec<u8>, usize)> {
             }
             _ => out.push(c),
         }
+        if out.len() > ctx.limits.max_output_bytes {
+            return Err(ExtractionError::Limit("output_bytes"));
+        }
     }
     Err(ExtractionError::Invalid)
 }
@@ -80,10 +91,15 @@ fn hex_digit(b: u8) -> Option<u8> {
     }
 }
 
-fn hex_literal(bytes: &[u8], start: usize) -> Result<(Vec<u8>, usize)> {
+fn hex_literal(ctx: &mut Context<'_>, bytes: &[u8], start: usize) -> Result<(Vec<u8>, usize)> {
     let mut digits = Vec::new();
     let mut at = start + 1;
+    let mut next_poll = at.saturating_add(4096);
     while let Some(&b) = bytes.get(at) {
+        if at >= next_poll {
+            ctx.poll()?;
+            next_poll = at.saturating_add(4096);
+        }
         at += 1;
         if b == b'>' {
             if digits.len() % 2 != 0 {
@@ -99,6 +115,9 @@ fn hex_literal(bytes: &[u8], start: usize) -> Result<(Vec<u8>, usize)> {
             continue;
         }
         digits.push(hex_digit(b).ok_or(ExtractionError::Invalid)?);
+        if digits.len() > ctx.limits.max_output_bytes.saturating_mul(2) {
+            return Err(ExtractionError::Limit("output_bytes"));
+        }
     }
     Err(ExtractionError::Invalid)
 }
@@ -176,7 +195,7 @@ fn content_text(ctx: &mut Context<'_>, data: &[u8]) -> Result<String> {
                     }
                 }
                 b'(' => {
-                    let (literal, end) = string_literal(block, pos)?;
+                    let (literal, end) = string_literal(ctx, block, pos)?;
                     let value = decode_text(&literal);
                     if !value.is_empty() {
                         output.push_str(&value);
@@ -188,7 +207,7 @@ fn content_text(ctx: &mut Context<'_>, data: &[u8]) -> Result<String> {
                     pos += 2;
                 }
                 b'<' => {
-                    let (literal, end) = hex_literal(block, pos)?;
+                    let (literal, end) = hex_literal(ctx, block, pos)?;
                     let value = decode_text(&literal);
                     if !value.is_empty() {
                         output.push_str(&value);
@@ -228,12 +247,17 @@ fn inflate_stream(ctx: &mut Context<'_>, compressed: &[u8]) -> Result<Vec<u8>> {
 
 // Lex the current dictionary rather than inheriting names from an earlier
 // object, comment or literal. Filter pipelines remain explicitly unsupported.
-fn stream_filter(bytes: &[u8]) -> Result<Option<bool>> {
+fn stream_filter(ctx: &mut Context<'_>, bytes: &[u8]) -> Result<Option<bool>> {
     let mut at = 0;
     let mut depth = 0usize;
     let mut filter = Some(false);
     let mut closed = None;
+    let mut next_poll = 0usize;
     while at < bytes.len() {
+        if at >= next_poll {
+            ctx.poll()?;
+            next_poll = at.saturating_add(4096);
+        }
         match bytes[at] {
             b'%' => {
                 while at < bytes.len() && !matches!(bytes[at], b'\r' | b'\n') {
@@ -241,7 +265,7 @@ fn stream_filter(bytes: &[u8]) -> Result<Option<bool>> {
                 }
             }
             b'(' => {
-                at = string_literal(bytes, at)?.1;
+                at = string_literal(ctx, bytes, at)?.1;
             }
             b'<' if bytes.get(at + 1) == Some(&b'<') => {
                 if depth == 0 {
@@ -255,7 +279,7 @@ fn stream_filter(bytes: &[u8]) -> Result<Option<bool>> {
                 at += 2;
             }
             b'<' => {
-                at = hex_literal(bytes, at)?.1;
+                at = hex_literal(ctx, bytes, at)?.1;
             }
             b'>' if bytes.get(at + 1) == Some(&b'>') => {
                 depth = depth.checked_sub(1).ok_or(ExtractionError::Invalid)?;
@@ -356,7 +380,7 @@ pub(super) fn extract_pdf(ctx: &mut Context<'_>, bytes: &[u8]) -> Result<()> {
         // Never inherit a filter from a preceding stream. Limit dictionary
         // inspection to the bytes since the previous endstream boundary.
         let preceding = &bytes[dict_start..marker];
-        let filter = stream_filter(preceding)?;
+        let filter = stream_filter(ctx, preceding)?;
         let flate = filter == Some(true);
         let unsupported_filter = filter.is_none();
         if !unsupported_filter {
