@@ -61,10 +61,7 @@ impl StateStore {
     ) -> Result<PrivateScope> {
         valid_id(scope_id)?;
         valid_text(name)?;
-        if !scope_id.starts_with("scope:")
-            || name.trim().len() > 128
-            || name.trim().is_empty()
-        {
+        if !scope_id.starts_with("scope:") || name.trim().len() > 128 || name.trim().is_empty() {
             return Err(StateError::InvalidValue);
         }
         if let Some(parent) = parent_scope_id {
