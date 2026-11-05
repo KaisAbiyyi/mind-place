@@ -746,7 +746,6 @@ mod tests {
         PortableBackup::create(&gate, lease, &vault, &root, &destination, 32).unwrap();
     }
 
-
     #[test]
     fn restore_rejects_unlisted_payload_and_unexpected_bundle_files() {
         let (temp, gate, lease, vault, recovery) = fixture();
@@ -759,7 +758,10 @@ mod tests {
         fs::write(&foreign, b"MPOS\\x01unlisted").unwrap();
         let target = temp.path().join("must-not-restore");
         assert!(PortableBackup::restore(&gate, lease, &backup, &target, &recovery).is_err());
-        assert!(!target.exists(), "unlisted payload published a recovery root");
+        assert!(
+            !target.exists(),
+            "unlisted payload published a recovery root"
+        );
         fs::remove_file(&foreign).unwrap();
 
         let extra = backup.join("unlisted-metadata.json");
@@ -769,8 +771,10 @@ mod tests {
         fs::remove_file(&extra).unwrap();
 
         PortableBackup::restore(&gate, lease, &backup, &target, &recovery).unwrap();
-        assert_eq!(fs::read(target.join("state.sqlite3")).unwrap(),
-            fs::read(source.join("state.sqlite3")).unwrap());
+        assert_eq!(
+            fs::read(target.join("state.sqlite3")).unwrap(),
+            fs::read(source.join("state.sqlite3")).unwrap()
+        );
     }
 
     #[test]
