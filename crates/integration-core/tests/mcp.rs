@@ -348,6 +348,9 @@ async fn real_http_deny_rebinding_origin_and_locked_epoch() {
         "Origin: https://chatgpt.com\r\n",
         "Forwarded: for=198.51.100.7;host=evil.example\r\n",
         "X-Forwarded-Host: evil.example\r\n",
+        "X-Forwarded-For: 198.51.100.7\r\n",
+        "X-Forwarded-Proto: https\r\n",
+        "X-Real-IP: 198.51.100.7\r\n",
     ] {
         let denied = simulated_forward(
             hosted_token.clone(),
@@ -357,6 +360,29 @@ async fn real_http_deny_rebinding_origin_and_locked_epoch() {
         )
         .await;
         assert!(denied.starts_with("HTTP/1.1 403"), "{denied}");
+    }
+    // Do not accept substring impostors for advertised MCP content types.
+    // Replacing rather than adding avoids the duplicate-header rejection path.
+    for bad_accept in [
+        "application/json-evil, text/event-stream",
+        "application/json, text/event-stream-evil",
+        "application/jsonian, text/event-stream-ish",
+    ] {
+        let valid = simulated_forwarded_rpc(
+            &hosted_token,
+            "tools/list",
+            json!({"_meta":meta()}),
+            "",
+        );
+        let spoofed = valid.replace(
+            "Accept: application/json, text/event-stream\r\n",
+            &format!("Accept: {bad_accept}\r\n"),
+        );
+        let response = tokio::task::spawn_blocking(move || tcp_request(spoofed))
+            .await
+            .unwrap();
+        assert!(response.starts_with("HTTP/1.1 406"), "{response}");
+        assert!(!response.contains("amber eclipse knowledge"));
     }
     let duplicated = format!("Authorization: Bearer {}\r\n", f.token);
     let denied = simulated_forwarded_rpc(
