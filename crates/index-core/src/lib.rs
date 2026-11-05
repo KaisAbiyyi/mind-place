@@ -1,7 +1,10 @@
 //! Rebuildable, non-authoritative archive search projection.
 //! Every durable source ID is registered in state.sqlite3, never assigned by this DB.
-use mind_place_archive::{ArchiveStore, Capture};
-use mind_place_state::{SourceDescriptor, SourceKey, StateStore};
+use mind_place_archive::{
+    ArchiveStore, Capture, Conversation, ConversationSummary, SnapshotSummary,
+};
+use mind_place_security::vault_fence::VaultWriterFence;
+use mind_place_state::{CipherKey, SourceDescriptor, SourceKey, StateStore};
 use rusqlite::{
     params, Connection, OpenFlags, OptionalExtension, Transaction, TransactionBehavior,
 };
@@ -9,6 +12,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{
     fs,
+    ops::{Deref, DerefMut},
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -42,6 +46,16 @@ pub mod graph_maintenance;
 pub mod graph_query;
 pub mod graphify;
 pub mod inspection;
+#[cfg(feature = "sqlcipher-preview")]
+pub mod vault_archive;
+#[cfg(feature = "sqlcipher-preview")]
+pub mod vault_legacy_migration;
+#[cfg(feature = "sqlcipher-preview")]
+mod vault_legacy_objects;
+#[cfg(feature = "sqlcipher-preview")]
+pub mod vault_online_backup;
+#[cfg(feature = "sqlcipher-preview")]
+pub mod vault_owner_migration;
 pub use context::{
     ContextBudget, ContextExcerpt, ContextGroup, ContextPack, ContextPreset, ContextRequest,
 };
@@ -115,9 +129,62 @@ impl IndexError {
     }
 }
 
+// Both plaintext legacy and AEAD/SQLCipher vault captures feed the same
+// validated, transactional FTS pipeline. This does not permit opening vault
+// contents through the legacy ArchiveStore path.
+pub(crate) trait CaptureArchiveReader {
+    fn list_captures(&self) -> Result<Vec<ConversationSummary>>;
+    fn read_capture(&self, id: &str, revision: Option<&str>) -> Result<Conversation>;
+    fn capture_snapshots(&self, id: &str) -> Result<Vec<SnapshotSummary>>;
+}
+
+impl CaptureArchiveReader for ArchiveStore {
+    fn list_captures(&self) -> Result<Vec<ConversationSummary>> {
+        Ok(ArchiveStore::list(self, "")?)
+    }
+    fn read_capture(&self, id: &str, revision: Option<&str>) -> Result<Conversation> {
+        Ok(ArchiveStore::read(self, id, revision)?)
+    }
+    fn capture_snapshots(&self, id: &str) -> Result<Vec<SnapshotSummary>> {
+        Ok(ArchiveStore::snapshots(self, id)?)
+    }
+}
+
+#[cfg(feature = "sqlcipher-preview")]
+impl CaptureArchiveReader for vault_archive::VaultCaptureStore {
+    fn list_captures(&self) -> Result<Vec<ConversationSummary>> {
+        vault_archive::VaultCaptureStore::list_complete_for_index(self)
+    }
+    fn read_capture(&self, id: &str, revision: Option<&str>) -> Result<Conversation> {
+        vault_archive::VaultCaptureStore::read(self, id, revision)
+    }
+    fn capture_snapshots(&self, id: &str) -> Result<Vec<SnapshotSummary>> {
+        vault_archive::VaultCaptureStore::snapshots(self, id)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct IndexStore {
     path: PathBuf,
+    cipher_key: Option<std::sync::Arc<CipherKey>>,
+}
+
+/// Holds the shared cross-process writer lock across a whole SQLCipher
+/// projection transaction. Plaintext legacy indexes remain unchanged.
+struct FencedIndexConnection {
+    db: Connection,
+    _writer: Option<VaultWriterFence>,
+}
+impl Deref for FencedIndexConnection {
+    type Target = Connection;
+    fn deref(&self) -> &Connection {
+        &self.db
+    }
+}
+impl DerefMut for FencedIndexConnection {
+    fn deref_mut(&mut self) -> &mut Connection {
+        &mut self.db
+    }
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
@@ -220,17 +287,44 @@ impl IndexStore {
     /// Open after unlock only. Refuses an existing foreign/unrecognized file.
     /// Missing index files are safe to initialize because they contain no authority.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        Self::open_internal(path, None)
+    }
+    /// New encrypted vaults only; never modifies an existing plaintext index.
+    pub fn open_encrypted(
+        path: impl AsRef<Path>,
+        raw_key: [u8; 32],
+        gate: &mind_place_security::SecurityGate,
+        lease: mind_place_security::UnlockLease,
+    ) -> Result<Self> {
+        Self::open_internal(path, Some(CipherKey::new(raw_key, gate, lease)))
+    }
+    fn open_internal(
+        path: impl AsRef<Path>,
+        cipher_key: Option<std::sync::Arc<CipherKey>>,
+    ) -> Result<Self> {
         let path = path.as_ref().to_owned();
         let parent = path.parent().ok_or(IndexError::UnsafePath)?;
         safe_path(parent)?;
+        // Never materialize a cleartext search projection inside a vault.
+        if cipher_key.is_none() && parent.join("vault-v1.json").exists() {
+            return Err(IndexError::ForeignDatabase);
+        }
         fs::create_dir_all(parent)?;
         safe_path(&path)?;
+        let _writer_guard = if cipher_key.is_some() && parent.join("vault-v1.json").exists() {
+            Some(VaultWriterFence::writer(parent).map_err(|_| IndexError::InvalidIndex)?)
+        } else {
+            None
+        };
         let existed = path.exists();
         if existed {
             let ro = Connection::open_with_flags(
                 &path,
                 OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
             )?;
+            if let Some(key) = cipher_key.as_ref() {
+                key.unlock(&ro)?;
+            }
             verify(&ro, true)?;
         }
         let mut db = Connection::open_with_flags(
@@ -239,6 +333,9 @@ impl IndexStore {
                 | OpenFlags::SQLITE_OPEN_CREATE
                 | OpenFlags::SQLITE_OPEN_NOFOLLOW,
         )?;
+        if let Some(key) = cipher_key.as_ref() {
+            key.unlock(&db)?;
+        }
         configure(&db)?;
         if !existed {
             let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -275,23 +372,94 @@ impl IndexStore {
             }
         }
         verify(&db, false)?;
-        Ok(Self { path })
+        Ok(Self { path, cipher_key })
     }
 
     pub fn path(&self) -> &Path {
         &self.path
     }
 
-    fn connection(&self) -> Result<Connection> {
+    /// Create an encrypted, create-new SQLCipher snapshot containing committed
+    /// WAL pages. This is a single derived-index primitive ONLY: not a vault-
+    /// wide online backup or cross-DB generation cut.
+    #[cfg(feature = "sqlcipher-preview")]
+    pub fn create_encrypted_online_snapshot(&self, destination: impl AsRef<Path>) -> Result<()> {
+        use rusqlite::backup::Backup;
+        use std::fs::{File, OpenOptions};
+        use std::io::Read;
+
+        let key = self.cipher_key.as_ref().ok_or(IndexError::InvalidIndex)?;
+        let destination = destination.as_ref();
+        let parent = destination.parent().ok_or(IndexError::UnsafePath)?;
+        safe_path(parent)?;
+        safe_path(destination)?;
+        if destination == self.path || !parent.is_dir() {
+            return Err(IndexError::UnsafePath);
+        }
+        let vault_parent = self.path.parent().ok_or(IndexError::UnsafePath)?;
+        let _writer_fence = if vault_parent.join("vault-v1.json").exists() {
+            Some(VaultWriterFence::writer(vault_parent).map_err(|_| IndexError::InvalidIndex)?)
+        } else {
+            None
+        };
+        let source = Connection::open_with_flags(
+            &self.path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+        )?;
+        key.unlock(&source)?;
+        verify(&source, true)?;
+
+        // Reserve the destination before any SQLite I/O; never overwrite a
+        // preexisting backup, even on wrong-key or interrupted operations.
+        let placeholder = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(destination)?;
+        placeholder.sync_all()?;
+        drop(placeholder);
+        let mut target = Connection::open_with_flags(
+            destination,
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+        )?;
+        key.unlock(&target)?;
+        {
+            let backup = Backup::new(&source, &mut target)?;
+            backup.run_to_completion(64, Duration::from_millis(50), None)?;
+        }
+        key.unlock(&target)?;
+        verify(&target, true)?;
+        drop(target);
+        drop(source);
+        let mut first = [0u8; 16];
+        File::open(destination)?.read_exact(&mut first)?;
+        if &first == b"SQLite format 3\0" {
+            return Err(IndexError::InvalidIndex);
+        }
+        Ok(())
+    }
+
+    fn connection(&self) -> Result<FencedIndexConnection> {
         safe_path(&self.path)?;
+        let parent = self.path.parent().ok_or(IndexError::UnsafePath)?;
+        let writer = if self.cipher_key.is_some() && parent.join("vault-v1.json").exists() {
+            Some(VaultWriterFence::writer(parent).map_err(|_| IndexError::InvalidIndex)?)
+        } else {
+            None
+        };
         let db = Connection::open_with_flags(
             &self.path,
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
         )?;
+        if let Some(key) = self.cipher_key.as_ref() {
+            key.unlock(&db)?;
+        }
         configure(&db)?;
         // Full integrity scans are done on open, not per hot search or transaction.
         verify(&db, false)?;
-        Ok(db)
+        Ok(FencedIndexConnection {
+            db,
+            _writer: writer,
+        })
     }
 
     pub fn stats(&self) -> Result<IndexStats> {
@@ -314,6 +482,26 @@ impl IndexStore {
         self.index(archive, authority, false, &mut check)
     }
 
+    #[cfg(feature = "sqlcipher-preview")]
+    pub fn sync_vault_with_check(
+        &self,
+        archive: &vault_archive::VaultCaptureStore,
+        authority: &StateStore,
+        mut check: impl FnMut() -> Result<()>,
+    ) -> Result<IndexStats> {
+        self.index(archive, authority, false, &mut check)
+    }
+
+    #[cfg(feature = "sqlcipher-preview")]
+    pub fn rebuild_vault_with_check(
+        &self,
+        archive: &vault_archive::VaultCaptureStore,
+        authority: &StateStore,
+        mut check: impl FnMut() -> Result<()>,
+    ) -> Result<IndexStats> {
+        self.index(archive, authority, true, &mut check)
+    }
+
     pub fn rebuild(&self, archive: &ArchiveStore, authority: &StateStore) -> Result<IndexStats> {
         self.rebuild_with_check(archive, authority, || Ok(()))
     }
@@ -329,14 +517,14 @@ impl IndexStore {
 
     fn index(
         &self,
-        archive: &ArchiveStore,
+        archive: &impl CaptureArchiveReader,
         authority: &StateStore,
         rebuild: bool,
         check: &mut impl FnMut() -> Result<()>,
     ) -> Result<IndexStats> {
         check()?;
         // Acquire/validate the full conversation list before starting a mutation.
-        let conversations = archive.list("")?;
+        let conversations = archive.list_captures()?;
         let mut db = self.connection()?;
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if rebuild {
@@ -351,7 +539,7 @@ impl IndexStore {
         let mut inserted = 0;
         for summary in conversations {
             check()?;
-            let selected = archive.read(&summary.id, None)?;
+            let selected = archive.read_capture(&summary.id, None)?;
             let namespace =
                 namespace_for_provider(&summary.provider).ok_or(IndexError::InvalidEvidence)?;
             if selected.capture.provider != summary.provider
@@ -373,7 +561,7 @@ impl IndexStore {
                 source_kind: "conversation",
                 key: SourceKey::External(&summary.conversation_id),
             })?;
-            let snapshots = archive.snapshots(&summary.id)?;
+            let snapshots = archive.capture_snapshots(&summary.id)?;
             if !snapshots
                 .iter()
                 .any(|r| r.snapshot_id == selected.snapshot_id)
@@ -402,7 +590,7 @@ impl IndexStore {
                 let snapshot = if current == 1 {
                     selected.clone()
                 } else {
-                    archive.read(&summary.id, Some(&revision.snapshot_id))?
+                    archive.read_capture(&summary.id, Some(&revision.snapshot_id))?
                 };
                 verify_snapshot(&snapshot.capture, &revision.snapshot_id)?;
                 if snapshot.capture.conversation_id != summary.conversation_id

@@ -1,0 +1,81 @@
+name: BRAVE-REG-01 bounded Windows regressions
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'src-tauri/**'
+      - 'src/reader.ts'
+      - 'test/reader.test.ts'
+      - '.github/workflows/brave-registration.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  registration:
+    if: github.event.pull_request.number == 132
+    name: Browser registration and capture boundary (NOT installed Brave acceptance)
+    runs-on: windows-2022
+    timeout-minutes: 60
+    env:
+      CARGO_INCREMENTAL: '0'
+      CARGO_BUILD_JOBS: '2'
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install pinned Rust
+        shell: pwsh
+        run: |
+          rustup toolchain install 1.90.0 --profile minimal --component rustfmt --no-self-update
+          rustup default 1.90.0
+      - name: Prepare desktop test resources
+        shell: pwsh
+        run: |
+          npm ci
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cargo build --locked -p mind-place-capture-host
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory -Force src-tauri/binaries | Out-Null
+          Copy-Item target/debug/mind-place-capture-host.exe src-tauri/binaries/mind-place-capture-host-x86_64-pc-windows-msvc.exe
+          node scripts/tunnel-helper.mjs
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          node scripts/generate-notices.mjs
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          npm run build:web
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Browser registration regressions (isolated test registry)
+        run: cargo test --locked -p mind-place --bin mind-place browser_registration_tests -- --nocapture
+      - name: Owner session and shutdown regressions
+        run: cargo test --locked -p mind-place --bin mind-place shutdown_race_regression_tests -- --nocapture
+      - name: Encrypted native capture and Lock denial
+        run: cargo test --locked -p mind-place --bin mind-place native_capture_ipc::qualification -- --nocapture
+      - name: Full repository baseline
+        shell: pwsh
+        run: |
+          npm run verify:repo
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          npm run typecheck
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          npm test
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cargo fmt --all -- --check
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          npm run build
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Report exact source and official fingerprints
+        shell: pwsh
+        run: |
+          git rev-parse HEAD
+          git rev-parse 'HEAD^{tree}'
+          python -m pip install --disable-pip-version-check PyYAML==6.0.3
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python scripts/mp10c_native_contract.py fingerprint --pr-number 132
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }

@@ -301,6 +301,27 @@ test("the reader has no chat composer and copy/export use archive actions", asyn
   assert.deepEqual(copied, ["A useful answer.", "# Notes\n\nA useful answer."]);
 });
 
+test("vault memory-only Markdown export does not claim a disk save", async () => {
+  const item = summary("f".repeat(64), "Encrypted notes");
+  const invoke: Invoke = async <T>(command: string) => {
+    if (command === "list_conversations") return [item] as T;
+    if (command === "read_conversation") return conversation(item, "Confidential synthetic reply.") as T;
+    if (command === "export_markdown") return { path: "", markdown: "# Synthetic encrypted export" } as T;
+    throw new Error(`Unexpected command: ${command}`);
+  };
+  const { root, app, copied } = createReader(invoke);
+  await app.ready;
+  await delay(0);
+  root.querySelector<HTMLButtonElement>("[data-action='export-markdown']")?.click();
+  await delay(0);
+  assert.match(root.textContent ?? "", /ready in memory, not saved to disk/i);
+  assert.doesNotMatch(root.textContent ?? "", /Saved Markdown to\s*$/);
+  assert.ok(root.querySelector<HTMLButtonElement>("[data-action='save-markdown']"));
+  root.querySelector<HTMLButtonElement>("[data-action='copy-markdown']")?.click();
+  await delay(0);
+  assert.deepEqual(copied, ["# Synthetic encrypted export"]);
+});
+
 test("capture history opens one selected snapshot without merging transcripts", async () => {
   const item = summary("d".repeat(64), "Revised conversation");
   const latest = { snapshot_id: "latest", captured_at: "2026-10-15T05:00:00.000Z", message_count: 2, completeness: "partial" as const };
@@ -490,7 +511,7 @@ test("Settings contains only the selected panel at accessible tab focus", async 
   assert.match(root.querySelector<HTMLElement>("#settings-panel-privacy")!.textContent ?? "", /Lock closes owner-only retrieval/);
 });
 
-test("Register Brave is an explicit Settings action and reports native host registration", async () => {
+test("Register Brave is an explicit Settings action and reports unverified configuration", async () => {
   let registeredBrowser: string | null = null;
   const invoke: Invoke = async <T>(command: string, args?: Record<string, unknown>) => {
     if (command === "list_conversations" || command === "list_document_roots" || command === "list_local_mcp_clients") return [] as T;
@@ -516,6 +537,6 @@ test("Register Brave is an explicit Settings action and reports native host regi
   root.querySelector<HTMLButtonElement>("[data-action='register-brave']")!.click();
   await delay(0);
   assert.equal(registeredBrowser, "brave");
-  assert.match(root.querySelector<HTMLElement>(".registered-status")?.textContent ?? "", /Registered in Brave/);
+  assert.match(root.querySelector<HTMLElement>(".registered-status")?.textContent ?? "", /Configured for Brave.*browser connection has not been tested/);
   assert.equal(root.querySelector<HTMLButtonElement>("[data-action='register-chrome']")?.disabled, false);
 });

@@ -2,80 +2,136 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # Keep bounded policy feedback available while the stacked PR is conflicted.
+    branches: [main, codex/mp-ci-win-01]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Exact open PR number to qualify
+        required: true
+        type: string
+      head_sha:
+        description: Frozen PR head SHA
+        required: true
+        type: string
+      base_sha:
+        description: Frozen PR base SHA
+        required: true
+        type: string
 
 permissions:
   contents: read
-
-concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  pull-requests: read
 
 jobs:
-  verify:
-    name: Verify Windows product
-    runs-on: windows-latest
-    timeout-minutes: 30
-    env:
-      CARGO_BUILD_JOBS: 1
-      CARGO_INCREMENTAL: 0
-
+  fast:
+    name: Fast developer feedback
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          fetch-depth: 0
+          ref: ${{ (github.event_name == 'workflow_dispatch' && format('refs/pull/{0}/merge', inputs.pr_number)) || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
         with:
           node-version: 24
           cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Verify repository contract
+        run: npm run verify:repo
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Test reader and browser contracts
+        run: npm run test:web
+      - name: Build reader
+        run: npm run build:web
+      - name: Validate document qualification gate policy
+        run: python3 -m unittest discover -s scripts/tests -p 'test_mp10c_*.py' -v
+      - name: Validate Windows qualification policy
+        run: |
+          python3 -m pip install --disable-pip-version-check PyYAML==6.0.3
+          python3 -m unittest discover -s scripts/tests -p 'test_windows_product*.py' -v
+      - name: Report draft acceptance boundary
+        if: github.event_name == 'pull_request' && github.event.pull_request.draft == true
+        run: |
+          echo '### Development checks only' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Full Windows product, security/native and storage qualification are PENDING for this Draft PR. A skipped native job does not certify acceptance. Switch to Ready for Review after freezing the candidate, or dispatch final qualification explicitly.' >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Setup Rust 1.90
-        shell: pwsh
+  rust-fast:
+    name: Fast Rust compile and vault feedback
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      CARGO_INCREMENTAL: 0
+      CARGO_BUILD_JOBS: 2
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          fetch-depth: 0
+          ref: ${{ (github.event_name == 'workflow_dispatch' && format('refs/pull/{0}/merge', inputs.pr_number)) || github.sha }}
+          persist-credentials: false
+      - name: Install pinned Rust 1.90
         run: |
           rustup toolchain install 1.90.0 --profile minimal --component rustfmt --no-self-update
           rustup default 1.90.0
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Check Rust formatting
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
+        with:
+          key: mind-place-fast-rust-190
+      - name: Rust format
         run: cargo fmt --all -- --check
-
-      - name: Verify repository contract
-        run: npm run verify:repo
-
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Visual Settings scroll and footer regression
-        run: node scripts/verify-settings-render.mjs
-
-      - name: Qualify bundled SQLite runtime
-        run: cargo test -p mind-place-state bundled_sqlite_version_is_supported -- --nocapture
-
-      - name: Test
-        run: npm test
-
-      - name: Stage capture sidecar for native desktop tests
-        shell: pwsh
+      - name: Compile production core crates
+        run: cargo check --locked -p mind-place-security -p mind-place-state -p mind-place-index -p mind-place-integration
+      - name: Compile available SQLCipher and vault features
         run: |
-          cargo build -p mind-place-capture-host
-          New-Item -ItemType Directory -Force src-tauri/binaries | Out-Null
-          Copy-Item "target/debug/mind-place-capture-host.exe" "src-tauri/binaries/mind-place-capture-host-x86_64-pc-windows-msvc.exe"
-          node scripts/tunnel-helper.mjs
-          node scripts/generate-notices.mjs
-          npm run build:web
+          python3 - <<'PY'
+          import json
+          import subprocess
+          data = json.loads(subprocess.check_output(
+              ["cargo", "metadata", "--no-deps", "--format-version", "1"]))
+          packages = {p["name"]: p["features"] for p in data["packages"]}
+          for package, feature in (
+              ("mind-place-state", "sqlcipher-preview"),
+              ("mind-place-index", "sqlcipher-preview"),
+              ("mind-place-integration", "vault-mcp"),
+          ):
+              if feature in packages.get(package, {}):
+                  subprocess.run(["cargo", "check", "--locked", "-p", package,
+                                  "--features", feature], check=True)
+              else:
+                  print(f"Feature {package}/{feature} absent at this source SHA; "
+                        "normal core compilation remains mandatory")
+          PY
+      - name: Focused security tests
+        run: cargo test --locked -p mind-place-security --lib
 
-      - name: Qualify Phase 3E simulated MCP and revocation boundary
-        run: cargo test -p mind-place-integration --test mcp -- --nocapture
-
-      - name: Test hosted tunnel desktop boundaries
-        run: cargo test -p mind-place --bin mind-place hosted_tunnel::tests -- --nocapture
-
-      - name: Build desktop app
-        run: npm run build
-
-      - name: Verify portable MIT license and third-party notices
-        run: npm run verify:distribution-license
+  native-evidence:
+    name: Native execution evidence
+    needs: [fast, rust-fast]
+    if: always() && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          fetch-depth: 0
+          ref: ${{ (github.event_name == 'workflow_dispatch' && format('refs/pull/{0}/merge', inputs.pr_number)) || github.sha }}
+          persist-credentials: false
+      - name: Capture native execution provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/mp10c_native_contract.py attest --output qualification/native-contract.json
+      - name: Upload native execution evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: mp-native-contract-attempt-${{ github.run_attempt }}
+          path: qualification/native-contract.json
+          if-no-files-found: error
+          retention-days: 14

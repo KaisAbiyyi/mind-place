@@ -1,8 +1,8 @@
 //! Phase 2C: evidence-backed context packs over Phase 2A search and Phase 2B fetch.
 //! A pack is a bounded projection, never a new authority or a memory truth claim.
 use crate::{
-    FetchBudget, FetchCursor, FetchGranularity, FetchRequest, IndexError, IndexStore, QueryTerm,
-    Result, RetrievalFilters, RetrievalHit, RetrievalRequest,
+    CaptureArchiveReader, FetchBudget, FetchCursor, FetchGranularity, FetchRequest, IndexError,
+    IndexStore, QueryTerm, Result, RetrievalFilters, RetrievalHit, RetrievalRequest,
 };
 use chrono::DateTime;
 use mind_place_archive::ArchiveStore;
@@ -250,6 +250,25 @@ impl IndexStore {
         &self,
         archive: &ArchiveStore,
         request: &ContextRequest,
+        check: impl FnMut() -> Result<()>,
+    ) -> Result<ContextPack> {
+        self.build_context_generic_with_check(archive, request, check)
+    }
+
+    #[cfg(feature = "sqlcipher-preview")]
+    pub fn build_context_vault_with_check(
+        &self,
+        archive: &crate::vault_archive::VaultCaptureStore,
+        request: &ContextRequest,
+        check: impl FnMut() -> Result<()>,
+    ) -> Result<ContextPack> {
+        self.build_context_generic_with_check(archive, request, check)
+    }
+
+    pub(crate) fn build_context_generic_with_check(
+        &self,
+        archive: &impl CaptureArchiveReader,
+        request: &ContextRequest,
         mut check: impl FnMut() -> Result<()>,
     ) -> Result<ContextPack> {
         let started = Instant::now();
@@ -342,7 +361,7 @@ impl IndexStore {
             };
             // Phase 2B checks canonical identity, exact snapshot, raw digest
             // and match against index metadata before any text is emitted.
-            let fetched = self.fetch_with_check(archive, &fetch_request, &mut check)?;
+            let fetched = self.fetch_generic_with_check(archive, &fetch_request, &mut check)?;
             let key = (fetched.source_id.clone(), fetched.snapshot_id.clone());
             let group_at = groups.iter().position(|g| {
                 (g.source_id.as_str(), g.snapshot_id.as_str()) == (key.0.as_str(), key.1.as_str())
