@@ -4,6 +4,9 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::path::PathBuf;
 
+pub mod chatgpt_export;
+pub mod gemini_takeout;
+
 use crate::Capture;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
