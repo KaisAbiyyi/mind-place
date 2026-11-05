@@ -4,7 +4,10 @@ use std::collections::{HashMap, HashSet};
 use std::io::Read;
 
 use crate::importers::{stream_top_level_array, RawEvidenceEnvelope, ReconciledItem};
-use crate::{Capture, Message};
+use crate::{Attachment, Capture, Message};
+
+const MAX_CHATGPT_RECORD_BYTES: usize = 64 * 1024 * 1024; // 64 MiB
+const MAX_ITEMS_IN_MEMORY: usize = 50_000;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ChatGptExportConversation {
@@ -13,6 +16,7 @@ pub struct ChatGptExportConversation {
     pub create_time: Option<f64>,
     pub update_time: Option<f64>,
     pub current_node: Option<String>,
+    #[serde(default)]
     pub mapping: HashMap<String, ChatGptNode>,
 }
 
@@ -56,12 +60,34 @@ pub struct ChatGptContent {
 pub struct ChatGptExportParser;
 
 impl ChatGptExportParser {
+    pub fn stream_conversations_json<
+        R: Read,
+        F: FnMut(ReconciledItem) -> Result<(), Box<dyn std::error::Error>>,
+    >(
+        reader: R,
+        mut callback: F,
+    ) -> Result<usize, Box<dyn std::error::Error>> {
+        let mut seen_ids = HashMap::new();
+        stream_top_level_array(reader, |raw_val: Box<serde_json::value::RawValue>| {
+            let raw_bytes = raw_val.get().as_bytes().to_vec();
+            if raw_bytes.len() > MAX_CHATGPT_RECORD_BYTES {
+                return Err("ChatGPT export record exceeds maximum allowed 64 MiB limit".into());
+            }
+            let item = Self::reconcile_conversation_raw(raw_bytes, &mut seen_ids)?;
+            callback(item)
+        })
+    }
+
     pub fn parse_conversations_json<R: Read>(
         reader: R,
     ) -> Result<Vec<ReconciledItem>, Box<dyn std::error::Error>> {
         let mut items = Vec::new();
-        stream_top_level_array(reader, |conv: ChatGptExportConversation| {
-            let item = Self::reconcile_conversation(conv)?;
+        Self::stream_conversations_json(reader, |item| {
+            if items.len() >= MAX_ITEMS_IN_MEMORY {
+                return Err(
+                    "ChatGPT export exceeds in-memory collection limit; use stream_conversations_json".into(),
+                );
+            }
             items.push(item);
             Ok(())
         })?;
@@ -72,7 +98,16 @@ impl ChatGptExportParser {
         conv: ChatGptExportConversation,
     ) -> Result<ReconciledItem, Box<dyn std::error::Error>> {
         let raw_bytes = serde_json::to_vec(&conv)?;
+        let mut seen_ids = HashMap::new();
+        Self::reconcile_conversation_raw(raw_bytes, &mut seen_ids)
+    }
+
+    fn reconcile_conversation_raw(
+        raw_bytes: Vec<u8>,
+        seen_ids: &mut HashMap<String, usize>,
+    ) -> Result<ReconciledItem, Box<dyn std::error::Error>> {
         let raw_sha256 = format!("{:x}", Sha256::digest(&raw_bytes));
+        let conv: ChatGptExportConversation = serde_json::from_slice(&raw_bytes)?;
 
         let raw_evidence = RawEvidenceEnvelope {
             provider: "chatgpt".into(),
@@ -87,15 +122,30 @@ impl ChatGptExportParser {
             .to_string(),
         };
 
-        let messages = Self::project_active_branch(&conv);
-        if messages.is_empty() {
-            return Ok(ReconciledItem::PreservedRawOnly {
-                evidence: raw_evidence,
-                disposition_reason:
-                    "ChatGPT export conversation contained zero valid message nodes".into(),
-                assets: vec![],
-            });
-        }
+        let mut warnings = Vec::new();
+
+        // 1. Authoritative branch projection
+        let branch_result = Self::project_authoritative_branch(&conv, &mut warnings);
+
+        let (messages, completeness) = match branch_result {
+            BranchProjection::CompleteActiveBranch(msgs) => (msgs, "complete".to_string()),
+            BranchProjection::PartialUnverified(msgs) => (msgs, "partial".to_string()),
+            BranchProjection::BranchingRefused(reason) => {
+                return Ok(ReconciledItem::PreservedRawOnly {
+                    evidence: raw_evidence,
+                    disposition_reason: reason,
+                    assets: vec![],
+                });
+            }
+            BranchProjection::Empty => {
+                return Ok(ReconciledItem::PreservedRawOnly {
+                    evidence: raw_evidence,
+                    disposition_reason:
+                        "ChatGPT export conversation contained zero valid message nodes".into(),
+                    assets: vec![],
+                });
+            }
+        };
 
         let title = conv
             .title
@@ -107,26 +157,66 @@ impl ChatGptExportParser {
             .take(120)
             .collect();
 
-        let captured_at = conv
-            .create_time
-            .or(conv.update_time)
-            .and_then(timestamp_to_rfc3339)
-            .unwrap_or_else(|| "2026-10-15T03:00:00.000Z".to_string());
+        // 2. Honest timestamp handling
+        let conversation_created_at = conv.create_time.and_then(timestamp_to_rfc3339);
+        let conversation_updated_at = conv.update_time.and_then(timestamp_to_rfc3339);
 
-        let source_url = format!("https://chatgpt.com/c/{}", conv.id);
+        let captured_at = if let Some(ref ts) = conversation_created_at {
+            ts.clone()
+        } else if let Some(ref ts) = conversation_updated_at {
+            ts.clone()
+        } else {
+            warnings.push(
+                "Missing conversation create_time and update_time; using import processing time for capture timestamp".into(),
+            );
+            chrono::Utc::now().to_rfc3339()
+        };
+
+        // 3. Collision-resistant duplicate conversation ID handling
+        let count = seen_ids.entry(conv.id.clone()).or_insert(0);
+        *count += 1;
+        let (conversation_id, source_url) = if *count == 1 {
+            (
+                conv.id.to_ascii_lowercase(),
+                format!("https://chatgpt.com/c/{}", conv.id),
+            )
+        } else {
+            // Generate deterministic UUIDv4 for duplicate occurrence to prevent collision
+            let hash = Sha256::digest(format!("{}:dup:{}", conv.id, *count).as_bytes());
+            let mut uuid_bytes = [0u8; 16];
+            uuid_bytes.copy_from_slice(&hash[..16]);
+            uuid_bytes[6] = (uuid_bytes[6] & 0x0f) | 0x40; // Version 4
+            uuid_bytes[8] = (uuid_bytes[8] & 0x3f) | 0x80; // Variant 1
+            let disambiguated = format!(
+                "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+                uuid_bytes[0], uuid_bytes[1], uuid_bytes[2], uuid_bytes[3],
+                uuid_bytes[4], uuid_bytes[5],
+                uuid_bytes[6], uuid_bytes[7],
+                uuid_bytes[8], uuid_bytes[9],
+                uuid_bytes[10], uuid_bytes[11], uuid_bytes[12], uuid_bytes[13], uuid_bytes[14], uuid_bytes[15]
+            );
+            warnings.push(
+                "Duplicate conversation UUID encountered in export; disambiguated identity assigned"
+                    .into(),
+            );
+            (
+                disambiguated.clone(),
+                format!("mindplace-import://chatgpt-export/{disambiguated}"),
+            )
+        };
 
         let capture = Capture {
             schema_version: 1,
             provider: "chatgpt".into(),
-            conversation_id: conv.id.to_ascii_lowercase(),
+            conversation_id,
             source_url,
             title,
-            conversation_created_at: conv.create_time.and_then(timestamp_to_rfc3339),
-            conversation_updated_at: conv.update_time.and_then(timestamp_to_rfc3339),
+            conversation_created_at,
+            conversation_updated_at,
             captured_at,
             capture_method: "export-import".into(),
-            completeness: "complete".into(),
-            warnings: vec![],
+            completeness,
+            warnings,
             messages,
         };
 
@@ -137,67 +227,103 @@ impl ChatGptExportParser {
         })
     }
 
-    fn project_active_branch(conv: &ChatGptExportConversation) -> Vec<Message> {
-        let mut ordered_messages = Vec::new();
-        let mut visited = HashSet::new();
+    fn project_authoritative_branch(
+        conv: &ChatGptExportConversation,
+        warnings: &mut Vec<String>,
+    ) -> BranchProjection {
+        if conv.mapping.is_empty() {
+            return BranchProjection::Empty;
+        }
 
-        if let Some(mut curr_id) = conv.current_node.clone() {
-            let mut path_nodes = Vec::new();
-            while let Some(node) = conv.mapping.get(&curr_id) {
-                if !visited.insert(curr_id.clone()) {
-                    // Prevent infinite loops on cyclic mapping
-                    break;
-                }
-                if let Some(msg) = &node.message {
-                    path_nodes.push(msg);
-                }
-                if let Some(parent_id) = &node.parent {
-                    curr_id = parent_id.clone();
-                } else {
-                    break;
-                }
-            }
-            path_nodes.reverse(); // Chronological order: root -> leaf
-            for msg in path_nodes {
-                if let Some(converted) = Self::convert_message(msg) {
-                    ordered_messages.push(converted);
-                }
-            }
-        } else {
-            // Fallback: traverse from roots
-            let roots: Vec<_> = conv
-                .mapping
-                .values()
-                .filter(|n| n.parent.is_none())
-                .collect();
-            for root in roots {
-                let mut curr = Some(root);
-                while let Some(node) = curr {
-                    if !visited.insert(node.id.clone()) {
+        // Case A: valid current_node chain
+        if let Some(curr_id) = &conv.current_node {
+            if let Some(_) = conv.mapping.get(curr_id) {
+                let mut path_nodes = Vec::new();
+                let mut visited = HashSet::new();
+                let mut curr = Some(curr_id.clone());
+                let mut cyclic = false;
+                let mut orphaned = false;
+
+                while let Some(node_id) = curr {
+                    if !visited.insert(node_id.clone()) {
+                        cyclic = true;
                         break;
                     }
-                    if let Some(msg) = &node.message {
+                    if let Some(node) = conv.mapping.get(&node_id) {
+                        if let Some(msg) = &node.message {
+                            path_nodes.push(msg);
+                        }
+                        curr = node.parent.clone();
+                    } else {
+                        orphaned = true;
+                        break;
+                    }
+                }
+
+                if !cyclic && !orphaned && !path_nodes.is_empty() {
+                    path_nodes.reverse(); // Chronological root -> leaf
+                    let mut ordered_messages = Vec::new();
+                    for msg in path_nodes {
                         if let Some(converted) = Self::convert_message(msg) {
                             ordered_messages.push(converted);
                         }
                     }
-                    curr = node
-                        .children
-                        .first()
-                        .and_then(|c_id| conv.mapping.get(c_id));
+
+                    if visited.len() < conv.mapping.len() {
+                        warnings.push(
+                            "Conversation contains alternate branches preserved in raw evidence"
+                                .into(),
+                        );
+                    }
+
+                    return BranchProjection::CompleteActiveBranch(ordered_messages);
                 }
             }
         }
 
-        // Deduplicate message IDs if identical IDs appear
-        let mut seen_ids = HashSet::new();
-        for (idx, msg) in ordered_messages.iter_mut().enumerate() {
-            if !seen_ids.insert(msg.id.clone()) {
-                msg.id = format!("{}-{idx}", msg.id);
+        // Case B: missing or invalid current_node
+        // Check if graph is strictly linear (single root, every node has <= 1 child)
+        let roots: Vec<_> = conv
+            .mapping
+            .values()
+            .filter(|n| n.parent.is_none())
+            .collect();
+
+        let is_strictly_linear =
+            roots.len() == 1 && conv.mapping.values().all(|n| n.children.len() <= 1);
+
+        if is_strictly_linear {
+            let mut curr = Some(roots[0]);
+            let mut visited = HashSet::new();
+            let mut ordered_messages = Vec::new();
+
+            while let Some(node) = curr {
+                if !visited.insert(node.id.clone()) {
+                    break;
+                }
+                if let Some(msg) = &node.message {
+                    if let Some(converted) = Self::convert_message(msg) {
+                        ordered_messages.push(converted);
+                    }
+                }
+                curr = node
+                    .children
+                    .first()
+                    .and_then(|c_id| conv.mapping.get(c_id));
             }
+
+            if ordered_messages.is_empty() {
+                return BranchProjection::Empty;
+            }
+
+            warnings.push("current_node pointer missing from export; projection unverified".into());
+            return BranchProjection::PartialUnverified(ordered_messages);
         }
 
-        ordered_messages
+        // Multiple roots or branching children without authoritative current_node
+        BranchProjection::BranchingRefused(
+            "Missing or invalid current_node pointer in branching conversation DAG; active branch cannot be authoritatively determined without guessing. Raw DAG preserved.".into(),
+        )
     }
 
     fn convert_message(raw: &ChatGptMessage) -> Option<Message> {
@@ -210,6 +336,8 @@ impl ChatGptExportParser {
         };
 
         let mut text = String::new();
+        let mut attachments = Vec::new();
+
         if let Some(content) = &raw.content {
             if let Some(parts) = &content.parts {
                 for part in parts {
@@ -218,7 +346,28 @@ impl ChatGptExportParser {
                             text.push_str(s);
                         }
                         serde_json::Value::Object(map) => {
-                            if let Some(serde_json::Value::String(s)) = map.get("text") {
+                            // Multimodal image/asset attachment pointer
+                            if map.get("content_type")
+                                == Some(&serde_json::json!("image_asset_pointer"))
+                                || map.contains_key("asset_pointer")
+                            {
+                                let pointer = map
+                                    .get("asset_pointer")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("unknown-asset");
+                                attachments.push(Attachment {
+                                    id: pointer.to_string(),
+                                    name: "image_asset".into(),
+                                    mime_type: "image/*".into(),
+                                    source_url: Some(pointer.to_string()),
+                                    data_url: None,
+                                    asset_path: None,
+                                    unavailable_reason: Some(
+                                        "External asset pointer preserved without fetching remote media"
+                                            .into(),
+                                    ),
+                                });
+                            } else if let Some(serde_json::Value::String(s)) = map.get("text") {
                                 text.push_str(s);
                             } else {
                                 text.push_str(&part.to_string());
@@ -234,8 +383,7 @@ impl ChatGptExportParser {
             }
         }
 
-        // Skip completely empty system prompts or placeholder root nodes
-        if text.trim().is_empty() && role == "system" {
+        if text.trim().is_empty() && attachments.is_empty() && role == "system" {
             return None;
         }
 
@@ -257,9 +405,16 @@ impl ChatGptExportParser {
                 .and_then(|m| m.get("model_slug"))
                 .and_then(|s| s.as_str())
                 .map(|s| s.to_string()),
-            attachments: vec![],
+            attachments,
         })
     }
+}
+
+enum BranchProjection {
+    CompleteActiveBranch(Vec<Message>),
+    PartialUnverified(Vec<Message>),
+    BranchingRefused(String),
+    Empty,
 }
 
 fn timestamp_to_rfc3339(ts: f64) -> Option<String> {
@@ -399,13 +554,11 @@ mod tests {
                 raw_evidence,
                 ..
             } => {
-                // Projection must contain root -> branch-b (2 messages), NOT branch-a!
                 assert_eq!(capture.messages.len(), 2);
                 assert_eq!(capture.messages[0].id, "msg-root");
                 assert_eq!(capture.messages[1].id, "msg-b");
                 assert!(capture.messages[1].text.contains("Alternative B"));
 
-                // But the raw evidence envelope preserves ALL nodes (including branch-a)!
                 let raw_str = String::from_utf8(raw_evidence.payload_bytes.clone()).unwrap();
                 assert!(raw_str.contains("Alternative A"));
                 assert!(raw_str.contains("Alternative B"));
@@ -447,8 +600,164 @@ mod tests {
             }
         ]"#;
 
-        // Must complete safely without hanging or stack overflowing!
         let items = ChatGptExportParser::parse_conversations_json(&json[..]).unwrap();
         assert_eq!(items.len(), 1);
+    }
+
+    #[test]
+    fn test_chatgpt_raw_exact_preservation_and_unknown_fields() {
+        let orig = r#"{"id":"12345678-1234-4123-8123-123456789abc", "title":"Fixture","mapping":{"root":{"id":"root","parent":null,"children":[],"message":{"id":"m","author":{"role":"user"},"content":{"content_type":"text","parts":["hi"]}}}},"current_node":"root","unexpected_external":{"canary":"must-preserve"}}"#;
+        let items =
+            ChatGptExportParser::parse_conversations_json(format!("[{orig}]").as_bytes()).unwrap();
+        let raw = match &items[0] {
+            ReconciledItem::Conversation { raw_evidence, .. } => raw_evidence,
+            _ => panic!("not conversation"),
+        };
+        assert_eq!(raw.payload_bytes, orig.as_bytes());
+        assert!(String::from_utf8_lossy(&raw.payload_bytes).contains("must-preserve"));
+    }
+
+    #[test]
+    fn test_chatgpt_missing_current_node_does_not_claim_complete() {
+        let orig = r#"{"id":"12345678-1234-4123-8123-123456789abc","title":"Fixture","mapping":{"root":{"id":"root","parent":null,"children":["child"],"message":{"id":"m","author":{"role":"user"},"content":{"content_type":"text","parts":["hi"]}}},"child":{"id":"child","parent":"root","children":[],"message":{"id":"m2","author":{"role":"assistant"},"content":{"content_type":"text","parts":["reply"]}}}}}"#;
+        let items =
+            ChatGptExportParser::parse_conversations_json(format!("[{orig}]").as_bytes()).unwrap();
+        match &items[0] {
+            ReconciledItem::Conversation { capture, .. } => {
+                assert_ne!(capture.completeness, "complete");
+                assert_eq!(capture.completeness, "partial");
+                assert!(capture
+                    .warnings
+                    .iter()
+                    .any(|w| w.contains("current_node pointer missing")));
+            }
+            ReconciledItem::PreservedRawOnly { .. } => {}
+        }
+    }
+
+    #[test]
+    fn test_chatgpt_duplicate_conversation_ids_reconciled() {
+        let x = r#"{"id":"12345678-1234-4123-8123-123456789abc","title":"Fixture","mapping":{"root":{"id":"root","parent":null,"children":[],"message":{"id":"m","author":{"role":"user"},"content":{"content_type":"text","parts":["hi"]}}}},"current_node":"root"}"#;
+        let items =
+            ChatGptExportParser::parse_conversations_json(format!("[{x},{x}]").as_bytes()).unwrap();
+        assert_eq!(items.len(), 2);
+        let ids: Vec<_> = items
+            .iter()
+            .map(|x| match x {
+                ReconciledItem::Conversation { capture, .. } => capture.conversation_id.clone(),
+                _ => panic!(),
+            })
+            .collect();
+        assert_ne!(ids[0], ids[1]);
+    }
+
+    #[test]
+    fn test_chatgpt_multimodal_attachment_projection() {
+        let orig = r#"{"id":"12345678-1234-4123-8123-123456789abc","mapping":{"root":{"id":"root","parent":null,"children":[],"message":{"id":"m","author":{"role":"user"},"content":{"content_type":"multimodal_text","parts":[{"content_type":"image_asset_pointer","asset_pointer":"file-service://id"}]}}}},"current_node":"root"}"#;
+        let items =
+            ChatGptExportParser::parse_conversations_json(format!("[{orig}]").as_bytes()).unwrap();
+        let c = match &items[0] {
+            ReconciledItem::Conversation { capture, .. } => capture,
+            _ => panic!(),
+        };
+        assert!(!c.messages[0].attachments.is_empty());
+        assert_eq!(
+            c.messages[0].attachments[0].source_url.as_deref(),
+            Some("file-service://id")
+        );
+    }
+
+    #[test]
+    fn test_chatgpt_branching_without_current_node_preserves_raw_only() {
+        let json = br#"[
+            {
+                "id": "12345678-1234-4123-8123-123456789abc",
+                "title": "Branching Without Current Node",
+                "create_time": 1700000000.0,
+                "current_node": null,
+                "mapping": {
+                    "root": {
+                        "id": "root",
+                        "parent": null,
+                        "children": ["branch-a", "branch-b"],
+                        "message": {
+                            "id": "m-root",
+                            "author": {"role": "user"},
+                            "content": {"content_type": "text", "parts": ["hello"]}
+                        }
+                    },
+                    "branch-a": {
+                        "id": "branch-a",
+                        "parent": "root",
+                        "children": [],
+                        "message": {
+                            "id": "m-a",
+                            "author": {"role": "assistant"},
+                            "content": {"content_type": "text", "parts": ["reply a"]}
+                        }
+                    },
+                    "branch-b": {
+                        "id": "branch-b",
+                        "parent": "root",
+                        "children": [],
+                        "message": {
+                            "id": "m-b",
+                            "author": {"role": "assistant"},
+                            "content": {"content_type": "text", "parts": ["reply b"]}
+                        }
+                    }
+                }
+            }
+        ]"#;
+
+        let items = ChatGptExportParser::parse_conversations_json(&json[..]).unwrap();
+        assert_eq!(items.len(), 1);
+        match &items[0] {
+            ReconciledItem::PreservedRawOnly {
+                disposition_reason, ..
+            } => {
+                assert!(disposition_reason.contains("active branch cannot be authoritatively"));
+            }
+            _ => panic!("Expected PreservedRawOnly variant for unresolvable branching DAG"),
+        }
+    }
+
+    #[test]
+    fn test_chatgpt_missing_timestamps_honestly_none() {
+        let json = br#"[
+            {
+                "id": "12345678-1234-4123-8123-123456789abc",
+                "title": "No Timestamps",
+                "create_time": null,
+                "update_time": null,
+                "current_node": "root",
+                "mapping": {
+                    "root": {
+                        "id": "root",
+                        "parent": null,
+                        "children": [],
+                        "message": {
+                            "id": "m-root",
+                            "author": {"role": "user"},
+                            "content": {"content_type": "text", "parts": ["timeless"]}
+                        }
+                    }
+                }
+            }
+        ]"#;
+
+        let items = ChatGptExportParser::parse_conversations_json(&json[..]).unwrap();
+        assert_eq!(items.len(), 1);
+        match &items[0] {
+            ReconciledItem::Conversation { capture, .. } => {
+                assert_eq!(capture.conversation_created_at, None);
+                assert_eq!(capture.conversation_updated_at, None);
+                assert!(capture
+                    .warnings
+                    .iter()
+                    .any(|w| w.contains("Missing conversation create_time")));
+            }
+            _ => panic!("Expected Conversation variant"),
+        }
     }
 }

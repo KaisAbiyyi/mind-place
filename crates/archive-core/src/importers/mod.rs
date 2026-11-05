@@ -111,6 +111,9 @@ where
     };
 
     let total = deserializer.deserialize_seq(visitor)?;
+    deserializer
+        .end()
+        .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
     Ok(total)
 }
 
@@ -122,6 +125,13 @@ mod tests {
     struct DummyRecord {
         id: u64,
         title: String,
+    }
+
+    #[test]
+    fn test_stream_top_level_array_rejects_trailing_garbage() {
+        let json = b"[] NOT_JSON";
+        let res = stream_top_level_array(&json[..], |_: serde_json::Value| Ok(()));
+        assert!(res.is_err());
     }
 
     #[test]
