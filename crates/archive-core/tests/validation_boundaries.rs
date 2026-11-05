@@ -199,9 +199,9 @@ fn test_ordinary_save_rejects_historical_import_methods() {
     cap_takeout.completeness = "complete".into();
     assert!(store.save(cap_takeout.clone()).is_err());
 
-    // Authorized entry point succeeds
-    assert!(store.save_historical_import(cap_export, "chatgpt").is_ok());
-    assert!(store.save_historical_import(cap_takeout, "gemini").is_ok());
+    // Naming an entry point "historical" cannot confer owner authority.
+    assert!(store.save_historical_import(cap_export, "chatgpt").is_err());
+    assert!(store.save_historical_import(cap_takeout, "gemini").is_err());
 }
 
 #[test]

@@ -200,7 +200,34 @@ impl SecurityGate {
         expected_source_root: &Path,
         independently_computed_manifest_hash: &[u8; 32],
     ) -> Result<()> {
-        self.validate_lease(lease)?;
+        self.with_verified_import_capability_bound(
+            lease,
+            cap,
+            expected_provider,
+            expected_job_id,
+            expected_source_root,
+            independently_computed_manifest_hash,
+            || (),
+        )
+    }
+
+    /// Run a bounded import write while its capability is valid. The action must
+    /// not call back into this gate. Lock and revocation serialize with the action.
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_verified_import_capability_bound<T>(
+        &self,
+        lease: UnlockLease,
+        cap: &ImportAuthorizationCapability,
+        expected_provider: &str,
+        expected_job_id: &str,
+        expected_source_root: &Path,
+        independently_computed_manifest_hash: &[u8; 32],
+        action: impl FnOnce() -> T,
+    ) -> Result<T> {
+        let mut state = self.lock_state();
+        if !state.configured {
+            return Err(SecurityError::Locked);
+        }
 
         // 1. Issuing gate instance binding: reject foreign gate capability
         if cap.issuing_gate_instance_id != self.inner.instance_id {
@@ -208,7 +235,6 @@ impl SecurityGate {
         }
 
         // 2. Epoch and unlock state check
-        let mut state = self.lock_state();
         let current_epoch = state.epoch;
         if state.locked || current_epoch != lease.epoch() {
             return Err(SecurityError::Locked);
@@ -273,7 +299,8 @@ impl SecurityGate {
         record.usage_count = record.usage_count.saturating_add(1);
         record.last_verified_at = Some(Instant::now());
 
-        Ok(())
+        // Keep the gate locked through the write: lock/revoke cannot race publication.
+        Ok(action())
     }
 
     pub fn revoke_import_capability(&self, token: &[u8; 32]) -> Result<()> {
@@ -307,6 +334,54 @@ impl SecurityGate {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn import_action_is_fenced_and_revoked_actions_never_run() {
+        let home = tempdir().unwrap();
+        let gate = SecurityGate::open(home.path().join("security.json")).unwrap();
+        gate.initialize(b"synthetic-owner-credential").unwrap();
+        let lease = gate.require_unlocked().unwrap();
+        let cap = gate
+            .authorize_import_session(
+                lease,
+                b"synthetic-owner-credential",
+                "chatgpt",
+                home.path(),
+                [5; 32],
+                Duration::from_secs(60),
+            )
+            .unwrap();
+        let mut calls = 0;
+        gate.with_verified_import_capability_bound(
+            lease,
+            &cap,
+            "chatgpt",
+            cap.job_id(),
+            home.path(),
+            &[5; 32],
+            || {
+                assert!(matches!(
+                    gate.inner.state.try_lock(),
+                    Err(std::sync::TryLockError::WouldBlock)
+                ));
+                calls += 1;
+            },
+        )
+        .unwrap();
+        gate.revoke_import_capability(cap.token()).unwrap();
+        assert!(gate
+            .with_verified_import_capability_bound(
+                lease,
+                &cap,
+                "chatgpt",
+                cap.job_id(),
+                home.path(),
+                &[5; 32],
+                || calls += 1,
+            )
+            .is_err());
+        assert_eq!(calls, 1);
+    }
 
     #[test]
     fn test_import_session_authorization_and_verification() {

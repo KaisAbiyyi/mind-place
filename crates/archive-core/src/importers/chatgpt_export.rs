@@ -205,7 +205,7 @@ impl ChatGptExportParser {
             )
         };
 
-        let capture = Capture {
+        let mut capture = Capture {
             schema_version: 1,
             provider: "chatgpt".into(),
             conversation_id,
@@ -219,6 +219,18 @@ impl ChatGptExportParser {
             warnings,
             messages,
         };
+
+        // A reader projection must satisfy the same contract as its write boundary.
+        // Conflicting message IDs (and other invalid metadata) remain lossless raw evidence.
+        if let Err(error) = crate::validate_historical_capture(&mut capture, "chatgpt") {
+            return Ok(ReconciledItem::PreservedRawOnly {
+                evidence: raw_evidence,
+                disposition_reason: format!(
+                    "ChatGPT projection rejected: {error}; raw DAG preserved"
+                ),
+                assets: vec![],
+            });
+        }
 
         Ok(ReconciledItem::Conversation {
             capture,
@@ -235,9 +247,15 @@ impl ChatGptExportParser {
             return BranchProjection::Empty;
         }
 
+        if !Self::valid_graph(conv) {
+            return BranchProjection::BranchingRefused(
+                "Inconsistent ChatGPT DAG: node identities, reciprocal parent/child links or root connectivity invalid; raw DAG preserved".into(),
+            );
+        }
+
         // Case A: valid current_node chain
         if let Some(curr_id) = &conv.current_node {
-            if let Some(_) = conv.mapping.get(curr_id) {
+            if conv.mapping.contains_key(curr_id) {
                 let mut path_nodes = Vec::new();
                 let mut visited = HashSet::new();
                 let mut curr = Some(curr_id.clone());
@@ -324,6 +342,52 @@ impl ChatGptExportParser {
         BranchProjection::BranchingRefused(
             "Missing or invalid current_node pointer in branching conversation DAG; active branch cannot be authoritatively determined without guessing. Raw DAG preserved.".into(),
         )
+    }
+
+    fn valid_graph(conv: &ChatGptExportConversation) -> bool {
+        let mut roots = Vec::new();
+        let mut linked_children = HashSet::new();
+        for (id, node) in &conv.mapping {
+            if id != &node.id {
+                return false;
+            }
+            if let Some(parent_id) = &node.parent {
+                if !conv.mapping.contains_key(parent_id) {
+                    return false;
+                }
+            } else {
+                roots.push(id);
+            }
+            for child_id in &node.children {
+                if !linked_children.insert(child_id)
+                    || !conv
+                        .mapping
+                        .get(child_id)
+                        .is_some_and(|child| child.parent.as_ref() == Some(id))
+                {
+                    return false;
+                }
+            }
+        }
+        if roots.len() != 1 {
+            return false;
+        }
+        if conv
+            .mapping
+            .iter()
+            .any(|(id, node)| node.parent.is_some() && !linked_children.contains(id))
+        {
+            return false;
+        }
+        let mut pending = roots;
+        let mut visited = HashSet::new();
+        while let Some(id) = pending.pop() {
+            if !visited.insert(id) {
+                return false;
+            }
+            pending.extend(&conv.mapping[id].children);
+        }
+        visited.len() == conv.mapping.len()
     }
 
     fn convert_message(raw: &ChatGptMessage) -> Option<Message> {

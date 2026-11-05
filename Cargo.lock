@@ -1379,6 +1379,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "html5gum"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba6fbe46e93059ce8ee19fbefdb0c7699cc7197fcaac048f2c3593f3e5da845f"
+
+[[package]]
 name = "http"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1988,6 +1994,8 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "fs2",
+ "html5gum",
+ "mind-place-security",
  "serde",
  "serde_json",
  "sha2",

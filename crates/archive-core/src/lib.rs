@@ -12,7 +12,8 @@ pub use importers::{
 };
 pub use store::{
     conversation_id_from_url, markdown, validate_capture, validate_historical_capture,
-    validate_live_capture, validate_stored_capture, verified_image_asset, MAX_CAPTURE_BYTES,
+    validate_live_capture, validate_stored_capture, verified_image_asset,
+    HistoricalImportAuthorization, MAX_CAPTURE_BYTES,
 };
 
 pub const NATIVE_HOST_NAME: &str = "com.mindplace.capture";

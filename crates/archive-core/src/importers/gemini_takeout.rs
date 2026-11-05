@@ -1,3 +1,4 @@
+use html5gum::{DefaultEmitter, Token, Tokenizer};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::io::Read;
@@ -104,29 +105,197 @@ pub fn strip_html_tags(s: &str) -> String {
         .to_string()
 }
 
+// HTML5 tokenization supplies decoded attributes and byte spans; evidence is
+// always sliced from the original input, never serialized from parsed markup.
+fn html_tokens(html: &str) -> impl Iterator<Item = Token<usize>> + '_ {
+    let mut emitter = DefaultEmitter::<usize>::new_with_span();
+    emitter.naively_switch_states(true);
+    Tokenizer::new_with_emitter(html, emitter).map(|token| token.expect("infallible string reader"))
+}
+
 fn extract_p_tags(html: &str) -> Vec<String> {
     let mut paragraphs = Vec::new();
-    let mut search = html;
-    while let Some(p_pos) = search.find("<p") {
-        let rest = &search[p_pos + 2..];
-        if let Some(first_char) = rest.chars().next() {
-            if first_char == '>' || first_char.is_whitespace() || first_char == '/' {
-                if let Some(tag_end) = rest.find('>') {
-                    let content_start = &rest[tag_end + 1..];
-                    if let Some(p_end) = content_start.find("</p>") {
-                        let text = strip_html_tags(&content_start[..p_end]);
-                        if !text.is_empty() {
-                            paragraphs.push(text);
-                        }
-                        search = &content_start[p_end + 4..];
-                        continue;
-                    }
+    let mut paragraph = None::<String>;
+    let mut ignored = 0usize;
+    for token in html_tokens(html) {
+        match token {
+            Token::StartTag(tag) if matches!(tag.name.as_ref(), b"script" | b"style") => {
+                ignored += 1
+            }
+            Token::EndTag(tag) if matches!(tag.name.as_ref(), b"script" | b"style") => {
+                ignored = ignored.saturating_sub(1)
+            }
+            Token::StartTag(tag) if tag.name == b"p" && ignored == 0 => {
+                if let Some(text) = paragraph.take().filter(|text| !text.trim().is_empty()) {
+                    paragraphs.push(text.trim().to_owned());
+                }
+                paragraph = Some(String::new());
+            }
+            Token::EndTag(tag) if tag.name == b"p" && ignored == 0 => {
+                if let Some(text) = paragraph.take().filter(|text| !text.trim().is_empty()) {
+                    paragraphs.push(text.trim().to_owned());
                 }
             }
+            Token::StartTag(tag) if tag.name == b"br" && ignored == 0 => {
+                if let Some(text) = &mut paragraph {
+                    text.push('\n');
+                }
+            }
+            Token::String(text) if ignored == 0 => {
+                if let Some(paragraph) = &mut paragraph {
+                    paragraph.push_str(&String::from_utf8_lossy(&text));
+                }
+            }
+            _ => {}
         }
-        search = &search[p_pos + 2..];
+    }
+    if let Some(text) = paragraph.filter(|text| !text.trim().is_empty()) {
+        paragraphs.push(text.trim().to_owned());
     }
     paragraphs
+}
+
+fn prompt_markers(html: &str) -> (Vec<usize>, bool) {
+    let mut markers = Vec::new();
+    // name, opening-tag offset, inherited exclusion, explicit prompt-cell class
+    let mut stack = Vec::<(Vec<u8>, usize, bool, bool)>::new();
+    let mut prompt_container = None::<(usize, usize, bool)>;
+    let mut ambiguous = false;
+    let mut at_block_start = true;
+    let mut raw_text_start = 0;
+    for token in html_tokens(html) {
+        match token {
+            Token::StartTag(tag) => {
+                raw_text_start = tag.span.end;
+                let excluded = stack.last().is_some_and(|frame| frame.2)
+                    || matches!(
+                        tag.name.as_ref(),
+                        b"p" | b"pre"
+                            | b"code"
+                            | b"script"
+                            | b"style"
+                            | b"textarea"
+                            | b"blockquote"
+                    )
+                    || tag
+                        .attributes
+                        .get(b"class".as_slice())
+                        .is_some_and(|value| {
+                            value.split(|byte| byte.is_ascii_whitespace()).any(|class| {
+                                class
+                                    .windows(8)
+                                    .any(|part| part.eq_ignore_ascii_case(b"response"))
+                            })
+                        });
+                if matches!(tag.name.as_ref(), b"div" | b"br" | b"p") {
+                    at_block_start = true;
+                }
+                if !matches!(
+                    tag.name.as_ref(),
+                    b"area"
+                        | b"base"
+                        | b"br"
+                        | b"col"
+                        | b"embed"
+                        | b"hr"
+                        | b"img"
+                        | b"input"
+                        | b"link"
+                        | b"meta"
+                        | b"param"
+                        | b"source"
+                        | b"track"
+                        | b"wbr"
+                ) {
+                    let prompt_cell =
+                        tag.attributes
+                            .get(b"class".as_slice())
+                            .is_some_and(|value| {
+                                value
+                                    .split(|byte| byte.is_ascii_whitespace())
+                                    .any(|class| class == b"content-cell")
+                            });
+                    stack.push((tag.name.to_vec(), tag.span.start, excluded, prompt_cell));
+                }
+            }
+            Token::EndTag(tag) => {
+                raw_text_start = tag.span.end;
+                if let Some(index) = stack
+                    .iter()
+                    .rposition(|frame| frame.0.as_slice() == tag.name.as_ref())
+                {
+                    stack.truncate(index);
+                }
+                if matches!(tag.name.as_ref(), b"div" | b"p") {
+                    at_block_start = true;
+                }
+            }
+            Token::Comment(value) => raw_text_start = value.span.end,
+            Token::Doctype(value) => raw_text_start = value.span.end,
+            Token::String(text) => {
+                let value = String::from_utf8_lossy(&text);
+                let is_label = at_block_start
+                    && value
+                        .trim_start()
+                        .strip_prefix("Prompted")
+                        .is_some_and(|rest| rest.starts_with(char::is_whitespace));
+                let direct_prompt_text = stack
+                    .last()
+                    .is_none_or(|frame| frame.0 == b"div" && !frame.2);
+                if is_label && direct_prompt_text {
+                    let container = stack.last().map_or(0, |frame| frame.1);
+                    let parent = stack
+                        .iter()
+                        .rev()
+                        .skip(1)
+                        .find(|frame| frame.0 == b"div")
+                        .map_or(0, |frame| frame.1);
+                    let prompt_cell = stack.last().is_some_and(|frame| frame.3);
+                    // Repeated flat labels are indistinguishable from response prose.
+                    // Only distinct peer provider content cells establish further turns.
+                    if prompt_container.is_none_or(|prior| {
+                        prior.0 != container && prior.1 == parent && prior.2 && prompt_cell
+                    }) {
+                        // String token spans may cover only the final entity expansion.
+                        // Tag spans reliably delimit the original text's starting offset.
+                        let raw = &html[raw_text_start..];
+                        let trimmed = raw.trim_start();
+                        if trimmed.starts_with("Prompted") {
+                            markers.push(raw_text_start + raw.len() - trimmed.len());
+                            prompt_container = Some((container, parent, prompt_cell));
+                        }
+                    } else {
+                        ambiguous = true;
+                    }
+                }
+                if !value.trim().is_empty() {
+                    at_block_start = false;
+                }
+            }
+            _ => {}
+        }
+    }
+    (markers, ambiguous)
+}
+
+fn prompt_text(html: &str) -> String {
+    let mut text = String::new();
+    for token in html_tokens(html) {
+        match token {
+            Token::StartTag(tag)
+                if matches!(tag.name.as_ref(), b"br" | b"p" | b"script" | b"style") =>
+            {
+                break
+            }
+            Token::EndTag(tag) if tag.name == b"div" => break,
+            Token::String(value) => text.push_str(&String::from_utf8_lossy(&value)),
+            _ => {}
+        }
+    }
+    text.strip_prefix("Prompted")
+        .unwrap_or(&text)
+        .trim()
+        .to_owned()
 }
 
 pub struct GeminiTakeoutParser;
@@ -145,30 +314,50 @@ impl GeminiTakeoutParser {
         }
 
         let mut items = Vec::new();
-        let card_markers: Vec<_> = html
-            .match_indices("<div class=\"outer-cell")
-            .map(|(i, _)| i)
-            .collect();
-
         let mut seen_identities: HashMap<String, usize> = HashMap::new();
-
-        if card_markers.is_empty() {
-            if !html.trim().is_empty() {
-                let item = Self::parse_single_card(&html, 0, &mut seen_identities);
-                items.push(item);
+        let mut div_depth = 0usize;
+        let mut active_card = None;
+        let mut ranges = Vec::new();
+        for token in html_tokens(&html) {
+            match token {
+                Token::StartTag(tag) if tag.name == b"div" => {
+                    let is_card = tag
+                        .attributes
+                        .get(b"class".as_slice())
+                        .is_some_and(|value| {
+                            value
+                                .split(|byte| byte.is_ascii_whitespace())
+                                .any(|class| class == b"outer-cell")
+                        });
+                    if is_card && active_card.is_none() {
+                        active_card = Some((tag.span.start, div_depth));
+                    }
+                    div_depth += 1;
+                }
+                Token::EndTag(tag) if tag.name == b"div" => {
+                    div_depth = div_depth.saturating_sub(1);
+                    if let Some((start, depth)) = active_card {
+                        if depth == div_depth {
+                            ranges.push(start..tag.span.end);
+                            active_card = None;
+                        }
+                    }
+                }
+                _ => {}
             }
-            return Ok(items);
         }
-
-        for (idx, &start) in card_markers.iter().enumerate() {
-            let end = if idx + 1 < card_markers.len() {
-                card_markers[idx + 1]
-            } else {
-                html.len()
-            };
-            let card_slice = &html[start..end];
-            let item = Self::parse_single_card(card_slice, idx, &mut seen_identities);
-            items.push(item);
+        if let Some((start, _)) = active_card {
+            ranges.push(start..html.len());
+        }
+        if ranges.is_empty() && !html.trim().is_empty() {
+            ranges.push(0..html.len());
+        }
+        for (idx, range) in ranges.into_iter().enumerate() {
+            items.push(Self::parse_single_card(
+                &html[range],
+                idx,
+                &mut seen_identities,
+            ));
         }
 
         Ok(items)
@@ -303,19 +492,61 @@ impl GeminiTakeoutParser {
     }
 
     fn extract_valid_gemini_id(card_html: &str) -> Option<String> {
-        let prefix = "https://gemini.google.com/app/";
-        if let Some(pos) = card_html.find(prefix) {
-            let rest = &card_html[pos + prefix.len()..];
-            let end = rest
-                .find(|c: char| c.is_whitespace() || c == '<' || c == '"' || c == '\'' || c == '/')
-                .unwrap_or(rest.len());
-            let candidate = rest[..end].trim_matches(|c: char| c == ':' || c == '/');
-            if !candidate.is_empty()
-                && candidate
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        // Only a complete canonical official route can supply an identity.
+        // Compare the original spelling as well: URL parsers normalize dot segments.
+        fn canonical_id(candidate: &str) -> Option<String> {
+            let url = url::Url::parse(candidate).ok()?;
+            let id = url.path().strip_prefix("/app/")?;
+            if url.scheme() != "https"
+                || url.host_str() != Some("gemini.google.com")
+                || url.port().is_some()
+                || !url.username().is_empty()
+                || url.password().is_some()
+                || url.query().is_some()
+                || url.fragment().is_some()
+                || !(8..=128).contains(&id.len())
+                || !id
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+                || candidate != format!("https://gemini.google.com/app/{id}")
             {
-                return Some(candidate.to_string());
+                return None;
+            }
+            Some(id.to_owned())
+        }
+        let mut visible_text = String::new();
+        let mut ignored = 0usize;
+        for token in html_tokens(card_html) {
+            match token {
+                Token::StartTag(tag) if matches!(tag.name.as_ref(), b"script" | b"style") => {
+                    ignored += 1
+                }
+                Token::EndTag(tag) if matches!(tag.name.as_ref(), b"script" | b"style") => {
+                    ignored = ignored.saturating_sub(1)
+                }
+                Token::StartTag(tag) if tag.name == b"a" && ignored == 0 => {
+                    if let Some(href) = tag.attributes.get(b"href".as_slice()) {
+                        if let Some(id) = canonical_id(&String::from_utf8_lossy(href)) {
+                            return Some(id);
+                        }
+                    }
+                }
+                Token::StartTag(tag) if matches!(tag.name.as_ref(), b"div" | b"p" | b"br") => {
+                    visible_text.push(' ')
+                }
+                Token::EndTag(tag) if matches!(tag.name.as_ref(), b"div" | b"p") => {
+                    visible_text.push(' ')
+                }
+                Token::String(text) if ignored == 0 => {
+                    visible_text.push_str(&String::from_utf8_lossy(&text))
+                }
+                _ => {}
+            }
+        }
+        // Inline markup cannot hide a suffix from complete candidate validation.
+        for word in visible_text.split_whitespace() {
+            if let Some(id) = canonical_id(word.strip_suffix(':').unwrap_or(word)) {
+                return Some(id);
             }
         }
         None
@@ -328,10 +559,10 @@ impl GeminiTakeoutParser {
         warnings: &mut Vec<String>,
     ) -> (Vec<Message>, String, String) {
         let mut messages = Vec::new();
-        let prompt_markers: Vec<_> = card_html
-            .match_indices("Prompted")
-            .map(|(i, _)| i)
-            .collect();
+        let (prompt_markers, ambiguous_prompt_container) = prompt_markers(card_html);
+        if ambiguous_prompt_container {
+            warnings.push("Ambiguous repeated or unscoped Prompted label retained in raw evidence; no user turn inferred".into());
+        }
 
         if !prompt_markers.is_empty() {
             for (turn_idx, &start) in prompt_markers.iter().enumerate() {
@@ -343,17 +574,7 @@ impl GeminiTakeoutParser {
                 let turn_slice = &card_html[start..end];
 
                 // Extract Prompt
-                let prompt_text = if let Some(after_prompted) = turn_slice.strip_prefix("Prompted")
-                {
-                    let end_pos = after_prompted
-                        .find("<br>")
-                        .or_else(|| after_prompted.find("<p>"))
-                        .or_else(|| after_prompted.find("</div>"))
-                        .unwrap_or(after_prompted.len());
-                    strip_html_tags(&after_prompted[..end_pos])
-                } else {
-                    String::new()
-                };
+                let prompt_text = prompt_text(turn_slice);
 
                 if !prompt_text.is_empty() {
                     messages.push(Message {
@@ -404,7 +625,10 @@ impl GeminiTakeoutParser {
         let user_count = messages.iter().filter(|m| m.role == "user").count();
         let assistant_count = messages.iter().filter(|m| m.role == "assistant").count();
 
-        let completeness = if user_count > 0 && assistant_count > 0 && user_count == assistant_count
+        let completeness = if !ambiguous_prompt_container
+            && user_count > 0
+            && assistant_count > 0
+            && user_count == assistant_count
         {
             "complete".to_string()
         } else {
@@ -510,7 +734,7 @@ mod tests {
 
     #[test]
     fn test_gemini_takeout_multi_turn_extraction() {
-        let html = r#"<div class="outer-cell">Prompted one<br><p>reply one</p> Prompted two<br><p>reply two</p></div>"#;
+        let html = r#"<div class="outer-cell"><div class="content-cell">Prompted one<br><p>reply one</p></div><div class="content-cell">Prompted two<br><p>reply two</p></div></div>"#;
         let items = GeminiTakeoutParser::parse_cards_html(html.as_bytes()).unwrap();
         assert_eq!(items.len(), 1);
 
