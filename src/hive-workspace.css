@@ -18,3 +18,42 @@
 .hive-details { overflow-wrap: anywhere; max-height: 300px; overflow-y: auto; }
 .hive-evidence { font-size: 12px; border-left: 2px solid var(--border); padding-left: 12px; }
 @media (max-width: 600px) { .hive-workspace { padding: 12px; } .hive-map { min-height: 180px; } }
+
+/* UI-04: evidence-first monochrome universe, bounded by the existing SVG contract. */
+.hive-workspace { max-width: 1320px; }
+.hive-heading h1 { font-weight: 650; letter-spacing: -.035em; }
+.hive-controls { gap: 8px 12px; align-items: end; }
+.hive-controls label { flex: 1 1 155px; min-width: 140px; font-size: .8rem; }
+.hive-controls input[type="search"], .hive-controls select { min-height: 36px; width: 100%; }
+.hive-map {
+  display: block;
+  min-height: 320px;
+  height: min(58vh, 620px);
+  max-height: none;
+  border-radius: 14px;
+  touch-action: none;
+  cursor: grab;
+  background-color: var(--surface);
+  background-image: radial-gradient(circle at center, transparent 0, color-mix(in srgb, var(--text) 5%, transparent) 100%),
+    radial-gradient(circle, color-mix(in srgb, var(--text) 7%, transparent) .65px, transparent .8px);
+  background-size: 100% 100%, 26px 26px;
+}
+.hive-map:active { cursor: grabbing; }
+.hive-edge { stroke: var(--muted); stroke-width: 1.15px; opacity: .5; }
+.hive-node { fill: var(--text); stroke: var(--surface); stroke-width: 1.8px; cursor: pointer; }
+.hive-node:hover { stroke: var(--text); stroke-width: 4px; }
+.hive-selected { stroke: var(--text); stroke-width: 3px; fill: var(--surface); }
+.hive-isolated { opacity: .55; stroke-dasharray: 3 2; }
+.hive-node-list { flex-wrap: wrap; max-height: 120px; overflow: auto; }
+.hive-node-choice { max-width: 300px; }
+.hive-details { max-height: 360px; padding: 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.hive-details h2 { margin: 0 0 8px; font-size: 1.15rem; overflow-wrap: anywhere; }
+.hive-evidence { margin-block: 12px; padding-block: 3px; }
+.hive-evidence button { margin-bottom: 6px; }
+@media (prefers-reduced-motion: no-preference) {
+  .hive-node { transition: r 150ms ease, opacity 150ms ease, stroke-width 150ms ease; }
+}
+@media (max-width: 780px) {
+  .hive-controls label { flex-basis: calc(50% - 10px); }
+  .hive-map { min-height: 240px; height: min(50vh, 440px); }
+}
