@@ -3,8 +3,11 @@ pub mod vault_backup;
 pub mod vault_fence;
 pub mod vault_first_run;
 pub mod vault_fs;
+pub mod vault_import_auth;
 pub mod vault_migration;
 pub mod vault_storage;
+
+pub use vault_import_auth::ImportAuthorizationCapability;
 
 use argon2::{
     password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
