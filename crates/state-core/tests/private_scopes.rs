@@ -1,6 +1,6 @@
 use mind_place_state::{
-    ClaimEvidence, ClientCapability as Cap, MemoryClaim, MemoryWrite, RankingMode,
-    RankingPolicy, SourceDescriptor, SourceKey, StateError, StateStore,
+    ClaimEvidence, ClientCapability as Cap, MemoryClaim, MemoryWrite, RankingMode, RankingPolicy,
+    SourceDescriptor, SourceKey, StateError, StateStore,
 };
 
 fn fixture() -> (tempfile::TempDir, StateStore, String) {
@@ -8,8 +8,13 @@ fn fixture() -> (tempfile::TempDir, StateStore, String) {
     let db = StateStore::open(temp.path().join("state.sqlite3")).unwrap();
     db.issue_client("client:v1:owner", "Owner", &"a".repeat(64), &[Cap::Admin])
         .unwrap();
-    db.issue_client("client:v1:writer", "Provider", &"b".repeat(64), &[Cap::Write])
-        .unwrap();
+    db.issue_client(
+        "client:v1:writer",
+        "Provider",
+        &"b".repeat(64),
+        &[Cap::Write],
+    )
+    .unwrap();
     db.issue_client(
         "client:v1:owner_writer",
         "Trusted owner editor",
@@ -57,7 +62,12 @@ fn private_scope_inventory_is_owner_only_bounded_and_durable() {
         .create_private_scope(&"a".repeat(64), "private", "Invalid ID", None)
         .is_err());
     assert!(db
-        .create_private_scope(&"a".repeat(64), "scope:child", "Child", Some("scope:missing"))
+        .create_private_scope(
+            &"a".repeat(64),
+            "scope:child",
+            "Child",
+            Some("scope:missing")
+        )
         .is_err());
 
     let root = db
@@ -65,7 +75,12 @@ fn private_scope_inventory_is_owner_only_bounded_and_durable() {
         .unwrap();
     assert_eq!(root.name, "Personal");
     let child = db
-        .create_private_scope(&"a".repeat(64), "scope:private.child", "Child", Some("scope:private"))
+        .create_private_scope(
+            &"a".repeat(64),
+            "scope:private.child",
+            "Child",
+            Some("scope:private"),
+        )
         .unwrap();
     assert_eq!(child.parent_scope_id.as_deref(), Some("scope:private"));
     assert!(db
@@ -81,7 +96,9 @@ fn private_scope_inventory_is_owner_only_bounded_and_durable() {
 
     let reopened = StateStore::open(db.path()).unwrap();
     assert_eq!(
-        reopened.list_private_scopes(&"a".repeat(64), None, 50).unwrap(),
+        reopened
+            .list_private_scopes(&"a".repeat(64), None, 50)
+            .unwrap(),
         all
     );
     db.revoke_client("client:v1:owner").unwrap();
@@ -129,7 +146,10 @@ fn scoped_memory_requires_same_credential_write_and_admin_and_stays_isolated() {
         "claim:secret"
     );
     assert!(db.memory_inspection_overview("").unwrap().is_empty());
-    assert!(db.memory_inspection_detail("claim:secret").unwrap().is_none());
+    assert!(db
+        .memory_inspection_detail("claim:secret")
+        .unwrap()
+        .is_none());
     let global = db
         .rank_claims(
             &["claim:secret"],
@@ -172,7 +192,10 @@ fn scoped_memory_requires_same_credential_write_and_admin_and_stays_isolated() {
     ));
     db.apply_memory_write(&"c".repeat(64), "scope-update-owner-01", &update)
         .unwrap();
-    assert!(db.memory_inspection_detail("claim:corrected").unwrap().is_none());
+    assert!(db
+        .memory_inspection_detail("claim:corrected")
+        .unwrap()
+        .is_none());
     db.revoke_client("client:v1:owner_writer").unwrap();
     assert!(matches!(
         db.apply_memory_write(&"c".repeat(64), "scope-update-owner-01", &update),
