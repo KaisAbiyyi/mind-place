@@ -1305,7 +1305,15 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     hiveWorkspace = mountHiveWorkspace(view, invoke, () => {
       hiveWorkspace?.destroy(); hiveWorkspace = undefined;
       returnToConversations();
-    }, initialKey);
+    }, initialKey, (archiveId) => {
+      // Indexed source IDs are not archive IDs. Never navigate by guessed identity.
+      const summary = summaries.find(item => item.id === archiveId);
+      if (!summary) {
+        setActionStatus("This graph identity has no matching saved conversation in the loaded archive.", true);
+        return;
+      }
+      void selectConversation(summary.id);
+    });
     focusViewHeading();
   };
 
