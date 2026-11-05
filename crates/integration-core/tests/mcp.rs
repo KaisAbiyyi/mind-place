@@ -368,12 +368,8 @@ async fn real_http_deny_rebinding_origin_and_locked_epoch() {
         "application/json, text/event-stream-evil",
         "application/jsonian, text/event-stream-ish",
     ] {
-        let valid = simulated_forwarded_rpc(
-            &hosted_token,
-            "tools/list",
-            json!({"_meta":meta()}),
-            "",
-        );
+        let valid =
+            simulated_forwarded_rpc(&hosted_token, "tools/list", json!({"_meta":meta()}), "");
         let spoofed = valid.replace(
             "Accept: application/json, text/event-stream\r\n",
             &format!("Accept: {bad_accept}\r\n"),
