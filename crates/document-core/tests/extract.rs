@@ -432,7 +432,7 @@ fn deterministic_adversarial_document_mutations_remain_bounded() {
             b"%PDF-1.7\n1 0 obj\n<< /Length 22 >>\nstream\nBT (fixture) Tj ET\nendstream\nendobj"
                 .to_vec(),
         ),
-        (DocumentFormat::Markdown, b"# Fixture\nsynthetic text".to_vec()),
+        (\n            DocumentFormat::Markdown,\n            b"# Fixture\nsynthetic text".to_vec(),\n        ),
     ];
     let limits = ExtractionLimits {
         max_input_bytes: 128 * 1024,
@@ -449,9 +449,10 @@ fn deterministic_adversarial_document_mutations_remain_bounded() {
             if let Ok(document) = extract_bytes(format, &input, limits) {
                 assert!(document.text.len() <= limits.max_output_bytes);
                 assert!(document.chunks.len() <= limits.max_chunks);
-                assert!(document.chunks.iter().all(|chunk| {
-                    !chunk.text.contains('\0')
-                }));
+                assert!(document
+                    .chunks
+                    .iter()
+                    .all(|chunk| { !chunk.text.contains('\0') }));
             }
         }
     }
