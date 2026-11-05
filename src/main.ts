@@ -6,6 +6,7 @@ import "./library-workspace.css";
 import "./memory-inspector.css";
 import "./memory-entity-lenses.css";
 import "./hive-workspace.css";
+import "./files-vault-workspace.css";
 import "./health-workspace.css";
 import "./workspace-integration.css";
 import "./security.css";
