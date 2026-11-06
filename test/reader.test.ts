@@ -518,7 +518,7 @@ test("Settings contains only the selected panel at accessible tab focus", async 
   };
   const { dom, root, app } = createReader(invoke);
   await app.ready;
-  root.querySelector<HTMLButtonElement>("[data-action='open-setup']")!.click();
+  openSetupFromWizard(root);
   await delay(0);
   await delay(0);
   const panels = [...root.querySelectorAll<HTMLElement>("[data-settings-panel]")];
@@ -557,7 +557,7 @@ test("Register Brave is an explicit Settings action and reports unverified confi
   };
   const { root, app } = createReader(invoke);
   await app.ready;
-  root.querySelector<HTMLButtonElement>("[data-action='open-setup']")!.click();
+  openSetupFromWizard(root);
   await delay(0);
   await delay(0);
   assert.equal(registeredBrowser, null, "Opening Settings must not register Brave automatically");
@@ -567,3 +567,11 @@ test("Register Brave is an explicit Settings action and reports unverified confi
   assert.match(root.querySelector<HTMLElement>(".registered-status")?.textContent ?? "", /Configured for Brave.*browser connection has not been tested/);
   assert.equal(root.querySelector<HTMLButtonElement>("[data-action='register-chrome']")?.disabled, false);
 });
+
+
+/** The sidebar's Setup & Onboarding entry opens the wizard; the detailed dialog is reached from its capture step. */
+function openSetupFromWizard(root: HTMLElement) {
+  root.querySelector<HTMLButtonElement>("[data-route='setup-onboarding']")!.click();
+  root.querySelector<HTMLButtonElement>(".onboarding-workspace [data-step='providers']")!.click();
+  root.querySelector<HTMLButtonElement>(".onboarding-workspace [data-focus-key='open-details']")!.click();
+}

@@ -9,6 +9,10 @@ import { mountMemoryInspector, type MemoryInspectorHandle } from "./memory-inspe
 import { mountHiveWorkspace, type HiveHandle } from "./hive-workspace.js";
 import { mountLibraryWorkspace, type LibraryHandle } from "./library-workspace.js";
 import { mountHealthWorkspace, type HealthWorkspaceHandle } from "./health-workspace.js";
+import {
+  createBrowserProgressStore, hasFinishedOnboarding, mountOnboardingWorkspace,
+  type OnboardingProgressStore, type OnboardingWorkspaceHandle,
+} from "./onboarding-workspace.js";
 import { marked } from "marked";
 import renderMathInElement from "katex/contrib/auto-render";
 import type {
@@ -35,6 +39,10 @@ export interface ReaderOptions {
   invoke: Invoke;
   clipboard?: ClipboardWriter;
   onLock?: () => void;
+  /** Set only for the session that created the unlock secret; opens Setup & Onboarding once. */
+  openOnboarding?: boolean;
+  /** Non-sensitive wizard progress (step and skip/finish markers only). */
+  onboardingStore?: OnboardingProgressStore;
 }
 
 export interface ReaderHandle {
@@ -119,7 +127,7 @@ export function renderMessageContent(document: Document, message: Pick<Message, 
   return content;
 }
 
-export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: ReaderOptions): ReaderHandle {
+export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock, openOnboarding, onboardingStore }: ReaderOptions): ReaderHandle {
   const document = root.ownerDocument;
   const clipboardWriter = clipboard ?? {
     writeText: (value: string) => document.defaultView?.navigator.clipboard?.writeText(value)
@@ -143,6 +151,8 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   let healthWorkspace: HealthWorkspaceHandle | undefined;
   let libraryWorkspace: LibraryHandle | undefined;
   let hiveWorkspace: HiveHandle | undefined;
+  let onboardingWorkspace: OnboardingWorkspaceHandle | undefined;
+  const progressStore = onboardingStore ?? createBrowserProgressStore(document.defaultView);
   let alive = true;
   const invoke: Invoke = async <T>(command: string, args?: Record<string, unknown>) => {
     if (!alive) throw new Error("MP_UI_SESSION_EXPIRED");
@@ -176,6 +186,8 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   let modalReturnFocus: HTMLElement | null = null;
   let archiveLoadState: "loading" | "ready" | "error" = "loading";
   const activateRoute = (route: UiRouteId, workspace: WorkspaceId = activeWorkspace) => {
+    // Leaving Setup & Onboarding unmounts the wizard and fences its late async work.
+    if (route !== "setup-onboarding" && onboardingWorkspace) { onboardingWorkspace.destroy(); onboardingWorkspace = undefined; }
     activeWorkspace = workspace;
     activeRoute = route;
     setActiveRoute(workspaceNav, route, workspace);
@@ -1166,6 +1178,8 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   const closeSetup = () => {
     ++setupVersion; // Ignore setup responses arriving after the dialog closes.
     activateRoute(modalReturnRoute, modalReturnWorkspace);
+    // A wizard that was unmounted by the dialog's destination resumes from its saved step.
+    if (modalReturnRoute === "setup-onboarding" && !onboardingWorkspace) openOnboardingWorkspace();
     setupContent.querySelector("[data-mcp-secret]")?.replaceChildren();
     if (typeof dialog.close === "function") {
       try { dialog.close(); } catch { dialog.removeAttribute("open"); }
@@ -1184,8 +1198,10 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     modalReturnRoute = activeRoute;
     modalReturnFocus = trigger;
     activeSettingsTab = tab;
-    activateWorkspace(workspace);
+    // With an explicit route the final state is identical; skipping the intermediate
+    // workspace activation keeps an open Setup & Onboarding wizard mounted behind the dialog.
     if (routeOverride) activateRoute(routeOverride, workspace);
+    else activateWorkspace(workspace);
     if (typeof dialog.showModal === "function") {
       try { dialog.showModal(); } catch { dialog.setAttribute("open", ""); }
     } else dialog.setAttribute("open", "");
@@ -1348,6 +1364,39 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     }
   };
 
+  const openOnboardingWorkspace = () => {
+    hiveWorkspace?.destroy(); hiveWorkspace = undefined;
+    libraryWorkspace?.destroy(); libraryWorkspace = undefined;
+    healthWorkspace?.destroy(); healthWorkspace = undefined;
+    memoryInspector?.destroy(); memoryInspector = undefined;
+    onboardingWorkspace?.destroy(); onboardingWorkspace = undefined;
+    ++selectionVersion;
+    selectedId = null;
+    loadedConversation = null;
+    loadedSnapshots = [];
+    selectedSnapshotId = null;
+    exportedMarkdown = "";
+    updateToolbarSelection();
+    setActionStatus("");
+    renderConversationRows(search.value.trim());
+    activateRoute("setup-onboarding", "connections");
+    toolbarTitle.textContent = "Setup & Onboarding";
+    onboardingWorkspace = mountOnboardingWorkspace({
+      view, invoke, store: progressStore,
+      hooks: {
+        openRoute: (route, trigger) => navigateToRoute(route, trigger),
+        openSetupDetails: (trigger) => openSetupDialog(trigger, "connections", "archive", "setup-onboarding"),
+        openConversation: (id, snapshotId) => {
+          void selectConversation(id).then(() => {
+            if (alive && selectedId === id && snapshotId) return loadSnapshot(snapshotId);
+          });
+        },
+        onFinish: () => openOverview(),
+      },
+    });
+    focusViewHeading();
+  };
+
   const openSettingsOverview = () => {
     hiveWorkspace?.destroy(); hiveWorkspace = undefined;
     libraryWorkspace?.destroy(); libraryWorkspace = undefined;
@@ -1396,7 +1445,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
       case "hive-mind-graph": openHiveWorkspace(); break;
       case "files-secure-vault": openSetupDialog(trigger, "documents", "documents", route); break;
       case "ai-providers-mcp": openSetupDialog(trigger, "connections", "connections", route); break;
-      case "setup-onboarding": openSetupDialog(trigger, "connections", "archive", route); break;
+      case "setup-onboarding": openOnboardingWorkspace(); break;
       case "settings": openSettingsOverview(); break;
     }
   }
@@ -1444,7 +1493,12 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
         if (tab === "privacy" || tab === "connections") openSetupDialog(actionElement, "connections", tab, "settings");
       }
       else if (action === "open-document-search") openSetupDialog(actionElement, "documents", "documents", "files-secure-vault");
-      else if (action === "open-setup") openSetupDialog(actionElement, "connections", "archive", "setup-onboarding");
+      else if (action === "open-setup") {
+        // The sidebar's Setup & Onboarding entry opens the wizard; the wizard's own
+        // "full capture settings" control (no data-route) opens the detailed dialog.
+        if (actionElement.dataset.route === "setup-onboarding") openOnboardingWorkspace();
+        else openSetupDialog(actionElement, "connections", "archive", "setup-onboarding");
+      }
       else if (action === "close-setup") closeSetup();
       else if (action === "load-setup") void loadSetup();
       else if (action === "export-markdown") void exportMarkdown();
@@ -1534,10 +1588,15 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   root.addEventListener("keydown", keyHandler);
 
   const ready = loadConversations();
+  // First run of a newly created secret opens the wizard once; a finished wizard is never forced again.
+  if (openOnboarding && !hasFinishedOnboarding(progressStore)) {
+    void ready.then(() => { if (alive) openOnboardingWorkspace(); }).catch(() => {});
+  }
   return {
     ready,
     refresh: refreshArchive,
     destroy: () => {
+      onboardingWorkspace?.destroy(); onboardingWorkspace = undefined;
       hiveWorkspace?.destroy(); hiveWorkspace = undefined;
       libraryWorkspace?.destroy(); libraryWorkspace = undefined;
       healthWorkspace?.destroy();
