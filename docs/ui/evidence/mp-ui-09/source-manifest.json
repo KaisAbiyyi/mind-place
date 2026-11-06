@@ -1,0 +1,63 @@
+{
+  "task": "MP-UI-09",
+  "scope": "owner-authorized pre-acceptance preparation, strict cloud-only",
+  "main": "24648c74f3f59e176974d3878049b882478db69b",
+  "main_tree": "72208912cce5429a5a3e578806de198784f348b9",
+  "sources": [
+    {
+      "pr": 156,
+      "head": "bab547fe6e399decc27b55ece7d95b21383ffc0a",
+      "tree": "1556e102d2026c5c7dfae06e3d648c366ca018b5",
+      "base": "24648c74f3f59e176974d3878049b882478db69b",
+      "state": "open",
+      "merged": false,
+      "branch": "codex/mp-ui-02-03-06-cloud-20261106",
+      "submitted_reviews": []
+    },
+    {
+      "pr": 147,
+      "head": "3d2e954244fa847ef50c0f8c19aff8c28696052c",
+      "tree": "6d5ecbc9332004385f9a38504e6a0f3dfca89c75",
+      "base": "24648c74f3f59e176974d3878049b882478db69b",
+      "state": "open",
+      "merged": false,
+      "branch": "codex/mp-ui-04-hive-explorer-20261106",
+      "submitted_reviews": []
+    },
+    {
+      "pr": 148,
+      "head": "3816b615c8a97c79130688e3a824056fdf35cd48",
+      "tree": "0af1077d07a376952cdb6bfdb1978ce223d22bc2",
+      "base": "24648c74f3f59e176974d3878049b882478db69b",
+      "state": "open",
+      "merged": false,
+      "branch": "codex/mp-ui-05-files-vault-20261106",
+      "submitted_reviews": []
+    },
+    {
+      "pr": 157,
+      "head": "ec907e490fc124b39e80a1a164fef9ce9135e3a8",
+      "tree": "5233a9cefdfb31d20b903732bab00c5e491582f8",
+      "base": "24648c74f3f59e176974d3878049b882478db69b",
+      "state": "open",
+      "merged": false,
+      "branch": "work/mp-ui-07-08-local",
+      "submitted_reviews": []
+    },
+    {
+      "pr": 158,
+      "head": "e544aea094cd7cf68b02868f1961befa631f3bf2",
+      "tree": "db9f5295615e8696d1df14574e77609ede788605",
+      "base": "24648c74f3f59e176974d3878049b882478db69b",
+      "state": "open",
+      "merged": false,
+      "branch": "work/mp-8onb-01/onboarding",
+      "submitted_reviews": []
+    }
+  ],
+  "strategy": "normal no-ff merges #156 \u2192 #147 \u2192 #148 \u2192 #157 \u2192 #158; reconcile shared reader routes and lifecycle, retain full ancestry",
+  "ground_truth_sha256": "b28acf5d50c62bfbaecc6285c0621e9903c04fe73b5a10de6f22948cdcf47579",
+  "claim": "mp-ui09-20261106-g1",
+  "lock": "ui-rollout-integration/shared-route-resolution",
+  "formal_status": "Blocked; predecessor feature tasks Review, not accepted"
+}
