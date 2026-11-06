@@ -1,6 +1,6 @@
 import type { Invoke, ClipboardWriter } from "./reader.js";
 import type { Conversation } from "./contracts.js";
-import type { DocumentSearchHit } from "./document-roots.js";
+import type { DocumentSearchHit, DocumentPreview } from "./document-roots.js";
 import type { UiModuleDataState, UiSurfaceStatus } from "./ui-contracts.js";
 import { createUiButton, createUiCard, createUiDialog, createUiDrawer, createUiStatus, createUiTable, createUiStatePanel } from "./ui-primitives.js";
 
@@ -25,13 +25,13 @@ export interface RetrievalFilters {
   providers?: string[];
   roles?: string[];
   kinds?: string[];
-  date_range?: { start?: string; end?: string };
+  captured_to?: string;
 }
 
-export type ContextPreset = "minimal" | "balanced" | "full" | "chronological";
+export type ContextPreset = "fast" | "balanced" | "source_first" | "challenge" | "historical";
 
 export interface ContextBudget {
-  max_tokens?: number;
+  max_estimated_tokens?: number;
 }
 
 export interface ContextRequest {
@@ -73,7 +73,7 @@ export interface ContextGroup {
 
 export interface ContextPack {
   groups: ContextGroup[];
-  total_tokens: number;
+  estimated_tokens: number;
   truncated: boolean;
 }
 
@@ -163,7 +163,7 @@ const DEFAULT_PAGE_SIZE = 10;
  */
 export function mountSearchWorkspace(
   view: HTMLElement,
-  invoke: Invoke,
+  nativeInvoke: Invoke,
   options: SearchWorkspaceOptions = {},
 ): SearchWorkspaceHandle {
   const doc = view.ownerDocument;
@@ -195,6 +195,20 @@ export function mountSearchWorkspace(
   let pageSize = DEFAULT_PAGE_SIZE;
 
   let surfaceStatus: UiSurfaceStatus = "idle";
+
+  let securityEpoch: number | null = null;
+  const clearEvidence = () => {
+    archiveHits = []; fileHits = []; retrievalHits = [];
+    lastContextPack = null; lastTrace = null; lastScoreContributions = [];
+  };
+  const invoke: Invoke = async <T>(command: string, args?: Record<string, unknown>) => {
+    if (!alive) throw new Error("MP_UI_SESSION_EXPIRED");
+    const before = await checkSecurity();
+    const result = await nativeInvoke<T>(command, args);
+    const after = await checkSecurity();
+    if (!alive || before.epoch !== after.epoch) throw new Error("MP_SECURITY_LOCKED");
+    return result;
+  };
 
   const make = <K extends keyof HTMLElementTagNameMap>(tag: K, text?: string) => {
     const el = doc.createElement(tag);
@@ -277,7 +291,7 @@ export function mountSearchWorkspace(
   const presetLabel = make("label", "Preset: ");
   const presetSelect = make("select");
   presetSelect.className = "search-select";
-  for (const preset of ["minimal", "balanced", "full", "chronological"] as const) {
+  for (const preset of ["fast", "balanced", "source_first", "challenge", "historical"] as const) {
     const opt = make("option", preset.charAt(0).toUpperCase() + preset.slice(1));
     opt.value = preset;
     if (preset === selectedPreset) opt.selected = true;
@@ -611,18 +625,18 @@ export function mountSearchWorkspace(
     }
   }
 
-  async function checkSecurity(): Promise<SecuritySnapshot | null> {
-    try {
-      const sec = await invoke<SecuritySnapshot>("get_security_status");
-      if (sec && sec.locked) {
-        surfaceStatus = "locked";
-        throw new Error("MP_SECURITY_LOCKED");
-      }
-      return sec;
-    } catch (err: any) {
-      if (err?.message === "MP_SECURITY_LOCKED") throw err;
-      return null;
+  async function checkSecurity(): Promise<SecuritySnapshot> {
+    const sec = await nativeInvoke<SecuritySnapshot>("get_security_status").catch(() => null);
+    if (!alive || !sec || sec.locked !== false || !Number.isSafeInteger(sec.epoch)
+      || (securityEpoch !== null && sec.epoch !== securityEpoch)) {
+      clearEvidence(); surfaceStatus = "locked";
+      results.replaceChildren(); preview.replaceChildren(); contextPackContent.replaceChildren(); traceContent.replaceChildren();
+      contextDrawer.removeAttribute("open"); traceDrawer.removeAttribute("open");
+      buildContextBtn.disabled = true; inspectTraceBtn.disabled = true;
+      throw new Error("MP_SECURITY_LOCKED");
     }
+    securityEpoch = sec.epoch;
+    return sec;
   }
 
   async function search() {
@@ -633,6 +647,9 @@ export function mountSearchWorkspace(
     }
     queryTerms[0].query = primaryQuery;
 
+    clearEvidence();
+    contextPackContent.replaceChildren(); traceContent.replaceChildren();
+    buildContextBtn.disabled = true; inspectTraceBtn.disabled = true;
     ++previewEpoch;
     preview.replaceChildren(make("p", "Choose a match to preview its provenance."));
     const version = ++epoch;
@@ -667,7 +684,7 @@ export function mountSearchWorkspace(
             providers: selectedProvider ? [selectedProvider] : undefined,
             roles: selectedRole ? [selectedRole] : undefined,
             kinds: selectedKind ? [selectedKind] : undefined,
-            date_range: asOfDate ? { end: asOfDate } : undefined,
+            captured_to: asOfDate ? new Date(asOfDate + "T23:59:59.999Z").toISOString() : undefined,
           },
           limit: 40,
         };
@@ -682,6 +699,9 @@ export function mountSearchWorkspace(
         retrievalPromise,
       ]);
 
+      if (!alive || version !== epoch) return;
+      await checkSecurity();
+      if (!alive || version !== epoch) return;
       archiveHits = archives.status === "fulfilled" && Array.isArray(archives.value) ? archives.value.slice(0, 40) : [];
       fileHits = files.status === "fulfilled" && Array.isArray(files.value) ? files.value.slice(0, 40) : [];
       retrievalHits = retrieval && retrieval.status === "fulfilled" && retrieval.value?.hits ? retrieval.value.hits : [];
@@ -761,14 +781,18 @@ export function mountSearchWorkspace(
     }
   }
 
-  function previewFile(hit: DocumentSearchHit) {
-    ++previewEpoch;
+  async function previewFile(hit: DocumentSearchHit) {
+    const version = ++previewEpoch;
+    try {
+    const exact = await invoke<DocumentPreview>("preview_document_source", { uri: hit.uri, versionId: hit.version_id });
+    if (!alive || version !== previewEpoch) return;
+    if (exact.uri !== hit.uri || exact.version_id !== hit.version_id) throw new Error("Source changed");
     preview.replaceChildren(
       make("h2", "Indexed document excerpt"),
       make("p", "Source: " + hit.uri),
       make("p", "Version: " + hit.version_id + " · section: " + hit.section),
       make("p", "Extractor: " + hit.extractor_revision),
-      make("pre", hit.snippet),
+      make("pre", exact.text),
       make(
         "p",
         hit.warnings.length
@@ -776,10 +800,14 @@ export function mountSearchWorkspace(
           : "Excerpt only; indexing and live root permission checks still apply.",
       ),
     );
+
+    } catch { if (alive && version === previewEpoch) preview.replaceChildren(make("p", "Source preview unavailable or no longer authorized.")); }
   }
 
-  function previewRetrieval(hit: RetrievalHit) {
-    ++previewEpoch;
+  async function previewRetrieval(hit: RetrievalHit) {
+    const version = ++previewEpoch;
+    try { await checkSecurity(); } catch { return; }
+    if (!alive || version !== previewEpoch) return;
     preview.replaceChildren(
       make("h2", hit.title || "Retrieval Hit Provenance"),
       make("p", `Source: ${hit.source_id} · Snapshot: ${hit.snapshot_id}`),
@@ -790,6 +818,7 @@ export function mountSearchWorkspace(
   }
 
   async function buildContext() {
+    const version = epoch;
     buildContextBtn.disabled = true;
     status.textContent = "Assembling context pack…";
     const primaryQuery = queryInput.value.trim();
@@ -800,27 +829,27 @@ export function mountSearchWorkspace(
         providers: selectedProvider ? [selectedProvider] : undefined,
         roles: selectedRole ? [selectedRole] : undefined,
         kinds: selectedKind ? [selectedKind] : undefined,
-        date_range: asOfDate ? { end: asOfDate } : undefined,
+        captured_to: asOfDate ? new Date(asOfDate + "T23:59:59.999Z").toISOString() : undefined,
       },
-      preset: selectedPreset,
-      as_of: asOfDate || null,
+      preset: asOfDate ? "historical" : selectedPreset,
+      as_of: asOfDate ? new Date(asOfDate + "T23:59:59.999Z").toISOString() : null,
       max_sources: maxSources,
       max_excerpts: maxExcerpts,
       max_per_source: maxPerSource,
-      budget: { max_tokens: tokenBudget },
+      budget: { max_estimated_tokens: tokenBudget },
     };
 
     try {
       await checkSecurity();
       const pack = await invoke<ContextPack>("build_retrieval_context", { request: req });
-      if (!alive) return;
+      if (!alive || version !== epoch) return;
       lastContextPack = pack;
 
       contextPackContent.replaceChildren();
 
       const summaryCard = createUiCard(doc, {
         title: "Context Summary",
-        description: `${pack.groups.length} source groups · estimated ${pack.total_tokens} tokens${pack.truncated ? " (budget truncated)" : ""}`,
+        description: `${pack.groups.length} source groups · estimated ${pack.estimated_tokens} tokens${pack.truncated ? " (budget truncated)" : ""}`,
       });
       contextPackContent.append(summaryCard.element);
 
@@ -840,7 +869,7 @@ export function mountSearchWorkspace(
         contextPackContent.append(groupCard.element);
       }
 
-      status.textContent = `Context pack built: ${pack.groups.length} sources, ~${pack.total_tokens} tokens.`;
+      status.textContent = `Context pack built: ${pack.groups.length} sources, ~${pack.estimated_tokens} tokens.`;
       if (typeof contextDrawer.showModal === "function") {
         try {
           contextDrawer.showModal();
@@ -859,6 +888,7 @@ export function mountSearchWorkspace(
   }
 
   async function inspectTrace() {
+    const version = epoch;
     inspectTraceBtn.disabled = true;
     status.textContent = "Running technical inspection…";
     const primaryQuery = queryInput.value.trim();
@@ -869,7 +899,7 @@ export function mountSearchWorkspace(
         providers: selectedProvider ? [selectedProvider] : undefined,
         roles: selectedRole ? [selectedRole] : undefined,
         kinds: selectedKind ? [selectedKind] : undefined,
-        date_range: asOfDate ? { end: asOfDate } : undefined,
+        captured_to: asOfDate ? new Date(asOfDate + "T23:59:59.999Z").toISOString() : undefined,
       },
       limit: 10,
     };
@@ -877,7 +907,7 @@ export function mountSearchWorkspace(
     try {
       await checkSecurity();
       const inspection = await invoke<SearchInspection>("inspect_retrieval", { request: req });
-      if (!alive) return;
+      if (!alive || version !== epoch) return;
       lastTrace = inspection.trace;
       lastScoreContributions = inspection.result.hits[0]?.score_contributions ?? [];
 
@@ -942,6 +972,8 @@ export function mountSearchWorkspace(
   async function copyContextPack() {
     if (!lastContextPack || !options.clipboard) return;
     try {
+      await checkSecurity();
+      if (!alive || !lastContextPack) return;
       const text = JSON.stringify(lastContextPack, null, 2);
       await options.clipboard.writeText(text);
       status.textContent = "Context pack copied to clipboard.";
@@ -1034,14 +1066,14 @@ export function mountSearchWorkspace(
     const file = target.closest<HTMLElement>("[data-library-file]");
     if (file) {
       const hit = fileHits[Number(file.dataset.libraryFile)];
-      if (hit) previewFile(hit);
+      if (hit) void previewFile(hit);
       return;
     }
 
     const ret = target.closest<HTMLElement>("[data-library-retrieval]");
     if (ret) {
       const hit = retrievalHits[Number(ret.dataset.libraryRetrieval)];
-      if (hit) previewRetrieval(hit);
+      if (hit) void previewRetrieval(hit);
     }
   };
 
@@ -1074,13 +1106,14 @@ export function mountSearchWorkspace(
       data: { archiveHits, fileHits, retrievalHits, lastContextPack, lastTrace },
       error: null,
       permission: "granted",
-      vault: "unlocked",
+      vault: surfaceStatus === "locked" ? "locked" : securityEpoch === null ? "not-applicable" : "unlocked",
     }),
     refresh: async () => {
       if (queryInput.value.trim()) await search();
     },
     destroy: () => {
       alive = false;
+      clearEvidence();
       epoch++;
       previewEpoch++;
       form.removeEventListener("submit", submitHandler);

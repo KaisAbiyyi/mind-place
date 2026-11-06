@@ -1,0 +1,4685 @@
+<!doctype html>
+<html lang="en" data-theme="light" data-tech="false" data-density="comfortable">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mind Place — Personal Knowledge OS & Shared-Brain Archive</title>
+<style>
+/* ============================================================================
+   1. PURE ACHROMATIC DESIGN TOKENS (STRICT WHITE-TO-BLACK SPECTRUM ONLY)
+   Zero warm tints, zero sepia, zero chromatic hues. Pure luminance hierarchy.
+   ============================================================================ */
+:root,
+html[data-theme="light"] {
+  --bg: #F4F4F5;
+  --surface: #FFFFFF;
+  --surface-subtle: #FAFAFA;
+  --surface-muted: #E4E4E7;
+  --ink: #09090B;
+  --ink-secondary: #3F3F46;
+  --ink-muted: #71717A;
+  --border: #E4E4E7;
+  --border-strong: #18181B;
+
+  --bg-app: #F4F4F5;
+  --bg-surface: #FFFFFF;
+  --bg-elevated: #FFFFFF;
+  --bg-subtle: #FAFAFA;
+  --bg-muted: #E4E4E7;
+  --bg-hover: #F0F0F2;
+  --bg-active: #E4E4E7;
+  --bg-inverse: #09090B;
+  --bg-inverse-subtle: #18181B;
+  --bg-glass: rgba(255, 255, 255, 0.88);
+  --bg-backdrop: rgba(9, 9, 11, 0.48);
+
+  --text-primary: #09090B;
+  --text-secondary: #3F3F46;
+  --text-muted: #71717A;
+  --text-faint: #A1A1AA;
+  --text-inverse: #FAFAFA;
+
+  --border-subtle: #E4E4E7;
+  --border-strong: #D4D4D8;
+  --border-focus: #09090B;
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.03);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.06), 0 2px 6px rgba(0, 0, 0, 0.04);
+  --shadow-lg: 0 20px 48px rgba(0, 0, 0, 0.14), 0 4px 12px rgba(0, 0, 0, 0.06);
+
+  --canvas-bg: #F4F4F5;
+  --canvas-grid: rgba(9, 9, 11, 0.055);
+  --canvas-ring: rgba(9, 9, 11, 0.08);
+  --canvas-edge: rgba(9, 9, 11, 0.14);
+  --canvas-edge-active: rgba(9, 9, 11, 0.72);
+  --canvas-node-fill: #18181B;
+  --canvas-node-secondary: #52525B;
+  --canvas-node-tertiary: #A1A1AA;
+  --canvas-node-stroke: #FFFFFF;
+  --canvas-label: #09090B;
+  --canvas-label-muted: #52525B;
+
+  --radius-xs: 5px;
+  --radius-sm: 7px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+
+  --font-sans: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+html[data-theme="dark"] {
+  --bg: #09090B;
+  --surface: #121215;
+  --surface-subtle: #18181B;
+  --surface-muted: #27272A;
+  --ink: #FAFAFA;
+  --ink-secondary: #A1A1AA;
+  --ink-muted: #71717A;
+  --border: #27272A;
+  --border-strong: #FAFAFA;
+
+  --bg-app: #09090B;
+  --bg-surface: #121215;
+  --bg-elevated: #18181B;
+  --bg-subtle: #18181B;
+  --bg-muted: #27272A;
+  --bg-hover: #1F1F23;
+  --bg-active: #27272A;
+  --bg-inverse: #FAFAFA;
+  --bg-inverse-subtle: #E4E4E7;
+  --bg-glass: rgba(18, 18, 21, 0.88);
+  --bg-backdrop: rgba(0, 0, 0, 0.74);
+
+  --text-primary: #FAFAFA;
+  --text-secondary: #A1A1AA;
+  --text-muted: #71717A;
+  --text-faint: #52525B;
+  --text-inverse: #09090B;
+
+  --border-subtle: #27272A;
+  --border-strong: #3F3F46;
+  --border-focus: #FAFAFA;
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.65);
+  --shadow-lg: 0 20px 50px rgba(0, 0, 0, 0.8);
+
+  --canvas-bg: #0C0C0E;
+  --canvas-grid: rgba(250, 250, 250, 0.045);
+  --canvas-ring: rgba(250, 250, 250, 0.07);
+  --canvas-edge: rgba(250, 250, 250, 0.14);
+  --canvas-edge-active: rgba(250, 250, 250, 0.78);
+  --canvas-node-fill: #FAFAFA;
+  --canvas-node-secondary: #A1A1AA;
+  --canvas-node-tertiary: #52525B;
+  --canvas-node-stroke: #09090B;
+  --canvas-label: #FAFAFA;
+  --canvas-label-muted: #A1A1AA;
+}
+
+/* ============================================================================
+   2. BASE RESET & ERGONOMIC TYPOGRAPHY (NO MICRO-FONT FATIGUE)
+   Minimum readable metadata is 11px; standard UI is 13px–14px.
+   ============================================================================ */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--bg-app);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 13.5px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button, input, select, textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+  background: none;
+  border: none;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  letter-spacing: -0.01em;
+}
+
+/* Progressive Disclosure: Technical Metadata Visibility */
+.tech-meta {
+  display: none !important;
+}
+html[data-tech="true"] .tech-meta {
+  display: inline-flex !important;
+}
+html[data-tech="true"] .tech-block {
+  display: block !important;
+}
+.tech-block {
+  display: none !important;
+}
+
+/* Compact Density Mode Support */
+html[data-density="compact"] .list-row {
+  padding: 8px 10px;
+}
+html[data-density="compact"] .table td,
+html[data-density="compact"] .table th {
+  padding: 9px 12px;
+}
+html[data-density="compact"] .stat {
+  padding: 14px 16px;
+}
+
+/* ============================================================================
+   3. APPLICATION SHELL & COLLAPSIBLE SIDEBAR
+   ============================================================================ */
+.app {
+  height: 100vh;
+  min-height: 640px;
+  display: grid;
+  grid-template-columns: 256px minmax(0, 1fr);
+  overflow: hidden;
+  transition: grid-template-columns 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.app.sidebar-collapsed {
+  grid-template-columns: 64px minmax(0, 1fr);
+}
+
+.sidebar {
+  background: var(--bg-surface);
+  border-right: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  padding: 16px 12px;
+  min-width: 0;
+  user-select: none;
+  z-index: 10;
+}
+
+.brand-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px 16px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.brand-mark {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-inverse);
+  color: var(--text-inverse);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.brand-mark svg {
+  width: 17px;
+  height: 17px;
+}
+
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.brand-name {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+.brand-ver {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.collapse-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-xs);
+  color: var(--text-muted);
+  display: grid;
+  place-items: center;
+  border: 1px solid transparent;
+}
+.collapse-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--border-subtle);
+}
+
+/* Vault Status Pill in Sidebar */
+.vault-pill {
+  margin: 0 4px 16px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  transition: border-color 0.15s;
+}
+
+.vault-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-primary);
+  box-shadow: 0 0 0 3px var(--bg-muted);
+  flex-shrink: 0;
+}
+
+.vault-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.vault-copy b {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.vault-copy small {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vault-lock-quick {
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}
+.vault-lock-quick:hover {
+  background: var(--bg-inverse);
+  color: var(--text-inverse);
+  border-color: var(--bg-inverse);
+}
+
+.nav-section-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  padding: 10px 10px 6px;
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.nav button {
+  height: 36px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  transition: all 0.12s ease;
+  text-align: left;
+}
+
+.nav button svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  stroke-width: 1.75;
+}
+
+.nav button:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.nav button.active {
+  background: var(--bg-inverse);
+  color: var(--text-inverse);
+  font-weight: 600;
+}
+
+.nav button .nav-count {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 99px;
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
+}
+
+.nav button.active .nav-count {
+  background: rgba(255, 255, 255, 0.16);
+  color: var(--text-inverse);
+}
+
+html[data-theme="dark"] .nav button.active .nav-count {
+  background: rgba(9, 9, 11, 0.18);
+  color: var(--text-inverse);
+}
+
+.sidebar-footer {
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mcp-status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+  font-size: 11.5px;
+}
+
+.profile-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+}
+
+.avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--bg-inverse);
+  color: var(--text-inverse);
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.profile-copy {
+  min-width: 0;
+  flex: 1;
+}
+.profile-copy b {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.profile-copy small {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* Collapsed sidebar adjustments */
+.app.sidebar-collapsed .brand-text,
+.app.sidebar-collapsed .vault-copy,
+.app.sidebar-collapsed .vault-lock-quick,
+.app.sidebar-collapsed .nav-section-label,
+.app.sidebar-collapsed .nav button span,
+.app.sidebar-collapsed .nav-count,
+.app.sidebar-collapsed .mcp-status-bar,
+.app.sidebar-collapsed .profile-copy {
+  display: none;
+}
+.app.sidebar-collapsed .brand-row {
+  justify-content: center;
+  padding-inline: 0;
+}
+.app.sidebar-collapsed .vault-pill {
+  justify-content: center;
+  padding: 10px 4px;
+}
+.app.sidebar-collapsed .nav button {
+  justify-content: center;
+  padding: 0;
+}
+.app.sidebar-collapsed .profile-row {
+  justify-content: center;
+}
+
+/* ============================================================================
+   4. TOPBAR & GLOBAL CONTROLS
+   ============================================================================ */
+.main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.topbar {
+  height: 58px;
+  flex: 0 0 58px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  padding: 0 28px;
+  gap: 16px;
+}
+
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.breadcrumb strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.command-trigger {
+  height: 36px;
+  max-width: 440px;
+  flex: 1;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+  font-size: 12.5px;
+  transition: all 0.15s;
+}
+
+.command-trigger:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}
+
+.command-trigger svg {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+}
+
+.command-trigger span {
+  flex: 1;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kbd {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+}
+
+.top-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pill-toggle {
+  height: 32px;
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s;
+}
+
+.pill-toggle:hover {
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.pill-toggle.active {
+  background: var(--bg-inverse);
+  color: var(--text-inverse);
+  border-color: var(--bg-inverse);
+}
+
+.icon-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  display: grid;
+  place-items: center;
+  transition: all 0.15s;
+}
+.icon-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+.icon-btn svg {
+  width: 15px;
+  height: 15px;
+}
+
+/* ============================================================================
+   5. CONTENT AREA, HEADERS, BUTTONS & CARDS
+   ============================================================================ */
+.content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 28px 32px 48px;
+  min-width: 0;
+}
+
+.page {
+  display: none;
+  max-width: 1340px;
+  margin: 0 auto;
+  animation: pageEnter 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.page.active {
+  display: block;
+}
+
+@keyframes pageEnter {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 24px;
+}
+
+.overline {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+h1 {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  margin: 4px 0 4px;
+  color: var(--text-primary);
+}
+
+.page-sub {
+  font-size: 13.5px;
+  color: var(--text-secondary);
+  max-width: 680px;
+}
+
+.btn {
+  height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-size: 12.5px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: all 0.14s ease;
+  white-space: nowrap;
+}
+
+.btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--text-muted);
+}
+
+.btn.primary {
+  background: var(--bg-inverse);
+  color: var(--text-inverse);
+  border-color: var(--bg-inverse);
+}
+
+.btn.primary:hover {
+  opacity: 0.9;
+}
+
+.btn.sm {
+  height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.grid {
+  display: grid;
+  gap: 16px;
+}
+
+.grid.stats {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 20px;
+}
+
+.card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-xs);
+}
+
+.stat {
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  transition: border-color 0.15s;
+}
+.stat:hover {
+  border-color: var(--border-strong);
+}
+
+.stat-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.stat-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  display: grid;
+  place-items: center;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.stat-value {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  margin: 10px 0 4px;
+  line-height: 1.1;
+}
+
+.stat-foot {
+  font-size: 12px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.stat-foot strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* Status Banner / Operational Strip */
+.status-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 18px;
+  margin-bottom: 20px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+}
+
+.status-strip-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.pulse-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 10px;
+  border-radius: 99px;
+  background: var(--bg-inverse);
+  color: var(--text-inverse);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.pulse-badge i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.home-grid {
+  grid-template-columns: minmax(0, 1.3fr) minmax(300px, 0.9fr) 280px;
+  align-items: stretch;
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.card-head h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+
+.card-head .link-btn {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.card-head .link-btn:hover {
+  color: var(--text-primary);
+}
+
+.list {
+  padding: 8px;
+}
+
+.list-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 12px;
+  border-radius: var(--radius-sm);
+  text-align: left;
+  transition: background 0.12s;
+}
+
+.list-row:hover {
+  background: var(--bg-hover);
+}
+
+.row-icon {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-subtle);
+  border-radius: var(--radius-sm);
+  display: grid;
+  place-items: center;
+  color: var(--text-primary);
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.row-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.row-copy b {
+  display: block;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.row-copy small {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.row-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  text-align: right;
+}
+
+.collection-bar {
+  height: 4px;
+  background: var(--bg-muted);
+  border-radius: 99px;
+  margin-top: 8px;
+  overflow: hidden;
+}
+
+.collection-bar i {
+  height: 100%;
+  display: block;
+  border-radius: 99px;
+  background: var(--text-primary);
+}
+
+.quick-action {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-subtle);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-primary);
+  transition: all 0.12s;
+}
+
+.quick-action:hover {
+  background: var(--bg-surface);
+  border-color: var(--border-strong);
+  transform: translateX(2px);
+}
+
+/* ============================================================================
+   6. TABLES, TAGS, TOOLBARS & FILTERS
+   ============================================================================ */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.field, .input {
+  height: 36px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  padding: 0 12px;
+  font-size: 13px;
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.field.search-field {
+  min-width: 260px;
+  flex: 1;
+}
+
+.field:focus, .input:focus {
+  border-color: var(--border-focus);
+}
+
+.tabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.tabs button {
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 5px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  transition: all 0.12s;
+}
+
+.tabs button.active {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-weight: 600;
+  box-shadow: var(--shadow-xs);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table th {
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  font-weight: 600;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-subtle);
+}
+
+.table td {
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.table tbody tr {
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.table tbody tr:hover td {
+  background: var(--bg-hover);
+}
+
+.table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.table td:first-child {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 5px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.tag.solid {
+  background: var(--bg-inverse);
+  color: var(--text-inverse);
+  border-color: var(--bg-inverse);
+}
+
+.tag.outline {
+  background: transparent;
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.switch {
+  width: 38px;
+  height: 21px;
+  border-radius: 99px;
+  background: var(--bg-muted);
+  border: 1px solid var(--border-strong);
+  padding: 2px;
+  display: inline-flex;
+  align-items: center;
+  transition: all 0.18s ease;
+  flex-shrink: 0;
+}
+
+.switch i {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--bg-surface);
+  transition: transform 0.18s ease;
+}
+
+.switch.on {
+  background: var(--bg-inverse);
+  border-color: var(--bg-inverse);
+}
+
+.switch.on i {
+  background: var(--text-inverse);
+  transform: translateX(17px);
+}
+
+/* ============================================================================
+   7. HIVE MIND — MONOCHROME SPATIAL KNOWLEDGE GRAPH
+   ============================================================================ */
+.hive-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 330px;
+  gap: 16px;
+  min-height: 600px;
+}
+
+.hive-main {
+  position: relative;
+  min-height: 600px;
+  overflow: hidden;
+  background: var(--canvas-bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+}
+
+.hive-toolbar {
+  position: absolute;
+  z-index: 3;
+  top: 14px;
+  left: 14px;
+  right: 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  pointer-events: none;
+}
+
+.hive-toolbar > * {
+  pointer-events: auto;
+}
+
+.hive-filters {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  padding: 4px;
+  background: var(--bg-glass);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.hive-filter {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 5px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.hive-filter:hover {
+  color: var(--text-primary);
+}
+
+.hive-filter.active {
+  background: var(--bg-inverse);
+  color: var(--text-inverse);
+  font-weight: 600;
+}
+
+.hive-controls-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hive-search-input {
+  height: 32px;
+  width: 175px;
+  padding: 0 10px;
+  font-size: 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-glass);
+  backdrop-filter: blur(8px);
+  color: var(--text-primary);
+  outline: none;
+}
+.hive-search-input:focus {
+  border-color: var(--border-focus);
+}
+
+.hive-actions {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  background: var(--bg-glass);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.hive-actions button {
+  height: 26px;
+  min-width: 28px;
+  padding: 0 7px;
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+.hive-actions button:hover {
+  background: var(--bg-hover);
+}
+
+#hiveCanvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+}
+#hiveCanvas.drag {
+  cursor: grabbing;
+}
+
+.hive-tooltip {
+  position: absolute;
+  z-index: 4;
+  display: none;
+  pointer-events: none;
+  min-width: 190px;
+  max-width: 250px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-md);
+  color: var(--text-primary);
+}
+.hive-tooltip b {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+}
+.hive-tooltip span {
+  display: block;
+  margin-top: 3px;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+.hive-tooltip small {
+  display: block;
+  margin-top: 6px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.hive-hint {
+  position: absolute;
+  z-index: 2;
+  bottom: 14px;
+  left: 16px;
+  padding: 5px 10px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-glass);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  pointer-events: none;
+}
+
+.hive-inspector {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+}
+
+.inspector-type {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.inspector-title {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  margin: 6px 0 8px;
+}
+
+.inspector-sub {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.inspector-metrics {
+  display: flex;
+  gap: 8px;
+  margin: 14px 0 18px;
+  flex-wrap: wrap;
+}
+
+.inspector-section {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 14px;
+  margin-top: 12px;
+}
+
+.inspector-section h4 {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin: 0 0 10px;
+}
+
+.branch-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.branch {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px;
+  border-radius: var(--radius-xs);
+  text-align: left;
+  font-size: 12.5px;
+}
+.branch:hover {
+  background: var(--bg-hover);
+}
+.branch-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-primary);
+  flex-shrink: 0;
+}
+.branch span:nth-child(2) {
+  color: var(--text-primary);
+  font-weight: 500;
+  flex: 1;
+}
+.branch small {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.trace-card {
+  margin-top: auto;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+}
+.trace-card b {
+  font-size: 12.5px;
+  display: block;
+}
+.trace-card p {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  margin: 4px 0 10px;
+}
+
+/* ============================================================================
+   8. DETAIL READERS & SLIDE-OVER INSPECTOR DRAWER
+   ============================================================================ */
+.two-col {
+  grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+}
+
+.panel {
+  padding: 20px;
+}
+
+.panel h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 4px;
+}
+
+.panel .panel-sub {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  margin-bottom: 16px;
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border-subtle);
+  gap: 18px;
+}
+.setting-row:last-child {
+  border-bottom: 0;
+}
+.setting-row b {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+}
+.setting-row small {
+  display: block;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 310px;
+  gap: 18px;
+  align-items: start;
+}
+
+.transcript-top {
+  height: 52px;
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 0 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.transcript-body {
+  padding: 20px 24px;
+}
+
+.message {
+  padding: 18px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.message:last-child {
+  border-bottom: 0;
+}
+.message-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.message-avatar {
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-subtle);
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+}
+.message-head b {
+  font-size: 13px;
+  font-weight: 600;
+}
+.message-head small {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: auto;
+}
+.message-content {
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text-primary);
+  padding-left: 36px;
+}
+.message-content p {
+  margin: 0 0 10px;
+}
+.message-content p:last-child {
+  margin-bottom: 0;
+}
+
+.detail-aside {
+  padding: 20px;
+}
+.detail-aside-title {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+.detail-meta-row {
+  padding: 0 0 10px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.detail-meta-row:last-child {
+  border-bottom: 0;
+  margin-bottom: 0;
+}
+.detail-meta-row small {
+  display: block;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+.detail-meta-row b {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+}
+.detail-divider {
+  height: 1px;
+  background: var(--border-subtle);
+  margin: 18px 0;
+}
+.related-memory {
+  width: 100%;
+  display: block;
+  text-align: left;
+  padding: 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+  margin-bottom: 8px;
+  transition: border-color 0.12s;
+}
+.related-memory:hover {
+  border-color: var(--border-focus);
+}
+.related-memory b {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.related-memory small {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+/* Setup Wizard */
+.setup-layout {
+  display: grid;
+  grid-template-columns: 250px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+.setup-steps {
+  padding: 16px;
+}
+.step-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 13px;
+  text-align: left;
+  margin-bottom: 4px;
+}
+.step-item.active {
+  background: var(--bg-inverse);
+  color: var(--text-inverse);
+  font-weight: 600;
+}
+.step-item.done {
+  color: var(--text-primary);
+}
+.step-num {
+  width: 22px;
+  height: 22px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+/* ============================================================================
+   9. COMMAND PALETTE (⌘K), MODALS, SLIDE-OVER DRAWER & VAULT LOCK OVERLAY
+   ============================================================================ */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--bg-backdrop);
+  backdrop-filter: blur(4px);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 50;
+}
+
+.modal {
+  width: min(540px, 100%);
+  padding: 24px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+}
+
+.cmd-palette {
+  width: min(640px, 100%);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+.cmd-input-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.cmd-input-row input {
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font-size: 15px;
+  color: var(--text-primary);
+}
+
+.cmd-results {
+  max-height: 380px;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.cmd-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  text-align: left;
+  font-size: 13px;
+}
+.cmd-item:hover, .cmd-item.selected {
+  background: var(--bg-hover);
+}
+
+/* Slide-over Quick Inspector Drawer */
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--bg-backdrop);
+  display: none;
+  justify-content: flex-end;
+  z-index: 45;
+}
+.drawer {
+  width: min(540px, 100%);
+  height: 100%;
+  background: var(--bg-surface);
+  border-left: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  animation: slideLeft 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes slideLeft {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+/* Vault Lock Screen (MP-3L1) */
+.vault-lock-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--bg-app);
+  z-index: 100;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+/* ============================================================================
+   10. APPROVED DOCUMENT ROOTS (ALLOWED FOLDERS) MANAGER STYLES
+   ============================================================================ */
+.roots-card {
+  margin-bottom: 20px;
+  overflow: hidden;
+}
+
+.roots-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-wrap: wrap;
+}
+
+.folder-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.folder-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--border-subtle);
+  transition: background 0.12s ease;
+}
+
+.folder-row:last-child {
+  border-bottom: 0;
+}
+
+.folder-row:hover {
+  background: var(--bg-hover);
+}
+
+.folder-row.scanning {
+  background: var(--bg-subtle);
+}
+
+.folder-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  min-width: 0;
+  flex: 1;
+}
+
+.folder-glyph {
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-subtle);
+  display: grid;
+  place-items: center;
+  font-size: 15px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.folder-row.watching .folder-glyph {
+  background: var(--bg-inverse);
+  color: var(--text-inverse);
+  border-color: var(--bg-inverse);
+}
+
+.folder-info {
+  min-width: 0;
+  flex: 1;
+}
+
+.folder-path-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.folder-path {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  word-break: break-all;
+}
+
+.folder-meta-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.folder-dev-line {
+  margin-top: 6px;
+  padding: 4px 8px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.folder-scan-bar {
+  height: 4px;
+  width: 100%;
+  max-width: 320px;
+  background: var(--bg-muted);
+  border-radius: 99px;
+  margin-top: 8px;
+  overflow: hidden;
+  display: none;
+}
+
+.folder-row.scanning .folder-scan-bar {
+  display: block;
+}
+
+.folder-scan-bar i {
+  display: block;
+  height: 100%;
+  width: 65%;
+  background: var(--text-primary);
+  border-radius: 99px;
+  animation: scanPulse 0.9s infinite alternate ease-in-out;
+}
+
+@keyframes scanPulse {
+  from { width: 20%; transform: translateX(0%); }
+  to { width: 85%; transform: translateX(15%); }
+}
+
+.folder-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.watch-pill {
+  height: 30px;
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.12s;
+}
+
+.watch-pill.watching {
+  background: var(--bg-inverse);
+  color: var(--text-inverse);
+  border-color: var(--bg-inverse);
+}
+
+.watch-pill.paused {
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+}
+
+.watch-pill i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.btn.fence-btn {
+  border-color: var(--border-strong);
+  color: var(--text-secondary);
+}
+.btn.fence-btn:hover {
+  background: var(--bg-inverse);
+  color: var(--text-inverse);
+  border-color: var(--bg-inverse);
+}
+
+.preset-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+.preset-chip {
+  padding: 4px 9px;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-subtle);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  transition: all 0.12s;
+}
+
+.preset-chip:hover {
+  border-color: var(--border-focus);
+  color: var(--text-primary);
+  background: var(--bg-surface);
+}
+
+.checkbox-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.checkbox-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+  cursor: pointer;
+  font-size: 12.5px;
+}
+
+.checkbox-card:hover {
+  border-color: var(--border-strong);
+}
+
+.checkbox-card input {
+  margin-top: 2px;
+  width: 15px;
+  height: 15px;
+  accent-color: var(--text-primary);
+  flex-shrink: 0;
+}
+
+.toast {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  transform: translateY(12px);
+  opacity: 0;
+  transition: all 0.18s ease;
+  z-index: 90;
+  background: var(--bg-inverse);
+  color: var(--text-inverse);
+  border-radius: var(--radius-sm);
+  padding: 10px 16px;
+  font-size: 12.5px;
+  font-weight: 500;
+  box-shadow: var(--shadow-md);
+  pointer-events: none;
+}
+.toast.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+@media (max-width: 1120px) {
+  .home-grid { grid-template-columns: 1fr 1fr; }
+  .hive-layout { grid-template-columns: 1fr; }
+  .detail-grid, .two-col { grid-template-columns: 1fr; }
+}
+@media (max-width: 780px) {
+  .app { grid-template-columns: 64px minmax(0, 1fr); }
+  .brand-text, .vault-copy, .vault-lock-quick, .nav-section-label, .nav button span, .nav-count, .mcp-status-bar, .profile-copy { display: none; }
+  .nav button { justify-content: center; padding: 0; }
+  .grid.stats { grid-template-columns: 1fr 1fr; }
+  .home-grid { grid-template-columns: 1fr; }
+  .content { padding: 20px 16px; }
+  .setup-layout { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<div class="app" id="appShell">
+  <!-- ======================= LEFT SIDEBAR ======================= -->
+  <aside class="sidebar">
+    <div class="brand-row">
+      <div class="brand">
+        <div class="brand-mark" title="Mind Place Knowledge OS">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <circle cx="12" cy="12" r="2.2"/>
+            <circle cx="12" cy="3.5" r="1.4"/>
+            <circle cx="19.2" cy="7.5" r="1.4"/>
+            <circle cx="19.2" cy="16.5" r="1.4"/>
+            <circle cx="12" cy="20.5" r="1.4"/>
+            <circle cx="4.8" cy="16.5" r="1.4"/>
+            <circle cx="4.8" cy="7.5" r="1.4"/>
+            <path d="M12 5v4.8m5.9-1.3-4.1 2.4m4.1 5.1-4.1-2.4M12 19v-4.8m-5.9 1.3 4.1-2.4m-4.1-5.1 4.1 2.4"/>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <span class="brand-name">Mind Place</span>
+          <span class="brand-ver">v0.9.4-local</span>
+        </div>
+      </div>
+      <button class="collapse-btn" id="toggleSidebar" title="Collapse/Expand Sidebar (⌘B)">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>
+      </button>
+    </div>
+
+    <div class="vault-pill">
+      <span class="vault-dot"></span>
+      <div class="vault-copy">
+        <b>Local Vault Unlocked</b>
+        <small>SQLCipher · AES-256-GCM</small>
+      </div>
+      <button class="vault-lock-quick" id="lockVaultBtn" title="Lock Vault Immediately (MP-3L1)">Lock</button>
+    </div>
+
+    <div class="nav-section-label">Knowledge OS</div>
+    <nav class="nav" id="mainNav">
+      <button class="active" data-page="home">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/></svg>
+        <span>Overview</span>
+      </button>
+      <button data-page="conversations">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8a2.5 2.5 0 0 1-2.5 2.5H10l-5 4v-4.6A2.5 2.5 0 0 1 4 13V5.5Z"/><path d="M8 8h8M8 11.5h5"/></svg>
+        <span>Conversations</span>
+        <span class="nav-count">128</span>
+      </button>
+      <button data-page="memory">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m12 3 8 4.5-8 4.5-8-4.5L12 3Z"/><path d="m4 12 8 4.5 8-4.5M4 16.5 12 21l8-4.5"/></svg>
+        <span>Curated Memory</span>
+        <span class="nav-count">342</span>
+      </button>
+      <button data-page="hive">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="2.2"/><circle cx="5" cy="6" r="1.5"/><circle cx="19" cy="5" r="1.5"/><circle cx="19" cy="18" r="1.5"/><circle cx="5" cy="19" r="1.5"/><path d="m6.2 7.1 4.1 3.6m3.3-.1 4.2-4.4m.1 6.8-4.3 2.7m-3.3.1-4.1 2.7"/></svg>
+        <span>Hive Mind Graph</span>
+        <span class="nav-count">33</span>
+      </button>
+    </nav>
+
+    <div class="nav-section-label">Authority & Infrastructure</div>
+    <nav class="nav">
+      <button data-page="files">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7Z"/><path d="M4 10h16"/></svg>
+        <span>Files & Secure Vault</span>
+        <span class="nav-count" id="navFilesCount">56</span>
+      </button>
+      <button data-page="providers">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 15 15 9"/><path d="M7 17H6a4 4 0 0 1 0-8h4m4-2h4a4 4 0 0 1 0 8h-1"/></svg>
+        <span>AI Providers & MCP</span>
+      </button>
+    </nav>
+
+    <div class="nav-section-label">System</div>
+    <nav class="nav">
+      <button data-page="setup">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3 2"/></svg>
+        <span>Setup & Onboarding</span>
+      </button>
+      <button data-page="settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
+        <span>Settings</span>
+      </button>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="mcp-status-bar">
+        <span class="mono">MCP 127.0.0.1:43110</span>
+        <span class="tag solid" style="padding:1px 6px;font-size:10px">ACTIVE</span>
+      </div>
+      <div class="profile-row">
+        <div class="avatar">KA</div>
+        <div class="profile-copy">
+          <b>Kais Abiyyi</b>
+          <small>Owner · Authority Root</small>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ======================= MAIN WORKSPACE ======================= -->
+  <main class="main">
+    <header class="topbar">
+      <div class="breadcrumb">
+        <span>Mind Place</span>
+        <span>/</span>
+        <strong id="crumb">Overview</strong>
+      </div>
+
+      <button class="command-trigger" id="openCmdPalette" title="Open Command Palette (⌘K)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4.5 4.5"/></svg>
+        <span>Search conversations, memories, Hive nodes, or run command…</span>
+        <span class="kbd">⌘K</span>
+      </button>
+
+      <div class="top-actions">
+        <button class="pill-toggle" id="techModeBtn" title="Toggle Technical Provenance & Telemetry Metadata (⌘I)">
+          <span>DEV / PROVENANCE</span>
+        </button>
+        <button class="icon-btn" id="themeToggleBtn" title="Switch Light / High-Contrast Dark Mode (⌘D)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+        </button>
+        <button class="icon-btn" id="askAI" title="Query Shared-Brain Archive">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v3m0 12v3M3 12h3m12 0h3"/><circle cx="12" cy="12" r="4"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <section class="content">
+      <!-- ==================== 1. OVERVIEW PAGE ==================== -->
+      <section class="page active" id="page-home">
+        <div class="page-head">
+          <div>
+            <div class="overline">PERSONAL KNOWLEDGE OS · SHARED-BRAIN RUNTIME</div>
+            <h1>Workspace Command Center</h1>
+            <div class="page-sub">Local-first intelligence archive unifying AI conversations, curated memories, and NTFS document roots.</div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn" id="quickInspectBtn">Inspect Latest Memory</button>
+            <button class="btn primary" data-goto="conversations">＋ Capture / New Thread</button>
+          </div>
+        </div>
+
+        <div class="status-strip">
+          <div class="status-strip-left">
+            <span class="pulse-badge"><i></i> GEN-14 GRAPH COHERENT</span>
+            <div>
+              <b style="font-size:13px">Workspace setup is 66% complete (Step 2 of 3)</b>
+              <div style="font-size:12px;color:var(--text-secondary)">Browser capture host active · 1 of 3 AI providers authorized via MCP</div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <span class="mono tech-meta">WAL: checkpoint_ok · 4.1ms</span>
+            <button class="btn sm" data-goto="setup">Complete Onboarding →</button>
+          </div>
+        </div>
+
+        <div class="grid stats">
+          <div class="card stat" data-goto="conversations" style="cursor:pointer">
+            <div class="stat-top">
+              <span>Archived Conversations</span>
+              <span class="stat-icon">▤</span>
+            </div>
+            <div class="stat-value">128</div>
+            <div class="stat-foot">
+              <span><strong>+6</strong> captured this week</span>
+              <span class="mono tech-meta">archive-core</span>
+            </div>
+          </div>
+
+          <div class="card stat" data-goto="memory" style="cursor:pointer">
+            <div class="stat-top">
+              <span>Curated Memories</span>
+              <span class="stat-icon">◇</span>
+            </div>
+            <div class="stat-value">342</div>
+            <div class="stat-foot">
+              <span><strong>+24</strong> ranked insights</span>
+              <span class="mono tech-meta">state-core v9</span>
+            </div>
+          </div>
+
+          <div class="card stat" data-goto="files" style="cursor:pointer">
+            <div class="stat-top">
+              <span>Secure Vault & NTFS Objects</span>
+              <span class="stat-icon">▣</span>
+            </div>
+            <div class="stat-value" id="homeFilesStatValue">56</div>
+            <div class="stat-foot">
+              <span id="homeFilesStatFoot"><strong>3 folders</strong> · AES-256 fenced</span>
+              <span class="mono tech-meta">security-core</span>
+            </div>
+          </div>
+
+          <div class="card stat" data-goto="providers" style="cursor:pointer">
+            <div class="stat-top">
+              <span>Authorized AI Providers</span>
+              <span class="stat-icon">⌘</span>
+            </div>
+            <div class="stat-value" id="providerCount">1 / 3</div>
+            <div class="stat-foot">
+              <span id="providerFootLabel"><strong>ChatGPT</strong> read-scoped</span>
+              <span class="mono tech-meta">mcp-v1</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid home-grid">
+          <div class="card">
+            <div class="card-head">
+              <h3>Recent Conversations</h3>
+              <button class="link-btn" data-goto="conversations">View all 128 →</button>
+            </div>
+            <div class="list" id="recentList"></div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <h3>Memory Collections</h3>
+              <button class="link-btn" data-goto="memory">Open Library →</button>
+            </div>
+            <div class="list" id="homeCollections"></div>
+          </div>
+
+          <div class="card panel" style="display:flex;flex-direction:column">
+            <h3>Operations & Telemetry</h3>
+            <div class="panel-sub">Direct workspace actions & ingestion feed.</div>
+            <button class="quick-action" id="homeAddFolderQuickBtn">
+              <span>＋ Authorize Local Folder</span>
+              <span class="mono">roots →</span>
+            </button>
+            <button class="quick-action" data-goto="hive">
+              <span>Explore Hive Mind Graph</span>
+              <span class="mono">33 nodes →</span>
+            </button>
+            <button class="quick-action" data-goto="providers">
+              <span>Configure MCP Client Scopes</span>
+              <span class="mono">ACL →</span>
+            </button>
+
+            <div style="margin-top:auto;padding-top:14px;border-top:1px solid var(--border-subtle)">
+              <div class="overline" style="margin-bottom:8px">LIVE RUNTIME TELEMETRY</div>
+              <div class="mono" style="font-size:11px;color:var(--text-secondary);line-height:1.7">
+                <div>[21:42:10] capture-host: ChatGPT DOM diff +2 msgs</div>
+                <div>[21:42:11] index-core: FTS5 + BM25 re-ranked (3.8ms)</div>
+                <div>[21:40:04] security-core: SQLCipher page integrity OK</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== 2. CONVERSATIONS PAGE ==================== -->
+      <section class="page" id="page-conversations">
+        <div class="page-head">
+          <div>
+            <div class="overline">CAPTURE HOST & ARCHIVE-CORE</div>
+            <h1>Conversations Archive</h1>
+            <div class="page-sub">Search, inspect provenance, and revisit full multi-provider transcripts captured into your local vault.</div>
+          </div>
+          <button class="btn primary" id="newConversation">＋ Simulate Capture Ingestion</button>
+        </div>
+
+        <div class="toolbar">
+          <input class="field search-field" id="conversationSearch" placeholder="Filter conversations by title, collection, or provider…">
+          <select class="field" id="providerFilter">
+            <option value="all">All AI Providers</option>
+            <option value="ChatGPT">ChatGPT (OpenAI)</option>
+            <option value="Claude">Claude (Anthropic)</option>
+            <option value="Gemini">Gemini (Google)</option>
+          </select>
+          <div class="tabs" id="convTabs">
+            <button class="active" data-tab="all">All (8)</button>
+            <button data-tab="starred">Starred</button>
+            <button data-tab="archived">Cold Archive</button>
+          </div>
+        </div>
+
+        <div class="card" style="overflow:hidden">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Conversation Title</th>
+                <th>Provider</th>
+                <th>Collection</th>
+                <th class="tech-meta">Provenance SHA / Msgs</th>
+                <th>Last Activity</th>
+                <th style="text-align:right">Inspect</th>
+              </tr>
+            </thead>
+            <tbody id="conversationRows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ==================== 3. CURATED MEMORY PAGE ==================== -->
+      <section class="page" id="page-memory">
+        <div class="page-head">
+          <div>
+            <div class="overline">STATE-CORE · CURATED MEMORY & RANKING</div>
+            <h1>Curated Memory</h1>
+            <div class="page-sub">Distilled, high-signal knowledge units extracted from conversations and local documents with strict source provenance.</div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn" id="createCollection">＋ New Collection</button>
+          </div>
+        </div>
+
+        <div class="toolbar">
+          <input class="field search-field" id="memorySearch" placeholder="Search 342 curated memories, insights, rules, and collections…">
+          <div class="tabs" id="memoryViewTabs">
+            <button class="active" data-memview="collections">Collections Grid (6)</button>
+            <button data-memview="all">All Curated Memories</button>
+          </div>
+        </div>
+
+        <div id="memoryCollectionsContainer">
+          <div class="grid" style="grid-template-columns:repeat(3,minmax(0,1fr))" id="collectionGrid"></div>
+        </div>
+
+        <div class="card" style="margin-top:18px">
+          <div class="card-head">
+            <h3>High-Authority Curated Memories</h3>
+            <span class="tag mono">BM25 + Semantic Ranked</span>
+          </div>
+          <div class="list" id="recentMemories"></div>
+        </div>
+      </section>
+
+      <!-- ==================== 4. HIVE MIND GRAPH PAGE ==================== -->
+      <section class="page" id="page-hive">
+        <div class="page-head">
+          <div>
+            <div class="overline">INDEX-CORE · GRAPHIFY & SPATIAL TOPOLOGY</div>
+            <h1>Hive Mind Graph</h1>
+            <div class="page-sub">Interactive monochrome topology of 33 concept clusters and 67 verified provenance edges. Isolated memories remain unforced.</div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn" id="hiveTraceToggle">Toggle Edge Pulse Trace</button>
+            <button class="btn" id="hiveExplain">Graph Principles ↗</button>
+          </div>
+        </div>
+
+        <div class="hive-layout">
+          <div class="hive-main">
+            <div class="hive-toolbar">
+              <div class="hive-filters" id="hiveFilters">
+                <button class="hive-filter active" data-layer="all">All (33)</button>
+                <button class="hive-filter" data-layer="work">Work & Engineering</button>
+                <button class="hive-filter" data-layer="research">Research & System</button>
+                <button class="hive-filter" data-layer="learning">Learning</button>
+                <button class="hive-filter" data-layer="life">Life & Goals</button>
+              </div>
+              <div class="hive-controls-right">
+                <input type="text" class="hive-search-input" id="hiveNodeSearch" placeholder="Highlight node…">
+                <div class="hive-actions">
+                  <button id="hiveMinus" title="Zoom Out">−</button>
+                  <button id="hiveZoomLabel" title="Current Zoom Scale">100%</button>
+                  <button id="hivePlus" title="Zoom In">＋</button>
+                  <button id="hiveReset" title="Reset Camera">Reset</button>
+                </div>
+              </div>
+            </div>
+
+            <canvas id="hiveCanvas"></canvas>
+            <div class="hive-tooltip" id="hiveTooltip">
+              <b></b>
+              <span></span>
+              <small></small>
+            </div>
+            <div class="hive-hint">
+              <b>HOVER</b> inspect node · <b>CLICK</b> lock & zoom branch · <b>DRAG / WHEEL</b> navigate topology
+            </div>
+          </div>
+
+          <aside class="card hive-inspector">
+            <div class="inspector-type" id="hiveType">ROOT / CENTRAL INTELLIGENCE</div>
+            <div class="inspector-title" id="hiveTitle">Mind Place</div>
+            <div class="inspector-sub" id="hiveDesc"></div>
+            <div class="inspector-metrics">
+              <span class="tag mono" id="hiveMemoryCount">12 source traces</span>
+              <span class="tag mono" id="hiveBranchCount">5 branches</span>
+              <span class="tag mono tech-meta" id="hiveNodeIdBadge">id:mind</span>
+            </div>
+
+            <div class="inspector-section">
+              <h4>Connected Topology Branches</h4>
+              <div class="branch-list" id="hiveBranches"></div>
+            </div>
+
+            <div class="inspector-section">
+              <h4>Provenance Distribution</h4>
+              <div class="branch-list" id="hiveSources"></div>
+            </div>
+
+            <div class="trace-card">
+              <b>Provenance Verification</b>
+              <p>Every edge in the Hive Mind is derived from explicit conversation or document evidence.</p>
+              <button class="btn sm primary" id="hiveTrace" style="width:100%">Inspect Source Evidence ↗</button>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <!-- ==================== 5. FILES & SECURE VAULT PAGE ==================== -->
+      <section class="page" id="page-files">
+        <div class="page-head">
+          <div>
+            <div class="overline">SECURITY-CORE & DOCUMENT-CORE · ZERO-CRAWL AUTHORITY</div>
+            <h1>Files & Secure Vault</h1>
+            <div class="page-sub">Explicitly authorize which local folders Mind Place is allowed to read, configure bounded extractors, and control SQLCipher vault protection.</div>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn" id="triggerLockFromFiles">Lock Vault Now</button>
+            <button class="btn" id="secureAll">Verify Global Fence</button>
+            <button class="btn primary" id="openAddFolderModalTop">＋ Add Allowed Folder</button>
+          </div>
+        </div>
+
+        <div class="status-strip">
+          <div class="status-strip-left">
+            <span class="pulse-badge"><i></i> ZERO-CRAWL POLICY ENFORCED</span>
+            <div>
+              <b style="font-size:13px">Mind Place never scans your disk without explicit folder authorization.</b>
+              <div style="font-size:12px;color:var(--text-secondary)">Only approved document roots are read via bounded extractors (<code class="mono">PDF</code>, <code class="mono">DOCX/OOXML</code>, <code class="mono">MD/TXT</code>). Removing a folder triggers an immediate <b>Revocation Fence</b>.</div>
+            </div>
+          </div>
+          <span class="tag mono tech-meta">state-core::document_roots · MP-4L1</span>
+        </div>
+
+        <div class="grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px">
+          <div class="card panel">
+            <div class="overline">AUTHORIZED DOCUMENT ROOTS</div>
+            <div class="stat-value" id="filesPageStatCount">3 Folders · 56 Files</div>
+            <div style="font-size:12.5px;color:var(--text-secondary)" id="filesPageStatSub">51.5 MB total bounded extraction · 2 watching, 1 paused.</div>
+          </div>
+          <div class="card panel">
+            <div class="overline">CURATED MEMORY RECORDS</div>
+            <div class="stat-value">342 Units</div>
+            <div style="font-size:12.5px;color:var(--text-secondary)">Linked to source conversations & local files in <code class="mono">schema_v9</code>.</div>
+          </div>
+          <div class="card panel">
+            <div class="overline">ACTIVE ENCRYPTION PROFILE</div>
+            <div class="stat-value" id="activeProfileStat">Balanced</div>
+            <div style="font-size:12.5px;color:var(--text-secondary)">SQLCipher 4096B pages · PBKDF2-HMAC-SHA512 (256k iter).</div>
+          </div>
+        </div>
+
+        <!-- CENTERPIECE: INTERACTIVE APPROVED DOCUMENT ROOTS (ALLOWED FOLDERS) MANAGER -->
+        <div class="card roots-card">
+          <div class="card-head" style="padding:18px 20px">
+            <div>
+              <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                <h3 style="font-size:15.5px">Approved Document Roots (Read-Authorized Folders)</h3>
+                <span class="tag solid mono" id="authorizedFoldersBadge">3 Authorized Folders · 56 Indexed Files</span>
+                <span class="tag mono tech-meta">document-core::bounded_extractor (max 32MB/obj)</span>
+              </div>
+              <div style="font-size:12.5px;color:var(--text-secondary);margin-top:4px">
+                Grant or revoke Mind Place read access per directory. Pause live watching at any time or inspect extracted files inside each root.
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center">
+              <button class="btn sm" id="rescanAllFoldersBtn">↻ Rescan All</button>
+              <button class="btn sm primary" id="openAddFolderModalBtn">＋ Add Allowed Folder</button>
+            </div>
+          </div>
+
+          <div class="roots-toolbar">
+            <input class="field search-field" id="folderSearchInput" placeholder="Filter authorized folders by path, collection, or file format (PDF, DOCX, MD)…" style="height:34px">
+            <div class="tabs" id="folderStatusTabs">
+              <button class="active" data-foldertab="all">All Roots</button>
+              <button data-foldertab="Watching">Watching</button>
+              <button data-foldertab="Paused">Paused</button>
+            </div>
+          </div>
+
+          <div class="folder-list" id="approvedFoldersList"></div>
+        </div>
+
+        <div class="grid two-col">
+          <div class="card panel">
+            <h3>Vault Protection Boundaries</h3>
+            <div class="panel-sub">Toggle encrypted storage enforcement across local subsystems.</div>
+            <div class="setting-row">
+              <div>
+                <b>Conversation Archive (archive-core)</b>
+                <small>Original multi-provider transcripts and raw DOM snapshots.</small>
+              </div>
+              <button class="switch on" data-switch="archive"><i></i></button>
+            </div>
+            <div class="setting-row">
+              <div>
+                <b>Curated Memories (state-core)</b>
+                <small>Derived insights, authority rankings, and provenance links.</small>
+              </div>
+              <button class="switch on" data-switch="memories"><i></i></button>
+            </div>
+            <div class="setting-row">
+              <div>
+                <b>Extracted Document Objects (document-core)</b>
+                <small>Parsed PDF and Office Open XML chunks from approved folders.</small>
+              </div>
+              <button class="switch on" data-switch="files"><i></i></button>
+            </div>
+            <div class="setting-row">
+              <div>
+                <b>Derived Search & Graph Indexes (index-core)</b>
+                <small>FTS5 lexical tables and Graphify generation snapshots.</small>
+              </div>
+              <button class="switch on" data-switch="indexes"><i></i></button>
+            </div>
+          </div>
+
+          <div class="card panel">
+            <h3>Cryptographic & Lock Policy</h3>
+            <div class="panel-sub">Configure runtime decryption caching and automatic vault lock behavior.</div>
+            <label style="display:block;font-size:12px;font-weight:600;margin-bottom:6px" for="encryptionMode">Runtime Encryption Profile</label>
+            <select class="input" id="encryptionMode" style="width:100%;margin-bottom:14px">
+              <option value="Balanced">Balanced — Secure page cache, 4.2ms average read</option>
+              <option value="Read-Optimized">Read-Optimized — Extended memory page retention</option>
+              <option value="Maximum Isolation">Maximum Isolation — Zero page cache, strict fence</option>
+            </select>
+            <div class="setting-row">
+              <div>
+                <b>Immediate Revocation Fence on Folder Removal</b>
+                <small>Purge derived chunks and block MCP reads the instant a folder is revoked.</small>
+              </div>
+              <button class="switch on"><i></i></button>
+            </div>
+            <div class="setting-row">
+              <div>
+                <b>Auto-Lock Vault on Window Close</b>
+                <small>Zeroize in-memory master key when Tauri window closes.</small>
+              </div>
+              <button class="switch on"><i></i></button>
+            </div>
+            <button class="btn" id="vaultDetails" style="margin-top:14px;width:100%">Inspect Cryptographic Manifest →</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== 6. AI PROVIDERS & MCP PAGE ==================== -->
+      <section class="page" id="page-providers">
+        <div class="page-head">
+          <div>
+            <div class="overline">INTEGRATION-CORE · MODEL CONTEXT PROTOCOL (MCP)</div>
+            <h1>AI Providers & MCP Authorization</h1>
+            <div class="page-sub">Grant granular, revocable read/write capabilities per AI client. Every provider operates under Default-Deny isolation.</div>
+          </div>
+          <span class="tag mono">MCP Transport: stdio + local HTTP</span>
+        </div>
+
+        <div class="grid" style="grid-template-columns:repeat(3,minmax(0,1fr));margin-bottom:18px" id="providerCards"></div>
+
+        <div class="grid two-col">
+          <div class="card panel">
+            <h3>Zero-Trust Permission Architecture</h3>
+            <div class="panel-sub">Enforced by <code class="mono">crates/integration-core/src/clients.rs</code></div>
+            <div class="setting-row">
+              <div>
+                <b>Default-Deny Client Registration</b>
+                <small>Unrecognized MCP clients cannot list collections or invoke retrieval tools.</small>
+              </div>
+              <span class="tag solid">ENFORCED</span>
+            </div>
+            <div class="setting-row">
+              <div>
+                <b>Collection-Level Access Scope</b>
+                <small>Each AI provider can be restricted to specific collections (e.g., Engineering only).</small>
+              </div>
+              <span class="tag solid">ENFORCED</span>
+            </div>
+            <div class="setting-row">
+              <div>
+                <b>Instant Cryptographic Revocation Fence</b>
+                <small>Revoking a client immediately invalidates its session token and blocks in-flight reads.</small>
+              </div>
+              <span class="tag solid">READY</span>
+            </div>
+          </div>
+
+          <div class="card panel">
+            <h3>Recent MCP Tool Call Audit Log</h3>
+            <div class="panel-sub">Real-time trace of external AI agents querying your Shared-Brain.</div>
+            <div class="mono" style="font-size:11.5px;line-height:1.85;background:var(--bg-subtle);padding:12px;border-radius:var(--radius-sm);border:1px solid var(--border-subtle)">
+              <div><b style="color:var(--text-primary)">[21:41:02]</b> client=<b>ChatGPT</b> tool=<code>retrieve_context</code> scope=<code>Engineering</code> latency=<b>4.1ms</b> status=<b>200_OK</b></div>
+              <div><b style="color:var(--text-primary)">[21:38:19]</b> client=<b>ChatGPT</b> tool=<code>fetch_exact_source</code> id=<code>conv_bomc_02</code> latency=<b>1.9ms</b> status=<b>200_OK</b></div>
+              <div><b style="color:var(--text-primary)">[20:15:44]</b> client=<b>Claude</b> tool=<code>write_memory_proposal</code> status=<b>DENIED_WRITE_OFF</b></div>
+              <div><b style="color:var(--text-primary)">[19:02:11]</b> client=<b>Gemini</b> tool=<code>list_collections</code> status=<b>DENIED_DISCONNECTED</b></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== 7. SETUP & ONBOARDING PAGE ==================== -->
+      <section class="page" id="page-setup">
+        <div class="page-head">
+          <div>
+            <div class="overline">FIRST-RUN QUALIFICATION WIZARD</div>
+            <h1>Set up Mind Place</h1>
+            <div class="page-sub">A guided, local-first onboarding flow from vault initialization to your first verified knowledge graph.</div>
+          </div>
+          <span class="tag mono">Step <span id="setupStepIndicator">1</span> of 4</span>
+        </div>
+        <div class="setup-layout">
+          <div class="card setup-steps" id="setupSteps">
+            <button class="step-item active" data-step="0"><span class="step-num">1</span><span>Welcome & Architecture</span></button>
+            <button class="step-item" data-step="1"><span class="step-num">2</span><span>Initialize Secure Vault</span></button>
+            <button class="step-item" data-step="2"><span class="step-num">3</span><span>Authorize AI Providers</span></button>
+            <button class="step-item" data-step="3"><span class="step-num">4</span><span>First Knowledge Result</span></button>
+          </div>
+          <div class="card panel" id="setupPanel" style="min-height:420px;display:flex;flex-direction:column;justify-content:space-between"></div>
+        </div>
+      </section>
+
+      <!-- ==================== 8. SETTINGS PAGE ==================== -->
+      <section class="page" id="page-settings">
+        <div class="page-head">
+          <div>
+            <div class="overline">WORKSPACE & ERGONOMIC PREFERENCES</div>
+            <h1>Settings</h1>
+            <div class="page-sub">Customize monochrome visual contrast, information density, and technical provenance telemetry.</div>
+          </div>
+        </div>
+        <div class="grid two-col">
+          <div class="card panel">
+            <h3>Interface & Visual Ergonomics</h3>
+            <div class="panel-sub">Strictly neutral white-to-black design system for zero chromatic distraction.</div>
+            <div class="setting-row">
+              <div>
+                <b>Monochrome Color Theme</b>
+                <small>Switch between Crisp Daylight White and High-Contrast Obsidian Black.</small>
+              </div>
+              <select class="field" id="settingsThemeSelect">
+                <option value="light">Pure Light (#FAFAFA / #FFFFFF)</option>
+                <option value="dark">Obsidian Dark (#09090B / #121214)</option>
+              </select>
+            </div>
+            <div class="setting-row">
+              <div>
+                <b>Technical Provenance Mode (DEV / ⌘I)</b>
+                <small>Display SHA-256 hashes, SQLCipher states, and BM25 rank scores inline.</small>
+              </div>
+              <button class="switch" id="settingsTechSwitch"><i></i></button>
+            </div>
+            <div class="setting-row">
+              <div>
+                <b>Compact Table & List Density</b>
+                <small>Tighten vertical padding to view more records per screen.</small>
+              </div>
+              <button class="switch" id="settingsDensitySwitch"><i></i></button>
+            </div>
+          </div>
+
+          <div class="card panel">
+            <h3>Storage & Authority Controls</h3>
+            <div class="panel-sub">Direct shortcuts to local database and MCP governance.</div>
+            <div class="setting-row">
+              <div>
+                <b>Local-First Source of Truth</b>
+                <small>SQLite + SQLCipher vault resides strictly on your machine.</small>
+              </div>
+              <span class="tag solid">VERIFIED</span>
+            </div>
+            <div class="setting-row">
+              <div>
+                <b>Provider Capability Matrix</b>
+                <small>Audit and revoke per-provider read/write scopes.</small>
+              </div>
+              <button class="btn sm" data-goto="providers">Configure Providers →</button>
+            </div>
+            <div class="setting-row">
+              <div>
+                <b>Vault Lock & Recovery</b>
+                <small>Test manual vault lock screen or inspect encryption profiles.</small>
+              </div>
+              <button class="btn sm" data-goto="files">Manage Vault →</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== 9. CONVERSATION DETAIL READER ==================== -->
+      <section class="page" id="page-conversation-detail">
+        <div class="page-head">
+          <div>
+            <div class="overline" id="conversationDetailOverline">CONVERSATION ARCHIVE / CHATGPT</div>
+            <h1 id="conversationDetailTitle">Conversation title</h1>
+            <div class="page-sub" id="conversationDetailSubtitle">Metadata</div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn" data-detail-back="conversations">← Back to Conversations</button>
+            <button class="btn" id="copyConversation">Copy Transcript</button>
+          </div>
+        </div>
+
+        <div class="detail-grid">
+          <div class="card" style="overflow:hidden">
+            <div class="transcript-top">
+              <div style="display:flex;align-items:center;gap:10px">
+                <b style="font-size:13.5px">Verified Transcript</b>
+                <span class="tag mono" id="transcriptMessageCount">4 messages</span>
+              </div>
+              <span class="mono tech-meta">adapter: dom-snapshot-v3 · lossless</span>
+            </div>
+            <div id="transcriptBody" class="transcript-body"></div>
+          </div>
+
+          <aside class="card detail-aside">
+            <div class="detail-aside-title">Provenance & Metadata</div>
+            <div id="conversationMetadata"></div>
+            <div class="detail-divider"></div>
+            <div class="detail-aside-title">Extracted Curated Memories</div>
+            <div id="conversationRelatedMemories"></div>
+            <div class="detail-divider"></div>
+            <div class="detail-aside-title">Archive Actions</div>
+            <button class="quick-action" id="starConversation"><span>☆ Star Conversation</span><span>↗</span></button>
+            <button class="quick-action" id="archiveConversation"><span>↧ Move to Cold Archive</span><span>↗</span></button>
+          </aside>
+        </div>
+      </section>
+
+      <!-- ==================== 10. COLLECTION DETAIL PAGE ==================== -->
+      <section class="page" id="page-collection-detail">
+        <div class="page-head">
+          <div>
+            <div class="overline">CURATED MEMORY / COLLECTION</div>
+            <h1 id="collectionDetailTitle">Engineering</h1>
+            <div class="page-sub" id="collectionDetailSubtitle">Collection description</div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn" data-detail-back="memory">← All Collections</button>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:8px;margin-bottom:16px" id="collectionDetailMeta"></div>
+
+        <div class="toolbar">
+          <input class="field search-field" id="collectionMemorySearch" placeholder="Filter memories inside this collection…">
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h3>Curated Memories in Collection</h3>
+            <span class="tag mono" id="collectionMemoryCount">0 memories</span>
+          </div>
+          <div class="list" id="collectionMemoryList"></div>
+        </div>
+      </section>
+
+      <!-- ==================== 11. MEMORY DETAIL & PROVENANCE INSPECTOR ==================== -->
+      <section class="page" id="page-memory-detail">
+        <div class="page-head">
+          <div>
+            <div class="overline" id="memoryDetailOverline">MEMORY / ENGINEERING</div>
+            <h1 id="memoryDetailTitle">Memory title</h1>
+            <div class="page-sub" id="memoryDetailSubtitle">Memory metadata</div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn" id="memoryBackButton">← Back to Collection</button>
+            <button class="btn" id="copyMemory">Copy Memory</button>
+          </div>
+        </div>
+
+        <div class="detail-grid">
+          <div class="card panel">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+              <span class="tag solid" id="memoryTypeTag">Extracted insight</span>
+              <span class="mono" id="memoryUpdatedAt" style="color:var(--text-muted)">Updated recently</span>
+            </div>
+            <div id="memoryContent" style="font-size:14.5px;line-height:1.75;color:var(--text-primary)"></div>
+            <div class="detail-divider"></div>
+            <div class="detail-aside-title">Why This Memory Matters (Authority Rationale)</div>
+            <p id="memoryExplanation" style="font-size:13.5px;line-height:1.65;color:var(--text-secondary);margin:0"></p>
+            <div class="detail-divider"></div>
+            <div class="detail-aside-title">Sibling & Connected Memories</div>
+            <div id="memoryRelated"></div>
+          </div>
+
+          <aside class="card detail-aside">
+            <div class="detail-aside-title">Memory Authority Record</div>
+            <div id="memoryMetadata"></div>
+            <div class="detail-divider"></div>
+            <div class="detail-aside-title">Origin Conversation Trace</div>
+            <div id="memorySource"></div>
+            <div class="detail-divider"></div>
+            <button class="quick-action" id="pinMemory"><span>☆ Pin to High-Priority Context</span><span>↗</span></button>
+          </aside>
+        </div>
+      </section>
+
+    </section>
+  </main>
+</div>
+
+<!-- ======================= COMMAND PALETTE MODAL (⌘K) ======================= -->
+<div class="modal-backdrop" id="cmdBackdrop">
+  <div class="cmd-palette">
+    <div class="cmd-input-row">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4.5 4.5"/></svg>
+      <input id="cmdInput" placeholder="Type to search 128 conversations, 342 memories, 33 Hive nodes, or commands…" autocomplete="off">
+      <button class="kbd" id="closeCmdBtn">ESC</button>
+    </div>
+    <div class="cmd-results" id="cmdResults"></div>
+  </div>
+</div>
+
+<!-- ======================= SLIDE-OVER QUICK INSPECTOR DRAWER ======================= -->
+<div class="drawer-backdrop" id="drawerBackdrop">
+  <aside class="drawer">
+    <div class="card-head" style="padding:18px 22px">
+      <div>
+        <div class="overline" id="drawerOverline">PROVENANCE QUICK INSPECTOR</div>
+        <h3 id="drawerTitle" style="font-size:16px;margin-top:3px">Memory Record</h3>
+      </div>
+      <button class="icon-btn" id="closeDrawerBtn" title="Close Drawer">✕</button>
+    </div>
+    <div style="padding:22px;overflow-y:auto;flex:1" id="drawerBody"></div>
+    <div style="padding:16px 22px;border-top:1px solid var(--border-subtle);display:flex;justify-content:space-between;gap:10px">
+      <button class="btn" id="drawerOpenSourceBtn">Open Source Thread ↗</button>
+      <button class="btn primary" id="drawerOpenFullBtn">Full Reader View →</button>
+    </div>
+  </aside>
+</div>
+
+<!-- ======================= ADD ALLOWED FOLDER MODAL ======================= -->
+<div class="modal-backdrop" id="addFolderBackdrop">
+  <div class="modal" style="width:min(580px,100%)">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <span class="overline">STATE-CORE::DOCUMENT_ROOTS · EXPLICIT READ GRANT</span>
+      <button class="icon-btn" id="closeAddFolderModal">✕</button>
+    </div>
+    <h2 style="font-size:20px;margin:10px 0 4px">Authorize Local Folder</h2>
+    <p style="font-size:13px;color:var(--text-secondary);margin:0 0 16px">
+      Grant Mind Place read-only access to a specific directory. Only selected file formats will be extracted into your local encrypted vault.
+    </p>
+
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div>
+        <label style="display:block;font-size:12px;font-weight:600;margin-bottom:6px" for="newFolderPath">Local Directory Path</label>
+        <input class="input mono" id="newFolderPath" style="width:100%" placeholder="e.g., D:\Projects\Soramula-Docs or ~/Documents/Architecture">
+        <div style="font-size:11px;color:var(--text-muted);margin-top:6px">Quick preset paths (click to fill):</div>
+        <div class="preset-chips" id="folderPresetChips">
+          <button type="button" class="preset-chip" data-preset-path="D:\Projects\Soramula-Docs" data-preset-col="Engineering">D:\Projects\Soramula-Docs</button>
+          <button type="button" class="preset-chip" data-preset-path="C:\Users\kais\Downloads\Papers" data-preset-col="Research">C:\Users\kais\Downloads\Papers</button>
+          <button type="button" class="preset-chip" data-preset-path="~/Documents/Work-Archive" data-preset-col="Product ideas">~/Documents/Work-Archive</button>
+        </div>
+      </div>
+
+      <div class="grid" style="grid-template-columns:1fr 1fr;gap:12px">
+        <div>
+          <label style="display:block;font-size:12px;font-weight:600;margin-bottom:6px" for="newFolderCollection">Target Memory Collection</label>
+          <select class="field" id="newFolderCollection" style="width:100%">
+            <option value="Engineering">Engineering</option>
+            <option value="Research">Research</option>
+            <option value="Learning">Learning</option>
+            <option value="Life & goals">Life & goals</option>
+            <option value="Product ideas">Product ideas</option>
+            <option value="Unsorted">Unsorted</option>
+          </select>
+        </div>
+        <div>
+          <label style="display:block;font-size:12px;font-weight:600;margin-bottom:6px" for="newFolderWatchMode">Initial Watch State</label>
+          <select class="field" id="newFolderWatchMode" style="width:100%">
+            <option value="Watching">Watching (Live NTFS USN / FS events)</option>
+            <option value="Paused">Paused (Manual snapshot only)</option>
+          </select>
+        </div>
+      </div>
+
+      <div>
+        <label style="display:block;font-size:12px;font-weight:600;margin-bottom:6px">Allowed File Extractors (document-core)</label>
+        <div class="checkbox-card-list">
+          <label class="checkbox-card">
+            <input type="checkbox" id="extMd" checked>
+            <div>
+              <b style="display:block">Markdown & Plaintext (.md, .txt)</b>
+              <span style="font-size:11.5px;color:var(--text-secondary)">Fast UTF-8 structural chunking with heading preservation.</span>
+            </div>
+          </label>
+          <label class="checkbox-card">
+            <input type="checkbox" id="extPdf" checked>
+            <div>
+              <b style="display:block">PDF Documents (.pdf — bounded page/size extractor)</b>
+              <span style="font-size:11.5px;color:var(--text-secondary)">Executed via <code class="mono">document-core/src/pdf.rs</code> with strict memory & page bounds.</span>
+            </div>
+          </label>
+          <label class="checkbox-card">
+            <input type="checkbox" id="extDocx" checked>
+            <div>
+              <b style="display:block">Office Documents (.docx — OOXML extractor)</b>
+              <span style="font-size:11.5px;color:var(--text-secondary)">Executed via <code class="mono">document-core/src/ooxml.rs</code> without external Office dependencies.</span>
+            </div>
+          </label>
+        </div>
+      </div>
+
+      <div>
+        <label style="display:block;font-size:12px;font-weight:600;margin-bottom:6px">Scanner Traversal & Hygiene Rules</label>
+        <div class="checkbox-card-list">
+          <label class="checkbox-card">
+            <input type="checkbox" id="ruleRecursive" checked>
+            <div>
+              <b style="display:block">Scan subfolders recursively</b>
+              <span style="font-size:11.5px;color:var(--text-secondary)">Traverse nested directories inside this root.</span>
+            </div>
+          </label>
+          <label class="checkbox-card">
+            <input type="checkbox" id="ruleIgnoreBuild" checked>
+            <div>
+              <b style="display:block">Ignore developer & build artifacts (.git, node_modules, target, dist)</b>
+              <span style="font-size:11.5px;color:var(--text-secondary)">Prevents build caches and repository internals from polluting retrieval indexes.</span>
+            </div>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:20px;padding-top:16px;border-top:1px solid var(--border-subtle)">
+      <span class="mono" style="font-size:11px;color:var(--text-muted)">Revocable anytime via Fence</span>
+      <div style="display:flex;gap:8px">
+        <button class="btn" id="cancelAddFolderBtn">Cancel</button>
+        <button class="btn primary" id="confirmAddFolderBtn">Authorize & Index Folder →</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= GENERIC DIALOG MODAL ======================= -->
+<div class="modal-backdrop" id="modal">
+  <div class="modal">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <span class="overline" id="modalKicker">MIND PLACE SYSTEM</span>
+      <button class="icon-btn" id="modalClose">✕</button>
+    </div>
+    <h2 id="modalTitle" style="font-size:20px;margin:12px 0 8px">Dialog Title</h2>
+    <div id="modalBody" style="font-size:13.5px;line-height:1.65;color:var(--text-secondary)"></div>
+    <div style="display:flex;justify-content:flex-end;margin-top:20px;gap:8px">
+      <button class="btn primary" id="modalDone">Acknowledge</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= VAULT LOCK OVERLAY (MP-3L1) ======================= -->
+<div class="vault-lock-overlay" id="vaultLockOverlay">
+  <div class="card panel" style="width:min(420px,100%);text-align:center;padding:32px 28px;box-shadow:var(--shadow-lg)">
+    <div class="brand-mark" style="margin:0 auto 16px;width:42px;height:42px">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="22" height="22"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+    </div>
+    <div class="overline">MP-3L1 MANUAL LOCK ENFORCED</div>
+    <h2 style="font-size:22px;margin:8px 0">Vault is Locked</h2>
+    <p style="font-size:13px;color:var(--text-secondary);margin:0 0 20px">In-memory SQLCipher keys have been zeroized and MCP client requests are fenced. Enter your owner passphrase to restore workspace state.</p>
+    <input type="password" class="input" id="unlockPassphrase" value="••••••••••••••••" style="width:100%;text-align:center;margin-bottom:12px" placeholder="Enter vault passphrase…">
+    <button class="btn primary" id="unlockVaultBtn" style="width:100%">Unlock Local Vault →</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============================================================================
+   1. CORE STATE & FULL PRESERVED DOMAIN DATASET
+   ============================================================================ */
+const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+
+let activePage = "home";
+let setupStep = 0;
+let convTabFilter = "all";
+let connected = { ChatGPT: true, Claude: false, Gemini: false };
+let starredConvs = new Set(["BOMC Builder — export architecture", "Building the Mind Place archive"]);
+
+const conversations = [
+  ["Building the Mind Place archive", "ChatGPT", "Product", "Today · 21:42", "sha256:4a91...c802", 14],
+  ["BOMC Builder — export architecture", "Claude", "Engineering", "Today · 18:16", "sha256:8f20...19b4", 22],
+  ["Research: semantic retrieval", "ChatGPT", "Research", "Today · 14:08", "sha256:3c71...90e1", 9],
+  ["Piano sheet-to-key mapping", "ChatGPT", "Learning", "Yesterday · 22:30", "sha256:7d12...44a9", 18],
+  ["V60 brewing ratios", "Gemini", "Life & goals", "Yesterday · 11:20", "sha256:1b08...7f3c", 7],
+  ["Hive graph product direction", "ChatGPT", "Product", "Oct 31 · 20:14", "sha256:6e55...2d10", 16],
+  ["Encrypted vault architecture", "Claude", "Engineering", "Oct 30 · 16:02", "sha256:9a44...01cc", 31],
+  ["Provider MCP connectivity", "ChatGPT", "Research", "Oct 29 · 19:44", "sha256:2f99...e408", 12]
+];
+
+const collections = [
+  { name: "Engineering", count: 142, desc: "Projects, architecture, implementation notes and technical decisions.", pct: 82 },
+  { name: "Research", count: 87, desc: "Questions, sources, investigations and evolving hypotheses.", pct: 61 },
+  { name: "Learning", count: 56, desc: "Music, programming, practice notes and reference material.", pct: 44 },
+  { name: "Life & goals", count: 34, desc: "Personal plans, preferences and recurring themes.", pct: 31 },
+  { name: "Product ideas", count: 18, desc: "Unfinished concepts, product direction and design exploration.", pct: 25 },
+  { name: "Unsorted", count: 5, desc: "Newly captured memories awaiting organization.", pct: 12 }
+];
+
+let folderStatusFilter = "all";
+let approvedFolders = [
+  {
+    id: "root_01h9x",
+    path: "C:\\Users\\kais\\Documents\\Engineering-Specs",
+    collection: "Engineering",
+    filesCount: 28,
+    sizeMb: 18.4,
+    formats: ["PDF", "DOCX", "MD"],
+    status: "Watching",
+    recursive: "Yes (Recursive)",
+    lastSynced: "2 mins ago",
+    devProvenance: "root_01h9x · NTFS USN Journal #884120 · document-core::ooxml,pdf",
+    sampleFiles: [
+      { name: "bomc-exact-export-spec.pdf", size: "4.2 MB", extractor: "pdf.rs", status: "Bounded · Indexed", hash: "sha256:7c91...e102" },
+      { name: "vault-recovery-fencing.docx", size: "1.8 MB", extractor: "ooxml.rs", status: "Bounded · Indexed", hash: "sha256:3a44...89b1" },
+      { name: "sibambo-opening-assemblies.pdf", size: "6.1 MB", extractor: "pdf.rs", status: "Bounded · Indexed", hash: "sha256:9f02...44c8" },
+      { name: "ntfs-usn-authority-notes.md", size: "48 KB", extractor: "utf8", status: "Bounded · Indexed", hash: "sha256:1d88...20a4" }
+    ]
+  },
+  {
+    id: "root_01h9y",
+    path: "D:\\Workspaces\\Research-Corpus",
+    collection: "Research",
+    filesCount: 19,
+    sizeMb: 31.0,
+    formats: ["PDF", "MD"],
+    status: "Watching",
+    recursive: "Yes (Recursive)",
+    lastSynced: "14 mins ago",
+    devProvenance: "root_01h9y · NTFS USN Journal #884095 · document-core::pdf",
+    sampleFiles: [
+      { name: "architect-visual-fidelity-protocol.pdf", size: "8.7 MB", extractor: "pdf.rs", status: "Bounded · Indexed", hash: "sha256:5e12...77d0" },
+      { name: "hybrid-bm25-vector-bakeoff.pdf", size: "5.4 MB", extractor: "pdf.rs", status: "Bounded · Indexed", hash: "sha256:2b67...91f3" },
+      { name: "semantic-retrieval-notes.md", size: "112 KB", extractor: "utf8", status: "Bounded · Indexed", hash: "sha256:8c30...11e9" }
+    ]
+  },
+  {
+    id: "root_01h9z",
+    path: "C:\\Users\\kais\\Notes\\Personal-Knowledge",
+    collection: "Learning",
+    filesCount: 9,
+    sizeMb: 2.1,
+    formats: ["MD", "TXT"],
+    status: "Paused",
+    recursive: "No (Top-level)",
+    lastSynced: "Yesterday · 22:15",
+    devProvenance: "root_01h9z · Poll Watcher · state-core::document_scanner",
+    sampleFiles: [
+      { name: "piano-88key-voicing-reference.md", size: "64 KB", extractor: "utf8", status: "Bounded · Indexed", hash: "sha256:4d90...66a2" },
+      { name: "v60-iced-brew-ratios.txt", size: "18 KB", extractor: "utf8", status: "Bounded · Indexed", hash: "sha256:6a11...09c7" },
+      { name: "chord-inversion-bass-rules.md", size: "39 KB", extractor: "utf8", status: "Bounded · Indexed", hash: "sha256:0f55...32b8" }
+    ]
+  }
+];
+
+const memoryData = {
+  "Engineering": [
+    ["BOMC Exact must preserve fidelity while reducing export size", "The optimization target is not merely a smaller file. The Exact export must preserve canonical geometry, material assignment, and the accepted visual result while reducing package size relative to the source SKP.", "BOMC Builder — export architecture", "Derived insight", "Oct 27, 2026", "A decision constraint that keeps optimization measurable without allowing fidelity regressions.", "0.98"],
+    ["Sibambo Rooms groups physical openings as assemblies", "A window or door should be represented as one physical opening assembly. Individual subfaces remain available for measurement, but the visual selection should highlight the complete opening.", "BOMC Builder — export architecture", "Project requirement", "Oct 27, 2026", "This requirement prevents panel-level detection from fragmenting one real-world opening.", "0.94"],
+    ["Mind Place vault recovery must be globally fenced", "Backup and restore must coordinate database, WAL, indexes, archive, and objects under one recovery boundary. Partial publication must fail closed and remain recoverable.", "Encrypted vault architecture", "Architecture decision", "Oct 25, 2026", "The recovery contract protects consistency across all vault data, not only the primary database.", "0.99"],
+    ["Cloud-first qualification excludes owner-only gates", "Cloud CI can qualify repository behavior, but physical Windows and owner-environment gates remain NOT_RUN unless explicitly authorized and executed.", "Building the Mind Place archive", "Operating rule", "Oct 31, 2026", "Separating cloud evidence from owner-machine evidence prevents unsupported acceptance claims.", "0.92"],
+    ["Self-review requires exact HEAD evidence", "Implementors must review the exact commit SHA, tests, security implications, and CI evidence before a task is marked ready for merge.", "Building the Mind Place archive", "Process rule", "Oct 27, 2026", "A reproducible evidence trail is required for reliable handoff and merge decisions.", "0.95"]
+  ],
+  "Research": [
+    ["Research 01 combines quantitative and qualitative evaluation", "The BOMC comparison uses measurable export properties alongside an independent architect's visual assessment of Exact and visual output. The research design is therefore mixed-method rather than purely quantitative.", "BOMC Builder — export architecture", "Research method", "Nov 2, 2026", "The architect review adds an independent professional perspective that file metrics cannot capture.", "0.96"],
+    ["Visual fidelity needs an independent architecture review", "An architect should inspect representative model outputs and record visible differences, artifacts, readability, and practical suitability without being guided toward a preferred result.", "BOMC Builder — export architecture", "Evaluation protocol", "Nov 2, 2026", "Independent observation reduces the risk of treating technical similarity as equivalent to professional visual acceptability.", "0.93"],
+    ["Retrieval should preserve source traceability", "A derived answer should retain references to the original conversation, message, provider, timestamp, and extraction path.", "Research: semantic retrieval", "Design principle", "Oct 29, 2026", "Traceability makes memory useful without hiding the provenance of the underlying information.", "0.97"],
+    ["Agent permissions should be scoped per provider", "Read and write permissions are separate capabilities. A provider should receive only explicitly granted collections and operations.", "Provider MCP connectivity", "Security principle", "Oct 28, 2026", "Narrow permissions reduce accidental exposure and make revocation easier to reason about.", "0.96"]
+  ],
+  "Learning": [
+    ["Piano sheet reading maps pitch, duration, and simultaneity", "A piano score communicates pitch by vertical staff position, duration by note shape and rhythmic notation, and simultaneous notes through vertical alignment. Chord grouping is not the same as lyric grouping.", "Piano sheet-to-key mapping", "Learning note", "Nov 1, 2026", "This distinction helps translate a guitar-oriented source into piano parts without inventing note groupings.", "0.91"],
+    ["An 88-key piano spans A0 through C8", "A standard 88-key piano begins at A0 and ends at C8. Octave labels should follow the chosen convention consistently throughout any note-conversion interface.", "Piano sheet-to-key mapping", "Reference", "Nov 1, 2026", "The range check prevents generated note labels from drifting by an octave.", "0.90"],
+    ["Left-hand bass should follow the chord root or inversion", "For a chord inversion, the bass note can reflect the inversion when the arrangement calls for it; otherwise the root remains a stable foundation. The score determines the intended voicing.", "Piano sheet-to-key mapping", "Practice note", "Oct 31, 2026", "This keeps bass choices musical rather than applying a rigid one-note-per-chord rule.", "0.89"]
+  ],
+  "Life & goals": [
+    ["V60 15 g is a useful baseline recipe", "A practical starting point is 15 g coffee with around 225–240 g water, then adjust grind, pouring, and total brew time based on taste and the beans.", "V60 brewing ratios", "Personal reference", "Nov 2, 2026", "A repeatable baseline makes it easier to identify which brewing variable changed the cup.", "0.94"],
+    ["Iced V60 dilution should be planned as part of the ratio", "When brewing directly over ice, include the ice mass in the total beverage water budget rather than treating it as an afterthought.", "V60 brewing ratios", "Personal reference", "Oct 31, 2026", "Accounting for meltwater prevents an iced recipe from becoming unintentionally weak.", "0.91"],
+    ["Piano practice is organized around chord shapes and lyrics", "The preferred learning layout keeps lyrics readable while distinguishing right-hand keys, left-hand chords, and bass notes. Vertical stacking is reserved for notes played simultaneously.", "Piano sheet-to-key mapping", "Preference", "Oct 31, 2026", "This interface preference directly affects how sheet-derived arrangements should be presented.", "0.88"]
+  ],
+  "Product ideas": [
+    ["Hive Mind should reveal relationships without forcing them", "The graph should make dense local connections discoverable while keeping uncertain or isolated memories visible. A relationship should be explainable and traceable to source evidence.", "Hive graph product direction", "Product principle", "Oct 31, 2026", "Showing uncertainty is more trustworthy than drawing attractive but unsupported links.", "0.98"],
+    ["Mind Place should feel local-first and provider-neutral", "The vault is the source of truth. AI providers are optional integrations with distinct permissions, not the owners of the user's memory.", "Building the Mind Place archive", "Product principle", "Oct 28, 2026", "This separates durable user knowledge from the lifecycle of any one AI provider.", "0.99"]
+  ],
+  "Unsorted": [
+    ["An imported note needs source attribution", "Imported snippets should retain their original source and import time until they can be reviewed and organized.", "Building the Mind Place archive", "Captured note", "Oct 26, 2026", "Attribution makes later review possible even before categorization.", "0.82"]
+  ]
+};
+
+const memoryIcons = {
+  "Engineering": "⌘",
+  "Research": "⌕",
+  "Learning": "◇",
+  "Life & goals": "○",
+  "Product ideas": "▧",
+  "Unsorted": "＋"
+};
+
+function allMemories() {
+  return Object.entries(memoryData).flatMap(([collection, items]) =>
+    items.map((m, i) => ({
+      id: `${collection}-${i}`,
+      collection,
+      title: m[0],
+      content: m[1],
+      source: m[2],
+      type: m[3],
+      updated: m[4],
+      why: m[5],
+      score: m[6] || "0.92"
+    }))
+  );
+}
+
+/* ============================================================================
+   2. NAVIGATION, THEME, TECHNICAL MODE & ERGONOMIC CONTROLS
+   ============================================================================ */
+const pageNames = {
+  home: "Overview",
+  conversations: "Conversations Archive",
+  memory: "Curated Memory",
+  hive: "Hive Mind Graph",
+  files: "Files & Secure Vault",
+  providers: "AI Providers & MCP",
+  setup: "Setup & Onboarding",
+  settings: "Settings",
+  "conversation-detail": "Conversation Reader",
+  "collection-detail": "Collection Inspector",
+  "memory-detail": "Memory Provenance"
+};
+
+function go(page) {
+  activePage = page;
+  $$(".page").forEach(p => p.classList.toggle("active", p.id === "page-" + page));
+  $$("[data-page]").forEach(b => b.classList.toggle("active", b.dataset.page === page));
+  $("#crumb").textContent = pageNames[page] || page;
+  if (page === "hive") {
+    setTimeout(startHive, 40);
+  }
+}
+
+$$("[data-page]").forEach(b => b.addEventListener("click", () => go(b.dataset.page)));
+document.addEventListener("click", e => {
+  const gotoBtn = e.target.closest("[data-goto]");
+  if (gotoBtn) go(gotoBtn.dataset.goto);
+});
+
+function toast(msg) {
+  const t = $("#toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove("show"), 2200);
+}
+
+function modal(title, bodyHtml, kicker = "MIND PLACE SYSTEM") {
+  $("#modalTitle").textContent = title;
+  $("#modalBody").innerHTML = bodyHtml;
+  $("#modalKicker").textContent = kicker;
+  $("#modal").style.display = "flex";
+}
+
+$("#modalClose").onclick = $("#modalDone").onclick = () => {
+  $("#modal").style.display = "none";
+};
+
+// Sidebar Collapse
+$("#toggleSidebar").onclick = () => {
+  $("#appShell").classList.toggle("sidebar-collapsed");
+  if (activePage === "hive") setTimeout(resizeHive, 220);
+};
+
+// Theme Toggle (Strict White-to-Black Light vs Obsidian Dark)
+function setTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+  $("#settingsThemeSelect").value = theme;
+  toast(theme === "dark" ? "High-Contrast Dark Mode enabled" : "Pure Light Mode enabled");
+}
+
+$("#themeToggleBtn").onclick = () => {
+  const curr = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
+  setTheme(curr);
+};
+
+$("#settingsThemeSelect").onchange = e => setTheme(e.target.value);
+
+// Technical Provenance Mode Toggle (Progressive Disclosure)
+function toggleTechMode() {
+  const next = document.documentElement.getAttribute("data-tech") !== "true";
+  document.documentElement.setAttribute("data-tech", String(next));
+  $("#techModeBtn").classList.toggle("active", next);
+  $("#settingsTechSwitch").classList.toggle("on", next);
+  toast(next ? "Technical Provenance Mode ON (SHA-256 & BM25 visible)" : "Technical Provenance Mode OFF");
+}
+
+$("#techModeBtn").onclick = toggleTechMode;
+$("#settingsTechSwitch").onclick = toggleTechMode;
+
+// Compact Density Switch
+$("#settingsDensitySwitch").onclick = e => {
+  const btn = e.currentTarget;
+  btn.classList.toggle("on");
+  const isCompact = btn.classList.contains("on");
+  document.documentElement.setAttribute("data-density", isCompact ? "compact" : "comfortable");
+  toast(isCompact ? "Compact density enabled" : "Comfortable density enabled");
+};
+
+// Vault Lock Overlay (MP-3L1)
+function lockVault() {
+  $("#vaultLockOverlay").style.display = "flex";
+  toast("Vault locked — in-memory keys zeroized");
+}
+$("#lockVaultBtn").onclick = lockVault;
+$("#triggerLockFromFiles").onclick = lockVault;
+$("#unlockVaultBtn").onclick = () => {
+  $("#vaultLockOverlay").style.display = "none";
+  toast("Vault unlocked · SQLCipher integrity verified");
+};
+
+/* ============================================================================
+   3. POPULATE OVERVIEW, CONVERSATIONS & CURATED MEMORIES
+   ============================================================================ */
+function renderHome() {
+  $("#recentList").innerHTML = conversations.slice(0, 5).map(c => `
+    <button class="list-row" data-open-conv="${c[0]}">
+      <span class="row-icon">▤</span>
+      <span class="row-copy">
+        <b>${c[0]}</b>
+        <small>
+          <span>${c[1]}</span>
+          <span>·</span>
+          <span>${c[2]}</span>
+          <span class="mono tech-meta">${c[4]}</span>
+        </small>
+      </span>
+      <span class="row-meta">${c[3]}</span>
+    </button>
+  `).join("");
+
+  $("#homeCollections").innerHTML = collections.slice(0, 5).map(c => `
+    <button class="list-row" data-collection="${c.name}">
+      <span class="row-icon">${memoryIcons[c.name] || "▱"}</span>
+      <span class="row-copy">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <b>${c.name}</b>
+          <span class="mono" style="color:var(--text-muted)">${c.count} units</span>
+        </div>
+        <span class="collection-bar"><i style="width:${c.pct}%"></i></span>
+      </span>
+    </button>
+  `).join("");
+}
+renderHome();
+
+function renderConversations() {
+  const q = ($("#conversationSearch")?.value || "").toLowerCase();
+  const prov = $("#providerFilter")?.value || "all";
+  const rows = conversations.filter(c => {
+    const matchesQ = c.join(" ").toLowerCase().includes(q);
+    const matchesProv = prov === "all" || c[1] === prov;
+    const matchesTab = convTabFilter === "all" ||
+      (convTabFilter === "starred" && starredConvs.has(c[0])) ||
+      (convTabFilter === "archived" && c[3].includes("Oct"));
+    return matchesQ && matchesProv && matchesTab;
+  });
+
+  $("#conversationRows").innerHTML = rows.map(c => `
+    <tr data-open-conv="${c[0]}">
+      <td>
+        ${starredConvs.has(c[0]) ? "★ " : ""}${c[0]}
+      </td>
+      <td><span class="tag">${c[1]}</span></td>
+      <td>${c[2]}</td>
+      <td class="tech-meta mono">${c[4]} · ${c[5]} msgs</td>
+      <td class="mono">${c[3]}</td>
+      <td style="text-align:right">
+        <button class="btn sm" data-open-conv="${c[0]}">Reader →</button>
+      </td>
+    </tr>
+  `).join("") || `<tr><td colspan="6" style="text-align:center;padding:32px;color:var(--text-muted)">No conversations match the current filter criteria.</td></tr>`;
+}
+renderConversations();
+
+$("#conversationSearch").oninput = renderConversations;
+$("#providerFilter").onchange = renderConversations;
+$("#convTabs").addEventListener("click", e => {
+  const btn = e.target.closest("[data-tab]");
+  if (!btn) return;
+  convTabFilter = btn.dataset.tab;
+  $$("#convTabs button").forEach(b => b.classList.toggle("active", b === btn));
+  renderConversations();
+});
+
+function renderMemoryPage() {
+  const q = ($("#memorySearch")?.value || "").toLowerCase();
+  const filteredCols = collections.filter(c =>
+    c.name.toLowerCase().includes(q) || c.desc.toLowerCase().includes(q)
+  );
+
+  $("#collectionGrid").innerHTML = filteredCols.map(c => `
+    <button class="card panel" style="text-align:left;display:flex;flex-direction:column;justify-content:space-between;cursor:pointer" data-collection="${c.name}">
+      <div>
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <span class="row-icon">${memoryIcons[c.name] || "▱"}</span>
+          <span class="tag mono">${c.count} memories</span>
+        </div>
+        <h3 style="margin-top:14px;font-size:16px">${c.name}</h3>
+        <div class="panel-sub" style="margin-bottom:12px;min-height:38px">${c.desc}</div>
+      </div>
+      <div>
+        <div class="collection-bar"><i style="width:${c.pct}%"></i></div>
+        <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--text-muted);margin-top:8px">
+          <span>Authority density: ${c.pct}%</span>
+          <span>Inspect →</span>
+        </div>
+      </div>
+    </button>
+  `).join("");
+
+  const mems = allMemories().filter(m =>
+    !q || (`${m.title} ${m.content} ${m.collection} ${m.type}`).toLowerCase().includes(q)
+  );
+
+  $("#recentMemories").innerHTML = mems.slice(0, 10).map(m => `
+    <div class="list-row" style="justify-content:space-between">
+      <div style="display:flex;align-items:center;gap:12px;min-width:0;flex:1;cursor:pointer" data-open-memory="${m.id}">
+        <span class="row-icon">${memoryIcons[m.collection] || "◇"}</span>
+        <span class="row-copy">
+          <b>${m.title}</b>
+          <small>
+            <span>${m.collection}</span>
+            <span>·</span>
+            <span>${m.type}</span>
+            <span>·</span>
+            <span>Source: ${m.source}</span>
+            <span class="mono tech-meta">rank:${m.score}</span>
+          </small>
+        </span>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <button class="btn sm" data-quick-drawer="${m.id}" title="Open Slide-Over Inspector without leaving page">Quick Peek</button>
+        <button class="btn sm" data-open-memory="${m.id}">Full View →</button>
+      </div>
+    </div>
+  `).join("");
+}
+renderMemoryPage();
+
+$("#memorySearch").oninput = renderMemoryPage;
+$("#memoryViewTabs").addEventListener("click", e => {
+  const btn = e.target.closest("[data-memview]");
+  if (!btn) return;
+  $$("#memoryViewTabs button").forEach(b => b.classList.toggle("active", b === btn));
+  $("#memoryCollectionsContainer").style.display = btn.dataset.memview === "all" ? "none" : "block";
+});
+
+/* ============================================================================
+   4. SLIDE-OVER QUICK INSPECTOR DRAWER (ZERO CONTEXT LOSS UX)
+   ============================================================================ */
+function openQuickDrawer(memId) {
+  const m = allMemories().find(x => x.id === memId) || allMemories()[0];
+  $("#drawerOverline").textContent = `PROVENANCE INSPECTOR · ${m.collection.toUpperCase()}`;
+  $("#drawerTitle").textContent = m.title;
+  $("#drawerBody").innerHTML = `
+    <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+      <span class="tag solid">${m.type}</span>
+      <span class="tag mono">${m.updated}</span>
+      <span class="tag mono">BM25+Vec Score: ${m.score}</span>
+    </div>
+    <p style="font-size:14px;line-height:1.7;color:var(--text-primary);margin:0 0 16px">${m.content}</p>
+    <div style="padding:14px;background:var(--bg-subtle);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);margin-bottom:16px">
+      <div class="overline" style="margin-bottom:4px">WHY THIS MEMORY MATTERS</div>
+      <div style="font-size:13px;color:var(--text-secondary)">${m.why}</div>
+    </div>
+    <div class="detail-aside-title">Cryptographic & Source Lineage</div>
+    <div class="detail-meta-row"><small>Origin Conversation</small><b>${m.source}</b></div>
+    <div class="detail-meta-row"><small>State-Core Record ID</small><b class="mono">${m.id}</b></div>
+    <div class="detail-meta-row"><small>Vault Boundary</small><b class="mono">SQLCipher Page #104 · Verified</b></div>
+  `;
+  $("#drawerOpenSourceBtn").onclick = () => {
+    $("#drawerBackdrop").style.display = "none";
+    openConversationDetail(m.source);
+  };
+  $("#drawerOpenFullBtn").onclick = () => {
+    $("#drawerBackdrop").style.display = "none";
+    openMemoryDetail(m.id);
+  };
+  $("#drawerBackdrop").style.display = "flex";
+}
+
+$("#quickInspectBtn").onclick = () => openQuickDrawer("Engineering-0");
+$("#closeDrawerBtn").onclick = () => ($("#drawerBackdrop").style.display = "none");
+$("#drawerBackdrop").addEventListener("click", e => {
+  if (e.target === $("#drawerBackdrop")) $("#drawerBackdrop").style.display = "none";
+});
+
+document.addEventListener("click", e => {
+  const qd = e.target.closest("[data-quick-drawer]");
+  if (qd) {
+    e.stopPropagation();
+    openQuickDrawer(qd.dataset.quickDrawer);
+  }
+});
+
+/* ============================================================================
+   5. AI PROVIDERS & COLLECTION SCOPE MATRIX
+   ============================================================================ */
+function providerMarkup(name, company, symbol, detail) {
+  const isConn = connected[name];
+  return `
+    <div class="card panel" style="display:flex;flex-direction:column;justify-content:space-between">
+      <div>
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+          <div class="row-icon" style="width:38px;height:38px;font-size:16px">${symbol}</div>
+          <div style="flex:1">
+            <h3 style="margin:0">${name}</h3>
+            <div style="font-size:12px;color:var(--text-muted)">${company}</div>
+          </div>
+          <span class="tag ${isConn ? "solid" : ""}">${isConn ? "CONNECTED" : "DISCONNECTED"}</span>
+        </div>
+        <p style="font-size:12.5px;color:var(--text-secondary);line-height:1.55;margin:0 0 16px">${detail}</p>
+        <button class="btn ${isConn ? "" : "primary"}" style="width:100%;margin-bottom:14px" data-connect="${name}">
+          ${isConn ? "Revoke & Disconnect Provider" : "Authorize Provider via MCP"}
+        </button>
+      </div>
+      <div>
+        <div class="setting-row">
+          <div>
+            <b>MCP Read Capability</b>
+            <small>Retrieve context from scoped collections.</small>
+          </div>
+          <button class="switch ${isConn ? "on" : ""}" data-permission="${name}-read"><i></i></button>
+        </div>
+        <div class="setting-row">
+          <div>
+            <b>MCP Write Proposals</b>
+            <small>Propose curated memories (Default OFF).</small>
+          </div>
+          <button class="switch" data-permission="${name}-write"><i></i></button>
+        </div>
+        <div class="setting-row">
+          <div>
+            <b>Collection & Folder Scope</b>
+            <small>${collections.length} collections · ${approvedFolders.length} folders</small>
+          </div>
+          <button class="btn sm" data-scope="${name}">Scope ACL →</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderProviders() {
+  $("#providerCards").innerHTML =
+    providerMarkup("ChatGPT", "OpenAI · Native Host + MCP", "✳", "Authorized reader and reasoning partner for your granted Mind Place collections.") +
+    providerMarkup("Claude", "Anthropic · Desktop MCP", "✺", "Connect Claude Desktop via local stdio MCP transport to query engineering & research roots.") +
+    providerMarkup("Gemini", "Google · Browser Adapter", "✧", "Optional browser capture and scoped retrieval bridge for Gemini workspace sessions.");
+
+  const count = Object.values(connected).filter(Boolean).length;
+  $("#providerCount").textContent = `${count} / 3`;
+  $("#providerFootLabel").innerHTML = `<strong>${count} connected</strong> · ${3 - count} fenced`;
+}
+renderProviders();
+
+/* ============================================================================
+   5B. APPROVED DOCUMENT ROOTS (ALLOWED FOLDERS) MANAGEMENT LOGIC
+   ============================================================================ */
+function updateGlobalFileMetrics() {
+  const totalFiles = approvedFolders.reduce((acc, f) => acc + f.filesCount, 0);
+  const totalMb = approvedFolders.reduce((acc, f) => acc + f.sizeMb, 0).toFixed(1);
+  const watchingCount = approvedFolders.filter(f => f.status === "Watching").length;
+  const pausedCount = approvedFolders.length - watchingCount;
+
+  $("#navFilesCount").textContent = String(totalFiles);
+  $("#homeFilesStatValue").textContent = String(totalFiles);
+  $("#homeFilesStatFoot").innerHTML = `<strong>${approvedFolders.length} folders</strong> · AES-256 fenced`;
+  $("#filesPageStatCount").textContent = `${approvedFolders.length} Folders · ${totalFiles} Files`;
+  $("#filesPageStatSub").textContent = `${totalMb} MB total bounded extraction · ${watchingCount} watching, ${pausedCount} paused.`;
+  $("#authorizedFoldersBadge").textContent = `${approvedFolders.length} Authorized Folders · ${totalFiles} Indexed Files`;
+}
+
+function renderApprovedFolders() {
+  updateGlobalFileMetrics();
+  const q = ($("#folderSearchInput")?.value || "").trim().toLowerCase();
+  const filtered = approvedFolders.filter(f => {
+    const matchStatus = folderStatusFilter === "all" || f.status === folderStatusFilter;
+    const matchQ = !q || (`${f.path} ${f.collection} ${f.formats.join(" ")} ${f.devProvenance}`).toLowerCase().includes(q);
+    return matchStatus && matchQ;
+  });
+
+  $("#approvedFoldersList").innerHTML = filtered.map(f => {
+    const isWatching = f.status === "Watching";
+    return `
+      <div class="folder-row ${isWatching ? "watching" : ""}" id="folder-row-${f.id}">
+        <div class="folder-main">
+          <div class="folder-glyph" title="${isWatching ? "Active Watcher" : "Watcher Paused"}">▣</div>
+          <div class="folder-info">
+            <div class="folder-path-line">
+              <span class="folder-path">${f.path}</span>
+              <span class="tag solid">${f.collection}</span>
+              ${f.formats.map(fmt => `<span class="tag mono" style="padding:2px 6px;font-size:11px">${fmt}</span>`).join("")}
+            </div>
+            <div class="folder-meta-line">
+              <span><b>${f.filesCount} files</b> (${f.sizeMb.toFixed(1)} MB)</span>
+              <span>·</span>
+              <span>${f.recursive}</span>
+              <span>·</span>
+              <span class="mono" id="folder-sync-label-${f.id}">Synced ${f.lastSynced}</span>
+            </div>
+            <div class="folder-dev-line tech-block">
+              ${f.devProvenance}
+            </div>
+            <div class="folder-scan-bar"><i></i></div>
+          </div>
+        </div>
+        <div class="folder-actions">
+          <button class="watch-pill ${isWatching ? "watching" : "paused"}" data-toggle-watch="${f.id}" title="Click to toggle Watching / Paused state">
+            <i></i>
+            <span>${f.status}</span>
+          </button>
+          <button class="btn sm" data-inspect-folder="${f.id}" title="Inspect bounded files extracted from this folder">Inspect Files (${f.filesCount})</button>
+          <button class="btn sm" data-rescan-folder="${f.id}" title="Trigger bounded directory scan">↻ Rescan</button>
+          <button class="btn sm fence-btn" data-revoke-folder="${f.id}" title="Revoke read permission & fence derived objects">✕ Fence</button>
+        </div>
+      </div>
+    `;
+  }).join("") || `
+    <div style="padding:36px 20px;text-align:center;color:var(--text-muted)">
+      <b style="display:block;color:var(--text-primary);font-size:14px;margin-bottom:4px">No matching authorized folders</b>
+      Click "＋ Add Allowed Folder" to grant Mind Place read access to a local directory.
+    </div>
+  `;
+}
+renderApprovedFolders();
+
+$("#folderSearchInput").oninput = renderApprovedFolders;
+$("#folderStatusTabs").addEventListener("click", e => {
+  const btn = e.target.closest("[data-foldertab]");
+  if (!btn) return;
+  folderStatusFilter = btn.dataset.foldertab;
+  $$("#folderStatusTabs button").forEach(b => b.classList.toggle("active", b === btn));
+  renderApprovedFolders();
+});
+
+function inspectFolderInDrawer(folderId) {
+  const f = approvedFolders.find(x => x.id === folderId);
+  if (!f) return;
+  $("#drawerOverline").textContent = `APPROVED DOCUMENT ROOT · ${f.collection.toUpperCase()}`;
+  $("#drawerTitle").textContent = f.path;
+  $("#drawerBody").innerHTML = `
+    <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+      <span class="tag ${f.status === "Watching" ? "solid" : ""}">${f.status.toUpperCase()}</span>
+      <span class="tag mono">${f.filesCount} Indexed Files · ${f.sizeMb.toFixed(1)} MB</span>
+      <span class="tag mono">${f.recursive}</span>
+    </div>
+    <div style="padding:12px;background:var(--bg-subtle);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);margin-bottom:16px;font-size:12.5px;color:var(--text-secondary)">
+      <b style="color:var(--text-primary);display:block;margin-bottom:3px">Bounded Extraction Authority</b>
+      Files inside this root are parsed locally via <code class="mono">${f.devProvenance}</code>. If you revoke this folder, all ${f.filesCount} files are immediately fenced from MCP retrieval.
+    </div>
+    <div class="detail-aside-title">Indexed Document Objects (${f.sampleFiles.length} previewed of ${f.filesCount})</div>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:18px">
+      ${f.sampleFiles.map(file => `
+        <div style="padding:10px 12px;border:1px solid var(--border-subtle);border-radius:var(--radius-sm);background:var(--bg-surface)">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+            <b class="mono" style="font-size:12.5px">${file.name}</b>
+            <span class="tag mono" style="font-size:10.5px">${file.status}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;font-size:11.5px;color:var(--text-muted)">
+            <span>Size: ${file.size} · Extractor: <code class="mono">${file.extractor}</code></span>
+            <span class="mono">${file.hash}</span>
+          </div>
+        </div>
+      `).join("")}
+    </div>
+    <div class="detail-aside-title">Root Security Actions</div>
+    <div style="display:flex;gap:8px">
+      <button class="btn sm" id="drawerRescanFolderBtn">↻ Rescan Folder Now</button>
+      <button class="btn sm fence-btn" id="drawerRevokeFolderBtn">✕ Revoke & Fence Folder</button>
+    </div>
+  `;
+
+  $("#drawerOpenSourceBtn").textContent = `Open ${f.collection} Collection`;
+  $("#drawerOpenSourceBtn").onclick = () => {
+    $("#drawerBackdrop").style.display = "none";
+    openCollectionDetail(f.collection);
+  };
+  $("#drawerOpenFullBtn").textContent = "Close Inspector";
+  $("#drawerOpenFullBtn").onclick = () => {
+    $("#drawerBackdrop").style.display = "none";
+  };
+
+  $("#drawerRescanFolderBtn").onclick = () => {
+    $("#drawerBackdrop").style.display = "none";
+    triggerFolderRescan(f.id);
+  };
+  $("#drawerRevokeFolderBtn").onclick = () => {
+    $("#drawerBackdrop").style.display = "none";
+    revokeFolderAccess(f.id);
+  };
+
+  $("#drawerBackdrop").style.display = "flex";
+}
+
+function triggerFolderRescan(folderId) {
+  const f = approvedFolders.find(x => x.id === folderId);
+  const row = document.getElementById(`folder-row-${folderId}`);
+  const syncLabel = document.getElementById(`folder-sync-label-${folderId}`);
+  if (!f || !row) return;
+
+  row.classList.add("scanning");
+  if (syncLabel) syncLabel.textContent = "Scanning directory...";
+  toast(`Scanning ${f.path}…`);
+
+  setTimeout(() => {
+    if (syncLabel) syncLabel.textContent = "Extracting bounded text (PDF/OOXML/MD)...";
+  }, 550);
+
+  setTimeout(() => {
+    row.classList.remove("scanning");
+    f.lastSynced = "Just now";
+    renderApprovedFolders();
+    toast(`Synced ${f.filesCount} files in ${f.path}`);
+  }, 1250);
+}
+
+function revokeFolderAccess(folderId) {
+  const f = approvedFolders.find(x => x.id === folderId);
+  if (!f) return;
+  approvedFolders = approvedFolders.filter(x => x.id !== folderId);
+  renderApprovedFolders();
+  renderProviders();
+  toast(`Revocation Fence enforced: ${f.path} removed & ${f.filesCount} files fenced`);
+}
+
+$("#rescanAllFoldersBtn").onclick = () => {
+  approvedFolders.forEach(f => {
+    const row = document.getElementById(`folder-row-${f.id}`);
+    const lbl = document.getElementById(`folder-sync-label-${f.id}`);
+    if (row) row.classList.add("scanning");
+    if (lbl) lbl.textContent = "Scanning directory & USN journal...";
+  });
+  toast(`Rescanning all ${approvedFolders.length} authorized folders…`);
+  setTimeout(() => {
+    approvedFolders.forEach(f => { f.lastSynced = "Just now"; });
+    renderApprovedFolders();
+    toast("All authorized folders verified & synchronized");
+  }, 1200);
+};
+
+// Open / Close "Add Allowed Folder" Modal
+function openAddFolderModal() {
+  go("files");
+  $("#newFolderPath").value = "D:\\Projects\\Soramula-Docs";
+  $("#newFolderCollection").value = "Engineering";
+  $("#newFolderWatchMode").value = "Watching";
+  $("#extMd").checked = true;
+  $("#extPdf").checked = true;
+  $("#extDocx").checked = true;
+  $("#ruleRecursive").checked = true;
+  $("#ruleIgnoreBuild").checked = true;
+  $("#addFolderBackdrop").style.display = "flex";
+  setTimeout(() => $("#newFolderPath").focus(), 20);
+}
+
+function closeAddFolderModal() {
+  $("#addFolderBackdrop").style.display = "none";
+}
+
+$("#openAddFolderModalBtn").onclick = openAddFolderModal;
+$("#openAddFolderModalTop").onclick = openAddFolderModal;
+$("#homeAddFolderQuickBtn").onclick = openAddFolderModal;
+$("#closeAddFolderModal").onclick = closeAddFolderModal;
+$("#cancelAddFolderBtn").onclick = closeAddFolderModal;
+$("#addFolderBackdrop").addEventListener("click", e => {
+  if (e.target === $("#addFolderBackdrop")) closeAddFolderModal();
+});
+
+$("#folderPresetChips").addEventListener("click", e => {
+  const chip = e.target.closest("[data-preset-path]");
+  if (!chip) return;
+  $("#newFolderPath").value = chip.dataset.presetPath;
+  if (chip.dataset.presetCol) {
+    $("#newFolderCollection").value = chip.dataset.presetCol;
+  }
+});
+
+$("#confirmAddFolderBtn").onclick = () => {
+  const rawPath = $("#newFolderPath").value.trim() || "D:\\Projects\\Soramula-Docs";
+  const col = $("#newFolderCollection").value || "Engineering";
+  const watchMode = $("#newFolderWatchMode").value || "Watching";
+  const isRec = $("#ruleRecursive").checked;
+
+  const formats = [];
+  if ($("#extPdf").checked) formats.push("PDF");
+  if ($("#extDocx").checked) formats.push("DOCX");
+  if ($("#extMd").checked) formats.push("MD");
+  if (formats.length === 0) formats.push("MD");
+
+  const newId = "root_01h" + Math.random().toString(36).slice(2, 5);
+  const addedFilesCount = 14;
+  const addedSizeMb = 11.6;
+  const baseName = rawPath.split(/[\\/]/).filter(Boolean).pop() || "workspace";
+
+  const newFolder = {
+    id: newId,
+    path: rawPath,
+    collection: col,
+    filesCount: addedFilesCount,
+    sizeMb: addedSizeMb,
+    formats,
+    status: watchMode,
+    recursive: isRec ? "Yes (Recursive)" : "No (Top-level)",
+    lastSynced: "Scanning...",
+    devProvenance: `${newId} · NTFS USN Journal #${Math.floor(884200 + Math.random() * 900)} · document-core::${formats.map(x => x.toLowerCase()).join(",")}`,
+    sampleFiles: [
+      { name: `${baseName.toLowerCase()}-architecture-overview.pdf`, size: "4.8 MB", extractor: "pdf.rs", status: "Bounded · Indexed", hash: "sha256:6b21...90a1" },
+      { name: `${baseName.toLowerCase()}-implementation-plan.docx`, size: "2.3 MB", extractor: "ooxml.rs", status: "Bounded · Indexed", hash: "sha256:8e40...12c9" },
+      { name: `README-notes.md`, size: "32 KB", extractor: "utf8", status: "Bounded · Indexed", hash: "sha256:1f09...77b4" }
+    ]
+  };
+
+  approvedFolders.unshift(newFolder);
+  closeAddFolderModal();
+  folderStatusFilter = "all";
+  $$("#folderStatusTabs button").forEach(b => b.classList.toggle("active", b.dataset.foldertab === "all"));
+  renderApprovedFolders();
+  renderProviders();
+  triggerFolderRescan(newId);
+};
+
+document.addEventListener("click", e => {
+  const toggleWatch = e.target.closest("[data-toggle-watch]");
+  if (toggleWatch) {
+    const f = approvedFolders.find(x => x.id === toggleWatch.dataset.toggleWatch);
+    if (f) {
+      f.status = f.status === "Watching" ? "Paused" : "Watching";
+      renderApprovedFolders();
+      toast(`${f.path} is now ${f.status}`);
+    }
+    return;
+  }
+
+  const inspectBtn = e.target.closest("[data-inspect-folder]");
+  if (inspectBtn) {
+    inspectFolderInDrawer(inspectBtn.dataset.inspectFolder);
+    return;
+  }
+
+  const rescanBtn = e.target.closest("[data-rescan-folder]");
+  if (rescanBtn) {
+    triggerFolderRescan(rescanBtn.dataset.rescanFolder);
+    return;
+  }
+
+  const revokeBtn = e.target.closest("[data-revoke-folder]");
+  if (revokeBtn) {
+    revokeFolderAccess(revokeBtn.dataset.revokeFolder);
+    return;
+  }
+
+  const c = e.target.closest("[data-connect]");
+  if (c) {
+    const n = c.dataset.connect;
+    connected[n] = !connected[n];
+    renderProviders();
+    renderSetup();
+    toast(`${n} ${connected[n] ? "authorized via MCP" : "revoked and fenced"}`);
+    return;
+  }
+  const sw = e.target.closest(".switch:not(#settingsTechSwitch):not(#settingsDensitySwitch)");
+  if (sw) {
+    sw.classList.toggle("on");
+    toast("Capability boundary updated");
+    return;
+  }
+  const sc = e.target.closest("[data-scope]");
+  if (sc) {
+    const prov = sc.dataset.scope;
+    modal(
+      `${prov} — Collection & Folder Scope Matrix`,
+      `<p style="margin-top:0">Select which memory collections and authorized local folders <b>${prov}</b> is permitted to read during MCP tool invocations:</p>
+       <div class="overline" style="margin:10px 0 6px">MEMORY COLLECTIONS (${collections.length})</div>
+       <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px">
+         ${collections.map((col, idx) => `
+           <label style="display:flex;align-items:center;justify-content:space-between;padding:7px 11px;border:1px solid var(--border-subtle);border-radius:6px">
+             <span><b>${col.name}</b> <small style="color:var(--text-muted)">(${col.count} memories)</small></span>
+             <input type="checkbox" ${idx < 3 ? "checked" : ""} style="accent-color:var(--text-primary);width:15px;height:15px">
+           </label>
+         `).join("")}
+       </div>
+       <div class="overline" style="margin:10px 0 6px">APPROVED DOCUMENT ROOTS (${approvedFolders.length})</div>
+       <div style="display:flex;flex-direction:column;gap:6px">
+         ${approvedFolders.map((f, idx) => `
+           <label style="display:flex;align-items:center;justify-content:space-between;padding:7px 11px;border:1px solid var(--border-subtle);border-radius:6px">
+             <span class="mono" style="font-size:11.5px">${f.path} <small style="color:var(--text-muted)">(${f.filesCount} files)</small></span>
+             <input type="checkbox" ${idx < 2 ? "checked" : ""} style="accent-color:var(--text-primary);width:15px;height:15px">
+           </label>
+         `).join("")}
+       </div>`,
+      "INTEGRATION-CORE · ACL SCOPE"
+    );
+  }
+});
+
+/* ============================================================================
+   6. SETUP WIZARD & VAULT DIALOGS
+   ============================================================================ */
+$("#encryptionMode").onchange = e => {
+  $("#activeProfileStat").textContent = e.target.value;
+  toast(`Encryption profile switched to ${e.target.value}`);
+};
+
+$("#secureAll").onclick = () => modal(
+  "Global Recovery Fence & Integrity Check",
+  `<div class="mono" style="background:var(--bg-subtle);padding:12px;border-radius:6px;line-height:1.8">
+    ✓ state-core (schema_v9): 342 records verified<br>
+    ✓ index-core (schema_v4): FTS5 + Graphify Gen-14 coherent<br>
+    ✓ archive-core: 128 conversation transcripts checksum OK<br>
+    ✓ security-core: SQLCipher WAL checkpoint fenced atomically
+   </div>`,
+  "MP-4L1 / MP-9A QUALIFICATION"
+);
+
+$("#vaultDetails").onclick = () => modal(
+  "Cryptographic Vault Manifest",
+  `<p>Mind Place encrypts your primary SQLite state database, cold archive blobs, and derived indexes using <b>SQLCipher AES-256-CBC/GCM</b> primitives.</p>
+   <div class="mono" style="background:var(--bg-subtle);padding:12px;border-radius:6px;line-height:1.7">
+     Cipher: AES-256 · KDF: PBKDF2-HMAC-SHA512<br>
+     Page Size: 4096 bytes · HMAC Check: SHA512<br>
+     Recovery Boundary: Atomic fail-closed fence
+   </div>`,
+  "SECURITY-CORE MANIFEST"
+);
+
+$("#askAI").onclick = () => modal(
+  "Query Your Shared-Brain Archive",
+  `<p>Ask a question across all 128 conversations and 342 curated memories. Answers synthesize only verified local context and preserve exact source links.</p>
+   <input class="input" style="width:100%;margin-top:8px" placeholder="e.g., What are the fidelity constraints for BOMC Exact export?" value="What are the fidelity constraints for BOMC Exact export?">
+   <div style="margin-top:12px;padding:12px;background:var(--bg-subtle);border-radius:6px;font-size:12.5px">
+     <b>Synthesized Answer (from Engineering · 0.98 rank):</b><br>
+     BOMC Exact must preserve canonical geometry, material assignment, and accepted visual output while reducing package size relative to the source SKP.
+   </div>`,
+  "CONTEXT ENGINE RETRIEVAL"
+);
+
+$("#newConversation").onclick = () => {
+  toast("Simulated browser capture: +1 conversation synced from capture-host");
+};
+
+$("#createCollection").onclick = () => modal(
+  "Create Curated Memory Collection",
+  `<label style="display:block;font-size:12px;font-weight:600;margin-bottom:6px">Collection Name</label>
+   <input class="input" style="width:100%;margin-bottom:12px" placeholder="e.g., Architecture Benchmarks">
+   <label style="display:block;font-size:12px;font-weight:600;margin-bottom:6px">Description & Auto-Classification Rule</label>
+   <input class="input" style="width:100%" placeholder="Memories relating to performance, scale qualification, and latency.">`,
+  "STATE-CORE COLLECTION"
+);
+
+function renderSetup() {
+  $("#setupStepIndicator").textContent = setupStep + 1;
+  $$("#setupSteps .step-item").forEach((el, i) => {
+    el.classList.toggle("active", i === setupStep);
+    el.classList.toggle("done", i < setupStep);
+    el.querySelector(".step-num").textContent = i < setupStep ? "✓" : i + 1;
+  });
+
+  let html = "";
+  if (setupStep === 0) {
+    html = `
+      <div>
+        <div class="overline">STEP 01 · ARCHITECTURE OVERVIEW</div>
+        <h2 style="font-size:22px;margin:8px 0">Welcome to Mind Place.</h2>
+        <p style="color:var(--text-secondary);max-width:600px">Your AI conversations, local documents, and evolving thoughts deserve a single, private, local-first home that works across every AI tool you use.</p>
+        <div class="grid" style="grid-template-columns:repeat(3,1fr);margin-top:24px">
+          <div class="card panel"><div class="stat-icon">▣</div><h3 style="margin-top:12px">1. Local Vault</h3><div class="panel-sub" style="margin:0">SQLCipher encrypted storage under your physical control.</div></div>
+          <div class="card panel"><div class="stat-icon">⌘</div><h3 style="margin-top:12px">2. Scoped MCP</h3><div class="panel-sub" style="margin:0">Grant ChatGPT, Claude, or Gemini granular read access.</div></div>
+          <div class="card panel"><div class="stat-icon">◇</div><h3 style="margin-top:12px">3. Hive Topology</h3><div class="panel-sub" style="margin:0">Trace every insight back to its exact source message.</div></div>
+        </div>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;padding-top:18px;border-top:1px solid var(--border-subtle)">
+        <span class="mono" style="color:var(--text-muted)">Estimated setup time: 90 seconds</span>
+        <button class="btn primary" data-setup-next>Initialize Vault →</button>
+      </div>`;
+  } else if (setupStep === 1) {
+    html = `
+      <div>
+        <div class="overline">STEP 02 · SECURITY-CORE INITIALIZATION</div>
+        <h2 style="font-size:22px;margin:8px 0">Configure Your Encrypted Vault</h2>
+        <p style="color:var(--text-secondary);max-width:600px">Set your master passphrase to derive the 256-bit SQLCipher key. All transcripts, memories, and FTS5 indexes are fenced inside this boundary.</p>
+        <div class="grid two-col" style="margin-top:20px">
+          <div style="display:flex;flex-direction:column;gap:12px">
+            <div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Vault Identifier</label><input class="input" style="width:100%" value="primary-local-vault"></div>
+            <div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Owner Passphrase</label><input class="input" type="password" style="width:100%" value="••••••••••••••••"></div>
+          </div>
+          <div class="card panel" style="background:var(--bg-subtle)">
+            <h3>Protected Subsystems</h3>
+            <div class="setting-row"><b>Conversation Archive</b><span class="tag solid">AES-256</span></div>
+            <div class="setting-row"><b>Curated Memories</b><span class="tag solid">AES-256</span></div>
+            <div class="setting-row"><b>NTFS Document Objects</b><span class="tag solid">AES-256</span></div>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;padding-top:18px;border-top:1px solid var(--border-subtle)">
+        <button class="btn" data-setup-back>← Back</button>
+        <button class="btn primary" data-setup-next>Continue to AI Providers →</button>
+      </div>`;
+  } else if (setupStep === 2) {
+    html = `
+      <div>
+        <div class="overline">STEP 03 · INTEGRATION-CORE</div>
+        <h2 style="font-size:22px;margin:8px 0">Authorize AI Providers</h2>
+        <p style="color:var(--text-secondary);max-width:600px">Choose which AI providers can connect to your local MCP endpoint. Every provider starts with Default-Deny permissions.</p>
+        <div style="display:flex;flex-direction:column;gap:10px;margin-top:18px">
+          ${["ChatGPT", "Claude", "Gemini"].map((n, i) => `
+            <div class="card" style="padding:14px 18px;display:flex;align-items:center;justify-content:space-between">
+              <div style="display:flex;align-items:center;gap:12px">
+                <span class="row-icon">${["✳", "✺", "✧"][i]}</span>
+                <div>
+                  <b style="font-size:14px">${n}</b>
+                  <div style="font-size:12px;color:var(--text-muted)">${["OpenAI", "Anthropic", "Google"][i]} · ${connected[n] ? "Authorized (Read-Scoped)" : "Disconnected"}</div>
+                </div>
+              </div>
+              <button class="btn ${connected[n] ? "" : "primary"}" data-connect="${n}">${connected[n] ? "Disconnect" : "Authorize"}</button>
+            </div>
+          `).join("")}
+        </div>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;padding-top:18px;border-top:1px solid var(--border-subtle)">
+        <button class="btn" data-setup-back>← Back</button>
+        <button class="btn primary" data-setup-next>Verify First Result →</button>
+      </div>`;
+  } else {
+    html = `
+      <div>
+        <div class="overline">STEP 04 · READY FOR OPERATION</div>
+        <h2 style="font-size:22px;margin:8px 0">Your Knowledge OS is Online.</h2>
+        <p style="color:var(--text-secondary);max-width:600px">All local crates are initialized. Jump directly into your conversation archive or explore the spatial Hive Mind topology.</p>
+        <div class="grid two-col" style="margin-top:24px">
+          <button class="card panel" style="text-align:left;cursor:pointer" data-goto="conversations">
+            <div class="stat-icon">▤</div>
+            <h3 style="margin-top:12px">Open Conversations Archive</h3>
+            <div class="panel-sub" style="margin:0">Inspect 128 captured multi-provider transcripts.</div>
+          </button>
+          <button class="card panel" style="text-align:left;cursor:pointer" data-goto="hive">
+            <div class="stat-icon">⌘</div>
+            <h3 style="margin-top:12px">Launch Hive Mind Graph</h3>
+            <div class="panel-sub" style="margin:0">Navigate 33 concept clusters and 67 provenance links.</div>
+          </button>
+        </div>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;padding-top:18px;border-top:1px solid var(--border-subtle)">
+        <button class="btn" data-setup-back>← Back</button>
+        <button class="btn primary" data-goto="home">Finish & Open Command Center →</button>
+      </div>`;
+  }
+  $("#setupPanel").innerHTML = html;
+}
+renderSetup();
+
+document.addEventListener("click", e => {
+  if (e.target.closest("[data-setup-next]")) { setupStep = Math.min(3, setupStep + 1); renderSetup(); }
+  if (e.target.closest("[data-setup-back]")) { setupStep = Math.max(0, setupStep - 1); renderSetup(); }
+  const stepBtn = e.target.closest("[data-step]");
+  if (stepBtn) { setupStep = Number(stepBtn.dataset.step); renderSetup(); }
+});
+
+/* ============================================================================
+   7. DETAIL READERS (CONVERSATION, COLLECTION, MEMORY)
+   ============================================================================ */
+function openConversationDetail(title) {
+  const c = conversations.find(x => x[0] === title) ||
+            conversations.find(x => x[0].toLowerCase().includes(String(title).toLowerCase()));
+  if (!c) {
+    modal("Source Record Not Found", `The source "${title}" is referenced by provenance metadata.`, "SOURCE TRACE");
+    return;
+  }
+
+  const sample = [
+    ["user", "I want to understand the current direction and what is already established. What should we preserve, and what still needs work?"],
+    ["assistant", "The important distinction is between what has been demonstrated and what is still a target. We should preserve the accepted behavior, make remaining requirements explicit, and avoid treating an unverified path as complete."],
+    ["user", "Can you turn that into something actionable?"],
+    ["assistant", "Start with the acceptance criteria, attach each one to evidence, and keep the source traceable. Any unresolved dependency should remain visible instead of being silently assumed complete."]
+  ];
+
+  const tailored = {
+    "BOMC Builder — export architecture": [
+      ["user", "The goal is to make BOMC Exact faster and smaller than the source SKP without losing fidelity. What should the acceptance gate measure?"],
+      ["assistant", "Measure package size and export duration independently for each model, then compare canonical geometry and material assignments. A smaller package is not a pass if the Exact output changes."],
+      ["user", "What about visual quality?"],
+      ["assistant", "Keep visual review separate from structural equivalence. An independent architect should inspect representative outputs and record visible differences, artifacts, and practical acceptability."]
+    ],
+    "Research: semantic retrieval": [
+      ["user", "How should memory retrieval behave when a query matches several related conversations?"],
+      ["assistant", "Return the strongest relevant memories with provenance. Keep the source conversation, provider, timestamp, and extraction path attached so the user can verify the result."],
+      ["user", "Should related memories be merged automatically?"],
+      ["assistant", "Only when the evidence supports a stable relationship. Keep ambiguous or isolated items visible and avoid forcing them into a cluster."]
+    ],
+    "Hive graph product direction": [
+      ["user", "I want the graph to feel like a real knowledge space, not a static mind map."],
+      ["assistant", "Use dense local clusters, selective cross-links, and spatial exploration. Hover should reveal context; selecting a node should open its branch and source trail."],
+      ["user", "What happens to memories that do not connect?"],
+      ["assistant", "Keep them as isolated memories. Uncertainty should be visible rather than hidden by invented relationships."]
+    ]
+  };
+
+  const messages = tailored[c[0]] || sample;
+  go("conversation-detail");
+  $("#conversationDetailTitle").textContent = c[0];
+  $("#conversationDetailOverline").textContent = `CONVERSATION ARCHIVE / ${c[1].toUpperCase()} · ${c[4]}`;
+  $("#conversationDetailSubtitle").textContent = `${c[1]} · Collection: ${c[2]} · Captured ${c[3]}`;
+  $("#transcriptMessageCount").textContent = `${messages.length} messages`;
+
+  $("#transcriptBody").innerHTML = messages.map((m, i) => `
+    <div class="message">
+      <div class="message-head">
+        <span class="message-avatar">${m[0] === "user" ? "KA" : c[1][0]}</span>
+        <b>${m[0] === "user" ? "Kais Abiyyi (Owner)" : c[1]}</b>
+        <small>msg_${i + 1} · ${i === 0 ? "Initial Prompt" : i === messages.length - 1 ? "Final Synthesis" : "Turn"}</small>
+      </div>
+      <div class="message-content"><p>${m[1]}</p></div>
+    </div>
+  `).join("");
+
+  $("#conversationMetadata").innerHTML = [
+    ["AI Provider", c[1]],
+    ["Collection Scope", c[2]],
+    ["Captured Timestamp", c[3]],
+    ["Content Hash", c[4]],
+    ["Storage State", "Encrypted in archive-core"]
+  ].map(x => `<div class="detail-meta-row"><small>${x[0]}</small><b class="${x[0].includes('Hash') ? 'mono' : ''}">${x[1]}</b></div>`).join("");
+
+  const related = allMemories().filter(m => m.source === c[0] || m.collection === c[2]).slice(0, 4);
+  $("#conversationRelatedMemories").innerHTML = related.map(m => `
+    <button class="related-memory" data-open-memory="${m.id}">
+      <b>${m.title}</b>
+      <small>${m.collection} · ${m.type} · rank ${m.score}</small>
+    </button>
+  `).join("");
+
+  $("#copyConversation").onclick = () => toast("Full transcript copied to clipboard");
+  $("#starConversation").onclick = () => {
+    if (starredConvs.has(c[0])) starredConvs.delete(c[0]);
+    else starredConvs.add(c[0]);
+    renderConversations();
+    toast(starredConvs.has(c[0]) ? "Conversation starred" : "Removed from starred");
+  };
+  $("#archiveConversation").onclick = () => toast("Conversation flagged for cold archive tier");
+}
+
+function openCollectionDetail(name) {
+  const col = collections.find(c => c.name === name) || collections[0];
+  go("collection-detail");
+  $("#collectionDetailTitle").textContent = col.name;
+  $("#collectionDetailSubtitle").textContent = col.desc;
+  $("#collectionDetailMeta").innerHTML = `
+    <span class="tag solid">${col.count} total memories</span>
+    <span class="tag mono">Authority Density: ${col.pct}%</span>
+    <span class="tag">Scoped for MCP Retrieval</span>
+  `;
+
+  const renderList = () => {
+    const q = ($("#collectionMemorySearch").value || "").toLowerCase();
+    const items = (memoryData[col.name] || [])
+      .map((m, i) => ({ id: `${col.name}-${i}`, title: m[0], source: m[2], type: m[3], updated: m[4], score: m[6] || "0.94" }))
+      .filter(m => (`${m.title} ${m.source} ${m.type}`).toLowerCase().includes(q));
+
+    $("#collectionMemoryCount").textContent = `${items.length} shown`;
+    $("#collectionMemoryList").innerHTML = items.map(m => `
+      <div class="list-row" style="justify-content:space-between">
+        <div style="display:flex;align-items:center;gap:12px;flex:1;cursor:pointer" data-open-memory="${m.id}">
+          <span class="row-icon">${memoryIcons[col.name] || "◇"}</span>
+          <span class="row-copy">
+            <b>${m.title}</b>
+            <small>${m.type} · Source: ${m.source} · <span class="mono">score:${m.score}</span></small>
+          </span>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <span class="mono" style="color:var(--text-muted)">${m.updated}</span>
+          <button class="btn sm" data-quick-drawer="${m.id}">Peek</button>
+          <button class="btn sm" data-open-memory="${m.id}">Inspect →</button>
+        </div>
+      </div>
+    `).join("") || `<div style="padding:28px;text-align:center;color:var(--text-muted)">No matching memories in this collection.</div>`;
+  };
+
+  $("#collectionMemorySearch").value = "";
+  $("#collectionMemorySearch").oninput = renderList;
+  renderList();
+}
+
+function openMemoryDetail(id) {
+  const m = allMemories().find(x => x.id === id);
+  if (!m) return;
+  go("memory-detail");
+  $("#memoryDetailOverline").textContent = `CURATED MEMORY / ${m.collection.toUpperCase()} / ${m.id}`;
+  $("#memoryDetailTitle").textContent = m.title;
+  $("#memoryDetailSubtitle").textContent = `${m.type} · Last verified ${m.updated} · Hybrid Score ${m.score}`;
+  $("#memoryTypeTag").textContent = m.type;
+  $("#memoryUpdatedAt").textContent = `Verified ${m.updated}`;
+  $("#memoryContent").innerHTML = `
+    <p>${m.content}</p>
+    <h3 style="font-size:15px;margin:20px 0 8px">Operational Invariants & Usage</h3>
+    <ul style="padding-left:20px;margin:0">
+      <li>Retain bidirectional provenance link to origin conversation (<b>${m.source}</b>).</li>
+      <li>Expose to authorized MCP clients only when <b>${m.collection}</b> scope is granted.</li>
+      <li>Re-evaluate authority weight if underlying project constraints are superseded.</li>
+    </ul>
+  `;
+  $("#memoryExplanation").textContent = m.why;
+  $("#memoryMetadata").innerHTML = [
+    ["Collection", m.collection],
+    ["Record Classification", m.type],
+    ["Hybrid Ranking Score", `${m.score} (BM25 + Cosine)`],
+    ["Updated Timestamp", m.updated],
+    ["Vault Protection", "SQLCipher Encrypted"]
+  ].map(x => `<div class="detail-meta-row"><small>${x[0]}</small><b>${x[1]}</b></div>`).join("");
+
+  $("#memorySource").innerHTML = `
+    <button class="related-memory" data-open-conv="${m.source}">
+      <b>${m.source}</b>
+      <small>Click to open original conversation transcript ↗</small>
+    </button>
+  `;
+
+  const related = allMemories().filter(x => x.id !== m.id && (x.collection === m.collection || x.source === m.source)).slice(0, 3);
+  $("#memoryRelated").innerHTML = related.map(x => `
+    <button class="related-memory" data-open-memory="${x.id}">
+      <b>${x.title}</b>
+      <small>${x.collection} · ${x.type}</small>
+    </button>
+  `).join("");
+
+  $("#memoryBackButton").onclick = () => openCollectionDetail(m.collection);
+  $("#copyMemory").onclick = () => toast("Curated memory copied to clipboard");
+  $("#pinMemory").onclick = () => toast("Memory pinned to top of MCP context window");
+}
+
+document.addEventListener("click", e => {
+  const convEl = e.target.closest("[data-open-conv]");
+  if (convEl) { openConversationDetail(convEl.dataset.openConv); return; }
+  const colEl = e.target.closest("[data-collection]");
+  if (colEl) { openCollectionDetail(colEl.dataset.collection); return; }
+  const memEl = e.target.closest("[data-open-memory]");
+  if (memEl) { openMemoryDetail(memEl.dataset.openMemory); return; }
+  const backEl = e.target.closest("[data-detail-back]");
+  if (backEl) { go(backEl.dataset.detailBack); return; }
+});
+
+/* ============================================================================
+   8. HIVE MIND — MONOCHROME ARCHITECTURAL TOPOLOGY CANVAS (33 NODES, 67 EDGES)
+   ============================================================================ */
+const hiveCanvas = $("#hiveCanvas");
+const hctx = hiveCanvas.getContext("2d");
+const hiveMain = $(".hive-main");
+const hiveTooltip = $("#hiveTooltip");
+
+const nodes = [
+  {id:"mind",title:"Mind Place",type:"Core intelligence",layer:"all",x:600,y:400,r:18,sub:"The living map of your knowledge.",summary:"Mind Place connects your conversations into a navigable knowledge universe. It does not just remember what was said — it helps reveal how ideas, projects and decisions relate to one another over time.",sources:12,branches:["memory","archive","graph","cross","permissions"],tag:"ROOT / CENTRAL INTELLIGENCE"},
+  {id:"memory",title:"Agent Memory",type:"System",layer:"research",x:480,y:270,r:13,sub:"Context that survives between sessions.",summary:"A continuity layer that turns past conversations into durable context. Agents can retrieve relevant history instead of starting from zero every time.",sources:18,branches:["context","retrieval","sync","identity"],tag:"SYSTEM / MEMORY"},
+  {id:"mcp",title:"MCP Protocol",type:"System",layer:"research",x:780,y:260,r:12,sub:"A shared doorway into the archive.",summary:"The protocol surface that lets external AI clients discover tools and work with authorized Mind Place data. Access is scoped per client and collection.",sources:9,branches:["permissions","identity","retrieval"],tag:"SYSTEM / CONNECTIVITY"},
+  {id:"context",title:"Context Engine",type:"System",layer:"research",x:620,y:155,r:10,sub:"Turning raw history into useful context.",summary:"Context assembly selects relevant evidence, preserves provenance and packages it into something an agent can actually use.",sources:14,branches:["retrieval","archive","semantic"],tag:"SYSTEM / CONTEXT"},
+  {id:"vault",title:"Encrypted Vault",type:"System",layer:"research",x:820,y:410,r:11,sub:"Private by default. Controlled by you.",summary:"The protected storage boundary for conversations, revisions, indexes and derived knowledge. The vault is the source of truth; the Hive is a navigable interpretation.",sources:7,branches:["permissions","identity","archive"],tag:"SYSTEM / TRUST"},
+  {id:"retrieval",title:"Retrieval Architecture",type:"System",layer:"research",x:930,y:325,r:11,sub:"Finding the right memory at the right moment.",summary:"Search, ranking, exact fetch and context building connect an agent's current question to the original evidence in the archive.",sources:16,branches:["context","semantic","archive"],tag:"SYSTEM / RETRIEVAL"},
+  {id:"permissions",title:"Permission Model",type:"Decision",layer:"research",x:930,y:470,r:9,sub:"Who can see or change what?",summary:"A scoped authorization model for clients, collections and operations. Read and write are distinct capabilities, with default-deny behavior and revocation.",sources:5,branches:["identity","mcp","vault"],tag:"DECISION / SECURITY"},
+  {id:"identity",title:"Client Identity",type:"System",layer:"research",x:740,y:520,r:9,sub:"Every request has an accountable origin.",summary:"Identity binds each provider client to its own grants and audit trail. It prevents one connected agent from inheriting another agent's authority.",sources:6,branches:["permissions","mcp","memory"],tag:"SYSTEM / IDENTITY"},
+  {id:"archive",title:"Conversation Archive",type:"Knowledge",layer:"research",x:350,y:440,r:14,sub:"The original material behind every insight.",summary:"A structured archive of conversations and revisions. Each derived node should retain a trace back to the message, source and moment that created it.",sources:42,branches:["memory","timeline","sources","graph"],tag:"KNOWLEDGE / SOURCE"},
+  {id:"graph",title:"Knowledge Graph",type:"Knowledge",layer:"research",x:420,y:610,r:11,sub:"Relationships, not folders.",summary:"A graph of concepts and entities extracted from the archive. Its value comes from exposing useful relationships and letting people explore them — not from the graph existing by itself.",sources:21,branches:["cross","ideas","timeline"],tag:"KNOWLEDGE / STRUCTURE"},
+  {id:"cross",title:"Cross-project insight",type:"Idea",layer:"research",x:600,y:620,r:12,sub:"A thread connecting separate worlds.",summary:"A recurring idea can appear in different conversations and projects. Cross-project links reveal that continuity, even when the original discussions were months apart.",sources:11,branches:["sibambo","ideas","decisions","graph"],tag:"INSIGHT / CROSS-PROJECT"},
+  {id:"ideas",title:"Emerging concepts",type:"Idea",layer:"research",x:210,y:270,r:10,sub:"Small thoughts that become larger systems.",summary:"Unfinished ideas, recurring questions and concepts that gain meaning as new conversations connect to them.",sources:13,branches:["research","graph","cross"],tag:"IDEA / CONCEPT"},
+  {id:"research",title:"Research threads",type:"Idea",layer:"research",x:155,y:480,r:10,sub:"Questions that evolve through evidence.",summary:"Research conversations linked by shared questions, evidence and conclusions. The thread can be followed from the first question to the latest decision.",sources:19,branches:["archive","timeline","ideas"],tag:"IDEA / RESEARCH"},
+  {id:"timeline",title:"Evolution over time",type:"Idea",layer:"research",x:310,y:730,r:9,sub:"See how a thought changed.",summary:"A temporal view of concepts, projects and decisions. It distinguishes the original idea from later revisions and shows what changed along the way.",sources:8,branches:["decisions","archive","graph"],tag:"IDEA / TIMELINE"},
+  {id:"decisions",title:"Decision trails",type:"Decision",layer:"work",x:430,y:770,r:11,sub:"The reasoning behind what you chose.",summary:"A decision is more than its final outcome. This trail preserves alternatives, constraints, evidence and the conversations that led to the choice.",sources:15,branches:["timeline","sibambo","research"],tag:"DECISION / HISTORY"},
+  {id:"sources",title:"Source provenance",type:"Knowledge",layer:"research",x:570,y:510,r:9,sub:"Every insight has an origin.",summary:"A transparent chain from a graph node to its source conversation, message, timestamp and revision. This is what makes exploration trustworthy.",sources:24,branches:["archive","retrieval","timeline"],tag:"KNOWLEDGE / PROVENANCE"},
+  {id:"semantic",title:"Semantic connections",type:"System",layer:"research",x:470,y:110,r:9,sub:"Meaning can connect different words.",summary:"Semantic similarity helps identify concepts that are related even when they use different language. It should suggest connections, not silently declare them as facts.",sources:10,branches:["context","graph","research"],tag:"SYSTEM / SEMANTICS"},
+  {id:"sync",title:"Memory synchronization",type:"System",layer:"research",x:880,y:130,r:9,sub:"Keep the archive coherent across sources.",summary:"A controlled ingestion and synchronization pipeline that tracks source identity, revisions and completeness without overwriting the original record.",sources:7,branches:["memory","archive","mcp"],tag:"SYSTEM / SYNC"},
+  {id:"sibambo",title:"Sibambo",type:"Project",layer:"work",x:820,y:650,r:13,sub:"A connected engineering workspace.",summary:"A project knowledge cluster linking product goals, geometry processing, exporter behavior, viewer implementation and benchmark evidence.",sources:23,branches:["bomc","viewer","export","cross","decisions"],tag:"PROJECT / ENGINEERING"},
+  {id:"bomc",title:"BOMC Builder",type:"Project",layer:"work",x:1010,y:680,r:11,sub:"Structured model export and optimization.",summary:"A project branch containing exporter architecture, model fidelity constraints, size optimization and acceptance evidence.",sources:17,branches:["sibambo","export","viewer"],tag:"PROJECT / BUILDER"},
+  {id:"viewer",title:"3D Model Viewer",type:"Project",layer:"work",x:1050,y:540,r:9,sub:"Making model data explorable.",summary:"A product surface for inspecting 3D model output, comparing states and understanding the structure behind a model.",sources:9,branches:["sibambo","bomc"],tag:"PROJECT / VISUALIZATION"},
+  {id:"export",title:"Export pipeline",type:"Project",layer:"work",x:700,y:750,r:9,sub:"From source model to compact output.",summary:"A pipeline that transforms source geometry into a portable representation while preserving exactness, provenance and predictable behavior.",sources:12,branches:["sibambo","bomc","decisions"],tag:"PROJECT / PIPELINE"},
+  {id:"learning",title:"Learning systems",type:"Idea",layer:"learning",x:1080,y:100,r:9,sub:"Knowledge that compounds with practice.",summary:"A cluster of learning threads that connect concepts, exercises, references and progress over time.",sources:6,branches:["ideas","research","cross"],tag:"IDEA / LEARNING"},
+  {id:"creative",title:"Creative work",type:"Idea",layer:"learning",x:1050,y:220,r:10,sub:"Patterns across creative interests.",summary:"A space for creative threads and recurring motifs. A useful graph can reveal connections without forcing every interest into the same category.",sources:8,branches:["learning","ideas","cross"],tag:"IDEA / CREATIVE"},
+  {id:"open",title:"Open questions",type:"Decision",layer:"research",x:170,y:680,r:9,sub:"Questions that still need an answer.",summary:"Unresolved questions linked to the evidence and decisions that may eventually close them. Open loops remain visible rather than disappearing into old chats.",sources:7,branches:["research","decisions","timeline"],tag:"DECISION / OPEN LOOP"},
+  {id:"threads",title:"Conversation threads",type:"Knowledge",layer:"research",x:280,y:555,r:9,sub:"A thought across multiple sessions.",summary:"Conversation threads connect messages that belong to the same evolving discussion, even if they were separated by time or different projects.",sources:26,branches:["archive","research","cross"],tag:"KNOWLEDGE / THREAD"},
+  {id:"agenttools",title:"Agent tools",type:"System",layer:"research",x:670,y:65,r:9,sub:"Actions an agent can safely perform.",summary:"A catalog of tools with explicit input, output and permission contracts. Tool access is not the same as unrestricted access to the underlying vault.",sources:5,branches:["mcp","permissions","memory"],tag:"SYSTEM / TOOLS"},
+  {id:"life",title:"Life & goals",type:"Knowledge",layer:"life",x:85,y:115,r:11,sub:"Personal interests, routines and longer-term goals.",summary:"A distinct region for personal context and ongoing interests. It should connect only when there is evidence of a meaningful relationship.",sources:13,branches:["coffee","v60","music"],tag:"LIFE / PERSONAL CONTEXT"},
+  {id:"coffee",title:"Coffee",type:"Idea",layer:"life",x:70,y:255,r:9,sub:"Brewing preferences and experiments.",summary:"A thread containing V60 recipes, grind settings, beans and brewing experiments, with enough source detail to reproduce a result.",sources:9,branches:["v60","life"],tag:"LIFE / INTEREST"},
+  {id:"v60",title:"V60 brewing",type:"Knowledge",layer:"life",x:210,y:295,r:9,sub:"Recipes, ratios and extraction experiments.",summary:"A focused record of brew ratios, grind settings, pour structure and taste observations across different beans.",sources:7,branches:["coffee","life"],tag:"LIFE / PRACTICE"},
+  {id:"music",title:"Music",type:"Idea",layer:"life",x:55,y:415,r:9,sub:"Listening interests and musical exploration.",summary:"Music-related interests and learning threads, kept distinct until a source-supported connection is useful.",sources:8,branches:["life","piano"],tag:"LIFE / INTEREST"},
+  {id:"piano",title:"Piano",type:"Knowledge",layer:"learning",x:1120,y:290,r:9,sub:"Chord shapes, sheet reading and practice.",summary:"A learning branch for piano note mapping, chord voicings, bass movement and readable arrangements.",sources:12,branches:["learning","music"],tag:"LEARNING / MUSIC"},
+  {id:"isolated",title:"Isolated memory",type:"Knowledge",layer:"all",x:1130,y:745,r:9,sub:"A memory with no reliable relationship yet.",summary:"This item remains visible as an isolated point because the archive does not contain enough evidence to connect it to another concept.",sources:1,branches:[],tag:"UNLINKED / ISOLATED"}
+];
+
+const edges = [
+  ["mind","memory"],["mind","mcp"],["mind","archive"],["mind","graph"],["mind","cross"],["mind","vault"],["mind","sources"],
+  ["memory","context"],["memory","identity"],["memory","sync"],["memory","retrieval"],
+  ["mcp","retrieval"],["mcp","permissions"],["mcp","identity"],["mcp","agenttools"],
+  ["context","retrieval"],["context","semantic"],["context","archive"],["context","agenttools"],
+  ["vault","permissions"],["vault","identity"],["vault","archive"],
+  ["retrieval","semantic"],["retrieval","sources"],["retrieval","archive"],
+  ["permissions","identity"],["permissions","agenttools"],
+  ["archive","timeline"],["archive","sources"],["archive","research"],["archive","threads"],
+  ["graph","cross"],["graph","ideas"],["graph","timeline"],["graph","semantic"],
+  ["cross","sibambo"],["cross","ideas"],["cross","decisions"],["cross","creative"],
+  ["ideas","research"],["ideas","learning"],["ideas","creative"],
+  ["research","timeline"],["research","decisions"],["research","open"],["research","threads"],
+  ["timeline","decisions"],["timeline","sources"],["decisions","sibambo"],["decisions","open"],
+  ["sibambo","bomc"],["sibambo","viewer"],["sibambo","export"],["bomc","viewer"],["bomc","export"],
+  ["creative","learning"],["threads","cross"],["sync","archive"],["sync","mcp"],["agenttools","memory"],
+  ["mind","learning"],["mind","life"],["learning","piano"],["creative","music"],["life","coffee"],["life","v60"],["life","music"],["coffee","v60"],["music","piano"]
+];
+
+const byId = Object.fromEntries(nodes.map(n => [n.id, n]));
+let W = 0, H = 0, dpr = 1, hovered = null, selected = "mind", filter = "all", query = "", dragging = false, dragStart = null, trace = true;
+let camera = { x: 600, y: 400, zoom: 1, tx: 600, ty: 400, tz: 1 };
+let frame = null, time = 0;
+
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+function baseScale() {
+  return Math.min(W / 1220, H / 820) * 0.94;
+}
+
+function transform(n) {
+  const s = baseScale() * camera.zoom;
+  return { x: W / 2 + (n.x - camera.x) * s, y: H / 2 + (n.y - camera.y) * s, s };
+}
+
+function visible(n) {
+  return filter === "all" || n.layer === "all" || n.layer === filter;
+}
+
+function matches(n) {
+  return !query || (`${n.title} ${n.sub} ${n.type}`).toLowerCase().includes(query);
+}
+
+function resizeHive() {
+  const r = hiveMain.getBoundingClientRect();
+  W = r.width;
+  H = r.height;
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  hiveCanvas.width = Math.max(1, Math.round(W * dpr));
+  hiveCanvas.height = Math.max(1, Math.round(H * dpr));
+  hiveCanvas.style.width = W + "px";
+  hiveCanvas.style.height = H + "px";
+  hctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+window.addEventListener("resize", () => { if (activePage === "hive") resizeHive(); });
+
+function drawHive() {
+  if (activePage !== "hive") { frame = null; return; }
+  if (!W || !H) { frame = requestAnimationFrame(drawHive); return; }
+
+  time += 16;
+  camera.x += (camera.tx - camera.x) * 0.085;
+  camera.y += (camera.ty - camera.y) * 0.085;
+  camera.zoom += (camera.tz - camera.zoom) * 0.085;
+
+  const bgCol = cssVar("--canvas-bg");
+  const gridCol = cssVar("--canvas-grid");
+  const ringCol = cssVar("--canvas-ring");
+  const edgeCol = cssVar("--canvas-edge");
+  const edgeActiveCol = cssVar("--canvas-edge-active");
+  const nodeFill = cssVar("--canvas-node-fill");
+  const nodeSec = cssVar("--canvas-node-secondary");
+  const nodeStroke = cssVar("--canvas-node-stroke");
+  const labelCol = cssVar("--canvas-label");
+  const labelMuted = cssVar("--canvas-label-muted");
+
+  // 1. Background & Subtle Architectural Coordinate Grid
+  hctx.clearRect(0, 0, W, H);
+  hctx.fillStyle = bgCol;
+  hctx.fillRect(0, 0, W, H);
+
+  const step = 36 * Math.max(0.65, Math.min(1.5, camera.zoom));
+  const offX = (W / 2 - camera.x * baseScale() * camera.zoom) % step;
+  const offY = (H / 2 - camera.y * baseScale() * camera.zoom) % step;
+  hctx.strokeStyle = gridCol;
+  hctx.lineWidth = 1;
+  hctx.beginPath();
+  for (let x = offX; x < W; x += step) { hctx.moveTo(x, 0); hctx.lineTo(x, H); }
+  for (let y = offY; y < H; y += step) { hctx.moveTo(0, y); hctx.lineTo(W, y); }
+  hctx.stroke();
+
+  // Concentric Orbital Rings
+  const s = baseScale() * camera.zoom;
+  hctx.save();
+  hctx.translate(W / 2 - camera.x * s, H / 2 - camera.y * s);
+  hctx.scale(s, s);
+  for (let i = 0; i < 4; i++) {
+    hctx.beginPath();
+    hctx.ellipse(600, 400, 210 + i * 110, 130 + i * 70, -0.14, 0, Math.PI * 2);
+    hctx.strokeStyle = ringCol;
+    hctx.lineWidth = 1 / s;
+    hctx.setLineDash([4 / s, 8 / s]);
+    hctx.stroke();
+  }
+  hctx.restore();
+
+  // 2. Edges & Data Pulses
+  const activeSet = new Set([selected, ...(byId[selected]?.branches || [])]);
+  for (const [aid, bid] of edges) {
+    const a = byId[aid], b = byId[bid];
+    if (!a || !b || !visible(a) || !visible(b)) continue;
+    const p = transform(a), q = transform(b);
+    const isActive = activeSet.has(aid) && activeSet.has(bid);
+    const dim = !matches(a) || !matches(b);
+
+    const mx = (p.x + q.x) / 2 + (q.y - p.y) * 0.06;
+    const my = (p.y + q.y) / 2 - (q.x - p.x) * 0.06;
+
+    hctx.beginPath();
+    hctx.moveTo(p.x, p.y);
+    hctx.quadraticCurveTo(mx, my, q.x, q.y);
+    hctx.strokeStyle = dim ? gridCol : (isActive ? edgeActiveCol : edgeCol);
+    hctx.lineWidth = (isActive ? 1.5 : 0.85) * Math.max(0.75, p.s);
+    hctx.setLineDash(isActive ? [] : [3, 5]);
+    hctx.stroke();
+    hctx.setLineDash([]);
+
+    if (isActive && trace && !dim) {
+      const t = (time * 0.00018 + (aid.length * bid.length * 0.031)) % 1;
+      const px = (1 - t) * (1 - t) * p.x + 2 * (1 - t) * t * mx + t * t * q.x;
+      const py = (1 - t) * (1 - t) * p.y + 2 * (1 - t) * t * my + t * t * q.y;
+      hctx.beginPath();
+      hctx.arc(px, py, 2.2, 0, Math.PI * 2);
+      hctx.fillStyle = nodeFill;
+      hctx.fill();
+    }
+  }
+
+  // 3. Nodes (Pure Monochrome Hierarchy)
+  const sorted = [...nodes].sort((a, b) => a.r - b.r);
+  for (const n of sorted) {
+    const p = transform(n);
+    const isSel = n.id === selected;
+    const isHover = n.id === hovered?.id;
+    const isBranch = byId[selected]?.branches?.includes(n.id);
+    const dim = !visible(n) || !matches(n);
+
+    let r = (n.r + (isSel ? 3.5 : 0) + (isHover ? 2 : 0)) * Math.max(0.68, p.s);
+    if (dim) r *= 0.75;
+
+    if (isSel || isHover) {
+      hctx.beginPath();
+      hctx.arc(p.x, p.y, r + 6 * Math.max(0.7, p.s), 0, Math.PI * 2);
+      hctx.strokeStyle = edgeActiveCol;
+      hctx.lineWidth = 1.2;
+      hctx.setLineDash([3, 3]);
+      hctx.stroke();
+      hctx.setLineDash([]);
+    }
+
+    hctx.beginPath();
+    hctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+    hctx.fillStyle = dim ? ringCol : (isSel || n.id === "mind" ? nodeFill : isBranch ? nodeSec : nodeStroke);
+    hctx.fill();
+    hctx.lineWidth = isSel ? 2.2 : 1.4;
+    hctx.strokeStyle = dim ? ringCol : (isSel ? nodeStroke : nodeFill);
+    hctx.stroke();
+
+    // Inner core dot for non-selected hollow nodes
+    if (!isSel && !isBranch && n.id !== "mind" && !dim) {
+      hctx.beginPath();
+      hctx.arc(p.x, p.y, Math.max(2, r * 0.35), 0, Math.PI * 2);
+      hctx.fillStyle = nodeSec;
+      hctx.fill();
+    }
+
+    if (n.r >= 9 || isSel || isHover || camera.zoom > 1.35) {
+      hctx.font = `${isSel ? 700 : 500} ${Math.max(10, Math.min(13, 11 * p.s))}px Inter, system-ui, sans-serif`;
+      hctx.textAlign = "center";
+      hctx.textBaseline = "top";
+      hctx.fillStyle = dim ? ringCol : (isSel ? labelCol : labelMuted);
+      hctx.fillText(n.title, p.x, p.y + r + 6 * Math.max(0.7, p.s));
+    }
+  }
+
+  frame = requestAnimationFrame(drawHive);
+}
+
+function startHive() {
+  resizeHive();
+  if (!frame) frame = requestAnimationFrame(drawHive);
+}
+
+function nearestNode(x, y) {
+  let best = null, dist = 1e9;
+  for (const n of nodes) {
+    if (!visible(n)) continue;
+    const p = transform(n);
+    const d = Math.hypot(x - p.x, y - p.y);
+    if (d < (n.r + 9) * Math.max(0.7, p.s) && d < dist) {
+      best = n;
+      dist = d;
+    }
+  }
+  return best;
+}
+
+function showHiveTooltip(n, x, y) {
+  if (!n) { hiveTooltip.style.display = "none"; return; }
+  hiveTooltip.style.display = "block";
+  hiveTooltip.style.left = Math.min(W - 240, x + 14) + "px";
+  hiveTooltip.style.top = Math.max(54, Math.min(H - 95, y + 14)) + "px";
+  hiveTooltip.querySelector("b").textContent = n.title;
+  hiveTooltip.querySelector("span").textContent = n.sub;
+  hiveTooltip.querySelector("small").textContent = `${n.type} · ${n.sources} PROVENANCE TRACES`;
+}
+
+function selectHive(id, zoom = true) {
+  const n = byId[id];
+  if (!n) return;
+  selected = id;
+  if (zoom) {
+    camera.tx = n.x;
+    camera.ty = n.y;
+    camera.tz = id === "mind" ? 1 : 1.48;
+  }
+  $("#hiveType").textContent = n.tag;
+  $("#hiveTitle").textContent = n.title;
+  $("#hiveDesc").textContent = n.summary;
+  $("#hiveMemoryCount").textContent = `${n.sources} traces`;
+  $("#hiveBranchCount").textContent = `${n.branches.length} branches`;
+  $("#hiveNodeIdBadge").textContent = `id:${n.id}`;
+
+  $("#hiveBranches").innerHTML = n.branches.map(bid => {
+    const b = byId[bid];
+    return b ? `
+      <button class="branch" data-hive-branch="${bid}">
+        <i class="branch-dot"></i>
+        <span>${b.title}</span>
+        <small>${b.sources} traces ↗</small>
+      </button>
+    ` : "";
+  }).join("") || `<div style="font-size:12px;color:var(--text-muted);padding:6px 0">Isolated node — zero forced edges. Remains unlinked until verified source evidence exists.</div>`;
+
+  const convCount = Math.max(1, Math.round(n.sources * 0.52));
+  const memCount = Math.max(1, Math.round(n.sources * 0.31));
+  const fileCount = Math.max(0, n.sources - convCount - memCount);
+  $("#hiveSources").innerHTML = [
+    ["Archived Conversations", convCount],
+    ["Curated Memories", memCount],
+    ["Local NTFS Documents", fileCount]
+  ].map(x => `<div class="branch"><i class="branch-dot" style="opacity:0.45"></i><span>${x[0]}</span><small>${x[1]}</small></div>`).join("");
+
+  $("#hiveZoomLabel").textContent = Math.round(camera.tz * 100) + "%";
+}
+
+hiveCanvas.addEventListener("mousemove", e => {
+  const r = hiveCanvas.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+  if (dragging && dragStart) {
+    const dx = x - dragStart.x, dy = y - dragStart.y, s = baseScale() * camera.zoom;
+    camera.tx -= dx / s; camera.ty -= dy / s;
+    camera.x = camera.tx; camera.y = camera.ty;
+    dragStart = { x, y };
+    showHiveTooltip(null);
+    return;
+  }
+  hovered = nearestNode(x, y);
+  showHiveTooltip(hovered, x, y);
+});
+
+hiveCanvas.addEventListener("mousedown", e => {
+  if (e.button !== 0) return;
+  dragging = true;
+  hiveCanvas.classList.add("drag");
+  const r = hiveCanvas.getBoundingClientRect();
+  dragStart = { x: e.clientX - r.left, y: e.clientY - r.top };
+});
+
+window.addEventListener("mouseup", () => {
+  dragging = false;
+  dragStart = null;
+  hiveCanvas.classList.remove("drag");
+});
+
+hiveCanvas.addEventListener("click", () => {
+  if (hovered) {
+    selectHive(hovered.id);
+    showHiveTooltip(null);
+  }
+});
+
+hiveCanvas.addEventListener("mouseleave", () => {
+  hovered = null;
+  showHiveTooltip(null);
+});
+
+hiveCanvas.addEventListener("wheel", e => {
+  e.preventDefault();
+  camera.tz = Math.max(0.55, Math.min(2.5, camera.tz + (e.deltaY < 0 ? 0.14 : -0.14)));
+  $("#hiveZoomLabel").textContent = Math.round(camera.tz * 100) + "%";
+}, { passive: false });
+
+$("#hiveFilters").addEventListener("click", e => {
+  const b = e.target.closest("[data-layer]");
+  if (!b) return;
+  filter = b.dataset.layer;
+  $$(".hive-filter").forEach(x => x.classList.toggle("active", x === b));
+  if (!visible(byId[selected])) {
+    const first = nodes.find(n => visible(n));
+    if (first) selectHive(first.id, false);
+  }
+});
+
+$("#hiveNodeSearch").oninput = e => {
+  query = e.target.value.trim().toLowerCase();
+  if (query) {
+    const match = nodes.find(n => n.title.toLowerCase().includes(query));
+    if (match) selectHive(match.id, false);
+  }
+};
+
+$("#hivePlus").onclick = () => { camera.tz = Math.min(2.5, camera.tz + 0.2); $("#hiveZoomLabel").textContent = Math.round(camera.tz * 100) + "%"; };
+$("#hiveMinus").onclick = () => { camera.tz = Math.max(0.55, camera.tz - 0.2); $("#hiveZoomLabel").textContent = Math.round(camera.tz * 100) + "%"; };
+$("#hiveReset").onclick = () => {
+  filter = "all"; query = ""; $("#hiveNodeSearch").value = "";
+  camera = { x: 600, y: 400, zoom: 1, tx: 600, ty: 400, tz: 1 };
+  $$(".hive-filter").forEach(b => b.classList.toggle("active", b.dataset.layer === "all"));
+  selectHive("mind", false);
+};
+
+$("#hiveBranches").addEventListener("click", e => {
+  const b = e.target.closest("[data-hive-branch]");
+  if (b) selectHive(b.dataset.hiveBranch);
+});
+
+$("#hiveTraceToggle").onclick = () => {
+  trace = !trace;
+  toast(trace ? "Edge data-pulse animation enabled" : "Edge data-pulse animation paused");
+};
+
+$("#hiveTrace").onclick = () => {
+  const n = byId[selected];
+  modal(
+    `Provenance Chain · ${n.title}`,
+    `<p>Concept node <b>${n.title}</b> (<code class="mono">${n.tag}</code>) is backed by <b>${n.sources} verified source traces</b> across your archive.</p>
+     <div class="mono" style="background:var(--bg-subtle);padding:12px;border-radius:6px;line-height:1.7">
+       Graph Generation: Gen-14 (graphify.rs)<br>
+       Connected Edges: ${n.branches.length}<br>
+       Source Integrity: Verified against archive-core
+     </div>`,
+    "INDEX-CORE · GRAPH PROVENANCE"
+  );
+};
+
+$("#hiveExplain").onclick = () => modal(
+  "Hive Mind Spatial Architecture",
+  `<p>Unlike decorative mind maps, every node and edge in the Hive Mind is derived from explicit evidence in <code class="mono">index-core/src/graphify.rs</code>:</p>
+   <ul style="padding-left:18px;line-height:1.7">
+     <li><b>Filled Core Nodes:</b> Central intelligence or currently selected focus cluster.</li>
+     <li><b>Solid vs. Dashed Bezier Edges:</b> Active direct branches vs. secondary topology links.</li>
+     <li><b>Isolated Nodes:</b> Memories with insufficient evidence remain unlinked rather than hallucinating connections.</li>
+   </ul>`,
+  "GRAPHIFY SPECIFICATION"
+);
+
+selectHive("mind", false);
+
+/* ============================================================================
+   9. REAL INTERACTIVE COMMAND PALETTE (⌘K / Ctrl+K)
+   Fixes the broken clusters.find bug from the old prototype!
+   ============================================================================ */
+function openCommandPalette() {
+  $("#cmdBackdrop").style.display = "flex";
+  $("#cmdInput").value = "";
+  renderCommandResults("");
+  setTimeout(() => $("#cmdInput").focus(), 20);
+}
+
+function closeCommandPalette() {
+  $("#cmdBackdrop").style.display = "none";
+}
+
+function renderCommandResults(q) {
+  const clean = q.trim().toLowerCase();
+  const items = [];
+
+  // System Commands
+  items.push(
+    { kind: "ACTION", label: "Authorize New Local Folder (＋ Add Allowed Folder)", sub: "Files & Secure Vault · state-core::document_roots", run: () => openAddFolderModal() },
+    { kind: "ACTION", label: "Toggle Dark / Light Monochrome Theme (⌘D)", sub: "Appearance", run: () => $("#themeToggleBtn").click() },
+    { kind: "ACTION", label: "Toggle Technical Provenance Mode (⌘I)", sub: "Developer Telemetry", run: () => toggleTechMode() },
+    { kind: "ACTION", label: "Lock Secure Vault Immediately (MP-3L1)", sub: "Security-Core", run: () => lockVault() }
+  );
+
+  // Authorized Folders
+  approvedFolders.forEach(f => {
+    items.push({
+      kind: "FOLDER ROOT",
+      label: f.path,
+      sub: `${f.collection} · ${f.filesCount} files (${f.formats.join(", ")}) · ${f.status}`,
+      run: () => { go("files"); setTimeout(() => inspectFolderInDrawer(f.id), 50); }
+    });
+  });
+
+  // Conversations
+  conversations.forEach(c => {
+    items.push({
+      kind: "CONVERSATION",
+      label: c[0],
+      sub: `${c[1]} · ${c[2]} · ${c[3]}`,
+      run: () => openConversationDetail(c[0])
+    });
+  });
+
+  // Memories
+  allMemories().forEach(m => {
+    items.push({
+      kind: "MEMORY",
+      label: m.title,
+      sub: `${m.collection} · ${m.type}`,
+      run: () => openMemoryDetail(m.id)
+    });
+  });
+
+  // Hive Nodes
+  nodes.forEach(n => {
+    items.push({
+      kind: "HIVE NODE",
+      label: n.title,
+      sub: `${n.tag} · ${n.sources} traces`,
+      run: () => { go("hive"); setTimeout(() => selectHive(n.id, true), 60); }
+    });
+  });
+
+  const filtered = items.filter(it => !clean || (`${it.kind} ${it.label} ${it.sub}`).toLowerCase().includes(clean)).slice(0, 12);
+
+  $("#cmdResults").innerHTML = filtered.map((it, idx) => `
+    <button class="cmd-item ${idx === 0 ? 'selected' : ''}" data-cmd-idx="${idx}">
+      <div style="min-width:0;flex:1">
+        <div style="font-weight:600;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${it.label}</div>
+        <div style="font-size:11.5px;color:var(--text-muted)">${it.sub}</div>
+      </div>
+      <span class="tag mono">${it.kind}</span>
+    </button>
+  `).join("") || `<div style="padding:24px;text-align:center;color:var(--text-muted)">No matching records or commands in archive.</div>`;
+
+  $$("#cmdResults .cmd-item").forEach((btn, idx) => {
+    btn.onclick = () => {
+      closeCommandPalette();
+      filtered[idx].run();
+    };
+  });
+
+  $("#cmdInput").onkeydown = e => {
+    if (e.key === "Enter" && filtered[0]) {
+      e.preventDefault();
+      closeCommandPalette();
+      filtered[0].run();
+    } else if (e.key === "Escape") {
+      closeCommandPalette();
+    }
+  };
+}
+
+$("#openCmdPalette").onclick = openCommandPalette;
+$("#closeCmdBtn").onclick = closeCommandPalette;
+$("#cmdInput").oninput = e => renderCommandResults(e.target.value);
+$("#cmdBackdrop").addEventListener("click", e => {
+  if (e.target === $("#cmdBackdrop")) closeCommandPalette();
+});
+
+// Global Keyboard Shortcuts
+document.addEventListener("keydown", e => {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+    e.preventDefault();
+    openCommandPalette();
+  } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "i") {
+    e.preventDefault();
+    toggleTechMode();
+  } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "d") {
+    e.preventDefault();
+    $("#themeToggleBtn").click();
+  } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "b") {
+    e.preventDefault();
+    $("#toggleSidebar").click();
+  } else if (e.key === "Escape") {
+    closeCommandPalette();
+    closeAddFolderModal();
+    $("#modal").style.display = "none";
+    $("#drawerBackdrop").style.display = "none";
+  }
+});
+</script>
+</body>
+</html>

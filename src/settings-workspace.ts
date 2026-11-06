@@ -36,6 +36,7 @@ interface SecuritySnapshot {
   configured: boolean;
   locked: boolean;
   epoch: number;
+  vault_mode?: "legacy" | "encrypted";
 }
 
 interface IndexSnapshot {
@@ -70,9 +71,10 @@ interface Inspection {
 }
 
 interface BackupMetadata {
-  manifest_path: string;
-  total_chunks: number;
-  timestamp: string;
+  version: number;
+  vault_id_b64: string;
+  generation: number;
+  count: number;
 }
 
 export async function fetchHealthSummary(invoke: Invoke): Promise<OverviewHealthSummary | null> {
@@ -113,7 +115,7 @@ export async function fetchHealthSummary(invoke: Invoke): Promise<OverviewHealth
  */
 export function mountSettingsWorkspace(
   view: HTMLElement,
-  invoke: Invoke,
+  nativeInvoke: Invoke,
   options: SettingsWorkspaceOptions = {},
 ): SettingsWorkspaceHandle {
   const doc = view.ownerDocument;
@@ -126,6 +128,18 @@ export function mountSettingsWorkspace(
   let localMcp: LocalMcpSnapshot | null = null;
   let hostedTunnel: HostedTunnelSnapshot | null = null;
   let lastTrace: Trace | null = null;
+
+  let securityEpoch: number | null = null;
+  const invoke: Invoke = async <T>(command: string, args?: Record<string, unknown>) => {
+    if (!alive) throw new Error("MP_UI_SESSION_EXPIRED");
+    if (command === "get_security_status") return nativeInvoke<T>(command, args);
+    const before = await nativeInvoke<SecuritySnapshot>("get_security_status");
+    if (!before || before.locked !== false || (securityEpoch !== null && before.epoch !== securityEpoch)) throw new Error("MP_SECURITY_LOCKED");
+    const result = await nativeInvoke<T>(command, args);
+    const after = await nativeInvoke<SecuritySnapshot>("get_security_status");
+    if (!alive || !after || after.locked !== false || after.epoch !== before.epoch) throw new Error("MP_SECURITY_LOCKED");
+    return result;
+  };
 
   const html = doc.documentElement;
 
@@ -199,31 +213,42 @@ export function mountSettingsWorkspace(
   shell.append(header, nav, contentArea, confirmDialog);
   view.replaceChildren(shell);
 
+  let pendingConfirm: (() => void) | null = null;
+  let returnFocus: HTMLElement | null = null;
+  const cancelConfirm = () => {
+    pendingConfirm = null;
+    if (typeof confirmDialog.close === "function") confirmDialog.close();
+    else confirmDialog.removeAttribute("open");
+    if (returnFocus?.isConnected) returnFocus.focus();
+  };
+  confirmDialog.addEventListener("cancel", () => { pendingConfirm = null; });
+  confirmProceedBtn.addEventListener("click", () => {
+    const action = pendingConfirm;
+    cancelConfirm();
+    if (alive) action?.();
+  });
   function promptConfirm(message: string, onConfirm: () => void) {
+    if (!alive) return;
+    pendingConfirm = onConfirm;
+    returnFocus = doc.activeElement as HTMLElement;
     confirmMsg.textContent = message;
-    const clickHandler = () => {
-      confirmProceedBtn.removeEventListener("click", clickHandler);
-      if (typeof confirmDialog.close === "function") confirmDialog.close();
-      else confirmDialog.removeAttribute("open");
-      onConfirm();
-    };
-    confirmProceedBtn.addEventListener("click", clickHandler);
-    if (typeof confirmDialog.showModal === "function") {
-      try {
-        confirmDialog.showModal();
-      } catch {
-        confirmDialog.setAttribute("open", "");
-      }
-    } else {
-      confirmDialog.setAttribute("open", "");
-    }
+    if (typeof confirmDialog.showModal === "function") confirmDialog.showModal();
+    else confirmDialog.setAttribute("open", "");
+    confirmCancelBtn.focus();
   }
 
   async function loadDiagnosticsData() {
     surfaceStatus = "loading";
     try {
       const sec = await invoke<SecuritySnapshot>("get_security_status").catch(() => null);
-      if (sec) securityState = sec;
+      if (!alive) return;
+      securityState = sec;
+      if (!sec || sec.locked !== false || (securityEpoch !== null && sec.epoch !== securityEpoch)) {
+        securityState = sec ? { ...sec, locked: true } : null;
+        indexStats = null; localMcp = null; hostedTunnel = null; lastTrace = null;
+        surfaceStatus = "locked"; return;
+      }
+      securityEpoch = sec.epoch;
 
       const [indexRes, mcpRes, tunnelRes] = await Promise.allSettled([
         invoke<IndexSnapshot>("get_archive_index_stats"),
@@ -231,6 +256,7 @@ export function mountSettingsWorkspace(
         invoke<HostedTunnelSnapshot>("get_hosted_tunnel_status"),
       ]);
 
+      if (!alive) return;
       if (indexRes.status === "fulfilled") indexStats = indexRes.value;
       if (mcpRes.status === "fulfilled") localMcp = mcpRes.value;
       if (tunnelRes.status === "fulfilled") hostedTunnel = tunnelRes.value;
@@ -305,11 +331,11 @@ export function mountSettingsWorkspace(
 
     // Vault Status Card
     const vaultCard = createUiCard(doc, {
-      title: "Encrypted Vault & Key Status",
+      title: "Vault & Key Status",
       description: "State of local vault authentication and security epoch lease.",
     });
 
-    const isLocked = securityState ? securityState.locked : false;
+    const isLocked = !securityState || securityState.locked;
     const isConfigured = securityState ? securityState.configured : false;
     const epoch = securityState ? securityState.epoch : 0;
 
@@ -334,85 +360,18 @@ export function mountSettingsWorkspace(
     vaultCard.body.append(statusGrid, vaultNote);
     panel.append(vaultCard.element);
 
-    // Key Recovery Ceremony Card
     const recoveryCard = createUiCard(doc, {
-      title: "Key Recovery Ceremony",
-      description: "Authenticate or establish recovery credentials for encrypted vault access.",
+      title: "Offline recovery",
+      description: "Recovery and first-run provisioning are handled by the locked security gate.",
     });
-
-    const recoveryControls = make("div");
-    recoveryControls.className = "settings-recovery-controls";
-
-    const recoveryStatus = make("p");
-    recoveryStatus.className = "list-note settings-recovery-status";
-
-    const secretInput = make("input");
-    secretInput.type = "password";
-    secretInput.placeholder = "Enter master password / secret";
-    secretInput.className = "settings-input";
-
-    const codeInput = make("input");
-    codeInput.type = "text";
-    codeInput.placeholder = "Enter recovery code (e.g. 24-character export code)";
-    codeInput.className = "settings-input";
-
-    const unlockRecoveryBtn = createUiButton(doc, "Unlock with Recovery Code", { variant: "primary" });
-    unlockRecoveryBtn.addEventListener("click", async () => {
-      const secret = secretInput.value.trim();
-      const code = codeInput.value.trim();
-      if (!secret || !code) {
-        recoveryStatus.textContent = "Please enter both secret and recovery code.";
-        return;
-      }
-      recoveryStatus.textContent = "Attempting recovery unlock…";
-      try {
-        const res = await invoke<SecuritySnapshot>("unlock_vault_with_recovery", { secret, code });
-        securityState = res;
-        recoveryStatus.textContent = "Vault unlocked successfully via recovery code.";
-        renderSection();
-      } catch (err: any) {
-        recoveryStatus.textContent = "Recovery failed: " + (err?.message || String(err));
-      }
-    });
-
-    const beginSetupBtn = createUiButton(doc, "Begin First-Run Vault Ceremony", { variant: "secondary" });
-    beginSetupBtn.addEventListener("click", async () => {
-      const secret = secretInput.value.trim();
-      if (!secret) {
-        recoveryStatus.textContent = "Enter secret to prepare vault setup.";
-        return;
-      }
-      recoveryStatus.textContent = "Preparing vault ceremony…";
-      try {
-        const code = await invoke<string>("begin_vault_setup", { secret });
-        recoveryStatus.textContent = `Generated recovery code: ${code}. Save this code in a secure location, then confirm below.`;
-        codeInput.value = code;
-      } catch (err: any) {
-        recoveryStatus.textContent = "Setup error: " + (err?.message || String(err));
-      }
-    });
-
-    const confirmSetupBtn = createUiButton(doc, "Confirm Recovery Setup", { variant: "secondary" });
-    confirmSetupBtn.addEventListener("click", () => {
-      const code = codeInput.value.trim();
-      if (!code) {
-        recoveryStatus.textContent = "Enter generated recovery code to confirm.";
-        return;
-      }
-      promptConfirm("Confirm provisioning this encrypted vault with your recovery code? This action is permanent.", async () => {
-        try {
-          await invoke("confirm_vault_setup", { code });
-          recoveryStatus.textContent = "Vault setup confirmed. Security locked as required by first-run protocol.";
-          await loadDiagnosticsData();
-          renderSection();
-        } catch (err: any) {
-          recoveryStatus.textContent = "Confirmation error: " + (err?.message || String(err));
-        }
-      });
-    });
-
-    recoveryControls.append(secretInput, codeInput, unlockRecoveryBtn, beginSetupBtn, confirmSetupBtn);
-    recoveryCard.body.append(recoveryControls, recoveryStatus);
+    recoveryCard.body.append(make("p", securityState?.vault_mode === "encrypted"
+      ? "Encrypted app vault reported by the native runtime. Lock Mind Place to use your offline recovery code. External source files and backups have separate protection."
+      : securityState?.vault_mode === "legacy"
+        ? "Legacy mode: archive files are not encrypted at rest. Existing archives cannot be migrated by this Settings page."
+        : "Vault mode unavailable. Encryption has not been verified."));
+    const recover = createUiButton(doc, "Lock to open recovery", { disabled: !options.onLock });
+    recover.addEventListener("click", () => promptConfirm("Lock Mind Place and return to the security gate? Offline recovery is available only for an encrypted vault. You can cancel without changing vault state.", () => options.onLock?.()));
+    recoveryCard.body.append(recover);
     panel.append(recoveryCard.element);
 
     // Online Vault Backup Card
@@ -443,6 +402,8 @@ export function mountSettingsWorkspace(
     backupStatus.className = "list-note settings-backup-status";
 
     const createBackupBtn = createUiButton(doc, "Create Online Backup", { variant: "primary" });
+    createBackupBtn.disabled = securityState?.vault_mode !== "encrypted" || isLocked;
+    if (createBackupBtn.disabled) backupStatus.textContent = "Backup unavailable: an unlocked encrypted app vault is required.";
     createBackupBtn.addEventListener("click", () => {
       const destination = destInput.value.trim();
       const generation = parseInt(genInput.value, 10);
@@ -454,7 +415,7 @@ export function mountSettingsWorkspace(
         backupStatus.textContent = "Creating online backup snapshot…";
         try {
           const meta = await invoke<BackupMetadata>("create_vault_online_backup", { destination, generation });
-          backupStatus.textContent = `Backup created successfully at ${meta.manifest_path} (${meta.total_chunks} chunks).`;
+          backupStatus.textContent = `Backup created at ${destination}. Generation ${meta.generation}; ${meta.count} objects. External approved-root files are not included.`;
         } catch (err: any) {
           backupStatus.textContent = "Backup error: " + (err?.message || String(err));
         }
@@ -516,17 +477,17 @@ export function mountSettingsWorkspace(
     panel.append(sessionCard.element);
 
     const principlesCard = createUiCard(doc, {
-      title: "Security & Zero-Telemetry Architecture",
+      title: "Security & data sharing",
       description: "Local data sovereignty and strict permissions boundary.",
     });
 
     const principlesList = make("ul");
     principlesList.className = "settings-boundary-list";
     principlesList.append(
-      make("li", "Local Execution: All indexing, FTS5 tokenization, and vector models run 100% on this computer."),
+      make("li", "Local indexing: archive and approved-document indexes are built on this computer. No vector model capability is asserted."),
       make("li", "Loopback Transport: Local MCP transport binds strictly to 127.0.0.1 with per-client authentication."),
       make("li", "Outbound Tunnel: Hosted tunnel is strictly outbound-only and requires explicit owner authorization."),
-      make("li", "Zero Telemetry: No keystrokes, queries, transcripts, or personal corpus contents are transmitted."),
+      make("li", "Data sharing: authorized MCP clients and an enabled tunnel can retrieve permitted content. Review Providers for active access; this panel is not a network audit."),
     );
     principlesCard.body.append(principlesList);
     panel.append(principlesCard.element);
@@ -706,12 +667,17 @@ export function mountSettingsWorkspace(
   }
 
   function renderSection() {
+    if (!alive) return;
     contentArea.replaceChildren();
     for (const s of sectionsList) {
       const tabBtn = doc.getElementById(`settings-tab-${s.id}`) as HTMLButtonElement | null;
       if (tabBtn) tabBtn.setAttribute("aria-selected", String(s.id === activeSection));
     }
 
+    if (surfaceStatus === "locked" && activeSection !== "general") {
+      contentArea.append(make("p", "Security status unavailable or locked. Privileged settings are unavailable; return to the security gate."));
+      return;
+    }
     let panel: HTMLElement;
     switch (activeSection) {
       case "general":
@@ -745,6 +711,9 @@ export function mountSettingsWorkspace(
     if (actionBtn) {
       const act = actionBtn.dataset.action;
       if (act === "toggle-theme-setting") {
+        const shellControl = doc.querySelector<HTMLButtonElement>("[data-action='toggle-theme']");
+        if (shellControl) shellControl.click();
+        else {
         const nextTheme = html.dataset.theme === "dark" ? "light" : "dark";
         html.dataset.theme = nextTheme;
         const themeBtn = doc.querySelector<HTMLButtonElement>("[data-action='toggle-theme']");
@@ -752,8 +721,12 @@ export function mountSettingsWorkspace(
           themeBtn.textContent = "Theme: " + (nextTheme === "light" ? "Light" : "Dark");
           themeBtn.setAttribute("aria-pressed", String(nextTheme === "dark"));
         }
+        }
         renderSection();
       } else if (act === "toggle-density-setting") {
+        const shellControl = doc.querySelector<HTMLButtonElement>("[data-action='toggle-density']");
+        if (shellControl) shellControl.click();
+        else {
         const nextDensity = html.dataset.density === "compact" ? "comfortable" : "compact";
         html.dataset.density = nextDensity;
         const densityBtn = doc.querySelector<HTMLButtonElement>("[data-action='toggle-density']");
@@ -761,8 +734,12 @@ export function mountSettingsWorkspace(
           densityBtn.textContent = "Density: " + (nextDensity === "comfortable" ? "Comfortable" : "Compact");
           densityBtn.setAttribute("aria-pressed", String(nextDensity === "compact"));
         }
+        }
         renderSection();
       } else if (act === "toggle-tech-setting") {
+        const shellControl = doc.querySelector<HTMLButtonElement>("[data-action='toggle-technical']");
+        if (shellControl) shellControl.click();
+        else {
         const nextTech = html.dataset.technicalMode !== "true";
         html.dataset.technicalMode = String(nextTech);
         const techBtn = doc.querySelector<HTMLButtonElement>("[data-action='toggle-technical']");
@@ -770,12 +747,12 @@ export function mountSettingsWorkspace(
           techBtn.textContent = "Technical: " + (nextTech ? "On" : "Off");
           techBtn.setAttribute("aria-pressed", String(nextTech));
         }
+        }
         renderSection();
       } else if (act === "close-ui-dialog") {
         const dialogId = actionBtn.dataset.dialogId;
         if (dialogId === "settings-confirm-dialog") {
-          if (typeof confirmDialog.close === "function") confirmDialog.close();
-          else confirmDialog.removeAttribute("open");
+          cancelConfirm();
         }
       }
     }
@@ -805,9 +782,10 @@ export function mountSettingsWorkspace(
       data: { securityState, indexStats, localMcp, hostedTunnel, lastTrace },
       error: null,
       permission: "granted",
-      vault: securityState?.locked ? "locked" : "unlocked",
+      vault: !securityState || securityState.locked ? "locked" : "unlocked",
     }),
     destroy: () => {
+      pendingConfirm = null; securityState = null; indexStats = null; localMcp = null; hostedTunnel = null; lastTrace = null;
       alive = false;
       shell.removeEventListener("click", clickHandler);
       shell.replaceChildren();

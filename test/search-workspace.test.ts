@@ -93,7 +93,7 @@ const mockContextPack: ContextPack = {
       ],
     },
   ],
-  total_tokens: 350,
+  estimated_tokens: 350,
   truncated: false,
 };
 

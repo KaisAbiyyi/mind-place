@@ -200,6 +200,8 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock, ope
     if (route !== "files-secure-vault" && filesVaultWorkspace) {
       filesVaultWorkspace.destroy(); filesVaultWorkspace = undefined;
     }
+    if (route !== "ai-providers-mcp" && providersWorkspace) { providersWorkspace.destroy(); providersWorkspace = undefined; }
+    if ((route !== "settings" || workspace !== "settings") && settingsWorkspace) { settingsWorkspace.destroy(); settingsWorkspace = undefined; }
     // Leaving Setup & Onboarding unmounts the wizard and fences its late async work.
     if (route !== "setup-onboarding" && onboardingWorkspace) { onboardingWorkspace.destroy(); onboardingWorkspace = undefined; }
     activeWorkspace = workspace;
@@ -1357,7 +1359,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock, ope
     libraryWorkspace = mountLibraryWorkspace(view, invoke, () => {
       libraryWorkspace?.destroy(); libraryWorkspace = undefined;
       returnToConversations();
-    });
+    }, safeClipboard);
     focusViewHeading();
   };
 
@@ -1516,6 +1518,8 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock, ope
   };
 
   const openSettingsOverview = () => {
+    ++selectionVersion;
+    selectedId = null; loadedConversation = null; loadedSnapshots = []; selectedSnapshotId = null; exportedMarkdown = "";
     providersWorkspace?.destroy(); providersWorkspace = undefined;
     hiveWorkspace?.destroy(); hiveWorkspace = undefined;
     libraryWorkspace?.destroy(); libraryWorkspace = undefined;

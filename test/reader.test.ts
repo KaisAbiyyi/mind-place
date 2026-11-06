@@ -488,7 +488,9 @@ test("Settings tabs preserve explicit consent, keyboard navigation and focus res
   };
   const { dom, root, app } = createReader(invoke);
   await app.ready;
-  const documents = root.querySelector<HTMLButtonElement>("[data-action='open-setup']")!;
+  root.querySelector<HTMLButtonElement>("#knowledge-os-nav [data-route='ai-providers-mcp']")!.click();
+  await delay(0);
+  const documents = root.querySelector<HTMLButtonElement>(".providers-workspace [data-action='open-setup']")!;
   documents.focus();
   documents.click();
   await delay(0);

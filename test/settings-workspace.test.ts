@@ -51,7 +51,7 @@ test("MP-UI-08: Storage & Vault displays factual state, recovery ceremony, backu
   const commands: string[] = [];
   const invoke: Invoke = async <T>(command: string, args?: Record<string, unknown>) => {
     commands.push(command);
-    if (command === "get_security_status") return { configured: true, locked: false, epoch: 3 } as T;
+    if (command === "get_security_status") return { configured: true, locked: false, epoch: 3, vault_mode: "encrypted" } as T;
     if (command === "get_archive_index_stats") return { sources: 5, revisions: 8, chunks: 40, generation: 2 } as T;
     if (command === "get_local_mcp_status") return { running: false } as T;
     if (command === "get_hosted_tunnel_status") return { running: false, connection_verified: false } as T;
@@ -66,7 +66,7 @@ test("MP-UI-08: Storage & Vault displays factual state, recovery ceremony, backu
     if (command === "create_vault_online_backup") {
       assert.equal(args?.destination, "D:\\backups\\mp");
       assert.equal(args?.generation, 2);
-      return { manifest_path: "D:\\backups\\mp\\manifest.json", total_chunks: 40, timestamp: "2026-11-06" } as T;
+      return { version: 1, vault_id_b64: "synthetic", generation: 2, count: 40 } as T;
     }
     throw new Error("Unhandled: " + command);
   };
@@ -82,27 +82,8 @@ test("MP-UI-08: Storage & Vault displays factual state, recovery ceremony, backu
   // Check boundary explanation
   assert.match(view.textContent!, /MP-9C backend acceptance/);
 
-  // Test begin vault setup
-  const secretInput = view.querySelector<HTMLInputElement>("input[type='password']")!;
-  secretInput.value = "mypassword123";
-  const beginBtn = [...view.querySelectorAll<HTMLButtonElement>("button")].find(
-    (b) => b.textContent?.includes("Begin First-Run Vault Ceremony"),
-  )!;
-  beginBtn.click();
-  await delay(10);
-
-  assert.ok(commands.includes("begin_vault_setup"));
-  assert.match(view.textContent!, /CODE-RECOVER-XYZ-789/);
-
-  // Test confirm vault setup (opens confirmation dialog, clicks proceed)
-  const confirmBtn = [...view.querySelectorAll<HTMLButtonElement>("button")].find(
-    (b) => b.textContent?.includes("Confirm Recovery Setup"),
-  )!;
-  confirmBtn.click();
-  const proceedBtn = view.querySelector<HTMLButtonElement>("#settings-confirm-dialog .ui-button-primary")!;
-  proceedBtn.click();
-  await delay(10);
-  assert.ok(commands.includes("confirm_vault_setup"));
+  assert.equal(view.querySelector("input[type=password]"), null);
+  assert.equal(commands.includes("begin_vault_setup"), false);
 
   // Test online backup
   const destInput = view.querySelector<HTMLInputElement>("label:has(input[placeholder*='backups']) input") ??
@@ -122,7 +103,7 @@ test("MP-UI-08: Storage & Vault displays factual state, recovery ceremony, backu
   await delay(10);
 
   assert.ok(commands.includes("create_vault_online_backup"));
-  assert.match(view.textContent!, /Backup created successfully at D:\\backups\\mp\\manifest\.json/);
+  assert.match(view.textContent!, /Generation 2; 40 objects/);
 
   handle.destroy();
 });
