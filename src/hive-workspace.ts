@@ -12,22 +12,49 @@ const SVG = "http://www.w3.org/2000/svg";
 const MAX_NODES = 120;
 const MAX_EDGES = 240;
 
-/** Stable non-force layout; no timer/network and a fixed DOM budget. */
-export function layoutHive(nodes: readonly HiveNode[]): Map<string, {x: number; y: number}> {
-  const groups = new Map<number, HiveNode[]>();
-  for (const node of nodes.slice(0, MAX_NODES)) {
-    const d = Math.max(0, Math.min(3, Math.trunc(node.depth)));
-    groups.set(d, [...(groups.get(d) ?? []), node]);
+/** Deterministic topology-based islands; unlinked evidence never acquires a synthetic edge. */
+export function layoutHive(nodes: readonly HiveNode[], edges: readonly HiveEdge[] = []): Map<string, {x: number; y: number}> {
+  const bounded = [...nodes.slice(0, MAX_NODES)].sort((a, b) => a.id.localeCompare(b.id));
+  const lookup = new Map(bounded.map((node) => [node.id, node]));
+  const adjacent = new Map(bounded.map((node) => [node.id, new Set<string>()]));
+  for (const edge of edges.slice(0, MAX_EDGES)) {
+    if (!lookup.has(edge.from_node) || !lookup.has(edge.to_node)) continue;
+    adjacent.get(edge.from_node)!.add(edge.to_node);
+    adjacent.get(edge.to_node)!.add(edge.from_node);
   }
+  const seen = new Set<string>();
+  const connected: HiveNode[][] = [], isolated: HiveNode[] = [];
+  for (const node of bounded) {
+    if (seen.has(node.id)) continue;
+    const queue = [node.id], component: HiveNode[] = [];
+    seen.add(node.id);
+    for (let index = 0; index < queue.length; index++) {
+      const id = queue[index];
+      component.push(lookup.get(id)!);
+      for (const next of [...adjacent.get(id)!].sort()) {
+        if (!seen.has(next)) { seen.add(next); queue.push(next); }
+      }
+    }
+    if (component.length === 1 && adjacent.get(node.id)!.size === 0) isolated.push(node);
+    else connected.push(component.sort((a, b) => a.id.localeCompare(b.id)));
+  }
+  connected.sort((a, b) => b.length - a.length || a[0].id.localeCompare(b[0].id));
   const positions = new Map<string, {x: number; y: number}>();
-  for (const [depth, rows] of groups) {
-    rows.sort((a, b) => a.id.localeCompare(b.id));
-    rows.forEach((node, i) => {
-      const a = ((i + (depth % 2) / 2) / Math.max(1, rows.length)) * Math.PI * 2 - Math.PI / 2;
-      const radius = depth === 0 ? 38 : 75 + depth * 76;
-      positions.set(node.id, { x: 380 + Math.cos(a) * radius, y: 300 + Math.sin(a) * radius });
+  connected.forEach((component, group) => {
+    const angle = connected.length === 1 ? 0 : (group / connected.length) * Math.PI * 2 - Math.PI / 2;
+    const orbit = connected.length === 1 ? 0 : Math.min(180, 95 + 12 * connected.length);
+    const cx = 380 + Math.cos(angle) * orbit, cy = 300 + Math.sin(angle) * orbit * .8;
+    component.forEach((node, index) => {
+      const phase = index * 2.399963229728653;
+      const radius = index === 0 ? 0 : Math.min(64, 19 * Math.sqrt(index));
+      positions.set(node.id, { x: cx + Math.cos(phase) * radius, y: cy + Math.sin(phase) * radius });
     });
-  }
+  });
+  isolated.forEach((node, index) => {
+    const angle = ((index + .5) / Math.max(1, isolated.length)) * Math.PI * 2 - Math.PI / 2;
+    const radius = 254 + (index % 3) * 7;
+    positions.set(node.id, { x: 380 + Math.cos(angle) * radius, y: 300 + Math.sin(angle) * radius * .86 });
+  });
   return positions;
 }
 
@@ -64,10 +91,12 @@ export function validateHive(value: unknown): HiveGraph {
 }
 
 /** Archive-only graph exploration: no graph writes, no wildcard/foreign scope. */
-export function mountHiveWorkspace(view: HTMLElement, invoke: Invoke, onClose: () => void, initialKey = ""): HiveHandle {
+export function mountHiveWorkspace(view: HTMLElement, invoke: Invoke, onClose: () => void, initialKey = "", onOpenArchive?: (id: string) => void): HiveHandle {
   const document = view.ownerDocument;
   let alive = true, generation = 0, graph: HiveGraph | null = null;
   let selectedId: string | null = null, zoom = 1, revisionIndex = 0;
+  let panX = 0, panY = 0, focus = false;
+  const history: string[] = [];
   const panel = document.createElement("section");
   panel.className = "hive-workspace";
   panel.setAttribute("aria-label", "Hive archive graph explorer");
@@ -113,6 +142,28 @@ export function mountHiveWorkspace(view: HTMLElement, invoke: Invoke, onClose: (
   timelineLabel.append(timeline);
   const revisionText = document.createElement("span"); revisionText.className = "hive-revision-label";
   controls.append(zoomLabel, timelineLabel, revisionText);
+  const searchLabel = document.createElement("label"); searchLabel.textContent = "Find a node";
+  const search = document.createElement("input"); search.type = "search"; search.maxLength = 256;
+  search.placeholder = "Title or exact identity"; searchLabel.append(search);
+  const layerLabel = document.createElement("label"); layerLabel.textContent = "Layer";
+  const layer = document.createElement("select");
+  for (const [value, label] of [["all", "All archive nodes"], ["conversation", "Conversations"], ["revision", "Revisions"], ["import", "Saved imports"]]) {
+    const option = document.createElement("option"); option.value = value; option.textContent = label; layer.append(option);
+  }
+  layerLabel.append(layer);
+  const originLabel = document.createElement("label"); originLabel.textContent = "Evidence";
+  const origin = document.createElement("select");
+  for (const [value, label] of [["all", "All relationships"], ["deterministic", "Deterministic only"], ["inferred", "Inferred only"]]) {
+    const option = document.createElement("option"); option.value = value; option.textContent = label; origin.append(option);
+  }
+  originLabel.append(origin);
+  const previous = document.createElement("button"); previous.type = "button"; previous.textContent = "Back one mind";
+  previous.className = "quiet-button"; previous.disabled = true;
+  const reset = document.createElement("button"); reset.type = "button"; reset.className = "quiet-button";
+  reset.textContent = "Reset view";
+  const refresh = document.createElement("button"); refresh.type = "button"; refresh.className = "quiet-button";
+  refresh.textContent = "Refresh graph";
+  controls.append(searchLabel, layerLabel, originLabel, previous, reset, refresh);
   const svg = document.createElementNS(SVG, "svg");
   svg.setAttribute("viewBox", "0 0 760 600"); svg.setAttribute("role", "img");
   svg.setAttribute("aria-label", "Bounded archive graph. Use the node list for keyboard navigation.");
@@ -121,11 +172,20 @@ export function mountHiveWorkspace(view: HTMLElement, invoke: Invoke, onClose: (
   const detail = document.createElement("section"); detail.className = "hive-details";
   detail.setAttribute("aria-live", "polite");
   panel.append(header, hint, form, status, controls, svg, list, detail);
+  hint.textContent += " Graph generation/rebuild is not exposed by this read-only API; Refresh only re-reads the current projection.";
+  list.setAttribute("role", "group"); list.setAttribute("aria-label", "Keyboard-accessible graph nodes and branches");
   view.replaceChildren(panel);
   controls.hidden = true;
 
   const revisions = () => graph ? [...new Set(graph.edges.map(e => e.source_revision).filter(Boolean))].sort() : [];
   const activeRevision = () => revisionIndex === 0 ? null : revisions()[revisionIndex - 1] ?? null;
+
+  const choose = (id: string) => {
+    if (!graph?.nodes.some(node => node.id === id)) return;
+    if (selectedId && selectedId !== id) history.push(selectedId);
+    selectedId = id; focus = true; zoom = Math.max(zoom, 1.45); panX = 0; panY = 0;
+    zoomSlider.value = String(Math.round(zoom * 100 / 10) * 10); render();
+  };
 
   function render() {
     if (!alive || !graph) return;
@@ -138,56 +198,89 @@ export function mountHiveWorkspace(view: HTMLElement, invoke: Invoke, onClose: (
       : "Revision " + revisionIndex + " of " + versions.length + ": " + versions[revisionIndex - 1];
     controls.hidden = graph.nodes.length === 0;
     svg.replaceChildren(); list.replaceChildren(); detail.replaceChildren();
-    const coords = layoutHive(graph.nodes);
-    const wrapper = document.createElementNS(SVG, "g");
-    wrapper.setAttribute("transform", "translate(380 300) scale(" + zoom + ") translate(-380 -300)");
+    const query = search.value.trim().toLocaleLowerCase();
+    const visible = graph.nodes.filter(node =>
+      (layer.value === "all" || node.kind === layer.value) &&
+      (!query || (node.label + " " + node.id + " " + node.canonical_key).toLocaleLowerCase().includes(query)));
+    const visibleIds = new Set(visible.map(node => node.id));
     const version = activeRevision();
-    for (const edge of graph.edges) {
-      if (version !== null && edge.source_revision !== version) continue;
+    const eligibleEdges = graph.edges.filter(edge => visibleIds.has(edge.from_node) && visibleIds.has(edge.to_node)
+      && (version === null || edge.source_revision === version)
+      && (origin.value === "all" || edge.origin === origin.value));
+    const coords = layoutHive(graph.nodes, graph.edges);
+    const anchor = focus && selectedId ? coords.get(selectedId) : null;
+    const center = anchor ?? { x: 380, y: 300 };
+    const wrapper = document.createElementNS(SVG, "g");
+    wrapper.setAttribute("transform", "translate(" + (380 + panX) + " " + (300 + panY) + ") scale(" +
+      zoom + ") translate(" + (-center.x) + " " + (-center.y) + ")");
+    const degree = new Map(visible.map(node => [node.id, 0]));
+    for (const edge of eligibleEdges) {
+      degree.set(edge.from_node, (degree.get(edge.from_node) ?? 0) + 1);
+      degree.set(edge.to_node, (degree.get(edge.to_node) ?? 0) + 1);
       const from = coords.get(edge.from_node), to = coords.get(edge.to_node);
       if (!from || !to) continue;
       const line = document.createElementNS(SVG, "line");
       line.setAttribute("x1", String(from.x)); line.setAttribute("y1", String(from.y));
       line.setAttribute("x2", String(to.x)); line.setAttribute("y2", String(to.y));
       line.setAttribute("class", edge.origin === "inferred" ? "hive-edge hive-inferred" : "hive-edge");
-      wrapper.append(line);
+      const tip = document.createElementNS(SVG, "title");
+      tip.textContent = edge.relation + " · " + edge.origin + " · " + edge.source_revision;
+      line.append(tip); wrapper.append(line);
     }
-    for (const node of graph.nodes) {
-      const pos = coords.get(node.id);
-      if (!pos) continue;
+    for (const node of visible) {
+      const pos = coords.get(node.id); if (!pos) continue;
       const circle = document.createElementNS(SVG, "circle");
       circle.setAttribute("cx", String(pos.x)); circle.setAttribute("cy", String(pos.y));
       circle.setAttribute("r", node.id === selectedId ? "10" : "7");
-      circle.setAttribute("class", node.id === selectedId ? "hive-node hive-selected" : "hive-node");
+      circle.setAttribute("class", (node.id === selectedId ? "hive-node hive-selected" : "hive-node") +
+        ((degree.get(node.id) ?? 0) === 0 ? " hive-isolated" : ""));
       const tip = document.createElementNS(SVG, "title");
       tip.textContent = node.kind + ": " + node.label;
-      circle.append(tip); wrapper.append(circle);
+      circle.append(tip); circle.addEventListener("click", () => choose(node.id));
+      wrapper.append(circle);
       const button = document.createElement("button"); button.type = "button";
       button.className = "quiet-button hive-node-choice";
       button.setAttribute("aria-pressed", String(node.id === selectedId));
-      button.textContent = node.kind + " · " + node.label;
-      button.addEventListener("click", () => { selectedId = node.id; render(); });
-      list.append(button);
+      button.textContent = node.kind + " · " + node.label + ((degree.get(node.id) ?? 0) === 0 ? " · no visible links" : "");
+      button.addEventListener("click", () => choose(node.id)); list.append(button);
     }
     svg.append(wrapper);
-    const selected = graph.nodes.find(x => x.id === selectedId);
-    if (!selected) return;
+    previous.disabled = history.length === 0;
+    const selected = visible.find(node => node.id === selectedId);
+    if (!selected) {
+      const empty = document.createElement("p"); empty.textContent = visible.length
+        ? "Select a node to trace its evidence." : "No nodes match this filter. Clear search or select another layer.";
+      detail.append(empty); return;
+    }
     const name = document.createElement("h2"); name.textContent = selected.label;
     const identity = document.createElement("p");
     identity.textContent = "Kind: " + selected.kind + " · Source ref: " + selected.source_ref + " · Key: " + selected.canonical_key;
     detail.append(name, identity);
-    const evidence = graph.edges.filter(e =>
-      (e.from_node === selected.id || e.to_node === selected.id) &&
-      (version === null || e.source_revision === version)).slice(0, MAX_EDGES);
+    if (selected.kind === "import" && onOpenArchive) {
+      const open = document.createElement("button"); open.type = "button";
+      open.className = "quiet-button"; open.textContent = "Open matching saved conversation";
+      open.addEventListener("click", () => onOpenArchive(selected.canonical_key)); detail.append(open);
+    }
+    const evidence = eligibleEdges.filter(edge => edge.from_node === selected.id || edge.to_node === selected.id);
     if (evidence.length === 0) {
-      const empty = document.createElement("p"); empty.textContent = "No edges in this revision selection."; detail.append(empty);
+      const empty = document.createElement("p");
+      empty.textContent = "No evidence relationships in this selection. Isolated nodes remain available without fabricated links.";
+      detail.append(empty);
     }
     for (const edge of evidence) {
-      const p = document.createElement("p"); p.className = "hive-evidence";
+      const row = document.createElement("div"); row.className = "hive-evidence";
+      const p = document.createElement("p");
       p.textContent = edge.relation + " · " + edge.origin +
-        (edge.confidence_bps === null ? "" : " (reported confidence " + edge.confidence_bps + "/10000)") +
+        (edge.confidence_bps === null ? " · confidence not reported" : " · reported confidence " + edge.confidence_bps + "/10000") +
         " · source " + edge.source_ref + " · revision " + edge.source_revision + " · locator " + edge.locator;
-      detail.append(p);
+      const other = graph.nodes.find(node => node.id === (edge.from_node === selected.id ? edge.to_node : edge.from_node));
+      row.append(p);
+      if (other) {
+        const follow = document.createElement("button"); follow.type = "button";
+        follow.className = "quiet-button"; follow.textContent = "Follow branch: " + other.label;
+        follow.addEventListener("click", () => choose(other.id)); row.append(follow);
+      }
+      detail.append(row);
     }
   }
 
@@ -199,6 +292,27 @@ export function mountHiveWorkspace(view: HTMLElement, invoke: Invoke, onClose: (
     revisionIndex = Math.max(0, Math.min(revisions().length, Number(timeline.value) || 0));
     render();
   });
+  search.addEventListener("input", render);
+  layer.addEventListener("change", render);
+  origin.addEventListener("change", render);
+  previous.addEventListener("click", () => { const id = history.pop(); if (id) { selectedId = id; focus = true; panX = 0; panY = 0; render(); } });
+  reset.addEventListener("click", () => { history.length = 0; focus = false; panX = 0; panY = 0; zoom = 1; zoomSlider.value = "100"; render(); });
+  refresh.addEventListener("click", () => { if (!submit.disabled) form.requestSubmit(); });
+  svg.addEventListener("wheel", event => {
+    event.preventDefault();
+    zoom = Math.max(.6, Math.min(2, zoom + (event.deltaY < 0 ? .1 : -.1)));
+    zoomSlider.value = String(Math.round(zoom * 100 / 10) * 10); render();
+  }, { passive: false });
+  let drag: { x: number; y: number } | null = null;
+  svg.addEventListener("pointerdown", event => { drag = { x: event.clientX, y: event.clientY }; });
+  svg.addEventListener("pointermove", event => {
+    if (!drag) return;
+    panX = Math.max(-260, Math.min(260, panX + event.clientX - drag.x));
+    panY = Math.max(-260, Math.min(260, panY + event.clientY - drag.y));
+    drag = { x: event.clientX, y: event.clientY }; render();
+  });
+  svg.addEventListener("pointerup", () => { drag = null; });
+  svg.addEventListener("pointerleave", () => { drag = null; });
   form.addEventListener("submit", event => {
     event.preventDefault();
     if (!alive || submit.disabled) return;
@@ -207,7 +321,7 @@ export function mountHiveWorkspace(view: HTMLElement, invoke: Invoke, onClose: (
       status.textContent = "Enter a valid bounded seed identity."; return;
     }
     const current = ++generation;
-    graph = null; selectedId = null; svg.replaceChildren(); list.replaceChildren(); detail.replaceChildren();
+    graph = null; selectedId = null; history.length = 0; panX = 0; panY = 0; focus = false; svg.replaceChildren(); list.replaceChildren(); detail.replaceChildren();
     controls.hidden = true;
     submit.disabled = true;
     status.textContent = "Loading a bounded read-only graph…";
@@ -236,7 +350,7 @@ export function mountHiveWorkspace(view: HTMLElement, invoke: Invoke, onClose: (
   });
   return {
     destroy: () => {
-      alive = false; ++generation; graph = null; selectedId = null;
+      alive = false; ++generation; graph = null; selectedId = null; history.length = 0; drag = null;
       key.value = ""; list.replaceChildren(); detail.replaceChildren(); svg.replaceChildren();
       if (panel.parentNode === view) view.replaceChildren();
     },
