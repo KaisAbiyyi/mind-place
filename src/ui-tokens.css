@@ -336,3 +336,6 @@
 :root[data-theme] .primary-button { border-color: var(--mp-text-primary); background: var(--mp-text-primary); color: var(--mp-bg-app); }
 :root[data-theme] .text-button,
 :root[data-theme] .text-button:hover { color: var(--mp-text-primary); }
+
+/* Keep native form affordances achromatic in both themes. */
+:root { accent-color:var(--mp-text-primary); }

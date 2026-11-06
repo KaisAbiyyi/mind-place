@@ -218,3 +218,10 @@
   border-bottom: 1px solid var(--mp-border);
   font-size: 11px;
 }
+
+/* UI-09: isolate the unified search form from legacy library flex rules. */
+.search-query-form { display:grid; align-items:start; }
+.search-multi-query-panel[hidden] { display:none !important; }
+.search-policies-grid :is(input, select) { flex:0 0 auto; min-width:0; width:100%; }
+.search-primary-row { min-width:0; }
+.search-primary-row > input { min-width:0; }

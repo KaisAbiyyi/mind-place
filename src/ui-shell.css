@@ -103,3 +103,5 @@
   .app-sidebar #knowledge-os-nav { flex:0 0 auto; max-height:calc(100dvh - 160px); overflow-y:auto; }
   .app-sidebar .sidebar-footer { margin-top:auto; }
 }
+/* Canonical HTML uses an inverse monochrome fill for the active destination. */
+.knowledge-os-nav-item[aria-current="page"] { background:var(--mp-text-primary); color:var(--mp-bg-app); }
