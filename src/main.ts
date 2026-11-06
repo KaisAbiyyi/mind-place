@@ -17,6 +17,7 @@ import "./ui-primitives.css";
 import "./ui-shell.css";
 import "./search-workspace.css";
 import "./settings-workspace.css";
+import "./onboarding-workspace.css";
 import type { Invoke } from "./reader.js";
 import { mountApplication } from "./app.js";
 
