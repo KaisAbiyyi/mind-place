@@ -61,3 +61,12 @@ test('UI09 Settings tabs support arrow keys and roving focus',async()=>{
  const h=mountSettingsWorkspace(view,invoke);await delay(0);const tab=view.querySelector<HTMLButtonElement>('[data-settings-section=general]')!;tab.focus();tab.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true,cancelable:true}));
  assert.equal(view.ownerDocument.activeElement?.getAttribute('data-settings-section'),'storage-vault');assert.equal(view.querySelectorAll('[role=tab][tabindex="0"]').length,1);h.destroy();dom.window.close();
 });
+test('UI09 Historical context requires a date before invoking native context builder',async()=>{
+ const {dom,view}=fixture();const calls:string[]=[];
+ const invoke:Invoke=async<T>(c:string)=>{calls.push(c);if(c==='get_security_status')return sec as T;if(c==='search_archive_index')return [hit] as T;return [] as T;};
+ const h=mountSearchWorkspace(view,invoke);submit(dom,view,'source');await delay(0);const preset=view.querySelector<HTMLSelectElement>('select.search-select')!;preset.value='historical';preset.dispatchEvent(new dom.window.Event('change'));view.querySelector<HTMLButtonElement>('[data-action=build-context]')!.click();await delay(0);assert.equal(calls.includes('build_retrieval_context'),false);assert.match(view.textContent!,/select.*date/i);h.destroy();dom.window.close();
+});
+test('UI09 Overview reports unavailable health without inventing zero counts',async()=>{
+ const {dom,view}=fixture();const invoke:Invoke=async<T>(c:string)=>{if(c==='list_conversations')return [] as T;throw Error('unavailable');};
+ const h=mountReader({root:view,invoke});await h.ready;await delay(0);assert.match(view.querySelector('[data-overview-health]')?.textContent||'',/unavailable/i);h.destroy();dom.window.close();
+});

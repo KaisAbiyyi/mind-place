@@ -826,6 +826,7 @@ export function mountSearchWorkspace(
   }
 
   async function buildContext() {
+    if (selectedPreset === "historical" && !asOfDate) { status.textContent = "Select an as-of date for Historical context."; return; }
     const version = epoch;
     buildContextBtn.disabled = true;
     status.textContent = "Assembling context pack…";

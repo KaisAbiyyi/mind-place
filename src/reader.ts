@@ -409,7 +409,31 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock, ope
     actions.append(sourceSearch);
     actionsCard.body.append(actions);
     lower.append(actionsCard.element);
+    const health = createUiCard(document, { title: "Runtime health", description: "Observed local status; listener state is not proof of a connected client." });
+    health.body.dataset.overviewHealth = "true";
+    health.body.textContent = "Checking native runtime status…";
+    lower.append(health.element);
     page.append(lower);
+    void (async () => {
+      try {
+        const security = await invoke<{ locked: boolean; epoch: number }>("get_security_status");
+        if (!alive || !page.isConnected) return;
+        if (!security || security.locked !== false) { health.body.textContent = "Runtime locked or unavailable. Open the security gate."; return; }
+        const observed = await Promise.allSettled([
+          invoke<{ sources: number; generation: number }>("get_archive_index_stats"),
+          invoke<{ running: boolean }>("get_local_mcp_status"),
+        ]);
+        const after = await invoke<{ locked: boolean; epoch: number }>("get_security_status");
+        if (!alive || !page.isConnected) return;
+        if (after.locked || after.epoch !== security.epoch) { health.body.textContent = "Runtime status changed. Refresh after unlocking."; return; }
+        const [index, mcp] = observed;
+        const indexLabel = index.status === "fulfilled" && Number.isFinite(index.value.sources)
+          ? `Index: ${index.value.sources} sources · generation ${index.value.generation}` : "Index status unavailable";
+        const mcpLabel = mcp.status === "fulfilled" && typeof mcp.value.running === "boolean"
+          ? mcp.value.running ? "MCP listener running; no client verified" : "MCP listener stopped" : "MCP status unavailable";
+        health.body.textContent = indexLabel + ". " + mcpLabel + ".";
+      } catch { if (alive && page.isConnected) health.body.textContent = "Runtime health unavailable. No service or encryption guarantee can be shown."; }
+    })();
 
     if (total === 0) {
       page.append(createUiStatePanel(document, {
