@@ -5,6 +5,7 @@ import { createUiButton, createUiCard, createUiStatePanel, createUiStatus, creat
 import { APPLICATION_SHELL_MARKUP, mountUiShell } from "./ui-shell.js";
 import { mountLocalMcpSetup } from "./mcp-setup.js";
 import { mountDocumentRootSetup } from "./document-roots.js";
+import { mountFilesVaultWorkspace, type FilesVaultHandle } from "./files-vault-workspace.js";
 import { mountMemoryInspector, type MemoryInspectorHandle } from "./memory-inspector.js";
 import { mountHiveWorkspace, type HiveHandle } from "./hive-workspace.js";
 import { mountLibraryWorkspace, type LibraryHandle } from "./library-workspace.js";
@@ -147,6 +148,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   let hiveWorkspace: HiveHandle | undefined;
   let providersWorkspace: ProvidersHandle | undefined;
   let setupMcp: { destroy(): void } | undefined;
+  let filesVaultWorkspace: FilesVaultHandle | undefined;
   let alive = true;
   const invoke: Invoke = async <T>(command: string, args?: Record<string, unknown>) => {
     if (!alive) throw new Error("MP_UI_SESSION_EXPIRED");
@@ -183,6 +185,9 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   let archiveTableVisible = false;
   let transcriptPage = 0;
   const activateRoute = (route: UiRouteId, workspace: WorkspaceId = activeWorkspace) => {
+    if (route !== "files-secure-vault" && filesVaultWorkspace) {
+      filesVaultWorkspace.destroy(); filesVaultWorkspace = undefined;
+    }
     activeWorkspace = workspace;
     activeRoute = route;
     setActiveRoute(workspaceNav, route, workspace);
@@ -1335,6 +1340,27 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     focusViewHeading();
   };
 
+  const openFilesVaultWorkspace = () => {
+    hiveWorkspace?.destroy(); hiveWorkspace = undefined;
+    libraryWorkspace?.destroy(); libraryWorkspace = undefined;
+    memoryInspector?.destroy(); memoryInspector = undefined;
+    healthWorkspace?.destroy(); healthWorkspace = undefined;
+    filesVaultWorkspace?.destroy(); filesVaultWorkspace = undefined;
+    ++selectionVersion;
+    selectedId = null;
+    loadedConversation = null;
+    loadedSnapshots = [];
+    selectedSnapshotId = null;
+    exportedMarkdown = "";
+    updateToolbarSelection();
+    setActionStatus("");
+    renderConversationRows(search.value.trim());
+    activateWorkspace("documents");
+    toolbarTitle.textContent = "Files & Secure Vault";
+    filesVaultWorkspace = mountFilesVaultWorkspace(view, invoke);
+    focusViewHeading();
+  };
+
   const openHiveWorkspace = () => {
     const initialKey = summaries.find(x => x.id === selectedId)?.id ?? summaries[0]?.id ?? "";
     libraryWorkspace?.destroy(); libraryWorkspace = undefined;
@@ -1480,7 +1506,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
       case "conversations": openConversations(); break;
       case "curated-memory": openMemoryInspector(); break;
       case "hive-mind-graph": openHiveWorkspace(); break;
-      case "files-secure-vault": openSetupDialog(trigger, "documents", "documents", route); break;
+      case "files-secure-vault": openFilesVaultWorkspace(); break;
       case "ai-providers-mcp": openProvidersWorkspace(); break;
       case "setup-onboarding": openSetupDialog(trigger, "connections", "archive", route); break;
       case "settings": openSettingsOverview(); break;
@@ -1541,7 +1567,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
         const tab = actionElement.dataset.tab;
         if (tab === "privacy" || tab === "connections") openSetupDialog(actionElement, "connections", tab, "settings");
       }
-      else if (action === "open-document-search") openSetupDialog(actionElement, "documents", "documents", "files-secure-vault");
+      else if (action === "open-document-search") openFilesVaultWorkspace();
       else if (action === "open-setup") openSetupDialog(actionElement, "connections", "archive", "setup-onboarding");
       else if (action === "open-import-setup") openSetupDialog(actionElement, "connections", "archive", "setup-onboarding");
       else if (action === "close-setup") closeSetup();
@@ -1641,6 +1667,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     destroy: () => {
       setupMcp?.destroy(); setupMcp = undefined;
       providersWorkspace?.destroy(); providersWorkspace = undefined;
+      filesVaultWorkspace?.destroy(); filesVaultWorkspace = undefined;
       hiveWorkspace?.destroy(); hiveWorkspace = undefined;
       libraryWorkspace?.destroy(); libraryWorkspace = undefined;
       healthWorkspace?.destroy();

@@ -488,10 +488,11 @@ test("Settings tabs preserve explicit consent, keyboard navigation and focus res
   };
   const { dom, root, app } = createReader(invoke);
   await app.ready;
-  const documents = root.querySelector<HTMLButtonElement>("[data-action='open-document-search']")!;
+  const documents = root.querySelector<HTMLButtonElement>("[data-action='open-setup']")!;
   documents.focus();
   documents.click();
   await delay(0);
+  root.querySelector<HTMLButtonElement>("#settings-tab-documents")!.click();
   await delay(0);
   assert.equal(root.querySelector<HTMLButtonElement>("#settings-tab-documents")?.getAttribute("aria-selected"), "true");
   assert.equal(root.querySelector<HTMLElement>("#settings-panel-documents")?.hidden, false);
