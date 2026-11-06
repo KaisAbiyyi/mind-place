@@ -1,0 +1,18 @@
+.providers-workspace { max-width:1440px; margin:auto; padding:28px clamp(16px,3vw,36px) 56px; display:grid; gap:20px; }
+.providers-page-head h1 { margin:0 0 8px; font-size:26px; line-height:1.25; letter-spacing:-.035em; }
+.providers-page-head p { margin:0; font-size:13px; color:var(--mp-text-secondary); }
+.providers-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; }
+.providers-workspace p { overflow-wrap:anywhere; line-height:1.65; }
+.provider-card .ui-card-title { font-size:17px; }
+.provider-card .ui-card-body { align-content:start; font-size:13px; }
+.provider-card p { margin:0; }
+.provider-card label { display:grid; gap:8px; font-size:12px; }
+.provider-card select { width:100%; min-width:0; padding:8px; border:1px solid var(--mp-border); border-radius:var(--mp-radius-md); background:var(--mp-bg-subtle); color:var(--mp-text-secondary); font:12px var(--mp-font-ui); opacity:1; }
+.provider-card .provider-capability-note { color:var(--mp-text-secondary); font-size:12px; }
+.providers-workspace .setup-mcp { min-width:0; padding:22px; border:1px solid var(--mp-border); border-radius:var(--mp-radius-lg); background:var(--mp-bg-surface); }
+.providers-workspace .setup-mcp p { font-size:13px; }
+.providers-workspace .setup-mcp input:not([type=checkbox]) { display:block; width:min(100%,520px); min-width:0; padding:10px; margin:8px 0 14px; background:var(--mp-bg-subtle); border:1px solid var(--mp-border); border-radius:var(--mp-radius-md); color:var(--mp-text-primary); font:13px var(--mp-font-ui); }
+.providers-workspace .setup-mcp [data-mcp-secret] { overflow-wrap:anywhere; }
+.providers-workspace .setup-mcp [data-mcp-secret] code { user-select:all; }
+.providers-workspace .setup-mcp .quiet-button, .providers-workspace .setup-mcp .primary-button { min-height:36px; font:12px var(--mp-font-ui); }
+@media(max-width:1120px) { .providers-grid { grid-template-columns:minmax(0,1fr); } }

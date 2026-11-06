@@ -4,6 +4,8 @@ import "./style.css";
 import "./knowledge-os.css";
 import "./library-workspace.css";
 import "./memory-inspector.css";
+import "./conversation-archive.css";
+import "./providers-workspace.css";
 import "./memory-entity-lenses.css";
 import "./hive-workspace.css";
 import "./health-workspace.css";
