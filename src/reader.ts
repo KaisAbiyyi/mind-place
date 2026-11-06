@@ -10,6 +10,7 @@ import { mountMemoryInspector, type MemoryInspectorHandle } from "./memory-inspe
 import { mountHiveWorkspace, type HiveHandle } from "./hive-workspace.js";
 import { mountLibraryWorkspace, type LibraryHandle } from "./library-workspace.js";
 import { mountHealthWorkspace, type HealthWorkspaceHandle } from "./health-workspace.js";
+import { mountSettingsWorkspace, type SettingsWorkspaceHandle } from "./settings-workspace.js";
 import { marked } from "marked";
 import renderMathInElement from "katex/contrib/auto-render";
 import type {
@@ -144,6 +145,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   let exportedMarkdown = "";
   let memoryInspector: MemoryInspectorHandle | undefined;
   let healthWorkspace: HealthWorkspaceHandle | undefined;
+  let settingsWorkspace: SettingsWorkspaceHandle | undefined;
   let libraryWorkspace: LibraryHandle | undefined;
   let hiveWorkspace: HiveHandle | undefined;
   let providersWorkspace: ProvidersHandle | undefined;
@@ -485,6 +487,8 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     libraryWorkspace?.destroy(); libraryWorkspace = undefined;
     healthWorkspace?.destroy();
     healthWorkspace = undefined;
+    settingsWorkspace?.destroy();
+    settingsWorkspace = undefined;
     memoryInspector?.destroy();
     memoryInspector = undefined;
     selectedId = id;
@@ -1321,6 +1325,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     hiveWorkspace?.destroy(); hiveWorkspace = undefined;
     memoryInspector?.destroy(); memoryInspector = undefined;
     healthWorkspace?.destroy(); healthWorkspace = undefined;
+    settingsWorkspace?.destroy(); settingsWorkspace = undefined;
     libraryWorkspace?.destroy(); libraryWorkspace = undefined;
     ++selectionVersion;
     selectedId = null;
@@ -1367,6 +1372,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     memoryInspector?.destroy(); memoryInspector = undefined;
     healthWorkspace?.destroy(); healthWorkspace = undefined;
     providersWorkspace?.destroy(); providersWorkspace = undefined;
+    settingsWorkspace?.destroy(); settingsWorkspace = undefined;
     hiveWorkspace?.destroy(); hiveWorkspace = undefined;
     ++selectionVersion;
     selectedId = null;
@@ -1401,6 +1407,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     libraryWorkspace?.destroy(); libraryWorkspace = undefined;
     healthWorkspace?.destroy(); healthWorkspace = undefined;
     memoryInspector?.destroy(); memoryInspector = undefined;
+    settingsWorkspace?.destroy(); settingsWorkspace = undefined;
     ++selectionVersion;
     selectedId = null;
     loadedConversation = null;
@@ -1431,6 +1438,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     loadedConversation = null;
     selectedSnapshotId = null;
     exportedMarkdown = "";
+    settingsWorkspace?.destroy(); settingsWorkspace = undefined;
     activateRoute("conversations", "conversations");
     const hadLegacyQuery = Boolean(search.value.trim());
     search.value = "";
@@ -1465,38 +1473,18 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     libraryWorkspace?.destroy(); libraryWorkspace = undefined;
     healthWorkspace?.destroy(); healthWorkspace = undefined;
     memoryInspector?.destroy(); memoryInspector = undefined;
+    settingsWorkspace?.destroy(); settingsWorkspace = undefined;
     activateWorkspace("settings");
-    const page = document.createElement("div");
-    page.className = "ui-overview-page";
-    const heading = document.createElement("header");
-    heading.className = "ui-overview-heading";
-    const title = document.createElement("h1");
-    title.textContent = "Settings";
-    const description = document.createElement("p");
-    description.textContent = "Privacy, provider connections and operational health.";
-    heading.append(title, description);
-    page.append(heading);
-    const grid = document.createElement("div");
-    grid.className = "ui-overview-grid";
-    const sections = [
-      { title: "Privacy & security", description: "Manage vault lock, privacy boundaries and security settings.", label: "Open privacy settings", action: "open-settings-section", tab: "privacy" },
-      { title: "Provider connections", description: "Configure AI providers, MCP servers and connection state.", label: "Manage connections", action: "open-settings-section", tab: "connections" },
-      { title: "Operational diagnostics", description: "Inspect archive, storage, retrieval and provider health.", label: "Open diagnostics", action: "open-health-inspector", workspace: "health" },
-    ];
-    for (const section of sections) {
-      const card = createUiCard(document, { title: section.title, description: section.description });
-      const button = createUiButton(document, section.label, { variant: "secondary" });
-      button.dataset.action = section.action;
-      if ("tab" in section) button.dataset.tab = section.tab;
-      if ("workspace" in section) button.dataset.workspace = section.workspace;
-      card.body.append(button);
-      grid.append(card.element);
-    }
-    page.append(grid);
-    view.replaceChildren(page);
+    toolbarTitle.textContent = "Settings";
+    setActionStatus("");
+    settingsWorkspace = mountSettingsWorkspace(view, invoke, {
+      onLock: () => onLock?.(),
+      onNavigate: (route) => navigateToRoute(route, view),
+      onOpenSetupDialog: (tab) => openSetupDialog(view, "connections", tab, "settings"),
+      onClose: returnToConversations,
+    });
     setViewBusy(false);
     updateToolbarSelection();
-    toolbarTitle.textContent = "Settings";
     focusViewHeading();
   };
 
@@ -1672,6 +1660,8 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
       libraryWorkspace?.destroy(); libraryWorkspace = undefined;
       healthWorkspace?.destroy();
       healthWorkspace = undefined;
+      settingsWorkspace?.destroy();
+      settingsWorkspace = undefined;
       memoryInspector?.destroy();
       memoryInspector = undefined;
       alive = false;
