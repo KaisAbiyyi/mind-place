@@ -2,7 +2,7 @@
 
 Date: 6 November 2026 (Asia/Jakarta). Executor: Codex Cloud. Claim generation 1, session `codex-mpui02-03-06-20261106-g1`. Tracker: [issue #146](https://github.com/KaisAbiyyi/mind-place/issues/146).
 
-Base: `24648c74f3f59e176974d3878049b882478db69b`. Branch: `codex/mp-ui-02-03-06-cloud-20261106`. Product checkpoint: `d153822a2efd1bca84f1296d578343229586ed32` (following `aae1829` and `d9b31e5`; final one-line CSS specificity correction verified in Chromium). These are cloud-workspace commits, **not remote checkpoints**. MP-UI-04 belongs to session `mp-ui04-20261106-g1` and was not modified. Other lanes, Rust/native authority, the shared shell/tokens/primitives/route registry and workflow files were not changed.
+Base: `24648c74f3f59e176974d3878049b882478db69b`. Branch: `codex/mp-ui-02-03-06-cloud-20261106`. Product checkpoint: `d153822a2efd1bca84f1296d578343229586ed32` (following `aae1829` and `d9b31e5`; final one-line CSS specificity correction verified in Chromium). All source commits are now published on the remote task branch in [draft PR #156](https://github.com/KaisAbiyyi/mind-place/pull/156), after the owner's explicit publication grant; issue #146 records the final verified remote SHA and CI status. MP-UI-04 belongs to session `mp-ui04-20261106-g1` and was not modified. Other lanes, Rust/native authority, the shared shell/tokens/primitives/route registry and workflow configuration were not changed.
 
 ## Delivery and source authority
 
@@ -35,6 +35,7 @@ This is advisory review in a write-capable environment, **not** independently re
 
 - Repository contract and TypeScript typecheck: PASS.
 - Vite production reader build (`npm run build:web`): PASS.
+- Repository cloud visual-smoke script: updated its obsolete provider-modal expectation to verify the dedicated Providers page, then Browser setup → Escape → Providers return. The same script passed all 16 synthetic viewport screenshots in the cloud with only local port/browser-executable adaptations. Its earlier remote failure is superseded only when the corrected-head CI is observed passing; do not label skipped Windows qualification as acceptance.
 - Focused archive/memory/provider tests: 12 PASS; broader reader/lock/MCP focused run: 31 PASS before final corrective tests.
 - Full web suite in the final serialized `npm test` run: **212 PASS, 0 FAIL, 1 SKIP** (213 tests). The existing skipped test requires a Windows portable payload: `Windows portable payload includes the verified helper, notices and receipt`. An earlier busy run had two timing-dependent failures in unchanged `extension-scroll.test.mjs` (visible-history-loader stability and middle-start ordering); isolated rerun passed **25/25**, then the whole web suite passed. No extension product code or test was changed to mask them.
 - `npm run test:rust`, `cargo fmt --all -- --check`, desktop `npm run build`: BLOCKED — this cloud environment has no Cargo/Rust compiler. `npm test` cannot certify Rust without that toolchain. No CI, installed Windows/WebView2, owner archive, real provider connection or native gate is claimed.

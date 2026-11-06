@@ -127,10 +127,13 @@ try {
     }
   }
   await page.locator('#knowledge-os-nav [data-route="ai-providers-mcp"]').click();
+  assert.equal(await page.locator(".providers-workspace h1").textContent(), "AI Providers & MCP Authorization");
+  assert.equal(await page.locator("#setup-dialog").getAttribute("open"), null);
+  await page.locator('.providers-workspace [data-action="open-setup"]').click();
   assert.equal(await page.locator("#setup-dialog").getAttribute("open"), "");
   await page.keyboard.press("Escape");
   assert.equal(await page.locator("#setup-dialog").getAttribute("open"), null);
-  assert.equal(await page.locator('#knowledge-os-nav [aria-current="page"]').getAttribute("data-route"), "settings");
+  assert.equal(await page.locator('#knowledge-os-nav [aria-current="page"]').getAttribute("data-route"), "ai-providers-mcp");
   assert.deepEqual(faults, [], "unexpected client JS errors");
   await writeFile(output + "/receipt.json", JSON.stringify({
     status: "PASS", platform: "cloud Chromium (NOT installed Windows WebView2)",
