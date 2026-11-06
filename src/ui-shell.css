@@ -96,3 +96,10 @@
 @media (forced-colors:active) {
   .knowledge-os-nav-item[aria-current="page"], .knowledge-os-nav-secondary[aria-pressed="true"], .ui-button:focus-visible { outline:2px solid CanvasText; outline-offset:2px; }
 }
+
+/* UI-09: supersede the older short-height navigation cap; all route groups
+   remain visible at the reference desktop height, with scrolling on short windows. */
+@media (min-width:781px) {
+  .app-sidebar #knowledge-os-nav { flex:0 0 auto; max-height:calc(100dvh - 160px); overflow-y:auto; }
+  .app-sidebar .sidebar-footer { margin-top:auto; }
+}

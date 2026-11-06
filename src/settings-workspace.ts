@@ -88,7 +88,8 @@ export async function fetchHealthSummary(invoke: Invoke): Promise<OverviewHealth
       invoke<HostedTunnelSnapshot>("get_hosted_tunnel_status"),
     ]);
 
-    const index = indexRes.status === "fulfilled" ? indexRes.value : { sources: 0, revisions: 0, chunks: 0, generation: 0 };
+    if (indexRes.status !== "fulfilled" || mcpRes.status !== "fulfilled" || tunnelRes.status !== "fulfilled") return null;
+    const index = indexRes.value;
     const mcp = mcpRes.status === "fulfilled" ? mcpRes.value : { running: false };
     const tunnel = tunnelRes.status === "fulfilled" ? tunnelRes.value : { running: false, connection_verified: false };
 
@@ -184,6 +185,7 @@ export function mountSettingsWorkspace(
     tabBtn.dataset.settingsSection = s.id;
     tabBtn.setAttribute("aria-controls", `settings-panel-${s.id}`);
     tabBtn.setAttribute("aria-selected", String(s.id === activeSection));
+    tabBtn.tabIndex = s.id === activeSection ? 0 : -1;
     tabBtn.className = "settings-section-tab";
     nav.append(tabBtn);
   }
@@ -257,11 +259,11 @@ export function mountSettingsWorkspace(
       ]);
 
       if (!alive) return;
-      if (indexRes.status === "fulfilled") indexStats = indexRes.value;
-      if (mcpRes.status === "fulfilled") localMcp = mcpRes.value;
-      if (tunnelRes.status === "fulfilled") hostedTunnel = tunnelRes.value;
+      indexStats = indexRes.status === "fulfilled" ? indexRes.value : null;
+      localMcp = mcpRes.status === "fulfilled" ? mcpRes.value : null;
+      hostedTunnel = tunnelRes.status === "fulfilled" ? tunnelRes.value : null;
 
-      surfaceStatus = "ready";
+      surfaceStatus = [indexRes, mcpRes, tunnelRes].every(r => r.status === "fulfilled") ? "ready" : "error";
     } catch {
       surfaceStatus = "error";
     }
@@ -529,19 +531,20 @@ export function mountSettingsWorkspace(
 
     indexGrid.append(
       make("span", "Index Generation:"),
-      make("strong", `Generation ${gen}`),
+      make("strong", indexStats ? `Generation ${gen}` : "Unavailable"),
       make("span", "Indexed Sources:"),
-      make("strong", sources.toLocaleString()),
+      make("strong", indexStats ? sources.toLocaleString() : "Unavailable"),
       make("span", "Archived Revisions:"),
-      make("strong", revisions.toLocaleString()),
+      make("strong", indexStats ? revisions.toLocaleString() : "Unavailable"),
       make("span", "Search Chunks:"),
-      make("strong", chunks.toLocaleString()),
+      make("strong", indexStats ? chunks.toLocaleString() : "Unavailable"),
     );
 
     const rebuildStatus = make("p");
     rebuildStatus.className = "list-note settings-rebuild-status";
 
     const rebuildBtn = createUiButton(doc, "Rebuild Archive Index", { variant: "secondary" });
+    rebuildBtn.disabled = !indexStats;
     rebuildBtn.addEventListener("click", () => {
       promptConfirm(
         "Rebuilding the archive index will re-scan all archived conversations and rebuild FTS5 search tables. Continue?",
@@ -577,11 +580,11 @@ export function mountSettingsWorkspace(
 
     mcpGrid.append(
       make("span", "Local MCP Server:"),
-      createUiStatus(doc, mcpRunning ? "Process running" : "Stopped", mcpRunning ? "complete" : "neutral"),
+      createUiStatus(doc, !localMcp ? "Unavailable" : mcpRunning ? "Listener running; no client verified" : "Stopped", mcpRunning ? "complete" : "neutral"),
       make("span", "Hosted Tunnel:"),
       createUiStatus(
         doc,
-        !tunnelRunning
+        !hostedTunnel ? "Unavailable" : !tunnelRunning
           ? "Stopped"
           : tunnelVerified
             ? "Helper running; connector reports verified"
@@ -671,7 +674,7 @@ export function mountSettingsWorkspace(
     contentArea.replaceChildren();
     for (const s of sectionsList) {
       const tabBtn = doc.getElementById(`settings-tab-${s.id}`) as HTMLButtonElement | null;
-      if (tabBtn) tabBtn.setAttribute("aria-selected", String(s.id === activeSection));
+      if (tabBtn) { tabBtn.setAttribute("aria-selected", String(s.id === activeSection)); tabBtn.tabIndex = s.id === activeSection ? 0 : -1; }
     }
 
     if (surfaceStatus === "locked" && activeSection !== "general") {
@@ -758,6 +761,19 @@ export function mountSettingsWorkspace(
     }
   };
 
+  const tabKeyboard = (event: KeyboardEvent) => {
+    const target = event.target;
+    if (!alive || !(target instanceof doc.defaultView!.HTMLButtonElement) || !target.dataset.settingsSection) return;
+    const keys = ["ArrowRight", "ArrowLeft", "Home", "End"];
+    if (!keys.includes(event.key)) return;
+    event.preventDefault();
+    const index = sectionsList.findIndex(s => s.id === target.dataset.settingsSection);
+    const next = event.key === "Home" ? 0 : event.key === "End" ? sectionsList.length - 1 : (index + (event.key === "ArrowRight" ? 1 : -1) + sectionsList.length) % sectionsList.length;
+    activeSection = sectionsList[next].id;
+    renderSection();
+    nav.querySelector<HTMLButtonElement>(`[data-settings-section="${activeSection}"]`)?.focus();
+  };
+  nav.addEventListener("keydown", tabKeyboard);
   shell.addEventListener("click", clickHandler);
 
   // Synchronous initial render
@@ -788,6 +804,7 @@ export function mountSettingsWorkspace(
       pendingConfirm = null; securityState = null; indexStats = null; localMcp = null; hostedTunnel = null; lastTrace = null;
       alive = false;
       shell.removeEventListener("click", clickHandler);
+      nav.removeEventListener("keydown", tabKeyboard);
       shell.replaceChildren();
       view.replaceChildren();
     },

@@ -45,3 +45,19 @@ test('UI09 transcript completion cannot replace Settings after navigation',async
  const invoke:Invoke=async<T>(c:string)=>{if(c==='list_conversations')return [summary] as T;if(c==='read_conversation')return pending as T;if(c==='list_snapshots')return [] as T;if(c==='get_security_status')return sec as T;return {} as T;};
  const h=mountReader({root:view,invoke});await h.ready;view.querySelector<HTMLButtonElement>('[data-route=conversations]')!.click();view.querySelector<HTMLButtonElement>('#reader-view [data-conversation-id]')!.click();view.querySelector<HTMLButtonElement>('[data-route=settings]')!.click();resolve({summary,capture:{messages:[]}});await delay(0);assert.ok(view.querySelector('.settings-workspace'));h.destroy();dom.window.close();
 });
+test('UI09 failed diagnostic reads show unavailable, never zero or stopped as observed health',async()=>{
+ const {dom,view}=fixture();const invoke:Invoke=async<T>(c:string)=>{if(c==='get_security_status')return sec as T;throw Error('service offline');};
+ const h=mountSettingsWorkspace(view,invoke,{initialSection:'diagnostics'});await delay(0);
+ assert.match(view.textContent!,/unavailable/i);assert.doesNotMatch(view.textContent!,/Generation 0|Stopped/);h.destroy();dom.window.close();
+});
+test('UI09 search preview opens the exact verified revision in the conversation route',async()=>{
+ const {dom,view}=fixture();let opened:unknown;
+ const invoke:Invoke=async<T>(c:string)=>{if(c==='get_security_status')return sec as T;if(c==='search_archive_index')return [hit] as T;if(c==='read_conversation')return {summary:{id:'a',title:'A',provider:'chatgpt'},snapshot_id:'v',capture:{captured_at:'2026-11-06',messages:[{id:'m',text:'Exact source'}]}} as T;return [] as T;};
+ const h=mountSearchWorkspace(view,invoke,{onSelectConversation:(id,snapshot)=>{opened={id,snapshot};}});submit(dom,view,'source');await delay(0);view.querySelector<HTMLButtonElement>('[data-library-archive]')!.click();await delay(0);
+ const open=view.querySelector<HTMLButtonElement>('[data-action=open-search-conversation]');assert.ok(open);open.click();await delay(0);assert.deepEqual(opened,{id:'a',snapshot:'v'});h.destroy();dom.window.close();
+});
+test('UI09 Settings tabs support arrow keys and roving focus',async()=>{
+ const {dom,view}=fixture();const invoke:Invoke=async<T>(c:string)=>c==='get_security_status'?sec as T:{} as T;
+ const h=mountSettingsWorkspace(view,invoke);await delay(0);const tab=view.querySelector<HTMLButtonElement>('[data-settings-section=general]')!;tab.focus();tab.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true,cancelable:true}));
+ assert.equal(view.ownerDocument.activeElement?.getAttribute('data-settings-section'),'storage-vault');assert.equal(view.querySelectorAll('[role=tab][tabindex="0"]').length,1);h.destroy();dom.window.close();
+});

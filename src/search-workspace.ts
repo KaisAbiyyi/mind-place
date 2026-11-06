@@ -772,6 +772,14 @@ export function mountSearchWorkspace(
         make("p", "Provider: " + result.summary.provider + " · captured " + result.capture.captured_at),
         make("pre", sourceText.slice(0, 1800) + (sourceText.length > 1800 ? "…" : "")),
       );
+      if (options.onSelectConversation) {
+        const open = createUiButton(doc, "Open full saved revision");
+        open.dataset.action = "open-search-conversation";
+        open.addEventListener("click", () => { void checkSecurity().then(() => {
+          if (alive && version === previewEpoch) options.onSelectConversation?.(hit.archive_id, hit.snapshot_id);
+        }).catch(() => {}); });
+        preview.append(open);
+      }
     } catch {
       if (alive && version === previewEpoch) {
         preview.replaceChildren(

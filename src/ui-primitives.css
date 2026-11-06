@@ -62,3 +62,5 @@
 @media (max-width: 1120px) { .ui-overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 780px) { .ui-overview-page { padding: var(--mp-space-4); } .ui-overview-lower { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 480px) { .ui-overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--mp-space-2); } .ui-stat-value { font-size: 20px; } }
+
+.ui-card { align-content:start; }

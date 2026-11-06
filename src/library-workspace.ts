@@ -9,8 +9,8 @@ export interface LibraryHandle {
 /**
  * Re-export and delegate to MP-UI-07 unified Search & Context workspace.
  */
-export function mountLibraryWorkspace(view: HTMLElement, invoke: Invoke, onClose: () => void, clipboard?: ClipboardWriter): LibraryHandle {
-  const handle = mountSearchWorkspace(view, invoke, { onClose, clipboard });
+export function mountLibraryWorkspace(view: HTMLElement, invoke: Invoke, onClose: () => void, clipboard?: ClipboardWriter, onSelectConversation?: (id: string, snapshotId?: string) => void): LibraryHandle {
+  const handle = mountSearchWorkspace(view, invoke, { onClose, clipboard, onSelectConversation });
   return {
     destroy: () => handle.destroy(),
   };

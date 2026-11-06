@@ -196,14 +196,14 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock, ope
   const archiveFilters = createArchiveFilters();
   let archiveTableVisible = false;
   let transcriptPage = 0;
-  const activateRoute = (route: UiRouteId, workspace: WorkspaceId = activeWorkspace) => {
-    if (route !== "files-secure-vault" && filesVaultWorkspace) {
+  const activateRoute = (route: UiRouteId, workspace: WorkspaceId = activeWorkspace, preserveModules = false) => {
+    if (!preserveModules && route !== "files-secure-vault" && filesVaultWorkspace) {
       filesVaultWorkspace.destroy(); filesVaultWorkspace = undefined;
     }
-    if (route !== "ai-providers-mcp" && providersWorkspace) { providersWorkspace.destroy(); providersWorkspace = undefined; }
-    if ((route !== "settings" || workspace !== "settings") && settingsWorkspace) { settingsWorkspace.destroy(); settingsWorkspace = undefined; }
+    if (!preserveModules && route !== "ai-providers-mcp" && providersWorkspace) { providersWorkspace.destroy(); providersWorkspace = undefined; }
+    if (!preserveModules && (route !== "settings" || workspace !== "settings") && settingsWorkspace) { settingsWorkspace.destroy(); settingsWorkspace = undefined; }
     // Leaving Setup & Onboarding unmounts the wizard and fences its late async work.
-    if (route !== "setup-onboarding" && onboardingWorkspace) { onboardingWorkspace.destroy(); onboardingWorkspace = undefined; }
+    if (!preserveModules && route !== "setup-onboarding" && onboardingWorkspace) { onboardingWorkspace.destroy(); onboardingWorkspace = undefined; }
     activeWorkspace = workspace;
     activeRoute = route;
     setActiveRoute(workspaceNav, route, workspace);
@@ -1231,7 +1231,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock, ope
   const closeSetup = () => {
     ++setupVersion; // Ignore setup responses arriving after the dialog closes.
     setupMcp?.destroy(); setupMcp = undefined;
-    activateRoute(modalReturnRoute, modalReturnWorkspace);
+    activateRoute(modalReturnRoute, modalReturnWorkspace, true);
     // A wizard that was unmounted by the dialog's destination resumes from its saved step.
     if (modalReturnRoute === "setup-onboarding" && !onboardingWorkspace) openOnboardingWorkspace();
     setupContent.querySelector("[data-mcp-secret]")?.replaceChildren();
@@ -1254,8 +1254,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock, ope
     activeSettingsTab = tab;
     // With an explicit route the final state is identical; skipping the intermediate
     // workspace activation keeps an open Setup & Onboarding wizard mounted behind the dialog.
-    if (routeOverride) activateRoute(routeOverride, workspace);
-    else activateWorkspace(workspace);
+    activateRoute(routeOverride ?? routeForWorkspace(workspace), workspace, true);
     if (typeof dialog.showModal === "function") {
       try { dialog.showModal(); } catch { dialog.setAttribute("open", ""); }
     } else dialog.setAttribute("open", "");
@@ -1359,7 +1358,11 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock, ope
     libraryWorkspace = mountLibraryWorkspace(view, invoke, () => {
       libraryWorkspace?.destroy(); libraryWorkspace = undefined;
       returnToConversations();
-    }, safeClipboard);
+    }, safeClipboard, (id, snapshotId) => {
+      void selectConversation(id).then(() => {
+        if (alive && selectedId === id && snapshotId) return loadSnapshot(snapshotId);
+      });
+    });
     focusViewHeading();
   };
 
