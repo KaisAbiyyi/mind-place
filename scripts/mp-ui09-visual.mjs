@@ -52,17 +52,17 @@ try {
  const routes=[['overview','home'],['conversations','conversations'],['curated-memory','memory'],['hive-mind-graph','hive'],['files-secure-vault','files'],['ai-providers-mcp','providers'],['setup-onboarding','setup'],['settings','settings']];
  const snap=async(name,ref,meta={})=>{
   await page.waitForTimeout(60);const integrated=name+'-integrated.png';await page.screenshot({path:output+'/'+integrated});
-  const metrics=await page.evaluate(()=>({overflow:document.documentElement.scrollWidth>innerWidth+1,heading:document.querySelector('#reader-view h1')?.textContent,theme:document.documentElement.dataset.theme}));
+  const metrics=await page.evaluate(()=>({overflow:document.documentElement.scrollWidth>innerWidth+1,heading:document.querySelector('#reader-view h1, #reader-view .ui-state-panel h2, #reader-view .state-panel h2')?.textContent,theme:document.documentElement.dataset.theme}));
   if(metrics.overflow)findings.push({name,issue:'viewport overflow'});
   assert.ok(metrics.heading||name.includes('locked'),'meaningful heading '+name);
-  let baseline=null;if(ref){await original.evaluate(p=>go(p),ref);await original.waitForTimeout(60);baseline=name+'-original.png';await original.screenshot({path:output+'/'+baseline});}
+  let baseline=null;if(ref){await original.evaluate(p=>{if(p==='conversation-detail')openConversationDetail('Building the Mind Place archive');else if(p==='memory-detail')openMemoryDetail(allMemories()[0].id);else go(p);},ref);await original.waitForTimeout(60);baseline=name+'-original.png';await original.screenshot({path:output+'/'+baseline});}
   rows.push({name,integrated,original:baseline,...metrics,...meta});
  };
  for(const theme of ['light','dark'])for(const width of [1440,1120,780,390])for(const collapsed of [false,true]){
   await page.setViewportSize({width,height:900});await original.setViewportSize({width,height:900});
   await page.evaluate(({theme,collapsed})=>{const t=document.querySelector('[data-action=toggle-theme]');if(document.documentElement.dataset.theme!==theme)t.click();const s=document.querySelector('.app-shell');if((s.dataset.sidebarCollapsed==='true')!==collapsed)document.querySelector('[data-action=toggle-sidebar]').click();},{theme,collapsed});
   await original.evaluate(({theme,collapsed})=>{setTheme(theme);document.querySelector('#appShell').classList.toggle('sidebar-collapsed',collapsed);},{theme,collapsed});
-  for(const [route,ref] of routes){await page.locator('#knowledge-os-nav [data-route="'+route+'"]').click();await snap(`${theme}-${width}-${collapsed?'collapsed':'expanded'}-${ref}`,ref,{width,collapsed,theme});}
+  for(const [route,ref] of routes){await page.locator('#knowledge-os-nav [data-route="'+route+'"]').click();if(route==='hive-mind-graph'){await page.locator('.hive-workspace form button[type=submit]').click();}await snap(`${theme}-${width}-${collapsed?'collapsed':'expanded'}-${ref}`,ref,{width,collapsed,theme});}
  }
  // Key details and wizard states in each theme, at desktop and narrow widths.
  for(const theme of ['light','dark'])for(const width of [1440,390]){
@@ -81,7 +81,7 @@ try {
  }
  for(const mode of ['empty','error']){
   await page.evaluate(async m=>{window.fixtureState.mode=m;await window.mountFixture();},mode);
-  for(const [route,ref]of routes){await page.locator('#knowledge-os-nav [data-route="'+route+'"]').click();await snap(`${mode}-${ref}`,null,{mode});}
+  for(const [route,ref]of routes){await page.locator('#knowledge-os-nav [data-route="'+route+'"]').click();if(route==='hive-mind-graph'){await page.locator('.hive-workspace form button[type=submit]').click();}await snap(`${mode}-${ref}`,null,{mode});}
  }
  assert.deepEqual(errors,[],'browser runtime errors');
 } catch(e){await writeFile(output+'/failure.txt',String(e.stack));throw e;}

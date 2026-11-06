@@ -166,7 +166,7 @@ test("MP-UI-08: Operational diagnostics rechecks index stats, rebuilds index, an
 
   // Check metrics rendered
   assert.match(view.textContent!, /Generation 3/);
-  assert.match(view.textContent!, /Process running/);
+  assert.match(view.textContent!, /Listener running; no client verified/);
   assert.match(view.textContent!, /connector reports verified/);
 
   // Ensure secrets were NEVER leaked
