@@ -59,5 +59,22 @@
   "ground_truth_sha256": "b28acf5d50c62bfbaecc6285c0621e9903c04fe73b5a10de6f22948cdcf47579",
   "claim": "mp-ui09-20261106-g1",
   "lock": "ui-rollout-integration/shared-route-resolution",
-  "formal_status": "Blocked; predecessor feature tasks Review, not accepted"
+  "formal_status": "Blocked; predecessor feature tasks Review, not accepted",
+  "frozen_product_head": "1fde14f9a8c1956360cdb5c73bb6ebd641609ae0",
+  "frozen_product_tree": "ca9c42ee8bd6e8df673614f950fec24e29a84988",
+  "product_paths": {
+    "src": "813ab59513fe9e90089f0ef4792e86df84f8fc35",
+    "src-tauri": "ff10cf66085fe643fa9164d32c31161778364d71",
+    "crates": "ff6b43321a79b5d7f20d919f0a54c763bfab22f4",
+    "extension": "ea84a4fbe020705d26adbe3589ca76989d9e13e7",
+    "package.json": "c91893ed55d85b46c009d66f2794c86292b950bf",
+    "package-lock.json": "06ada74991515cb18372fc8a2b736d4841ae630d"
+  },
+  "source_review": {
+    "reviewer": "independent read-only subagent integration_review",
+    "head": "1fde14f9a8c1956360cdb5c73bb6ebd641609ae0",
+    "tree": "ca9c42ee8bd6e8df673614f950fec24e29a84988",
+    "verdict": "advisory: no unresolved confirmed P0/P1 or actionable P2 in inspected paths; not security approval",
+    "focused_pass": 24
+  }
 }
