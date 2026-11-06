@@ -29,6 +29,7 @@ try {
    if(command==='get_security_status')return {configured:true,locked:state.locked,epoch:1,retry_after_ms:0,vault_mode:'legacy'};
    if(state.locked)throw Error('MP_SECURITY_LOCKED');
    if(state.mode==='error'&&['list_conversations','list_document_roots','list_memory_inspection','read_archive_hive','search_archive_index'].includes(command))throw Error('Synthetic service unavailable');
+   if(command==='list_conversations'&&state.mode==='loading')return new Promise(()=>{});
    if(command==='list_conversations')return state.mode==='empty'?[]:Array.from({length:65},(_,i)=>({...summary,id:i?'a'+i:'a',title:i?`Synthetic chat ${i} — `+summary.title:summary.title,provider:i%2?'claude':'chatgpt'}));
    if(command==='read_conversation')return {summary:{...summary,id:args.id},snapshot_id:args.snapshotId||'snap-1',capture};
    if(command==='list_snapshots')return [{snapshot_id:'snap-1',captured_at:summary.captured_at,message_count:2,completeness:'partial',warnings:summary.warnings},{snapshot_id:'snap-0',captured_at:'2026-11-05T00:00:00Z',message_count:1,completeness:'complete',warnings:[]}];
@@ -70,18 +71,28 @@ try {
   await page.evaluate(t=>{if(document.documentElement.dataset.theme!==t)document.querySelector('[data-action=toggle-theme]').click();},theme);await original.evaluate(t=>setTheme(t),theme);
   const nav=async route=>page.locator('#knowledge-os-nav [data-route="'+route+'"]').click();
   await nav('conversations');await page.locator('#reader-view [data-conversation-id]').first().click();await snap(`${theme}-${width}-transcript`,'conversation-detail');
-  await nav('curated-memory');await page.locator('[data-memory-claim]').first().click();await snap(`${theme}-${width}-memory-detail`,'memory-detail');
+  await nav('curated-memory');await page.locator('[data-memory-quick]').first().click();await snap(`${theme}-${width}-memory-quick`,null);await page.keyboard.press('Escape');await page.locator('[data-memory-claim]').first().click();await snap(`${theme}-${width}-memory-detail`,'memory-detail');
+  await nav('files-secure-vault');await page.locator('[data-action=inspect-document-root]').first().click();await snap(`${theme}-${width}-folder-inspector`,'files');await page.locator('[data-action=authorize-document-folder]').click();await snap(`${theme}-${width}-folder-approval`,null);await page.keyboard.press('Escape');
+  await nav('ai-providers-mcp');await page.locator('.providers-workspace [data-action=open-setup]').click();await snap(`${theme}-${width}-capture-setup`,null);await page.keyboard.press('Escape');
   await nav('setup-onboarding');for(const step of ['welcome','vault','providers','first-result']){await page.locator('button[data-step="'+step+'"]').click();await original.evaluate(n=>{setupStep=n;renderSetup();},['welcome','vault','providers','first-result'].indexOf(step));await snap(`${theme}-${width}-onboarding-${step}`,'setup');}
   await nav('settings');for(const section of ['general','storage-vault','privacy','diagnostics']){await page.locator('[data-settings-section="'+section+'"]').click();await snap(`${theme}-${width}-settings-${section}`,'settings');}
   // Use global palette, proving the search route is reachable without synthetic navigation.
-  await page.locator('[data-action=open-command-palette]').click();await page.locator('#command-palette input').fill('Search');await page.locator('[data-command-id="search-all-sources"]').click();
+  await page.locator('[data-action=open-command-palette]').click();await page.locator('#command-palette input').fill('Search');await snap(`${theme}-${width}-palette`,null);await page.locator('[data-command-id="search-all-sources"]').click();
   await page.locator('#library-query').fill('evidence');await page.locator('.search-query-form button[type=submit]').click();await page.waitForTimeout(80);await snap(`${theme}-${width}-search-results`,null);
   await page.locator('[data-action=build-context]').click();await snap(`${theme}-${width}-context`,null);await page.locator('#search-context-drawer [data-action=copy-context]').click();await page.locator('#search-context-drawer [data-action=close-ui-dialog]').click();
   await page.locator('[data-action=inspect-trace]').click();await snap(`${theme}-${width}-trace`,null);await page.keyboard.press('Escape');
  }
- for(const mode of ['empty','error']){
-  await page.evaluate(async m=>{window.fixtureState.mode=m;await window.mountFixture();},mode);
-  for(const [route,ref]of routes){await page.locator('#knowledge-os-nav [data-route="'+route+'"]').click();if(route==='hive-mind-graph'){await page.locator('.hive-workspace form button[type=submit]').click();}await snap(`${mode}-${ref}`,null,{mode});}
+ for(const theme of ['light','dark'])for(const width of [1440,390]) {
+  await page.setViewportSize({width,height:900});
+  for(const mode of ['empty','error']){
+   await page.evaluate(async m=>{window.fixtureState.mode=m;await window.mountFixture();},mode);
+   await page.evaluate(t=>{if(document.documentElement.dataset.theme!==t)document.querySelector('[data-action=toggle-theme]').click();},theme);
+   for(const [route,ref]of routes){await page.locator('#knowledge-os-nav [data-route="'+route+'"]').click();await snap(`${theme}-${width}-${mode}-${ref}`,null,{mode});}
+  }
+  await page.evaluate(()=>{window.fixtureState.mode='loading';void window.mountFixture();});await snap(`${theme}-${width}-loading-overview`,null,{mode:'loading'});
+  await page.evaluate(async()=>{window.reader.destroy();window.fixtureState.mode='populated';window.fixtureState.locked=true;const {mountApplication}=await import('/src/app.ts');await mountApplication({root:document.querySelector('#app'),invoke:window.invokeFixture});});
+  await snap(`${theme}-${width}-locked`,null,{mode:'locked'});
+  await page.evaluate(async()=>{window.fixtureState.locked=false;await window.mountFixture();});
  }
  assert.deepEqual(errors,[],'browser runtime errors');
 } catch(e){await writeFile(output+'/failure.txt',String(e.stack));throw e;}
