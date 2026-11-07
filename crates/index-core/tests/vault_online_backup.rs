@@ -46,7 +46,10 @@ fn online_snapshot_restores_cross_store_synthetic_capture_and_state() {
         .sync_vault_with_check(&archive, &state, || Ok(()))
         .unwrap();
     assert!(indexed.chunks > 0);
-    assert_eq!(index.search("archivebackupneedle", false, 5).unwrap().len(), 1);
+    assert_eq!(
+        index.search("archivebackupneedle", false, 5).unwrap().len(),
+        1
+    );
     let _document_index = archive.open_document_index().unwrap();
     let backup = home.path().join("portable-bundle");
     // Scope a second crypto handle to ensure the coordinator can recover
@@ -88,12 +91,18 @@ fn online_snapshot_restores_cross_store_synthetic_capture_and_state() {
     let rebuilt = CryptoVault::restore_with_recovery(&gate, lease, &manifest, &recovery).unwrap();
     let restored_archive = VaultCaptureStore::open(&destination, rebuilt, &gate, lease).unwrap();
     let loaded = restored_archive.read(&receipt.id, None).unwrap();
-    assert_eq!(loaded.capture.messages[0].text, "synthetic archivebackupneedle");
+    assert_eq!(
+        loaded.capture.messages[0].text,
+        "synthetic archivebackupneedle"
+    );
     assert_eq!(loaded.summary.snapshot_count, 1);
     let restored_state = restored_archive.open_state_store().unwrap();
     let restored_index = restored_archive.open_index_store().unwrap();
     assert_eq!(
-        restored_index.search("archivebackupneedle", false, 5).unwrap().len(),
+        restored_index
+            .search("archivebackupneedle", false, 5)
+            .unwrap()
+            .len(),
         1,
         "restored FTS must retain the indexed archive generation"
     );
@@ -187,7 +196,8 @@ fn online_backup_failure_injection_never_publishes_incomplete_restores() {
         .unwrap()
         .flatten()
         .filter(|entry| {
-            entry.file_name()
+            entry
+                .file_name()
                 .to_str()
                 .is_some_and(|name| name.starts_with(".mp9b-encrypted-online-"))
         })
@@ -201,12 +211,12 @@ fn online_backup_failure_injection_never_publishes_incomplete_restores() {
     let staged = staged_target.with_extension("mp9b-verified-restore-partial");
     fs::create_dir(&staged).unwrap();
     fs::write(staged.join("owner-kept"), b"explicit disposition").unwrap();
-    assert!(VaultOnlineBackup::restore(
-        &gate, lease, &backup, &staged_target, &recovery
-    )
-    .is_err());
+    assert!(VaultOnlineBackup::restore(&gate, lease, &backup, &staged_target, &recovery).is_err());
     assert!(!staged_target.exists());
-    assert_eq!(fs::read(staged.join("owner-kept")).unwrap(), b"explicit disposition");
+    assert_eq!(
+        fs::read(staged.join("owner-kept")).unwrap(),
+        b"explicit disposition"
+    );
 
     let object = first_file(&backup.join("payload/archive"));
     let mut bytes = fs::read(&object).unwrap();
@@ -228,10 +238,10 @@ fn online_backup_failure_injection_never_publishes_incomplete_restores() {
     state_bytes[32] ^= 0x40;
     fs::write(&state_payload, state_bytes).unwrap();
     let digest_target = home.path().join("digest-must-not-restore");
-    assert!(VaultOnlineBackup::restore(
-        &gate, lease, &digest_backup, &digest_target, &recovery
-    )
-    .is_err());
+    assert!(
+        VaultOnlineBackup::restore(&gate, lease, &digest_backup, &digest_target, &recovery)
+            .is_err()
+    );
     assert!(!digest_target.exists());
     assert!(!digest_target
         .with_extension("mp9b-verified-restore-partial")
@@ -244,10 +254,16 @@ fn online_backup_failure_injection_never_publishes_incomplete_restores() {
     *manifest_bytes.last_mut().unwrap() ^= 0x01;
     fs::write(&manifest_path, manifest_bytes).unwrap();
     let manifest_target = home.path().join("manifest-must-not-restore");
-    assert!(VaultOnlineBackup::restore(
-        &gate, lease, &manifest_backup, &manifest_target, &recovery
-    )
-    .is_err());
+    assert!(
+        VaultOnlineBackup::restore(
+            &gate,
+            lease,
+            &manifest_backup,
+            &manifest_target,
+            &recovery
+        )
+        .is_err()
+    );
     assert!(!manifest_target.exists());
     assert!(!manifest_target
         .with_extension("mp9b-verified-restore-partial")
@@ -255,15 +271,9 @@ fn online_backup_failure_injection_never_publishes_incomplete_restores() {
 
     gate.lock();
     let locked_backup = home.path().join("locked-online-backup");
-    assert!(VaultOnlineBackup::create(
-        &gate, lease, &verified, &root, &locked_backup, 6
-    )
-    .is_err());
+    assert!(VaultOnlineBackup::create(&gate, lease, &verified, &root, &locked_backup, 6).is_err());
     assert!(!locked_backup.exists());
     let locked_restore = home.path().join("locked-online-restore");
-    assert!(VaultOnlineBackup::restore(
-        &gate, lease, &backup, &locked_restore, &recovery
-    )
-    .is_err());
+    assert!(VaultOnlineBackup::restore(&gate, lease, &backup, &locked_restore, &recovery).is_err());
     assert!(!locked_restore.exists());
 }

@@ -60,7 +60,12 @@ struct ObjectTreeBudget {
 
 impl ObjectTreeBudget {
     fn new(limits: ObjectTreeLimits) -> Self {
-        Self { limits, entries: 0, directories: 0, files: 0 }
+        Self {
+            limits,
+            entries: 0,
+            directories: 0,
+            files: 0,
+        }
     }
 
     fn production() -> Self {
@@ -68,7 +73,10 @@ impl ObjectTreeBudget {
     }
 
     fn record_entry(&mut self) -> Result<()> {
-        self.entries = self.entries.checked_add(1).ok_or(IndexError::InvalidEvidence)?;
+        self.entries = self
+            .entries
+            .checked_add(1)
+            .ok_or(IndexError::InvalidEvidence)?;
         if self.entries > self.limits.max_entries {
             return Err(IndexError::InvalidEvidence);
         }
@@ -76,7 +84,10 @@ impl ObjectTreeBudget {
     }
 
     fn record_directory(&mut self, depth: usize) -> Result<()> {
-        self.directories = self.directories.checked_add(1).ok_or(IndexError::InvalidEvidence)?;
+        self.directories = self
+            .directories
+            .checked_add(1)
+            .ok_or(IndexError::InvalidEvidence)?;
         if self.directories > self.limits.max_directories || depth > self.limits.max_depth {
             return Err(IndexError::InvalidEvidence);
         }
@@ -84,7 +95,10 @@ impl ObjectTreeBudget {
     }
 
     fn record_file(&mut self) -> Result<()> {
-        self.files = self.files.checked_add(1).ok_or(IndexError::InvalidEvidence)?;
+        self.files = self
+            .files
+            .checked_add(1)
+            .ok_or(IndexError::InvalidEvidence)?;
         if self.files > self.limits.max_files {
             return Err(IndexError::InvalidEvidence);
         }
@@ -158,11 +172,14 @@ impl VaultOnlineBackup {
                     if name == "state.sqlite3" {
                         have_state = true;
                     }
-                } else if ["archive", "document-objects", "backups"].contains(&name) && meta.is_dir() {
+                } else if ["archive", "document-objects", "backups"].contains(&name)
+                    && meta.is_dir()
+                {
                     object_budget.record_entry()?;
                     object_budget.record_directory(0)?;
                     copy_ciphertext_tree(&path, &scratch.join(name), 0, &mut object_budget)?;
-                } else if ["vault-v1.json", ".state-schema.lock", ".vault-writer.lock"].contains(&name)
+                } else if ["vault-v1.json", ".state-schema.lock", ".vault-writer.lock"]
+                    .contains(&name)
                     && meta.is_file()
                     && (name == "vault-v1.json" || meta.len() == 0)
                 {
@@ -557,4 +574,3 @@ mod tests {
         assert!(source.join("empty-c").is_dir());
     }
 }
-

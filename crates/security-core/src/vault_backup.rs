@@ -46,11 +46,19 @@ struct InventoryBudget {
 
 impl InventoryBudget {
     fn new(limits: InventoryLimits) -> Self {
-        Self { limits, entries: 0, directories: 0, files: 0 }
+        Self {
+            limits,
+            entries: 0,
+            directories: 0,
+            files: 0,
+        }
     }
 
     fn record_entry(&mut self) -> Result<()> {
-        self.entries = self.entries.checked_add(1).ok_or(SecurityError::InvalidConfig)?;
+        self.entries = self
+            .entries
+            .checked_add(1)
+            .ok_or(SecurityError::InvalidConfig)?;
         if self.entries > self.limits.max_entries {
             return Err(SecurityError::InvalidConfig);
         }
@@ -58,7 +66,10 @@ impl InventoryBudget {
     }
 
     fn record_directory(&mut self, depth: usize) -> Result<()> {
-        self.directories = self.directories.checked_add(1).ok_or(SecurityError::InvalidConfig)?;
+        self.directories = self
+            .directories
+            .checked_add(1)
+            .ok_or(SecurityError::InvalidConfig)?;
         if self.directories > self.limits.max_directories || depth > self.limits.max_depth {
             return Err(SecurityError::InvalidConfig);
         }
@@ -66,7 +77,10 @@ impl InventoryBudget {
     }
 
     fn record_payload_file(&mut self) -> Result<()> {
-        self.files = self.files.checked_add(1).ok_or(SecurityError::InvalidConfig)?;
+        self.files = self
+            .files
+            .checked_add(1)
+            .ok_or(SecurityError::InvalidConfig)?;
         if self.files > self.limits.max_files {
             return Err(SecurityError::InvalidConfig);
         }
@@ -121,7 +135,15 @@ impl PortableBackup {
         destination: &Path,
         generation: u64,
     ) -> Result<BackupMetadata> {
-        Self::create_with_checkpoint(gate, lease, vault, vault_root, destination, generation, |_, _| Ok(()))
+        Self::create_with_checkpoint(
+            gate,
+            lease,
+            vault,
+            vault_root,
+            destination,
+            generation,
+            |_, _| Ok(()),
+        )
     }
 
     fn create_with_checkpoint(
@@ -292,8 +314,13 @@ impl PortableBackup {
         recovery: &crate::vault::RecoverySecret,
     ) -> Result<BackupMetadata> {
         Self::restore_with_limits_and_checkpoint(
-            gate, lease, backup_root, destination, recovery,
-            PRODUCTION_INVENTORY_LIMITS, |_, _| Ok(()),
+            gate,
+            lease,
+            backup_root,
+            destination,
+            recovery,
+            PRODUCTION_INVENTORY_LIMITS,
+            |_, _| Ok(()),
         )
     }
 
@@ -1047,11 +1074,23 @@ mod tests {
         let target = temp.path().join("fanout-must-not-restore");
         let partial = target.with_extension("mp9b-restore-partial");
         assert!(PortableBackup::restore_with_limits_and_checkpoint(
-            &gate, lease, &backup, &target, &recovery, bounded, |_, _| Ok(())
+            &gate,
+            lease,
+            &backup,
+            &target,
+            &recovery,
+            bounded,
+            |_, _| Ok(())
         )
         .is_err());
-        assert!(!target.exists(), "fan-out rejection published a restore destination");
-        assert!(!partial.exists(), "preflight rejection created restore staging");
+        assert!(
+            !target.exists(),
+            "fan-out rejection published a restore destination"
+        );
+        assert!(
+            !partial.exists(),
+            "preflight rejection created restore staging"
+        );
     }
 
     #[test]
@@ -1099,7 +1138,9 @@ mod tests {
             max_files: 10,
             max_depth: 5,
         };
-        assert!(verify_package_inventory_with_limits(&backup, &mixed_expected, total_limit).is_err());
+        assert!(
+            verify_package_inventory_with_limits(&backup, &mixed_expected, total_limit).is_err()
+        );
     }
 
     #[test]
@@ -1117,7 +1158,12 @@ mod tests {
             let destination = temp.path().join("interrupted-backup");
             let staging = destination.with_extension("mp9b-partial");
             let result = PortableBackup::create_with_checkpoint(
-                &gate, lease, &vault, &source, &destination, 111,
+                &gate,
+                lease,
+                &vault,
+                &source,
+                &destination,
+                111,
                 |point, _| {
                     if point == interrupted_at {
                         Err(SecurityError::InvalidConfig)
@@ -1126,7 +1172,10 @@ mod tests {
                     }
                 },
             );
-            assert!(result.is_err(), "fault at {interrupted_at:?} did not interrupt creation");
+            assert!(
+                result.is_err(),
+                "fault at {interrupted_at:?} did not interrupt creation"
+            );
             assert!(!destination.exists(), "partial package was published");
             assert!(staging.is_dir(), "failed staging was automatically removed");
             match interrupted_at {
@@ -1136,7 +1185,9 @@ mod tests {
                 }
                 BackupCheckpoint::PayloadCopyChunk => {
                     assert_eq!(
-                        fs::metadata(staging.join("payload/state.sqlite3")).unwrap().len(),
+                        fs::metadata(staging.join("payload/state.sqlite3"))
+                            .unwrap()
+                            .len(),
                         64 * 1024,
                         "copy fault must leave a deterministic partial payload"
                     );
@@ -1157,7 +1208,12 @@ mod tests {
         let destination = temp.path().join("rename-race");
         let staging = destination.with_extension("mp9b-partial");
         let result = PortableBackup::create_with_checkpoint(
-            &gate, lease, &vault, &source, &destination, 112,
+            &gate,
+            lease,
+            &vault,
+            &source,
+            &destination,
+            112,
             |point, path| {
                 if point == BackupCheckpoint::BeforeBackupPublish {
                     fs::create_dir(path)?;
@@ -1166,15 +1222,27 @@ mod tests {
                 Ok(())
             },
         );
-        assert!(result.is_err(), "a destination created during publication was replaced");
-        assert_eq!(fs::read(destination.join("owner-kept")).unwrap(), b"existing owner data");
-        assert!(staging.is_dir(), "failed package staging must remain for owner disposition");
+        assert!(
+            result.is_err(),
+            "a destination created during publication was replaced"
+        );
+        assert_eq!(
+            fs::read(destination.join("owner-kept")).unwrap(),
+            b"existing owner data"
+        );
+        assert!(
+            staging.is_dir(),
+            "failed package staging must remain for owner disposition"
+        );
 
         let collision = temp.path().join("existing-destination");
         fs::create_dir(&collision).unwrap();
         fs::write(collision.join("owner-kept"), b"pre-existing").unwrap();
         assert!(PortableBackup::create(&gate, lease, &vault, &source, &collision, 113).is_err());
-        assert_eq!(fs::read(collision.join("owner-kept")).unwrap(), b"pre-existing");
+        assert_eq!(
+            fs::read(collision.join("owner-kept")).unwrap(),
+            b"pre-existing"
+        );
         assert!(!collision.with_extension("mp9b-partial").exists());
     }
 
@@ -1185,7 +1253,12 @@ mod tests {
         let destination = temp.path().join("restart-backup");
         let staging = destination.with_extension("mp9b-partial");
         assert!(PortableBackup::create_with_checkpoint(
-            &gate, lease, &vault, &source, &destination, 114,
+            &gate,
+            lease,
+            &vault,
+            &source,
+            &destination,
+            114,
             |point, _| {
                 if point == BackupCheckpoint::PackageStagingCreated {
                     Err(SecurityError::InvalidConfig)
@@ -1197,7 +1270,10 @@ mod tests {
         .is_err());
         let preserved_manifest = fs::read(staging.join("vault-v1.json")).unwrap();
         assert!(PortableBackup::create(&gate, lease, &vault, &source, &destination, 114).is_err());
-        assert_eq!(fs::read(staging.join("vault-v1.json")).unwrap(), preserved_manifest);
+        assert_eq!(
+            fs::read(staging.join("vault-v1.json")).unwrap(),
+            preserved_manifest
+        );
         assert!(!destination.exists());
 
         let backup = temp.path().join("valid-restart-source");
@@ -1206,10 +1282,9 @@ mod tests {
         let restore_staging = restore_target.with_extension("mp9b-restore-partial");
         fs::create_dir(&restore_staging).unwrap();
         fs::write(restore_staging.join("owner-kept"), b"disposition required").unwrap();
-        assert!(PortableBackup::restore(
-            &gate, lease, &backup, &restore_target, &recovery
-        )
-        .is_err());
+        assert!(
+            PortableBackup::restore(&gate, lease, &backup, &restore_target, &recovery).is_err()
+        );
         assert!(!restore_target.exists());
         assert_eq!(
             fs::read(restore_staging.join("owner-kept")).unwrap(),
@@ -1229,7 +1304,11 @@ mod tests {
         let destination = temp.path().join("restore-copy-interrupted");
         let staging = destination.with_extension("mp9b-restore-partial");
         assert!(PortableBackup::restore_with_limits_and_checkpoint(
-            &gate, lease, &backup, &destination, &recovery,
+            &gate,
+            lease,
+            &backup,
+            &destination,
+            &recovery,
             PRODUCTION_INVENTORY_LIMITS,
             |point, _| {
                 if point == BackupCheckpoint::RestorePayloadCopyChunk {
@@ -1246,11 +1325,11 @@ mod tests {
             64 * 1024
         );
         assert_eq!(fs::read(source.join("state.sqlite3")).unwrap(), original);
-        assert!(PortableBackup::restore(
-            &gate, lease, &backup, &destination, &recovery
-        )
-        .is_err());
-        assert!(staging.is_dir(), "restart must not adopt or clean partial restore staging");
+        assert!(PortableBackup::restore(&gate, lease, &backup, &destination, &recovery).is_err());
+        assert!(
+            staging.is_dir(),
+            "restart must not adopt or clean partial restore staging"
+        );
     }
 
     #[cfg(unix)]
@@ -1267,10 +1346,7 @@ mod tests {
 
         let destination = temp.path().join("special-file-must-not-restore");
         let staging = destination.with_extension("mp9b-restore-partial");
-        assert!(PortableBackup::restore(
-            &gate, lease, &backup, &destination, &recovery
-        )
-        .is_err());
+        assert!(PortableBackup::restore(&gate, lease, &backup, &destination, &recovery).is_err());
         assert!(!destination.exists());
         assert!(!staging.exists());
         drop(listener);

@@ -206,7 +206,9 @@ fn online_snapshot_waits_for_real_document_object_and_state_index_commit() {
     let restored_manifest = VaultManifest::read(&restored).unwrap();
     assert_eq!(restored_manifest.vault_id_b64, f.manifest.vault_id_b64);
     let restored_archive_index = archive.open_index_store().unwrap();
-    let archive_hits = restored_archive_index.search("synthetic", false, 5).unwrap();
+    let archive_hits = restored_archive_index
+        .search("synthetic", false, 5)
+        .unwrap();
     assert!(
         archive_hits.iter().any(|hit| hit.message_id == "one"),
         "restored archive FTS must retain the committed message"
