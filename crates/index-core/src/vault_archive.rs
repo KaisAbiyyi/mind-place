@@ -1196,7 +1196,8 @@ mod privacy_capture_race_tests {
     ) {
         let home = tempfile::tempdir().unwrap();
         let gate = SecurityGate::open(home.path().join("security.json")).unwrap();
-        gate.initialize(b"synthetic-redaction-race-password").unwrap();
+        gate.initialize(b"synthetic-redaction-race-password")
+            .unwrap();
         let lease = gate.require_unlocked().unwrap();
         let (vault, recovery, manifest) = CryptoVault::provision(&gate, lease).unwrap();
         let root = home.path().join("vault");
@@ -1205,7 +1206,12 @@ mod privacy_capture_race_tests {
         let state = archive.open_state_store().unwrap();
         let admin = "a".repeat(64);
         state
-            .issue_client("client:v1:owner", "Synthetic owner", &admin, &[ClientCapability::Admin])
+            .issue_client(
+                "client:v1:owner",
+                "Synthetic owner",
+                &admin,
+                &[ClientCapability::Admin],
+            )
             .unwrap();
         let source = state
             .register_source(&SourceDescriptor {
@@ -1215,7 +1221,9 @@ mod privacy_capture_race_tests {
                 key: SourceKey::External("123e4567-e89b-12d3-a456-426614174099"),
             })
             .unwrap();
-        (home, gate, lease, manifest, recovery, archive, admin, source)
+        (
+            home, gate, lease, manifest, recovery, archive, admin, source,
+        )
     }
 
     #[test]
@@ -1251,19 +1259,24 @@ mod privacy_capture_race_tests {
         resume_tx.send(()).unwrap();
         let saved = capturing.join().unwrap().unwrap();
         redactor.join().unwrap();
-        assert!(done_rx.recv_timeout(Duration::from_secs(30)).unwrap().is_ok());
+        assert!(done_rx
+            .recv_timeout(Duration::from_secs(30))
+            .unwrap()
+            .is_ok());
 
         assert!(archive.read(&saved.id, Some(&saved.snapshot_id)).is_err());
         assert!(archive.save(synthetic_capture("new revision")).is_err());
         let state = archive.open_state_store().unwrap();
-        let source_id = state
-            .register_source(&SourceDescriptor {
-                provider: "chatgpt",
-                source_namespace: crate::namespace_for_provider("chatgpt").unwrap(),
-                source_kind: "conversation",
-                key: SourceKey::External("123e4567-e89b-12d3-a456-426614174099"),
-            });
-        assert!(source_id.is_err(), "redacted source cannot re-enter ingestion");
+        let source_id = state.register_source(&SourceDescriptor {
+            provider: "chatgpt",
+            source_namespace: crate::namespace_for_provider("chatgpt").unwrap(),
+            source_kind: "conversation",
+            key: SourceKey::External("123e4567-e89b-12d3-a456-426614174099"),
+        });
+        assert!(
+            source_id.is_err(),
+            "redacted source cannot re-enter ingestion"
+        );
     }
 
     #[test]
@@ -1281,11 +1294,14 @@ mod privacy_capture_race_tests {
         authority
             .redact_source(&admin, &source, "After interrupted capture")
             .unwrap();
-        assert!(archive.save(synthetic_capture("after interruption")).is_err());
+        assert!(archive
+            .save(synthetic_capture("after interruption"))
+            .is_err());
         drop(archive);
 
         let vault = CryptoVault::restore_with_recovery(&gate, lease, &manifest, &recovery).unwrap();
-        let reopened = VaultCaptureStore::open(home.path().join("vault"), vault, &gate, lease).unwrap();
+        let reopened =
+            VaultCaptureStore::open(home.path().join("vault"), vault, &gate, lease).unwrap();
         assert!(reopened
             .open_state_store()
             .unwrap()
