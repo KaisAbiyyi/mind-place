@@ -1,17 +1,20 @@
 import type { ConversationSummary } from "./contracts.js";
-import { createUiButton, createUiStatePanel, createUiTable } from "./ui-primitives.js";
+import { createUiButton, createUiStatePanel, createUiStatus, createUiTable } from "./ui-primitives.js";
 
 export interface ArchiveFilters { query: string; provider: string; completeness: string; page: number }
 export const createArchiveFilters = (): ArchiveFilters => ({ query: "", provider: "all", completeness: "all", page: 0 });
 
 /** A bounded table over the currently authorized archive response; no invented collections or mutations. */
 export function createConversationArchive(document: Document, items: readonly ConversationSummary[], filters: ArchiveFilters): HTMLElement {
-  const page = document.createElement("section"); page.className = "conversation-archive-page";
-  const heading = document.createElement("header"); heading.className = "archive-page-head";
+  const page = document.createElement("section"); page.className = "conversation-archive-page page";
+  const heading = document.createElement("header"); heading.className = "archive-page-head page-head";
+  const copy = document.createElement("div"); copy.className = "archive-page-head-copy";
+  const overline = document.createElement("div"); overline.className = "overline"; overline.textContent = "MULTI-PROVIDER ARCHIVE";
   const title = document.createElement("h1"); title.textContent = "Conversations Archive";
-  const note = document.createElement("p"); note.textContent = "Search, inspect provenance, and revisit saved multi-provider transcripts.";
-  const setup = createUiButton(document, "Capture & import setup"); setup.dataset.action = "open-setup";
-  heading.append(title, note, setup);
+  const note = document.createElement("p"); note.className = "page-sub"; note.textContent = "Search, inspect provenance, and revisit saved multi-provider transcripts.";
+  copy.append(overline, title, note);
+  const setup = createUiButton(document, "Capture & import setup", { variant: "primary" }); setup.dataset.action = "open-setup";
+  heading.append(copy, setup);
   const form = document.createElement("div"); form.className = "archive-filters";
   const query = document.createElement("input"); query.type = "search"; query.maxLength = 256;
   query.setAttribute("aria-label", "Filter saved conversations"); query.placeholder = "Filter by title or provider…"; query.value = filters.query;
@@ -51,8 +54,16 @@ export function createConversationArchive(document: Document, items: readonly Co
       const link = createUiButton(document, item.title || "Untitled conversation", { variant: "link" });
       link.dataset.conversationId = item.id; link.dataset.archiveRow = "";
       const date = new Date(item.conversation_date || item.captured_at);
-      return [link, item.provider, `${item.message_count} messages · ${item.snapshot_count} captures`,
-        item.completeness, Number.isFinite(date.getTime()) ? date.toLocaleDateString() : "Date unavailable"];
+      const providerBadge = document.createElement("span");
+      providerBadge.className = "tag outline mono";
+      providerBadge.textContent = item.provider;
+      const completenessBadge = createUiStatus(
+        document,
+        item.completeness,
+        item.completeness === "partial" ? "partial" : "complete",
+      );
+      return [link, providerBadge, `${item.message_count} messages · ${item.snapshot_count} captures`,
+        completenessBadge, Number.isFinite(date.getTime()) ? date.toLocaleDateString() : "Date unavailable"];
     });
     content.replaceChildren(visible.length ? createUiTable(document, {
       caption: "Saved conversations", columns: ["Conversation title", "Provider", "Capture history", "Completeness", "Last activity"], rows,

@@ -325,19 +325,53 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock, ope
     const messageCount = summaries.reduce((sum, item) => sum + item.message_count, 0);
     const completeCount = summaries.filter((item) => item.completeness === "complete").length;
     const partialCount = summaries.filter((item) => item.completeness === "partial").length;
+    const convBadge = workspaceNav.querySelector<HTMLElement>('[data-route-badge="conversations"]');
+    if (convBadge) convBadge.textContent = String(total);
+
     const page = document.createElement("div");
-    page.className = "ui-overview-page";
+    page.className = "ui-overview-page page";
     const heading = document.createElement("header");
-    heading.className = "ui-overview-heading";
+    heading.className = "ui-overview-heading page-head";
+    const headingCopy = document.createElement("div");
+    const overline = document.createElement("div");
+    overline.className = "overline";
+    overline.textContent = "KNOWLEDGE OS · WORKSPACE OVERVIEW";
     const title = document.createElement("h1");
     title.textContent = "Overview";
     const description = document.createElement("p");
+    description.className = "page-sub";
     description.textContent = "A live view of the conversations saved in your local archive.";
-    heading.append(title, description);
+    headingCopy.append(overline, title, description);
+
+    const headingActions = document.createElement("div");
+    headingActions.className = "page-actions";
+    const topSearchBtn = createUiButton(document, "Search all sources", { variant: "secondary", className: "btn" });
+    topSearchBtn.dataset.action = "open-library-workspace";
+    const topHiveBtn = createUiButton(document, "Explore Hive Mind", { variant: "primary", className: "btn primary" });
+    topHiveBtn.dataset.action = "navigate-route";
+    topHiveBtn.dataset.route = "hive-mind-graph";
+    headingActions.append(topSearchBtn, topHiveBtn);
+    heading.append(headingCopy, headingActions);
     page.append(heading);
 
+    const strip = document.createElement("div");
+    strip.className = "status-strip";
+    const stripLeft = document.createElement("div");
+    stripLeft.className = "status-strip-left";
+    const pulse = document.createElement("span");
+    pulse.className = "pulse-badge";
+    pulse.textContent = "LOCAL-FIRST";
+    const stripText = document.createElement("span");
+    stripText.textContent = "All conversation snapshots, curated memories, and approved folder indexes remain stored locally on this device.";
+    stripLeft.append(pulse, stripText);
+    const stripRight = document.createElement("span");
+    stripRight.className = "tag mono";
+    stripRight.textContent = `${total} SAVED · ${messageCount} MSG`;
+    strip.append(stripLeft, stripRight);
+    page.append(strip);
+
     const metrics = document.createElement("div");
-    metrics.className = "ui-overview-grid";
+    metrics.className = "ui-overview-grid grid stats";
     const metricValues = [
       { label: "Saved conversations", value: total, detail: "Available in this archive" },
       { label: "Messages captured", value: messageCount, detail: "Across saved conversations" },
@@ -345,12 +379,12 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock, ope
       { label: "Partial captures", value: partialCount, detail: "Contain capture warnings or gaps" },
     ];
     for (const metric of metricValues) {
-      const card = createUiCard(document, { title: metric.label, className: "ui-stat-card" });
+      const card = createUiCard(document, { title: metric.label, className: "ui-stat-card card stat" });
       const value = document.createElement("strong");
-      value.className = "ui-stat-value";
+      value.className = "ui-stat-value stat-value";
       value.textContent = metric.value.toLocaleString();
       const detail = document.createElement("span");
-      detail.className = "ui-stat-detail";
+      detail.className = "ui-stat-detail stat-foot";
       detail.textContent = metric.detail;
       card.body.append(value, detail);
       metrics.append(card.element);
@@ -358,10 +392,11 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock, ope
     page.append(metrics);
 
     const lower = document.createElement("div");
-    lower.className = "ui-overview-lower";
+    lower.className = "ui-overview-lower home-grid";
     const recentCard = createUiCard(document, {
       title: "Recent conversations",
       description: "Open a saved conversation to inspect its captured transcript.",
+      className: "card panel",
     });
     const recent = [...summaries]
       .sort((left, right) => new Date(right.captured_at).getTime() - new Date(left.captured_at).getTime())

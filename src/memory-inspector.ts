@@ -149,6 +149,8 @@ export function mountMemoryInspector({ view, invoke, copyText, onClose, initialL
     const focusValue = focusAttribute ? focused?.getAttribute(focusAttribute) : null;
     cards.replaceChildren();
     collections.replaceChildren();
+    const memBadge = document.querySelector<HTMLElement>('[data-route-badge="curated-memory"]');
+    if (memBadge) memBadge.textContent = String(items.length);
     const groups = ["all", ...new Set(items.map(item => item.disposition))];
     for (const group of groups) {
       const count = group === "all" ? items.length : items.filter(item => item.disposition === group).length;

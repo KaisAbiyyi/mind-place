@@ -46,7 +46,7 @@ export function layoutHive(nodes: readonly HiveNode[], edges: readonly HiveEdge[
     const cx = 380 + Math.cos(angle) * orbit, cy = 300 + Math.sin(angle) * orbit * .8;
     component.forEach((node, index) => {
       const phase = index * 2.399963229728653;
-      const radius = index === 0 ? 0 : Math.min(64, 19 * Math.sqrt(index));
+      const radius = index === 0 ? 0 : Math.min(135, 76 * Math.sqrt(index));
       positions.set(node.id, { x: cx + Math.cos(phase) * radius, y: cy + Math.sin(phase) * radius });
     });
   });
@@ -213,6 +213,16 @@ export function mountHiveWorkspace(view: HTMLElement, invoke: Invoke, onClose: (
     const wrapper = document.createElementNS(SVG, "g");
     wrapper.setAttribute("transform", "translate(" + (380 + panX) + " " + (300 + panY) + ") scale(" +
       zoom + ") translate(" + (-center.x) + " " + (-center.y) + ")");
+    const hiveBadge = document.querySelector<HTMLElement>('[data-route-badge="hive-mind-graph"]');
+    if (hiveBadge) hiveBadge.textContent = String(graph.nodes.length);
+    for (const orbitRadius of [110, 215]) {
+      const orbit = document.createElementNS(SVG, "ellipse");
+      orbit.setAttribute("cx", "380"); orbit.setAttribute("cy", "300");
+      orbit.setAttribute("rx", String(orbitRadius));
+      orbit.setAttribute("ry", String(orbitRadius));
+      orbit.setAttribute("class", "hive-orbit");
+      wrapper.append(orbit);
+    }
     const degree = new Map(visible.map(node => [node.id, 0]));
     for (const edge of eligibleEdges) {
       degree.set(edge.from_node, (degree.get(edge.from_node) ?? 0) + 1);
@@ -238,6 +248,13 @@ export function mountHiveWorkspace(view: HTMLElement, invoke: Invoke, onClose: (
       tip.textContent = node.kind + ": " + node.label;
       circle.append(tip); circle.addEventListener("click", () => choose(node.id));
       wrapper.append(circle);
+      const text = document.createElementNS(SVG, "text");
+      text.setAttribute("x", String(pos.x));
+      text.setAttribute("y", String(pos.y + 20));
+      text.setAttribute("text-anchor", "middle");
+      text.setAttribute("class", node.id === selectedId ? "hive-node-label is-selected" : "hive-node-label");
+      text.textContent = node.label.length > 26 ? node.label.slice(0, 25) + "…" : node.label;
+      wrapper.append(text);
       const button = document.createElement("button"); button.type = "button";
       button.className = "quiet-button hive-node-choice";
       button.setAttribute("aria-pressed", String(node.id === selectedId));

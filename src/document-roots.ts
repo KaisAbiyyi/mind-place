@@ -179,6 +179,8 @@ export function mountDocumentRootSetup(parent: HTMLElement, invoke: Invoke): voi
       const roots = await invoke<DocumentRoot[]>("list_document_roots");
       if (!section.isConnected || epoch !== refreshEpoch) return;
       list.replaceChildren();
+      const filesBadge = doc.querySelector<HTMLElement>('[data-route-badge="files-secure-vault"]');
+      if (filesBadge) filesBadge.textContent = String(roots.length);
       const query = folderQuery.value.trim().toLocaleLowerCase();
       const matching = roots.filter(root => {
         const latest = lastReports.get(root.id);
