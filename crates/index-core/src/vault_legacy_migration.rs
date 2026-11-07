@@ -102,8 +102,6 @@ impl LegacyEncryptedConversion<'_> {
     ) -> SecResult<()> {
         self.gate.validate_lease(self.lease)?;
         self.ensure_manifest(stage)?;
-        #[cfg(debug_assertions)]
-        eprintln!("MP9C_MIGRATION: manifest");
         // Establish the encrypted archive catalog before preserving the raw
         // legacy archive map or any immutable archive objects. A missing
         // catalog after object publication must never be mistaken for empty.
@@ -111,14 +109,10 @@ impl LegacyEncryptedConversion<'_> {
             .map_err(|_| SecurityError::Crypto)?;
         drop(_archive);
         self.copy_state(source, stage)?;
-        #[cfg(debug_assertions)]
-        eprintln!("MP9C_MIGRATION: state copied");
         checkpoint(LegacyConversionCheckpoint::StateCopied)?;
         // Preserve a stable, encrypted raw mapping before normalized views.
         self.preserve_raw_inventory(source, stage)?;
         self.import_archives(source, stage)?;
-        #[cfg(debug_assertions)]
-        eprintln!("MP9C_MIGRATION: archives imported");
         checkpoint(LegacyConversionCheckpoint::ArchiveImported)?;
         self.preserve_raw_archive(source, stage)?;
         checkpoint(LegacyConversionCheckpoint::RawArchivePreserved)?;
@@ -131,17 +125,9 @@ impl LegacyEncryptedConversion<'_> {
         self.gate.validate_lease(self.lease)?;
         self.ensure_manifest(stage)?;
         self.verify_state(source, stage)?;
-        #[cfg(debug_assertions)]
-        eprintln!("MP9C_MIGRATION: state verified");
         self.verify_archives(source, stage)?;
-        #[cfg(debug_assertions)]
-        eprintln!("MP9C_MIGRATION: archives verified");
         self.verify_raw_archive(source, stage)?;
-        #[cfg(debug_assertions)]
-        eprintln!("MP9C_MIGRATION: raw archive verified");
         self.verify_documents(source, stage)?;
-        #[cfg(debug_assertions)]
-        eprintln!("MP9C_MIGRATION: docs verified");
         let vault = self.crypto()?;
         let storage = ImmutableVaultStorage::new(stage, &vault, self.gate, self.lease)?;
         let actual = RawLegacyInventory::read(stage, &vault, &storage, self.gate, self.lease)?
@@ -149,11 +135,7 @@ impl LegacyEncryptedConversion<'_> {
         if actual != self.raw_inventory(source)? {
             return Err(SecurityError::Crypto);
         }
-        #[cfg(debug_assertions)]
-        eprintln!("MP9C_MIGRATION: raw inventory verified");
         self.verify_layout(source, stage)?;
-        #[cfg(debug_assertions)]
-        eprintln!("MP9C_MIGRATION: layout verified");
         self.gate.validate_lease(self.lease)
     }
 
@@ -233,14 +215,6 @@ impl LegacyEncryptedConversion<'_> {
         // Never certify or publish orphan temporary/partial/plaintext bytes.
         // Unknown staging data is retained for explicit rollback/disposition.
         if actual != expected {
-            #[cfg(debug_assertions)]
-            eprintln!(
-                "MP9C_MIGRATION: layout unexpected count={} expected={} unexpected={:?} missing={:?}",
-                actual.len(),
-                expected.len(),
-                actual.difference(&expected).collect::<Vec<_>>(),
-                expected.difference(&actual).collect::<Vec<_>>()
-            );
             return Err(SecurityError::Crypto);
         }
         Ok(())
