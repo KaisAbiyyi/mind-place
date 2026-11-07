@@ -90,20 +90,21 @@ test("setup and documents modal return to the previous workspace and never steal
     const setup = root.querySelector<HTMLButtonElement>('[data-workspace="connections"]')!;
     setup.click();
     assert.equal(root.querySelector('[aria-current="page"]')?.getAttribute("data-route"), "ai-providers-mcp");
+    assert.ok(root.querySelector(".providers-workspace"));
+    const captureSetup = root.querySelector<HTMLButtonElement>('.providers-workspace [data-action="open-setup"]')!;
+    captureSetup.click();
     const dialog = root.querySelector<HTMLDialogElement>("#setup-dialog")!;
     assert.equal(dialog.hasAttribute("open"), true);
     root.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "/", bubbles: true, cancelable: true }));
     assert.notEqual(dom.window.document.activeElement?.id, "archive-search");
     root.querySelector<HTMLButtonElement>('[data-action="close-setup"]')!.click();
-    assert.equal(root.querySelector('[aria-current="page"]')?.getAttribute("data-route"), "overview");
-    assert.equal(root.querySelector('[data-nav-secondary][data-workspace="library"]')?.getAttribute("aria-pressed"), "true");
-    assert.equal(dom.window.document.activeElement, setup);
+    assert.equal(root.querySelector('[aria-current="page"]')?.getAttribute("data-route"), "ai-providers-mcp");
+    assert.equal(dom.window.document.activeElement, captureSetup);
     const documents = root.querySelector<HTMLButtonElement>('[data-workspace="documents"]')!;
     documents.click();
     assert.equal(root.querySelector('[aria-current="page"]')?.getAttribute("data-route"), "files-secure-vault");
     dialog.dispatchEvent(new dom.window.Event("cancel", { cancelable: true }));
-    assert.equal(root.querySelector('[aria-current="page"]')?.getAttribute("data-route"), "overview");
-    assert.equal(root.querySelector('[data-nav-secondary][data-workspace="library"]')?.getAttribute("aria-pressed"), "true");
+    assert.equal(root.querySelector('[aria-current="page"]')?.getAttribute("data-route"), "ai-providers-mcp");
     assert.equal(dialog.hasAttribute("open"), false);
   } finally {
     app.destroy(); dom.window.close();

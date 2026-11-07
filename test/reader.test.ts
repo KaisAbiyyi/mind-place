@@ -65,6 +65,8 @@ function createReader(invoke: Invoke, copied: string[] = []) {
   });
   mounted.push(app);
   root.querySelector<HTMLButtonElement>('[data-route="conversations"]')?.click();
+  // Reader assertions exercise an explicitly opened transcript; the route itself is now an archive table.
+  void app.ready.then(() => root.querySelector<HTMLButtonElement>("#conversation-list [data-conversation-id]")?.click());
   return { dom, root, app, copied };
 }
 
@@ -90,6 +92,9 @@ test("overview uses live archive data and opens the selected transcript through 
   assert.match(overview, /Overview fixture/);
   assert.doesNotMatch(overview, /Overview answer/);
   root.querySelector<HTMLButtonElement>('[data-route="conversations"]')!.click();
+  await delay(0);
+  assert.equal(root.querySelector("#reader-view h1")?.textContent, "Conversations Archive");
+  root.querySelector<HTMLButtonElement>("#reader-view [data-conversation-id]")!.click();
   await delay(0);
   assert.match(root.querySelector("#reader-view")?.textContent ?? "", /Overview answer/);
 });
@@ -483,10 +488,13 @@ test("Settings tabs preserve explicit consent, keyboard navigation and focus res
   };
   const { dom, root, app } = createReader(invoke);
   await app.ready;
-  const documents = root.querySelector<HTMLButtonElement>("[data-action='open-document-search']")!;
+  root.querySelector<HTMLButtonElement>("#knowledge-os-nav [data-route='ai-providers-mcp']")!.click();
+  await delay(0);
+  const documents = root.querySelector<HTMLButtonElement>(".providers-workspace [data-action='open-setup']")!;
   documents.focus();
   documents.click();
   await delay(0);
+  root.querySelector<HTMLButtonElement>("#settings-tab-documents")!.click();
   await delay(0);
   assert.equal(root.querySelector<HTMLButtonElement>("#settings-tab-documents")?.getAttribute("aria-selected"), "true");
   assert.equal(root.querySelector<HTMLElement>("#settings-panel-documents")?.hidden, false);
@@ -518,7 +526,7 @@ test("Settings contains only the selected panel at accessible tab focus", async 
   };
   const { dom, root, app } = createReader(invoke);
   await app.ready;
-  root.querySelector<HTMLButtonElement>("[data-action='open-setup']")!.click();
+  openSetupFromWizard(root);
   await delay(0);
   await delay(0);
   const panels = [...root.querySelectorAll<HTMLElement>("[data-settings-panel]")];
@@ -557,7 +565,7 @@ test("Register Brave is an explicit Settings action and reports unverified confi
   };
   const { root, app } = createReader(invoke);
   await app.ready;
-  root.querySelector<HTMLButtonElement>("[data-action='open-setup']")!.click();
+  openSetupFromWizard(root);
   await delay(0);
   await delay(0);
   assert.equal(registeredBrowser, null, "Opening Settings must not register Brave automatically");
@@ -567,3 +575,11 @@ test("Register Brave is an explicit Settings action and reports unverified confi
   assert.match(root.querySelector<HTMLElement>(".registered-status")?.textContent ?? "", /Configured for Brave.*browser connection has not been tested/);
   assert.equal(root.querySelector<HTMLButtonElement>("[data-action='register-chrome']")?.disabled, false);
 });
+
+
+/** The sidebar's Setup & Onboarding entry opens the wizard; the detailed dialog is reached from its capture step. */
+function openSetupFromWizard(root: HTMLElement) {
+  root.querySelector<HTMLButtonElement>("[data-route='setup-onboarding']")!.click();
+  root.querySelector<HTMLButtonElement>(".onboarding-workspace [data-step='providers']")!.click();
+  root.querySelector<HTMLButtonElement>(".onboarding-workspace [data-focus-key='open-details']")!.click();
+}

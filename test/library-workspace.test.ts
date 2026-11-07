@@ -8,7 +8,8 @@ import type { Invoke } from "../src/reader.js";
 function fixture(invoke: Invoke) {
   const dom = new JSDOM("<!doctype html><html><body><main></main></body></html>", { url: "https://local.test/" });
   const view = dom.window.document.querySelector("main")!;
-  const handle = mountLibraryWorkspace(view, invoke, () => handle.destroy());
+  const checkedInvoke: Invoke = async <T>(command: string, args?: Record<string, unknown>) => command === "get_security_status" ? { configured:true,locked:false,epoch:1 } as T : invoke<T>(command,args);
+  const handle = mountLibraryWorkspace(view, checkedInvoke, () => handle.destroy());
   const search = (q: string) => {
     view.querySelector<HTMLInputElement>("#library-query")!.value = q;
     view.querySelector("form")!.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
