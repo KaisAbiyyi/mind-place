@@ -163,7 +163,7 @@ fn online_backup_failure_injection_never_publishes_incomplete_restores() {
         "messages": [{"id": "one", "role": "user", "text": "synthetic", "format": "plain", "attachments": []}],
         "warnings": []
     })).unwrap();
-    archive.save(capture).unwrap();
+    let receipt = archive.save(capture).unwrap();
     let verified = CryptoVault::restore_with_recovery(&gate, lease, &manifest, &recovery).unwrap();
 
     // An unknown plaintext writer cannot be silently excluded from a "complete"
@@ -206,6 +206,11 @@ fn online_backup_failure_injection_never_publishes_incomplete_restores() {
         scratch_count_after_success, 1,
         "successful backup removes only its own temporary scratch"
     );
+
+    // Preserve a separately published valid encrypted generation before
+    // rejecting tampered packages. Recovery must remain possible afterwards.
+    let safe_recovery = home.path().join("untouched-published-recovery");
+    VaultOnlineBackup::create(&gate, lease, &verified, &root, &safe_recovery, 30).unwrap();
 
     let staged_target = home.path().join("stale-staged-restore");
     let staged = staged_target.with_extension("mp9b-verified-restore-partial");
@@ -266,6 +271,17 @@ fn online_backup_failure_injection_never_publishes_incomplete_restores() {
     assert!(!manifest_target
         .with_extension("mp9b-verified-restore-partial")
         .exists());
+
+    let recovered = home.path().join("recovered-from-published-backup");
+    VaultOnlineBackup::restore(&gate, lease, &safe_recovery, &recovered, &recovery).unwrap();
+    let recovered_vault =
+        CryptoVault::restore_with_recovery(&gate, lease, &manifest, &recovery).unwrap();
+    let recovered_archive = VaultCaptureStore::open(&recovered, recovered_vault, &gate, lease).unwrap();
+    assert_eq!(
+        recovered_archive.read(&receipt.id, None).unwrap().capture.messages[0].text,
+        "synthetic"
+    );
+    assert_eq!(VaultManifest::read(&recovered).unwrap().vault_id_b64, manifest.vault_id_b64);
 
     gate.lock();
     let locked_backup = home.path().join("locked-online-backup");
