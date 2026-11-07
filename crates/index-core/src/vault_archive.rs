@@ -579,6 +579,31 @@ impl VaultCaptureStore {
     }
 
     pub fn read(&self, archive_id: &str, revision: Option<&str>) -> Result<Conversation> {
+        self.read_with_checkpoint(archive_id, revision, || {})
+    }
+
+    // Test-only checkpoints use the same production shared disclosure fence.
+    // Unlike the shared writer fence, this conflicts with source redaction's
+    // exclusive privacy transition. The lock is acquired BEFORE opening state.
+    fn read_with_checkpoint(
+        &self,
+        archive_id: &str,
+        revision: Option<&str>,
+        after_visibility_check: impl FnOnce(),
+    ) -> Result<Conversation> {
+        let _privacy = VaultWriterFence::privacy_reader(&self.root)
+            .map_err(|_| IndexError::InvalidEvidence)?;
+        self.read_under_privacy(archive_id, revision, after_visibility_check)
+    }
+
+    // The caller must already hold privacy_reader. Used by export/assets to
+    // avoid a second shared lock after an exclusive writer has queued.
+    fn read_under_privacy(
+        &self,
+        archive_id: &str,
+        revision: Option<&str>,
+        after_visibility_check: impl FnOnce(),
+    ) -> Result<Conversation> {
         let authority = self.open_state_store()?;
         let _writer =
             VaultWriterFence::writer(&self.root).map_err(|_| IndexError::InvalidEvidence)?;
@@ -614,7 +639,9 @@ impl VaultCaptureStore {
             .optional()?
             .ok_or(IndexError::InvalidEvidence)?;
         // Direct archive-id + revision fetch cannot bypass logical redaction.
+        // Hold privacy_reader through decrypt, validation and the return handoff.
         self.require_visible(&authority, &row.2, &row.3)?;
+        after_visibility_check();
         let snapshot_count: i64 = db.query_row(
             "SELECT count(*) FROM vault_captures WHERE archive_id=?1",
             [archive_id],
@@ -725,8 +752,10 @@ impl VaultCaptureStore {
         archive_id: &str,
         revision: Option<&str>,
     ) -> Result<ExportResult> {
+        let _privacy = VaultWriterFence::privacy_reader(&self.root)
+            .map_err(|_| IndexError::InvalidEvidence)?;
         let authority = self.open_state_store()?;
-        let conversation = self.read(archive_id, revision)?;
+        let conversation = self.read_under_privacy(archive_id, revision, || {})?;
         let _writer =
             VaultWriterFence::writer(&self.root).map_err(|_| IndexError::InvalidEvidence)?;
         self.require_visible(
@@ -753,6 +782,8 @@ impl VaultCaptureStore {
     }
 
     pub fn asset(&self, archive_id: &str, name: &str) -> Result<AssetResult> {
+        let _privacy = VaultWriterFence::privacy_reader(&self.root)
+            .map_err(|_| IndexError::InvalidEvidence)?;
         self.gate
             .validate_lease(self.lease)
             .map_err(|_| IndexError::Revoked)?;
@@ -770,7 +801,7 @@ impl VaultCaptureStore {
             return Err(IndexError::InvalidEvidence);
         }
         let authority = self.open_state_store()?;
-        let conversation = self.read(archive_id, None)?;
+        let conversation = self.read_under_privacy(archive_id, None, || {})?;
         let _writer =
             VaultWriterFence::writer(&self.root).map_err(|_| IndexError::InvalidEvidence)?;
         self.require_visible(
@@ -810,6 +841,8 @@ impl VaultCaptureStore {
     }
 
     fn list_catalog(&self, query: &str, complete: bool) -> Result<Vec<ConversationSummary>> {
+        let _privacy = VaultWriterFence::privacy_reader(&self.root)
+            .map_err(|_| IndexError::InvalidEvidence)?;
         if query.len() > 1024 {
             return Err(IndexError::InvalidQuery);
         }
@@ -1020,6 +1053,8 @@ impl VaultCaptureStore {
     }
 
     pub fn snapshots(&self, archive_id: &str) -> Result<Vec<SnapshotSummary>> {
+        let _privacy = VaultWriterFence::privacy_reader(&self.root)
+            .map_err(|_| IndexError::InvalidEvidence)?;
         let authority = self.open_state_store()?;
         let _writer =
             VaultWriterFence::writer(&self.root).map_err(|_| IndexError::InvalidEvidence)?;
