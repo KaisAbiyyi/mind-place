@@ -1060,7 +1060,11 @@ mod tests {
         let payload = staging.join("payload");
         fs::create_dir_all(&payload).unwrap();
         fs::write(staging.join("vault-v1.json"), b"synthetic metadata").unwrap();
-        fs::write(payload.join("state.sqlite3"), b"synthetic encrypted payload").unwrap();
+        fs::write(
+            payload.join("state.sqlite3"),
+            b"synthetic encrypted payload",
+        )
+        .unwrap();
 
         let exact = InventoryLimits {
             max_entries: 3,
@@ -1074,7 +1078,10 @@ mod tests {
         assert_eq!(accepted.directories, 1);
         assert_eq!(accepted.files, 1, "root metadata must not count as payload");
 
-        let too_few = InventoryLimits { max_files: 0, ..exact };
+        let too_few = InventoryLimits {
+            max_files: 0,
+            ..exact
+        };
         let mut rejected = InventoryBudget::new(too_few);
         assert!(sync_directory_tree(&staging, &payload, &mut rejected).is_err());
     }
@@ -1086,7 +1093,12 @@ mod tests {
         let interrupted_backup = temp.path().join("backup-before-publish");
         let backup_staging = interrupted_backup.with_extension("mp9b-partial");
         assert!(PortableBackup::create_with_checkpoint(
-            &gate, lease, &vault, &source, &interrupted_backup, 118,
+            &gate,
+            lease,
+            &vault,
+            &source,
+            &interrupted_backup,
+            118,
             |point, _| {
                 if point == BackupCheckpoint::BeforeBackupPublish {
                     Err(SecurityError::InvalidConfig)
@@ -1094,12 +1106,15 @@ mod tests {
                     Ok(())
                 }
             },
-        ).is_err());
+        )
+        .is_err());
         assert!(!interrupted_backup.exists());
         assert!(backup_staging.join("bundle.json").is_file());
-        assert!(PortableBackup::create(
-            &gate, lease, &vault, &source, &interrupted_backup, 118
-        ).is_err(), "retry must not adopt prior staging");
+        assert!(
+            PortableBackup::create(&gate, lease, &vault, &source, &interrupted_backup, 118)
+                .is_err(),
+            "retry must not adopt prior staging"
+        );
 
         let valid_backup = temp.path().join("valid-published-recovery");
         PortableBackup::create(&gate, lease, &vault, &source, &valid_backup, 119).unwrap();
@@ -1107,10 +1122,16 @@ mod tests {
             BackupCheckpoint::RestoreStagingCreated,
             BackupCheckpoint::BeforeRestorePublish,
         ] {
-            let destination = temp.path().join(format!("interrupted-restore-{checkpoint:?}"));
+            let destination = temp
+                .path()
+                .join(format!("interrupted-restore-{checkpoint:?}"));
             let staging = destination.with_extension("mp9b-restore-partial");
             assert!(PortableBackup::restore_with_limits_and_checkpoint(
-                &gate, lease, &valid_backup, &destination, &recovery,
+                &gate,
+                lease,
+                &valid_backup,
+                &destination,
+                &recovery,
                 PRODUCTION_INVENTORY_LIMITS,
                 |point, _| {
                     if point == checkpoint {
@@ -1119,12 +1140,15 @@ mod tests {
                         Ok(())
                     }
                 },
-            ).is_err());
+            )
+            .is_err());
             assert!(!destination.exists(), "partial generation was published");
             assert!(staging.is_dir(), "interrupted staging was deleted");
-            assert!(PortableBackup::restore(
-                &gate, lease, &valid_backup, &destination, &recovery
-            ).is_err(), "retry adopted existing partial staging");
+            assert!(
+                PortableBackup::restore(&gate, lease, &valid_backup, &destination, &recovery)
+                    .is_err(),
+                "retry adopted existing partial staging"
+            );
         }
         let recovered = temp.path().join("fresh-valid-recovery");
         PortableBackup::restore(&gate, lease, &valid_backup, &recovered, &recovery).unwrap();
