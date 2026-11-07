@@ -1278,6 +1278,51 @@ mod privacy_capture_race_tests {
     }
 
     #[test]
+    fn redaction_waits_for_inflight_archive_disclosure_and_denies_subsequent_reads() {
+        let (_home, _gate, _lease, _manifest, _recovery, archive, admin, source) = fixture();
+        let saved = archive.save(synthetic_capture("sensitive synthetic read")).unwrap();
+        let (checked_tx, checked_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let reader = Arc::clone(&archive);
+        let snapshot_id = saved.snapshot_id.clone();
+        let id = saved.id.clone();
+        let reading = thread::spawn(move || {
+            reader.read_with_checkpoint(&id, Some(&snapshot_id), || {
+                checked_tx.send(()).unwrap();
+                release_rx.recv_timeout(Duration::from_secs(30)).unwrap();
+            })
+        });
+        checked_rx.recv_timeout(Duration::from_secs(30)).unwrap();
+
+        let state = archive.open_state_store().unwrap();
+        let (attempt_tx, attempt_rx) = mpsc::channel();
+        let (redacted_tx, redacted_rx) = mpsc::channel();
+        let redacting = thread::spawn(move || {
+            attempt_tx.send(()).unwrap();
+            redacted_tx
+                .send(state.redact_source(&admin, &source, "Synthetic in-flight read"))
+                .unwrap();
+        });
+        attempt_rx.recv_timeout(Duration::from_secs(30)).unwrap();
+        assert!(matches!(
+            redacted_rx.recv_timeout(Duration::from_millis(150)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
+        release_tx.send(()).unwrap();
+        let prior = reading.join().unwrap().unwrap();
+        assert_eq!(prior.summary.id, saved.id);
+        redacting.join().unwrap();
+        assert!(redacted_rx.recv_timeout(Duration::from_secs(30)).unwrap().is_ok());
+
+        // After the exclusive commit returns, every public archive disclosure
+        // path denies the source even when addressed by immutable snapshot ID.
+        assert!(archive.read(&saved.id, Some(&saved.snapshot_id)).is_err());
+        assert!(archive.export_markdown(&saved.id, None).is_err());
+        assert!(archive.snapshots(&saved.id).is_err());
+        assert!(archive.list("").unwrap().is_empty());
+    }
+
+    #[test]
     fn redaction_waits_for_checked_capture_publication_then_denies_later_writes() {
         let (_home, _gate, _lease, _manifest, _recovery, archive, admin, source) = fixture();
         let (entered_tx, entered_rx) = mpsc::channel();
