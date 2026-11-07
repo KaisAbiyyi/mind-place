@@ -11,6 +11,7 @@ const fullyHardened = new Set([
   "mp-10c-scale.yml",
   "storage-qualification.yml",
   "mp9b-sqlcipher-qualification.yml",
+  "mp9c-privacy.yml",
   "windows-product.yml",
   "mp10b-bakeoff.yml",
   "mp8f-visual.yml",
