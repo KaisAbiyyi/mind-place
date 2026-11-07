@@ -2,7 +2,7 @@
 //! This module is deliberately not exposed over Tauri/MCP. Phase 5C owns
 //! capability-checked write entry points and destructive/forget behavior.
 use crate::{
-    source_record, valid_id, valid_text, verify_source_record, MemoryClaim, Result, StateError,
+    source_record, source_redaction, valid_id, valid_text, verify_source_record, MemoryClaim, Result, StateError,
     StateStore,
 };
 use rusqlite::{params, OptionalExtension, TransactionBehavior};
@@ -143,6 +143,7 @@ pub(crate) fn add_evidence(
             .optional()?
             .ok_or(StateError::InvalidValue)?;
         verify_source_record(&record)?;
+        source_redaction::assert_source_not_redacted(tx, &entry.source_ref)?;
         tx.execute(
             "INSERT INTO memory_claim_event_evidence
              (claim_id,revision,source_ref,evidence_kind) VALUES(?1,?2,?3,?4)",
@@ -409,7 +410,7 @@ impl StateStore {
             [claim_id],
             |r| r.get(0),
         )?;
-        if forgotten {
+        if forgotten || source_redaction::claim_has_redacted_source(&tx, claim_id)? {
             return Ok(None);
         }
         let history = events(&tx, claim_id)?;
@@ -456,7 +457,7 @@ pub(crate) fn claim_as_of_connection(
         [claim_id],
         |r| r.get(0),
     )?;
-    if forgotten {
+    if forgotten || source_redaction::claim_has_redacted_source(db, claim_id)? {
         return Ok(None);
     }
     let history = events(db, claim_id)?;
