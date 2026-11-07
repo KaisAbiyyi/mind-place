@@ -1308,7 +1308,9 @@ mod privacy_capture_race_tests {
         })
         .unwrap();
         assert!(state.source(&raw_source).unwrap().is_some());
-        state.redact_source(&admin, &raw_source, "Synthetic capture").unwrap();
+        state
+            .redact_source(&admin, &raw_source, "Synthetic capture")
+            .unwrap();
         assert!(archive.read(&saved.id, None).is_err());
         assert!(archive.save(raw).is_err());
 
