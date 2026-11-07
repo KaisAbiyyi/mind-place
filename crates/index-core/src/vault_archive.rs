@@ -1280,7 +1280,9 @@ mod privacy_capture_race_tests {
     #[test]
     fn redaction_waits_for_inflight_archive_disclosure_and_denies_subsequent_reads() {
         let (_home, _gate, _lease, _manifest, _recovery, archive, admin, source) = fixture();
-        let saved = archive.save(synthetic_capture("sensitive synthetic read")).unwrap();
+        let saved = archive
+            .save(synthetic_capture("sensitive synthetic read"))
+            .unwrap();
         let (checked_tx, checked_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
         let reader = Arc::clone(&archive);
@@ -1312,7 +1314,10 @@ mod privacy_capture_race_tests {
         let prior = reading.join().unwrap().unwrap();
         assert_eq!(prior.summary.id, saved.id);
         redacting.join().unwrap();
-        assert!(redacted_rx.recv_timeout(Duration::from_secs(30)).unwrap().is_ok());
+        assert!(redacted_rx
+            .recv_timeout(Duration::from_secs(30))
+            .unwrap()
+            .is_ok());
 
         // After the exclusive commit returns, every public archive disclosure
         // path denies the source even when addressed by immutable snapshot ID.
