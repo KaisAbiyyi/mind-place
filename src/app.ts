@@ -12,6 +12,8 @@ export async function mountApplication({ root, invoke, clipboard }: ApplicationO
   let reader: ReaderHandle | undefined;
   let generation = 0;
   let locking = false;
+  // True only for a session in which the owner created the unlock secret on the lock screen.
+  let firstRunSession = false;
 
   const showGate = async (requireLocked = false) => {
     const expectedGeneration = generation;
@@ -19,6 +21,7 @@ export async function mountApplication({ root, invoke, clipboard }: ApplicationO
       if (generation !== expectedGeneration) throw new Error("MP_UI_SESSION_EXPIRED");
       const result = await invoke<T>(command, args);
       if (generation !== expectedGeneration) throw new Error("MP_UI_SESSION_EXPIRED");
+      if (command === "get_security_status" && (result as SecurityStatus).configured === false) firstRunSession = true;
       if (requireLocked && command === "get_security_status" && !(result as SecurityStatus).locked) {
         throw new Error("MP_UI_LOCK_UNCONFIRMED");
       }
@@ -31,7 +34,9 @@ export async function mountApplication({ root, invoke, clipboard }: ApplicationO
         if (generation !== expectedGeneration) return;
         generation++;
         const epoch = generation;
-        const currentReader = mountReader({ root, invoke, clipboard, onLock: () => { void lock(); } });
+        const openOnboarding = firstRunSession;
+        firstRunSession = false;
+        const currentReader = mountReader({ root, invoke, clipboard, openOnboarding, onLock: () => { void lock(); } });
         reader = currentReader;
         // The first library read and the derived index would otherwise scan
         // the same thousands of archive files concurrently on cold unlock.

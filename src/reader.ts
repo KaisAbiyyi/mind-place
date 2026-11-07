@@ -5,10 +5,16 @@ import { createUiButton, createUiCard, createUiStatePanel, createUiStatus, creat
 import { APPLICATION_SHELL_MARKUP, mountUiShell } from "./ui-shell.js";
 import { mountLocalMcpSetup } from "./mcp-setup.js";
 import { mountDocumentRootSetup } from "./document-roots.js";
+import { mountFilesVaultWorkspace, type FilesVaultHandle } from "./files-vault-workspace.js";
 import { mountMemoryInspector, type MemoryInspectorHandle } from "./memory-inspector.js";
 import { mountHiveWorkspace, type HiveHandle } from "./hive-workspace.js";
 import { mountLibraryWorkspace, type LibraryHandle } from "./library-workspace.js";
 import { mountHealthWorkspace, type HealthWorkspaceHandle } from "./health-workspace.js";
+import { mountSettingsWorkspace, type SettingsWorkspaceHandle } from "./settings-workspace.js";
+import {
+  createBrowserProgressStore, hasFinishedOnboarding, mountOnboardingWorkspace,
+  type OnboardingProgressStore, type OnboardingWorkspaceHandle,
+} from "./onboarding-workspace.js";
 import { marked } from "marked";
 import renderMathInElement from "katex/contrib/auto-render";
 import type {
@@ -23,6 +29,8 @@ import type {
   Message,
   SetupInfo,
 } from "./contracts.js";
+import { createArchiveFilters, createConversationArchive } from "./conversation-archive.js";
+import { mountProvidersWorkspace, type ProvidersHandle } from "./providers-workspace.js";
 
 export type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
 
@@ -35,6 +43,10 @@ export interface ReaderOptions {
   invoke: Invoke;
   clipboard?: ClipboardWriter;
   onLock?: () => void;
+  /** Set only for the session that created the unlock secret; opens Setup & Onboarding once. */
+  openOnboarding?: boolean;
+  /** Non-sensitive wizard progress (step and skip/finish markers only). */
+  onboardingStore?: OnboardingProgressStore;
 }
 
 export interface ReaderHandle {
@@ -119,7 +131,7 @@ export function renderMessageContent(document: Document, message: Pick<Message, 
   return content;
 }
 
-export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: ReaderOptions): ReaderHandle {
+export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock, openOnboarding, onboardingStore }: ReaderOptions): ReaderHandle {
   const document = root.ownerDocument;
   const clipboardWriter = clipboard ?? {
     writeText: (value: string) => document.defaultView?.navigator.clipboard?.writeText(value)
@@ -141,8 +153,14 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   let exportedMarkdown = "";
   let memoryInspector: MemoryInspectorHandle | undefined;
   let healthWorkspace: HealthWorkspaceHandle | undefined;
+  let settingsWorkspace: SettingsWorkspaceHandle | undefined;
   let libraryWorkspace: LibraryHandle | undefined;
   let hiveWorkspace: HiveHandle | undefined;
+  let providersWorkspace: ProvidersHandle | undefined;
+  let setupMcp: { destroy(): void } | undefined;
+  let filesVaultWorkspace: FilesVaultHandle | undefined;
+  let onboardingWorkspace: OnboardingWorkspaceHandle | undefined;
+  const progressStore = onboardingStore ?? createBrowserProgressStore(document.defaultView);
   let alive = true;
   const invoke: Invoke = async <T>(command: string, args?: Record<string, unknown>) => {
     if (!alive) throw new Error("MP_UI_SESSION_EXPIRED");
@@ -175,7 +193,17 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   let modalReturnRoute: UiRouteId = "overview";
   let modalReturnFocus: HTMLElement | null = null;
   let archiveLoadState: "loading" | "ready" | "error" = "loading";
-  const activateRoute = (route: UiRouteId, workspace: WorkspaceId = activeWorkspace) => {
+  const archiveFilters = createArchiveFilters();
+  let archiveTableVisible = false;
+  let transcriptPage = 0;
+  const activateRoute = (route: UiRouteId, workspace: WorkspaceId = activeWorkspace, preserveModules = false) => {
+    if (!preserveModules && route !== "files-secure-vault" && filesVaultWorkspace) {
+      filesVaultWorkspace.destroy(); filesVaultWorkspace = undefined;
+    }
+    if (!preserveModules && route !== "ai-providers-mcp" && providersWorkspace) { providersWorkspace.destroy(); providersWorkspace = undefined; }
+    if (!preserveModules && (route !== "settings" || workspace !== "settings") && settingsWorkspace) { settingsWorkspace.destroy(); settingsWorkspace = undefined; }
+    // Leaving Setup & Onboarding unmounts the wizard and fences its late async work.
+    if (!preserveModules && route !== "setup-onboarding" && onboardingWorkspace) { onboardingWorkspace.destroy(); onboardingWorkspace = undefined; }
     activeWorkspace = workspace;
     activeRoute = route;
     setActiveRoute(workspaceNav, route, workspace);
@@ -297,19 +325,53 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     const messageCount = summaries.reduce((sum, item) => sum + item.message_count, 0);
     const completeCount = summaries.filter((item) => item.completeness === "complete").length;
     const partialCount = summaries.filter((item) => item.completeness === "partial").length;
+    const convBadge = workspaceNav.querySelector<HTMLElement>('[data-route-badge="conversations"]');
+    if (convBadge) convBadge.textContent = String(total);
+
     const page = document.createElement("div");
-    page.className = "ui-overview-page";
+    page.className = "ui-overview-page page";
     const heading = document.createElement("header");
-    heading.className = "ui-overview-heading";
+    heading.className = "ui-overview-heading page-head";
+    const headingCopy = document.createElement("div");
+    const overline = document.createElement("div");
+    overline.className = "overline";
+    overline.textContent = "KNOWLEDGE OS · WORKSPACE OVERVIEW";
     const title = document.createElement("h1");
     title.textContent = "Overview";
     const description = document.createElement("p");
+    description.className = "page-sub";
     description.textContent = "A live view of the conversations saved in your local archive.";
-    heading.append(title, description);
+    headingCopy.append(overline, title, description);
+
+    const headingActions = document.createElement("div");
+    headingActions.className = "page-actions";
+    const topSearchBtn = createUiButton(document, "Search all sources", { variant: "secondary", className: "btn" });
+    topSearchBtn.dataset.action = "open-library-workspace";
+    const topHiveBtn = createUiButton(document, "Explore Hive Mind", { variant: "primary", className: "btn primary" });
+    topHiveBtn.dataset.action = "navigate-route";
+    topHiveBtn.dataset.route = "hive-mind-graph";
+    headingActions.append(topSearchBtn, topHiveBtn);
+    heading.append(headingCopy, headingActions);
     page.append(heading);
 
+    const strip = document.createElement("div");
+    strip.className = "status-strip";
+    const stripLeft = document.createElement("div");
+    stripLeft.className = "status-strip-left";
+    const pulse = document.createElement("span");
+    pulse.className = "pulse-badge";
+    pulse.textContent = "LOCAL-FIRST";
+    const stripText = document.createElement("span");
+    stripText.textContent = "All conversation snapshots, curated memories, and approved folder indexes remain stored locally on this device.";
+    stripLeft.append(pulse, stripText);
+    const stripRight = document.createElement("span");
+    stripRight.className = "tag mono";
+    stripRight.textContent = `${total} SAVED · ${messageCount} MSG`;
+    strip.append(stripLeft, stripRight);
+    page.append(strip);
+
     const metrics = document.createElement("div");
-    metrics.className = "ui-overview-grid";
+    metrics.className = "ui-overview-grid grid stats";
     const metricValues = [
       { label: "Saved conversations", value: total, detail: "Available in this archive" },
       { label: "Messages captured", value: messageCount, detail: "Across saved conversations" },
@@ -317,12 +379,12 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
       { label: "Partial captures", value: partialCount, detail: "Contain capture warnings or gaps" },
     ];
     for (const metric of metricValues) {
-      const card = createUiCard(document, { title: metric.label, className: "ui-stat-card" });
+      const card = createUiCard(document, { title: metric.label, className: "ui-stat-card card stat" });
       const value = document.createElement("strong");
-      value.className = "ui-stat-value";
+      value.className = "ui-stat-value stat-value";
       value.textContent = metric.value.toLocaleString();
       const detail = document.createElement("span");
-      detail.className = "ui-stat-detail";
+      detail.className = "ui-stat-detail stat-foot";
       detail.textContent = metric.detail;
       card.body.append(value, detail);
       metrics.append(card.element);
@@ -330,10 +392,11 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     page.append(metrics);
 
     const lower = document.createElement("div");
-    lower.className = "ui-overview-lower";
+    lower.className = "ui-overview-lower home-grid";
     const recentCard = createUiCard(document, {
       title: "Recent conversations",
       description: "Open a saved conversation to inspect its captured transcript.",
+      className: "card panel",
     });
     const recent = [...summaries]
       .sort((left, right) => new Date(right.captured_at).getTime() - new Date(left.captured_at).getTime())
@@ -381,7 +444,31 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     actions.append(sourceSearch);
     actionsCard.body.append(actions);
     lower.append(actionsCard.element);
+    const health = createUiCard(document, { title: "Runtime health", description: "Observed local status; listener state is not proof of a connected client." });
+    health.body.dataset.overviewHealth = "true";
+    health.body.textContent = "Checking native runtime status…";
+    lower.append(health.element);
     page.append(lower);
+    void (async () => {
+      try {
+        const security = await invoke<{ locked: boolean; epoch: number }>("get_security_status");
+        if (!alive || !page.isConnected) return;
+        if (!security || security.locked !== false) { health.body.textContent = "Runtime locked or unavailable. Open the security gate."; return; }
+        const observed = await Promise.allSettled([
+          invoke<{ sources: number; generation: number }>("get_archive_index_stats"),
+          invoke<{ running: boolean }>("get_local_mcp_status"),
+        ]);
+        const after = await invoke<{ locked: boolean; epoch: number }>("get_security_status");
+        if (!alive || !page.isConnected) return;
+        if (after.locked || after.epoch !== security.epoch) { health.body.textContent = "Runtime status changed. Refresh after unlocking."; return; }
+        const [index, mcp] = observed;
+        const indexLabel = index.status === "fulfilled" && Number.isFinite(index.value.sources)
+          ? `Index: ${index.value.sources} sources · generation ${index.value.generation}` : "Index status unavailable";
+        const mcpLabel = mcp.status === "fulfilled" && typeof mcp.value.running === "boolean"
+          ? mcp.value.running ? "MCP listener running; no client verified" : "MCP listener stopped" : "MCP status unavailable";
+        health.body.textContent = indexLabel + ". " + mcpLabel + ".";
+      } catch { if (alive && page.isConnected) health.body.textContent = "Runtime health unavailable. No service or encryption guarantee can be shown."; }
+    })();
 
     if (total === 0) {
       page.append(createUiStatePanel(document, {
@@ -466,10 +553,15 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   };
 
   const selectConversation = async (id: string) => {
+    archiveTableVisible = false;
+    transcriptPage = 0;
+    providersWorkspace?.destroy(); providersWorkspace = undefined;
     hiveWorkspace?.destroy(); hiveWorkspace = undefined;
     libraryWorkspace?.destroy(); libraryWorkspace = undefined;
     healthWorkspace?.destroy();
     healthWorkspace = undefined;
+    settingsWorkspace?.destroy();
+    settingsWorkspace = undefined;
     memoryInspector?.destroy();
     memoryInspector = undefined;
     selectedId = id;
@@ -504,6 +596,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
 
   const loadSnapshot = async (snapshotId: string) => {
     if (!selectedId || !snapshotId || snapshotId === selectedSnapshotId) return;
+    transcriptPage = 0;
     const id = selectedId;
     const version = ++selectionVersion;
     exportedMarkdown = "";
@@ -641,6 +734,10 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     );
     metadata.append(...metadataParts);
     top.append(eyebrow, heading, metadata);
+    const detailActions = document.createElement("div"); detailActions.className = "conversation-detail-actions";
+    const back = createUiButton(document, "Back to Conversations"); back.dataset.action = "archive-table";
+    const copyTranscript = createUiButton(document, "Copy transcript"); copyTranscript.dataset.action = "copy-transcript";
+    detailActions.append(back, copyTranscript); top.append(detailActions);
     if (snapshots.length > 1) {
       const history = document.createElement("div");
       history.className = "capture-history";
@@ -689,7 +786,8 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
 
     const messageList = document.createElement("div");
     messageList.className = "message-list";
-    for (const message of capture.messages) {
+    const messageStart = transcriptPage * 40;
+    for (const [index, message] of capture.messages.slice(messageStart, messageStart + 40).entries()) {
       const card = document.createElement("article");
       card.className = `message message-${message.role}`;
       card.dataset.messageId = message.id;
@@ -711,7 +809,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
         copy.dataset.action = "copy-message";
         copy.dataset.messageId = message.id;
         copy.textContent = "Copy answer";
-        copy.setAttribute("aria-label", `Copy answer ${messageList.querySelectorAll(".message-assistant").length + 1}`);
+        copy.setAttribute("aria-label", `Copy answer at message ${messageStart + index + 1}`);
         messageHeader.append(copy);
       }
 
@@ -727,7 +825,30 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
       messageList.append(empty);
     }
     transcript.append(messageList);
-    view.replaceChildren(top, transcript);
+    if (capture.messages.length > 40) {
+      const pagination = document.createElement("nav"); pagination.className = "transcript-pagination";
+      pagination.setAttribute("aria-label", "Transcript messages");
+      const previous = createUiButton(document, "Previous messages", { disabled: transcriptPage === 0 }); previous.dataset.action = "transcript-previous";
+      const range = document.createElement("span"); range.setAttribute("role", "status");
+      range.textContent = `Messages ${messageStart + 1}–${Math.min(messageStart + 40, capture.messages.length)} of ${capture.messages.length}`;
+      const next = createUiButton(document, "Next messages", { disabled: messageStart + 40 >= capture.messages.length }); next.dataset.action = "transcript-next";
+      pagination.append(previous, range, next); transcript.append(pagination);
+    }
+    const provenance = document.createElement("aside"); provenance.className = "conversation-provenance";
+    const provenanceTitle = document.createElement("h2"); provenanceTitle.textContent = "Provenance & Metadata";
+    const fields = document.createElement("dl");
+    for (const [label, value] of [["Provider", summary.provider], ["Conversation ID", capture.conversation_id],
+      ["Archive ID", summary.id], ["Saved revision", activeSnapshotId ?? "Not supplied by archive"], ["Captured", capture.captured_at],
+      ["Capture method", capture.capture_method], ["Completeness", capture.completeness]]) {
+      const term = document.createElement("dt"); term.textContent = label;
+      const definition = document.createElement("dd"); definition.textContent = value; fields.append(term, definition);
+    }
+    const branches = document.createElement("p"); branches.textContent = "Saved captures preserve the branches exposed by the source. A separate branch map is not supplied by this archive.";
+    const related = document.createElement("p"); related.textContent = "Related memories are not supplied by this archive response. Inspect global claims in Curated Memory.";
+    const memories = createUiButton(document, "Open Curated Memory"); memories.dataset.action = "open-memory-inspector";
+    provenance.append(provenanceTitle, fields, branches, related, memories);
+    const grid = document.createElement("div"); grid.className = "conversation-detail-grid"; grid.append(transcript, provenance);
+    view.replaceChildren(top, grid);
     setViewBusy(false);
     updateToolbarSelection(summary);
   }
@@ -746,6 +867,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   };
 
   const renderSetup = (info: SetupInfo) => {
+    setupMcp?.destroy(); setupMcp = undefined;
     setupContent.replaceChildren();
     const makePanel = (tab: typeof activeSettingsTab, title: string, description: string) => {
       const panel = document.createElement("section");
@@ -846,7 +968,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     genericStatus.setAttribute("role", "status");
     genericStatus.setAttribute("aria-live", "polite");
     archivePanel.append(document.createElement("hr"), genericTitle, genericInfo, genericFile, genericButton, genericStatus);
-    mountLocalMcpSetup(connectionPanel, invoke, safeClipboard);
+    setupMcp = mountLocalMcpSetup(connectionPanel, invoke, safeClipboard);
     mountDocumentRootSetup(documentPanel, invoke);
     const boundaries = document.createElement("ul");
     boundaries.className = "settings-boundaries";
@@ -918,7 +1040,9 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
       }
       renderConversationRows(query);
       if (activeRoute === "overview" && activeWorkspace === "conversations") renderOverview();
-      if (activeRoute === "conversations" && summaries.length && !selectedId) {
+      if (activeRoute === "conversations" && archiveTableVisible) {
+        renderArchiveTable();
+      } else if (activeRoute === "conversations" && summaries.length && !selectedId) {
         void selectConversation(summaries[0].id);
       } else if (selectedId && (selectedChanged || reloadSelected)) {
         void selectConversation(selectedId);
@@ -1165,7 +1289,10 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
 
   const closeSetup = () => {
     ++setupVersion; // Ignore setup responses arriving after the dialog closes.
-    activateRoute(modalReturnRoute, modalReturnWorkspace);
+    setupMcp?.destroy(); setupMcp = undefined;
+    activateRoute(modalReturnRoute, modalReturnWorkspace, true);
+    // A wizard that was unmounted by the dialog's destination resumes from its saved step.
+    if (modalReturnRoute === "setup-onboarding" && !onboardingWorkspace) openOnboardingWorkspace();
     setupContent.querySelector("[data-mcp-secret]")?.replaceChildren();
     if (typeof dialog.close === "function") {
       try { dialog.close(); } catch { dialog.removeAttribute("open"); }
@@ -1184,8 +1311,9 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     modalReturnRoute = activeRoute;
     modalReturnFocus = trigger;
     activeSettingsTab = tab;
-    activateWorkspace(workspace);
-    if (routeOverride) activateRoute(routeOverride, workspace);
+    // With an explicit route the final state is identical; skipping the intermediate
+    // workspace activation keeps an open Setup & Onboarding wizard mounted behind the dialog.
+    activateRoute(routeOverride ?? routeForWorkspace(workspace), workspace, true);
     if (typeof dialog.showModal === "function") {
       try { dialog.showModal(); } catch { dialog.setAttribute("open", ""); }
     } else dialog.setAttribute("open", "");
@@ -1193,7 +1321,11 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     const focusVersion = setupVersion;
     void pendingSetup.then(() => {
       if (!alive || !dialog.hasAttribute("open") || focusVersion !== setupVersion) return;
-      if (tab === "documents") setupContent.querySelector<HTMLInputElement>(".document-search-form input")?.focus();
+      if (trigger.dataset.action === "open-import-setup") {
+        const fileInput = setupContent.querySelector<HTMLInputElement>("[data-generic-file]");
+        fileInput?.focus(); fileInput?.scrollIntoView?.({ block: "nearest" });
+      }
+      else if (tab === "documents") setupContent.querySelector<HTMLInputElement>(".document-search-form input")?.focus();
       else get<HTMLButtonElement>("[data-action='close-setup']").focus();
     });
   };
@@ -1209,6 +1341,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   };
 
   const openMemoryInspector = (workspace: "memories" | "projects" | "people" | "topics" = "memories") => {
+    providersWorkspace?.destroy(); providersWorkspace = undefined;
     hiveWorkspace?.destroy(); hiveWorkspace = undefined;
     libraryWorkspace?.destroy(); libraryWorkspace = undefined;
     healthWorkspace?.destroy();
@@ -1237,6 +1370,7 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   };
 
   const openHealthWorkspace = () => {
+    providersWorkspace?.destroy(); providersWorkspace = undefined;
     hiveWorkspace?.destroy(); hiveWorkspace = undefined;
     libraryWorkspace?.destroy(); libraryWorkspace = undefined;
     memoryInspector?.destroy();
@@ -1263,9 +1397,11 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   };
 
   const openLibraryWorkspace = () => {
+    providersWorkspace?.destroy(); providersWorkspace = undefined;
     hiveWorkspace?.destroy(); hiveWorkspace = undefined;
     memoryInspector?.destroy(); memoryInspector = undefined;
     healthWorkspace?.destroy(); healthWorkspace = undefined;
+    settingsWorkspace?.destroy(); settingsWorkspace = undefined;
     libraryWorkspace?.destroy(); libraryWorkspace = undefined;
     ++selectionVersion;
     selectedId = null;
@@ -1281,7 +1417,32 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     libraryWorkspace = mountLibraryWorkspace(view, invoke, () => {
       libraryWorkspace?.destroy(); libraryWorkspace = undefined;
       returnToConversations();
+    }, safeClipboard, (id, snapshotId) => {
+      void selectConversation(id).then(() => {
+        if (alive && selectedId === id && snapshotId) return loadSnapshot(snapshotId);
+      });
     });
+    focusViewHeading();
+  };
+
+  const openFilesVaultWorkspace = () => {
+    hiveWorkspace?.destroy(); hiveWorkspace = undefined;
+    libraryWorkspace?.destroy(); libraryWorkspace = undefined;
+    memoryInspector?.destroy(); memoryInspector = undefined;
+    healthWorkspace?.destroy(); healthWorkspace = undefined;
+    filesVaultWorkspace?.destroy(); filesVaultWorkspace = undefined;
+    ++selectionVersion;
+    selectedId = null;
+    loadedConversation = null;
+    loadedSnapshots = [];
+    selectedSnapshotId = null;
+    exportedMarkdown = "";
+    updateToolbarSelection();
+    setActionStatus("");
+    renderConversationRows(search.value.trim());
+    activateWorkspace("documents");
+    toolbarTitle.textContent = "Files & Secure Vault";
+    filesVaultWorkspace = mountFilesVaultWorkspace(view, invoke);
     focusViewHeading();
   };
 
@@ -1290,6 +1451,8 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     libraryWorkspace?.destroy(); libraryWorkspace = undefined;
     memoryInspector?.destroy(); memoryInspector = undefined;
     healthWorkspace?.destroy(); healthWorkspace = undefined;
+    providersWorkspace?.destroy(); providersWorkspace = undefined;
+    settingsWorkspace?.destroy(); settingsWorkspace = undefined;
     hiveWorkspace?.destroy(); hiveWorkspace = undefined;
     ++selectionVersion;
     selectedId = null;
@@ -1303,17 +1466,28 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
     activateWorkspace("graph");
     toolbarTitle.textContent = "Hive graph";
     hiveWorkspace = mountHiveWorkspace(view, invoke, () => {
+      providersWorkspace?.destroy(); providersWorkspace = undefined;
       hiveWorkspace?.destroy(); hiveWorkspace = undefined;
       returnToConversations();
-    }, initialKey);
+    }, initialKey, (archiveId) => {
+      // Indexed source IDs are not archive IDs. Never navigate by guessed identity.
+      const summary = summaries.find(item => item.id === archiveId);
+      if (!summary) {
+        setActionStatus("This graph identity has no matching saved conversation in the loaded archive.", true);
+        return;
+      }
+      void selectConversation(summary.id);
+    });
     focusViewHeading();
   };
 
   const openOverview = () => {
+    providersWorkspace?.destroy(); providersWorkspace = undefined;
     hiveWorkspace?.destroy(); hiveWorkspace = undefined;
     libraryWorkspace?.destroy(); libraryWorkspace = undefined;
     healthWorkspace?.destroy(); healthWorkspace = undefined;
     memoryInspector?.destroy(); memoryInspector = undefined;
+    settingsWorkspace?.destroy(); settingsWorkspace = undefined;
     ++selectionVersion;
     selectedId = null;
     loadedConversation = null;
@@ -1333,58 +1507,98 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   };
 
   const openConversations = () => {
+    providersWorkspace?.destroy(); providersWorkspace = undefined;
     hiveWorkspace?.destroy(); hiveWorkspace = undefined;
     libraryWorkspace?.destroy(); libraryWorkspace = undefined;
     healthWorkspace?.destroy(); healthWorkspace = undefined;
     memoryInspector?.destroy(); memoryInspector = undefined;
+    archiveTableVisible = true;
+    ++selectionVersion;
+    selectedId = null;
+    loadedConversation = null;
+    selectedSnapshotId = null;
+    exportedMarkdown = "";
+    settingsWorkspace?.destroy(); settingsWorkspace = undefined;
     activateRoute("conversations", "conversations");
-    if (summaries.length) void selectConversation(selectedId ?? summaries[0].id);
-    else {
-      selectedId = null;
-      loadedConversation = null;
-      updateToolbarSelection();
-      renderState("Archive is empty", "No saved conversations are available.");
-      focusViewHeading();
-    }
+    const hadLegacyQuery = Boolean(search.value.trim());
+    search.value = "";
+    if (hadLegacyQuery) {
+      renderState("Loading your archive", "Clearing the previous sidebar search…", "loading");
+      void loadConversations();
+    } else renderArchiveTable();
+    focusViewHeading();
+  };
+
+  function renderArchiveTable() {
+    view.replaceChildren(createConversationArchive(document, summaries, archiveFilters));
+    setViewBusy(false); updateToolbarSelection();
+  }
+
+  function openProvidersWorkspace() {
+    providersWorkspace?.destroy(); providersWorkspace = undefined;
+    hiveWorkspace?.destroy(); hiveWorkspace = undefined;
+    memoryInspector?.destroy(); memoryInspector = undefined;
+    libraryWorkspace?.destroy(); libraryWorkspace = undefined;
+    healthWorkspace?.destroy(); healthWorkspace = undefined;
+    ++selectionVersion;
+    selectedId = null; loadedConversation = null; loadedSnapshots = []; selectedSnapshotId = null; exportedMarkdown = "";
+    activateRoute("ai-providers-mcp", "connections"); updateToolbarSelection(); setActionStatus("");
+    providersWorkspace = mountProvidersWorkspace(view, invoke, safeClipboard);
+    toolbarTitle.textContent = "AI Providers & MCP"; focusViewHeading();
+  }
+  const openOnboardingWorkspace = () => {
+    hiveWorkspace?.destroy(); hiveWorkspace = undefined;
+    libraryWorkspace?.destroy(); libraryWorkspace = undefined;
+    healthWorkspace?.destroy(); healthWorkspace = undefined;
+    memoryInspector?.destroy(); memoryInspector = undefined;
+    onboardingWorkspace?.destroy(); onboardingWorkspace = undefined;
+    ++selectionVersion;
+    selectedId = null;
+    loadedConversation = null;
+    loadedSnapshots = [];
+    selectedSnapshotId = null;
+    exportedMarkdown = "";
+    updateToolbarSelection();
+    setActionStatus("");
+    renderConversationRows(search.value.trim());
+    activateRoute("setup-onboarding", "connections");
+    toolbarTitle.textContent = "Setup & Onboarding";
+    onboardingWorkspace = mountOnboardingWorkspace({
+      view, invoke, store: progressStore,
+      hooks: {
+        openRoute: (route, trigger) => navigateToRoute(route, trigger),
+        openSetupDetails: (trigger) => openSetupDialog(trigger, "connections", "archive", "setup-onboarding"),
+        openConversation: (id, snapshotId) => {
+          void selectConversation(id).then(() => {
+            if (alive && selectedId === id && snapshotId) return loadSnapshot(snapshotId);
+          });
+        },
+        onFinish: () => openOverview(),
+      },
+    });
+    focusViewHeading();
   };
 
   const openSettingsOverview = () => {
+    ++selectionVersion;
+    selectedId = null; loadedConversation = null; loadedSnapshots = []; selectedSnapshotId = null; exportedMarkdown = "";
+    providersWorkspace?.destroy(); providersWorkspace = undefined;
     hiveWorkspace?.destroy(); hiveWorkspace = undefined;
     libraryWorkspace?.destroy(); libraryWorkspace = undefined;
     healthWorkspace?.destroy(); healthWorkspace = undefined;
     memoryInspector?.destroy(); memoryInspector = undefined;
+    settingsWorkspace?.destroy(); settingsWorkspace = undefined;
     activateWorkspace("settings");
-    const page = document.createElement("div");
-    page.className = "ui-overview-page";
-    const heading = document.createElement("header");
-    heading.className = "ui-overview-heading";
-    const title = document.createElement("h1");
-    title.textContent = "Settings";
-    const description = document.createElement("p");
-    description.textContent = "Privacy, provider connections and operational health.";
-    heading.append(title, description);
-    page.append(heading);
-    const grid = document.createElement("div");
-    grid.className = "ui-overview-grid";
-    const sections = [
-      { title: "Privacy & security", description: "Manage vault lock, privacy boundaries and security settings.", label: "Open privacy settings", action: "open-settings-section", tab: "privacy" },
-      { title: "Provider connections", description: "Configure AI providers, MCP servers and connection state.", label: "Manage connections", action: "open-settings-section", tab: "connections" },
-      { title: "Operational diagnostics", description: "Inspect archive, storage, retrieval and provider health.", label: "Open diagnostics", action: "open-health-inspector", workspace: "health" },
-    ];
-    for (const section of sections) {
-      const card = createUiCard(document, { title: section.title, description: section.description });
-      const button = createUiButton(document, section.label, { variant: "secondary" });
-      button.dataset.action = section.action;
-      if ("tab" in section) button.dataset.tab = section.tab;
-      if ("workspace" in section) button.dataset.workspace = section.workspace;
-      card.body.append(button);
-      grid.append(card.element);
-    }
-    page.append(grid);
-    view.replaceChildren(page);
+    toolbarTitle.textContent = "Settings";
+    setActionStatus("");
+    settingsWorkspace = mountSettingsWorkspace(view, invoke, {
+      onLock: () => onLock?.(),
+      onNavigate: (route) => navigateToRoute(route, view),
+      onOpenSetupDialog: (tab) => openSetupDialog(view, "connections", tab, "settings"),
+      onClose: returnToConversations,
+    });
     setViewBusy(false);
     updateToolbarSelection();
-    toolbarTitle.textContent = "Settings";
     focusViewHeading();
   };
 
@@ -1394,9 +1608,9 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
       case "conversations": openConversations(); break;
       case "curated-memory": openMemoryInspector(); break;
       case "hive-mind-graph": openHiveWorkspace(); break;
-      case "files-secure-vault": openSetupDialog(trigger, "documents", "documents", route); break;
-      case "ai-providers-mcp": openSetupDialog(trigger, "connections", "connections", route); break;
-      case "setup-onboarding": openSetupDialog(trigger, "connections", "archive", route); break;
+      case "files-secure-vault": openFilesVaultWorkspace(); break;
+      case "ai-providers-mcp": openProvidersWorkspace(); break;
+      case "setup-onboarding": openOnboardingWorkspace(); break;
       case "settings": openSettingsOverview(); break;
     }
   }
@@ -1425,6 +1639,18 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
         if (route && isUiRouteId(route)) navigateToRoute(route, actionElement);
       }
       else if (action === "lock") onLock?.();
+      else if (action === "archive-table") openConversations();
+      else if (action === "copy-transcript" && loadedConversation) {
+        const text = loadedConversation.capture.messages.map(message => `${titleCase(message.role)}\n${message.text}`).join("\n\n");
+        void safeClipboard.writeText(text).then(() => { if (alive) setActionStatus("Transcript copied"); })
+          .catch(() => { if (alive) setActionStatus("Clipboard unavailable", true); });
+      }
+      else if ((action === "transcript-next" || action === "transcript-previous") && loadedConversation) {
+        transcriptPage = Math.max(0, Math.min(Math.ceil(loadedConversation.capture.messages.length / 40) - 1,
+          transcriptPage + (action === "transcript-next" ? 1 : -1)));
+        renderConversation(loadedConversation, selectionVersion, loadedSnapshots, selectedSnapshotId);
+        focusViewHeading();
+      }
       else if (action === "refresh") void refreshArchive();
       else if (action === "workspace-conversations") {
         if (summaries.length) void selectConversation(selectedId ?? summaries[0].id);
@@ -1443,8 +1669,14 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
         const tab = actionElement.dataset.tab;
         if (tab === "privacy" || tab === "connections") openSetupDialog(actionElement, "connections", tab, "settings");
       }
-      else if (action === "open-document-search") openSetupDialog(actionElement, "documents", "documents", "files-secure-vault");
-      else if (action === "open-setup") openSetupDialog(actionElement, "connections", "archive", "setup-onboarding");
+      else if (action === "open-document-search") openFilesVaultWorkspace();
+      else if (action === "open-setup") {
+        // The sidebar's Setup & Onboarding entry opens the wizard; the wizard's own
+        // "full capture settings" control (no data-route) opens the detailed dialog.
+        if (actionElement.dataset.route === "setup-onboarding") openOnboardingWorkspace();
+        else openSetupDialog(actionElement, "connections", "archive", "setup-onboarding");
+      }
+      else if (action === "open-import-setup") openSetupDialog(actionElement, "connections", "archive", "setup-onboarding");
       else if (action === "close-setup") closeSetup();
       else if (action === "load-setup") void loadSetup();
       else if (action === "export-markdown") void exportMarkdown();
@@ -1520,7 +1752,9 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
       const active = document.activeElement;
       if (active instanceof document.defaultView!.HTMLElement && (active.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName))) return;
       event.preventDefault();
-      search.focus();
+      const visibleSearch = view.querySelector<HTMLInputElement>('input[type="search"]');
+      if (visibleSearch) visibleSearch.focus();
+      else if (activeRoute === "conversations") search.focus();
     }
   };
 
@@ -1534,14 +1768,24 @@ export function mountReader({ root, invoke: nativeInvoke, clipboard, onLock }: R
   root.addEventListener("keydown", keyHandler);
 
   const ready = loadConversations();
+  // First run of a newly created secret opens the wizard once; a finished wizard is never forced again.
+  if (openOnboarding && !hasFinishedOnboarding(progressStore)) {
+    void ready.then(() => { if (alive) openOnboardingWorkspace(); }).catch(() => {});
+  }
   return {
     ready,
     refresh: refreshArchive,
     destroy: () => {
+      setupMcp?.destroy(); setupMcp = undefined;
+      providersWorkspace?.destroy(); providersWorkspace = undefined;
+      filesVaultWorkspace?.destroy(); filesVaultWorkspace = undefined;
+      onboardingWorkspace?.destroy(); onboardingWorkspace = undefined;
       hiveWorkspace?.destroy(); hiveWorkspace = undefined;
       libraryWorkspace?.destroy(); libraryWorkspace = undefined;
       healthWorkspace?.destroy();
       healthWorkspace = undefined;
+      settingsWorkspace?.destroy();
+      settingsWorkspace = undefined;
       memoryInspector?.destroy();
       memoryInspector = undefined;
       alive = false;

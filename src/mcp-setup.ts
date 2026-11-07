@@ -4,8 +4,10 @@ interface Issued { client_id: string; credential: string; }
 interface Registered { id: string; display_name: string; state: string; policy_revision: number; }
 interface HostedStatus { running: boolean; tunnel_id: string | null; connection_verified: boolean; }
 /** Owner-only UI. MCP clients cannot invoke these commands. */
-export function mountLocalMcpSetup(parent: HTMLElement, invoke: Invoke, clipboard: ClipboardWriter): void {
+export function mountLocalMcpSetup(parent: HTMLElement, invoke: Invoke, clipboard: ClipboardWriter): { destroy(): void } {
   const doc = parent.ownerDocument;
+  let alive = true;
+  const connected = () => alive && section.isConnected;
   const section = doc.createElement("section");
   section.className = "setup-mcp";
   section.innerHTML = [
@@ -52,20 +54,20 @@ export function mountLocalMcpSetup(parent: HTMLElement, invoke: Invoke, clipboar
   const refreshHostedStatus = async (): Promise<void> => {
     try {
       const hosted = await invoke<HostedStatus>("get_hosted_tunnel_status");
-      if (section.isConnected) {
+      if (connected()) {
         hostedState.textContent = hosted.running
           ? "Tunnel helper is running (not yet verified connected). ID: " + (hosted.tunnel_id ?? "unknown")
           : "Hosted tunnel stopped; no remote access is active through this helper.";
       }
     } catch {
-      if (section.isConnected) hostedState.textContent = "Could not check hosted tunnel.";
+      if (connected()) hostedState.textContent = "Could not check hosted tunnel.";
     }
   };
   void refreshHostedStatus();
   void invoke<Status>("get_local_mcp_status").then((result) => {
-    if (section.isConnected) state.textContent = result.running ? "Local MCP is running." : "Local MCP is stopped.";
+    if (connected()) state.textContent = result.running ? "Local MCP is running." : "Local MCP is stopped.";
   }).catch(() => {
-    if (section.isConnected) state.textContent = "MCP status unavailable.";
+    if (connected()) state.textContent = "MCP status unavailable.";
   });
 
   const clientsElement = section.querySelector<HTMLElement>("[data-mcp-clients]")!;
@@ -80,7 +82,7 @@ export function mountLocalMcpSetup(parent: HTMLElement, invoke: Invoke, clipboar
     try {
       const page = await invoke<Registered[]>("list_local_mcp_clients",
         nextCursor ? { after: nextCursor } : {});
-      if (!section.isConnected) return;
+      if (!connected()) return;
       if (reset) {
         clientsElement.replaceChildren();
         cursor = undefined;
@@ -106,10 +108,10 @@ export function mountLocalMcpSetup(parent: HTMLElement, invoke: Invoke, clipboar
       if (page.length) cursor = page[page.length - 1].id;
       more.hidden = page.length < 50;
     } catch {
-      if (section.isConnected) state.textContent = "Client list unavailable; access remains fail-closed.";
+      if (connected()) state.textContent = "Client list unavailable; access remains fail-closed.";
     } finally {
       listing = false;
-      if (section.isConnected) more.disabled = false;
+      if (connected()) more.disabled = false;
     }
   };
   void loadClients(true);
@@ -117,7 +119,7 @@ export function mountLocalMcpSetup(parent: HTMLElement, invoke: Invoke, clipboar
     const target = event.target;
     if (!(target instanceof doc.defaultView!.Element)) return;
     const button = target.closest<HTMLButtonElement>("[data-mcp-action]");
-    if (!button || button.disabled) return;
+    if (!connected() || !button || button.disabled) return;
     button.disabled = true;
     try {
       switch (button.dataset.mcpAction) {
@@ -125,7 +127,7 @@ export function mountLocalMcpSetup(parent: HTMLElement, invoke: Invoke, clipboar
         case "stop": {
           const command = button.dataset.mcpAction === "start" ? "start_local_mcp" : "stop_local_mcp";
           const result = await invoke<Status>(command);
-          if (section.isConnected) state.textContent = result.running ? "Local MCP is running." : "Local MCP is stopped.";
+          if (connected()) state.textContent = result.running ? "Local MCP is running." : "Local MCP is stopped.";
           await refreshHostedStatus();
           break;
         }
@@ -155,7 +157,7 @@ export function mountLocalMcpSetup(parent: HTMLElement, invoke: Invoke, clipboar
         case "issue": {
           const displayName = section.querySelector<HTMLInputElement>("#mcp-client-name")?.value.trim() ?? "";
           const result = await invoke<Issued>("issue_local_mcp_reader", { displayName });
-          if (!section.isConnected) break;
+          if (!connected()) break;
           secret.replaceChildren();
           const note = doc.createElement("p");
           note.textContent = "Copy this credential now. It is displayed only once.";
@@ -181,14 +183,14 @@ export function mountLocalMcpSetup(parent: HTMLElement, invoke: Invoke, clipboar
           const value = secret.querySelector<HTMLElement>("[data-mcp-token]")?.textContent;
           if (!value) throw new Error("No credential to copy");
           await clipboard.writeText(value);
-          if (section.isConnected) state.textContent = "Credential copied. Clear clipboard after setup.";
+          if (connected()) state.textContent = "Credential copied. Clear clipboard after setup.";
           break;
         }
         case "revoke": {
           const clientId = button.dataset.clientId;
           if (!clientId) throw new Error("Missing client identity");
           await invoke("revoke_local_mcp_client", { clientId });
-          if (section.isConnected) {
+          if (connected()) {
             secret.replaceChildren();
             state.textContent = "Client revoked.";
             void loadClients(true);
@@ -198,7 +200,7 @@ export function mountLocalMcpSetup(parent: HTMLElement, invoke: Invoke, clipboar
         }
       }
     } catch (error) {
-      if (section.isConnected) {
+      if (connected()) {
         const message = String(error);
         state.textContent = /MP_TUNNEL_(BINARY|INTEGRITY):/.test(message)
           ? "The bundled tunnel helper is missing or damaged. Repair or reinstall Mind Place, then try again."
@@ -209,4 +211,5 @@ export function mountLocalMcpSetup(parent: HTMLElement, invoke: Invoke, clipboar
       if (button.isConnected) button.disabled = false;
     }
   });
+  return { destroy() { alive = false; secret.replaceChildren(); for (const input of section.querySelectorAll("input")) { input.value = ""; input.checked = false; } section.replaceChildren(); section.remove(); } };
 }
