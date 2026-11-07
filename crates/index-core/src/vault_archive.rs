@@ -355,7 +355,18 @@ impl VaultCaptureStore {
         self.save_internal(capture, true)
     }
 
-    fn save_internal(&self, mut capture: Capture, migration: bool) -> Result<SaveReceipt> {
+    fn save_internal(&self, capture: Capture, migration: bool) -> Result<SaveReceipt> {
+        self.save_internal_with_checkpoint(capture, migration, || {})
+    }
+
+    // Test checkpoint is invoked under the exact production privacy fence,
+    // immediately after authority visibility and before ciphertext publication.
+    fn save_internal_with_checkpoint(
+        &self,
+        mut capture: Capture,
+        migration: bool,
+        after_visibility_check: impl FnOnce(),
+    ) -> Result<SaveReceipt> {
         self.gate
             .validate_lease(self.lease)
             .map_err(|_| IndexError::Revoked)?;
@@ -379,13 +390,18 @@ impl VaultCaptureStore {
             )
         );
         let identity = Self::identity(&id, &snapshot_id);
-        // Open authority BEFORE the outer writer fence: vault open itself may
-        // perform fenced schema validation. Check under the SAME writer fence
-        // as the immutable archive write to close the redaction/capture race.
+        // Lock order: privacy exclusive -> nested shared writer leases.
+        // The writer fence alone is SHARED and cannot serialize redaction.
+        // Keep this lock across the visibility check, immutable publication,
+        // and catalog commit; redaction takes the same exclusive privacy lock
+        // BEFORE it opens a writable state connection.
+        let _privacy =
+            VaultWriterFence::privacy(&self.root).map_err(|_| IndexError::InvalidEvidence)?;
         let authority = self.open_state_store()?;
         let _writer =
             VaultWriterFence::writer(&self.root).map_err(|_| IndexError::InvalidEvidence)?;
         self.require_visible(&authority, &capture.provider, &capture.conversation_id)?;
+        after_visibility_check();
         let mut db = self.connection()?;
         if db
             .query_row(
