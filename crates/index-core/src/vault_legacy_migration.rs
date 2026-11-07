@@ -163,10 +163,10 @@ impl LegacyEncryptedConversion<'_> {
         if busy != 0 {
             return Err(SecurityError::Crypto);
         }
-        let mode: String = sql(db.query_row("PRAGMA journal_mode=DELETE", [], |row| row.get(0)))?;
-        if mode != "delete" {
-            return Err(SecurityError::Crypto);
-        }
+        // Preserve the encrypted database's WAL mode. Switching WAL -> DELETE
+        // -> WAL on every verified reopen changes SQLCipher page ciphertext
+        // and breaks the authenticated migration output digest on resume.
+        // The writable pager checkpoints and closes the empty sidecars.
         sqlite_healthy(&db)?;
         drop(db);
         for suffix in ["-wal", "-shm"] {
