@@ -127,8 +127,7 @@ fn online_backup_rejects_unreferenced_archive_and_document_objects() {
             let orphan = orphan_shard.join("f".repeat(64));
             fs::copy(original, orphan).unwrap();
         } else {
-            let storage =
-                ImmutableVaultStorage::new(&f.root, &f.vault, &f.gate, f.lease).unwrap();
+            let storage = ImmutableVaultStorage::new(&f.root, &f.vault, &f.gate, f.lease).unwrap();
             storage
                 .write_immutable(
                     &f.gate,
@@ -141,15 +140,8 @@ fn online_backup_rejects_unreferenced_archive_and_document_objects() {
         }
         let destination = f.home.path().join(format!("orphan-{mode}-backup"));
         assert!(
-            VaultOnlineBackup::create(
-                &f.gate,
-                f.lease,
-                &f.vault,
-                &f.root,
-                &destination,
-                8,
-            )
-            .is_err(),
+            VaultOnlineBackup::create(&f.gate, f.lease, &f.vault, &f.root, &destination, 8,)
+                .is_err(),
             "unreferenced {mode} object was silently included"
         );
         assert!(!destination.exists());

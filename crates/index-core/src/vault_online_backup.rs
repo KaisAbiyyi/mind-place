@@ -477,8 +477,7 @@ fn verify_coherent_snapshot(
     {
         return Err(IndexError::InvalidEvidence);
     }
-    let mut expected_archive =
-        VaultCaptureStore::verify_backup_catalog(root, vault, gate, lease)?;
+    let mut expected_archive = VaultCaptureStore::verify_backup_catalog(root, vault, gate, lease)?;
     if let Some(raw) = raw {
         raw.verify_all(&storage, gate, lease)
             .map_err(|_| IndexError::InvalidEvidence)?;
