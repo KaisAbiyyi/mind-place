@@ -1,0 +1,46 @@
+name: MP-9C encrypted privacy regressions
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'crates/state-core/**'
+      - 'crates/index-core/**'
+      - 'crates/security-core/**'
+      - 'crates/integration-core/**'
+      - '.github/workflows/mp9c-privacy.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  privacy:
+    name: SQLCipher, fencing and MCP synthetic privacy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      CARGO_INCREMENTAL: '0'
+      CARGO_BUILD_JOBS: '2'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Install pinned Rust 1.90
+        run: |
+          rustup toolchain install 1.90.0 --profile minimal --component rustfmt --no-self-update
+          rustup default 1.90.0
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
+        with:
+          key: mp9c-privacy-rust190
+      - name: Formatting
+        run: cargo fmt --all -- --check
+      - name: Cross-process privacy lock regressions
+        run: cargo test --locked -p mind-place-security --lib vault_fence -- --nocapture
+      - name: Source redaction and evidence persistence
+        run: cargo test --locked -p mind-place-state --features sqlcipher-preview --test source_redaction -- --nocapture
+      - name: Deterministic encrypted capture/redaction interleaving and restart
+        run: cargo test --locked -p mind-place-index --features sqlcipher-preview --lib privacy_capture_race_tests -- --nocapture
+      - name: Existing encrypted archive interruption and readback
+        run: cargo test --locked -p mind-place-index --features sqlcipher-preview --test vault_capture_encrypted -- --nocapture
+      - name: Encrypted MCP synthetic capability and revocation
+        run: cargo test --locked -p mind-place-integration --features vault-mcp --test mcp_vault -- --nocapture
