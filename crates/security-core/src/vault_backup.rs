@@ -15,7 +15,89 @@ use std::{
 
 const VERSION: u32 = 1;
 const MAX_FILES: usize = 100_000;
+// Keep the historical file cap while bounding combined enumeration and
+// directory-only fan-out independently.
+const MAX_TOTAL_ENTRIES: usize = 200_000;
+const MAX_DIRECTORIES: usize = 100_000;
+const MAX_DIRECTORY_DEPTH: usize = 5;
 const MAX_MANIFEST: usize = 24 * 1024 * 1024;
+
+#[derive(Clone, Copy)]
+struct InventoryLimits {
+    max_entries: usize,
+    max_directories: usize,
+    max_files: usize,
+    max_depth: usize,
+}
+
+const PRODUCTION_INVENTORY_LIMITS: InventoryLimits = InventoryLimits {
+    max_entries: MAX_TOTAL_ENTRIES,
+    max_directories: MAX_DIRECTORIES,
+    max_files: MAX_FILES,
+    max_depth: MAX_DIRECTORY_DEPTH,
+};
+
+struct InventoryBudget {
+    limits: InventoryLimits,
+    entries: usize,
+    directories: usize,
+    files: usize,
+}
+
+impl InventoryBudget {
+    fn new(limits: InventoryLimits) -> Self {
+        Self {
+            limits,
+            entries: 0,
+            directories: 0,
+            files: 0,
+        }
+    }
+
+    fn record_entry(&mut self) -> Result<()> {
+        self.entries = self
+            .entries
+            .checked_add(1)
+            .ok_or(SecurityError::InvalidConfig)?;
+        if self.entries > self.limits.max_entries {
+            return Err(SecurityError::InvalidConfig);
+        }
+        Ok(())
+    }
+
+    fn record_directory(&mut self, depth: usize) -> Result<()> {
+        self.directories = self
+            .directories
+            .checked_add(1)
+            .ok_or(SecurityError::InvalidConfig)?;
+        if self.directories > self.limits.max_directories || depth > self.limits.max_depth {
+            return Err(SecurityError::InvalidConfig);
+        }
+        Ok(())
+    }
+
+    fn record_payload_file(&mut self) -> Result<()> {
+        self.files = self
+            .files
+            .checked_add(1)
+            .ok_or(SecurityError::InvalidConfig)?;
+        if self.files > self.limits.max_files {
+            return Err(SecurityError::InvalidConfig);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BackupCheckpoint {
+    PackageStagingCreated,
+    PayloadCopyChunk,
+    ManifestPartiallyWritten,
+    BeforeBackupPublish,
+    RestoreStagingCreated,
+    RestorePayloadCopyChunk,
+    BeforeRestorePublish,
+}
 const MAX_FILE_SIZE: u64 = 8 * 1024 * 1024 * 1024;
 const MAX_TOTAL_SIZE: u64 = 512 * 1024 * 1024 * 1024;
 #[derive(Serialize, Deserialize)]
@@ -53,6 +135,26 @@ impl PortableBackup {
         destination: &Path,
         generation: u64,
     ) -> Result<BackupMetadata> {
+        Self::create_with_checkpoint(
+            gate,
+            lease,
+            vault,
+            vault_root,
+            destination,
+            generation,
+            |_, _| Ok(()),
+        )
+    }
+
+    fn create_with_checkpoint(
+        gate: &SecurityGate,
+        lease: UnlockLease,
+        vault: &CryptoVault,
+        vault_root: &Path,
+        destination: &Path,
+        generation: u64,
+        mut checkpoint: impl FnMut(BackupCheckpoint, &Path) -> Result<()>,
+    ) -> Result<BackupMetadata> {
         gate.validate_lease(lease)?;
         safe(vault_root)?;
         safe(destination)?;
@@ -75,9 +177,6 @@ impl PortableBackup {
         // Conservative offline inventory: refuse unexpected app-owned files
         // rather than silently produce an incomplete "full" backup.
         let files = inventory(vault_root)?;
-        if files.len() > MAX_FILES {
-            return Err(SecurityError::InvalidConfig);
-        }
         let staging = destination.with_extension("mp9b-partial");
         if staging.exists() {
             return Err(SecurityError::AlreadyConfigured);
@@ -86,6 +185,7 @@ impl PortableBackup {
         safe(parent)?;
         // Persist and flush the wrapped recovery key before any publication.
         original.persist_new(&staging)?;
+        checkpoint(BackupCheckpoint::PackageStagingCreated, &staging)?;
         // On errors the staging folder is intentionally left for explicit
         // owner disposition; never auto-delete snapshots on catch/rollback.
         let expected_files = files.clone();
@@ -123,7 +223,9 @@ impl PortableBackup {
                 .write(true)
                 .create_new(true)
                 .open(&target)?;
-            let (size, digest) = copy_digest(&mut input, &mut output)?;
+            let (size, digest) = copy_digest_with_checkpoint(&mut input, &mut output, || {
+                checkpoint(BackupCheckpoint::PayloadCopyChunk, &target)
+            })?;
             output.sync_all()?;
             if size != meta.len() {
                 return Err(SecurityError::Crypto);
@@ -160,8 +262,12 @@ impl PortableBackup {
             &generation.to_be_bytes(),
             &body,
         )?;
-        let mut encrypted_manifest = File::create_new(staging.join("manifest.enc"))?;
-        encrypted_manifest.write_all(&ciphertext)?;
+        let manifest_path = staging.join("manifest.enc");
+        let mut encrypted_manifest = File::create_new(&manifest_path)?;
+        let split = (ciphertext.len() / 2).max(1);
+        encrypted_manifest.write_all(&ciphertext[..split])?;
+        checkpoint(BackupCheckpoint::ManifestPartiallyWritten, &manifest_path)?;
+        encrypted_manifest.write_all(&ciphertext[split..])?;
         encrypted_manifest.sync_all()?;
         let meta = BackupMetadata {
             version: VERSION,
@@ -177,9 +283,23 @@ impl PortableBackup {
         // before publishing the complete snapshot via atomic rename.
         drop(metadata_file);
         drop(encrypted_manifest);
-        #[cfg(unix)]
-        File::open(&staging)?.sync_all()?;
+        // An authenticated manifest alone must not excuse unlisted ciphertext
+        // appearing inside the staged package (or missing payload files).
+        let expected = manifest
+            .files
+            .iter()
+            .map(|file| file.path.clone())
+            .collect();
+        verify_package_inventory(&staging, &expected)?;
+        // File sync alone does not persist freshly created parent-directory
+        // entries on POSIX. Sync nested dirs before the nonreplacing rename.
+        let mut sync_budget = InventoryBudget::new(PRODUCTION_INVENTORY_LIMITS);
+        sync_directory_tree(&staging, &staging.join("payload"), &mut sync_budget)?;
+        // Recheck after directory sync so entries added during the sync walk
+        // cannot be published outside the authenticated inventory.
+        verify_package_inventory(&staging, &expected)?;
         gate.validate_lease(lease)?;
+        checkpoint(BackupCheckpoint::BeforeBackupPublish, destination)?;
         crate::vault_fs::publish_new_directory(&staging, destination)?;
         Ok(meta)
     }
@@ -192,6 +312,26 @@ impl PortableBackup {
         backup_root: &Path,
         destination: &Path,
         recovery: &crate::vault::RecoverySecret,
+    ) -> Result<BackupMetadata> {
+        Self::restore_with_limits_and_checkpoint(
+            gate,
+            lease,
+            backup_root,
+            destination,
+            recovery,
+            PRODUCTION_INVENTORY_LIMITS,
+            |_, _| Ok(()),
+        )
+    }
+
+    fn restore_with_limits_and_checkpoint(
+        gate: &SecurityGate,
+        lease: UnlockLease,
+        backup_root: &Path,
+        destination: &Path,
+        recovery: &crate::vault::RecoverySecret,
+        limits: InventoryLimits,
+        mut checkpoint: impl FnMut(BackupCheckpoint, &Path) -> Result<()>,
     ) -> Result<BackupMetadata> {
         gate.validate_lease(lease)?;
         safe(backup_root)?;
@@ -260,11 +400,15 @@ impl PortableBackup {
         if !seen.contains("state.sqlite3") {
             return Err(SecurityError::Crypto);
         }
+        // Reject unmanifested files, hidden payload additions, unexpected
+        // package metadata or unsafe entries before creating a restore root.
+        verify_package_inventory_with_limits(backup_root, &seen, limits)?;
         let staging = destination.with_extension("mp9b-restore-partial");
         if staging.exists() {
             return Err(SecurityError::AlreadyConfigured);
         }
         fs::create_dir(&staging)?;
+        checkpoint(BackupCheckpoint::RestoreStagingCreated, &staging)?;
         let mut config = File::create_new(staging.join("vault-v1.json"))?;
         config.write_all(&serde_json::to_vec(&original).map_err(|_| SecurityError::Crypto)?)?;
         config.sync_all()?;
@@ -275,20 +419,148 @@ impl PortableBackup {
             fs::create_dir_all(path.parent().ok_or(SecurityError::UnsafePath)?)?;
             let mut out = File::create_new(&path)?;
             let mut input = File::open(backup_root.join("payload").join(relative))?;
-            let (length, digest) = copy_digest(&mut input, &mut out)?;
+            let (length, digest) = copy_digest_with_checkpoint(&mut input, &mut out, || {
+                checkpoint(BackupCheckpoint::RestorePayloadCopyChunk, &path)
+            })?;
             out.sync_all()?;
             if length != receipt.length || digest != receipt.sha256 {
                 return Err(SecurityError::Crypto);
             }
         }
+        // Recheck the source package after copying; a changed or newly-added
+        // entry must not be adopted after the bounded preflight.
+        verify_package_inventory_with_limits(backup_root, &seen, limits)?;
+        let restored_files = inventory_with_limits(&staging, limits)?;
+        let restored: std::collections::HashSet<String> = restored_files
+            .iter()
+            .map(|path| {
+                path.to_str()
+                    .map(|value| value.replace('\\', "/"))
+                    .ok_or(SecurityError::Crypto)
+            })
+            .collect::<Result<_>>()?;
+        if restored != seen {
+            return Err(SecurityError::Crypto);
+        }
         // Close the restored manifest handle before directory publication.
         // Otherwise Windows reports ERROR_ACCESS_DENIED on the rename.
         drop(config);
+        let mut sync_budget = InventoryBudget::new(PRODUCTION_INVENTORY_LIMITS);
+        sync_directory_tree(&staging, &staging, &mut sync_budget)?;
         gate.validate_lease(lease)?;
+        checkpoint(BackupCheckpoint::BeforeRestorePublish, destination)?;
         crate::vault_fs::publish_new_directory(&staging, destination)?;
         Ok(meta)
     }
 }
+/// Verify that every backed-up byte belongs to the authenticated file list.
+/// A digest match for every declared receipt alone is insufficient: a
+/// portable bundle may otherwise smuggle unlisted files that will be ignored
+/// by one reader and accidentally adopted by another.
+fn verify_package_inventory(
+    root: &Path,
+    expected: &std::collections::HashSet<String>,
+) -> Result<()> {
+    verify_package_inventory_with_limits(root, expected, PRODUCTION_INVENTORY_LIMITS)
+}
+
+fn verify_package_inventory_with_limits(
+    root: &Path,
+    expected: &std::collections::HashSet<String>,
+    limits: InventoryLimits,
+) -> Result<()> {
+    safe(root)?;
+    let mut budget = InventoryBudget::new(limits);
+    let mut metadata = std::collections::HashSet::new();
+    for entry in fs::read_dir(root)? {
+        let entry = entry?;
+        budget.record_entry()?;
+        let path = entry.path();
+        safe(&path)?;
+        let name = entry
+            .file_name()
+            .to_str()
+            .ok_or(SecurityError::Crypto)?
+            .to_owned();
+        let kind = fs::symlink_metadata(&path)?;
+        match name.as_str() {
+            "vault-v1.json" | "bundle.json" | "manifest.enc" if kind.is_file() => {}
+            "payload" if kind.is_dir() => budget.record_directory(0)?,
+            _ => return Err(SecurityError::Crypto),
+        }
+        if !metadata.insert(name) {
+            return Err(SecurityError::Crypto);
+        }
+    }
+    if metadata.len() != 4 {
+        return Err(SecurityError::Crypto);
+    }
+    let payload = root.join("payload");
+    let mut files = Vec::new();
+    gather(&payload, &payload, &mut files, &mut budget)?;
+    if files.len() != expected.len() {
+        return Err(SecurityError::Crypto);
+    }
+    let mut actual = std::collections::HashSet::new();
+    for relative in files {
+        valid_relative(&relative)?;
+        let normalized = relative
+            .to_str()
+            .ok_or(SecurityError::Crypto)?
+            .replace('\\', "/");
+        if !actual.insert(normalized) {
+            return Err(SecurityError::Crypto);
+        }
+    }
+    if &actual != expected {
+        return Err(SecurityError::Crypto);
+    }
+    Ok(())
+}
+
+/// Persist directory entries bottom-up before publishing a complete new
+/// generation. On Windows each file is synced and the final rename uses
+/// MoveFileExW WRITE_THROUGH; directory handles cannot be flushed portably.
+fn sync_directory_tree(
+    directory: &Path,
+    data_root: &Path,
+    budget: &mut InventoryBudget,
+) -> Result<()> {
+    safe(directory)?;
+    for entry in fs::read_dir(directory)? {
+        let entry = entry?;
+        budget.record_entry()?;
+        let path = entry.path();
+        safe(&path)?;
+        let metadata = fs::symlink_metadata(&path)?;
+        if metadata.is_dir() {
+            let relative = path
+                .strip_prefix(data_root)
+                .map_err(|_| SecurityError::UnsafePath)?;
+            let depth = if path == data_root {
+                0
+            } else {
+                relative.components().count()
+            };
+            budget.record_directory(depth)?;
+            sync_directory_tree(&path, data_root, budget)?;
+        } else if metadata.is_file() {
+            // Package metadata consumes the entry budget, not the payload-file
+            // budget. Enforce the payload cap on this sync walk as well.
+            if let Ok(relative) = path.strip_prefix(data_root) {
+                if allowed(relative) {
+                    budget.record_payload_file()?;
+                }
+            }
+        } else {
+            return Err(SecurityError::UnsafePath);
+        }
+    }
+    #[cfg(unix)]
+    File::open(directory)?.sync_all()?;
+    Ok(())
+}
+
 fn allowed(relative: &Path) -> bool {
     let mut components = relative.components();
     match components.next() {
@@ -337,11 +609,17 @@ fn verify_quiescent_sources(
 /// before rollout; otherwise partial "complete backups" would silently omit
 /// state. Only zero-length schema locks are excluded.
 fn inventory(root: &Path) -> Result<Vec<PathBuf>> {
+    inventory_with_limits(root, PRODUCTION_INVENTORY_LIMITS)
+}
+
+fn inventory_with_limits(root: &Path, limits: InventoryLimits) -> Result<Vec<PathBuf>> {
     safe(root)?;
+    let mut budget = InventoryBudget::new(limits);
     let mut files = Vec::new();
     let mut has_state = false;
     for entry in fs::read_dir(root)? {
         let entry = entry?;
+        budget.record_entry()?;
         let path = entry.path();
         safe(&path)?;
         let name = entry.file_name();
@@ -365,20 +643,19 @@ fn inventory(root: &Path) -> Result<Vec<PathBuf>> {
                 if starts_with(&path, b"SQLite format 3\0")? {
                     return Err(SecurityError::Crypto);
                 }
+                budget.record_payload_file()?;
                 if name == "state.sqlite3" {
                     has_state = true;
                 }
                 files.push(PathBuf::from(name));
             }
             "archive" | "document-objects" | "backups" if meta.is_dir() => {
-                gather(root, &path, &mut files)?;
+                budget.record_directory(1)?;
+                gather(root, &path, &mut files, &mut budget)?;
             }
             // Unknown/unmigrated state, WAL, plaintext cache, directory, or
             // unclassified app-owned file makes the backup unsafe/incomplete.
             _ => return Err(SecurityError::InvalidConfig),
-        }
-        if files.len() > MAX_FILES {
-            return Err(SecurityError::InvalidConfig);
         }
     }
     if !has_state {
@@ -405,24 +682,28 @@ fn safe(path: &Path) -> Result<()> {
     }
     Ok(())
 }
-fn gather(root: &Path, folder: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
+fn gather(
+    root: &Path,
+    folder: &Path,
+    files: &mut Vec<PathBuf>,
+    budget: &mut InventoryBudget,
+) -> Result<()> {
     safe(folder)?;
     for item in fs::read_dir(folder)? {
-        if files.len() >= MAX_FILES {
-            return Err(SecurityError::InvalidConfig);
-        }
-        let path = item?.path();
+        let item = item?;
+        budget.record_entry()?;
+        let path = item.path();
         safe(&path)?;
         let metadata = fs::symlink_metadata(&path)?;
         if metadata.is_dir() {
             let relative = path
                 .strip_prefix(root)
                 .map_err(|_| SecurityError::UnsafePath)?;
-            if relative.components().count() > 5 {
-                return Err(SecurityError::InvalidConfig);
-            }
-            gather(root, &path, files)?;
+            let depth = relative.components().count();
+            budget.record_directory(depth)?;
+            gather(root, &path, files, budget)?;
         } else if metadata.is_file() {
+            budget.record_payload_file()?;
             let relative = path
                 .strip_prefix(root)
                 .map_err(|_| SecurityError::UnsafePath)?
@@ -469,7 +750,11 @@ fn digest_file(src: &mut File) -> Result<(u64, String)> {
     }
     Ok((len, format!("{:x}", sha.finalize())))
 }
-fn copy_digest(src: &mut File, dst: &mut File) -> Result<(u64, String)> {
+fn copy_digest_with_checkpoint(
+    src: &mut File,
+    dst: &mut File,
+    mut checkpoint: impl FnMut() -> Result<()>,
+) -> Result<(u64, String)> {
     let mut sha = Sha256::new();
     let mut len = 0u64;
     let mut buf = [0u8; 64 * 1024];
@@ -483,6 +768,7 @@ fn copy_digest(src: &mut File, dst: &mut File) -> Result<(u64, String)> {
             .ok_or(SecurityError::Crypto)?;
         dst.write_all(&buf[..amount])?;
         sha.update(&buf[..amount]);
+        checkpoint()?;
     }
     Ok((len, format!("{:x}", sha.finalize())))
 }
@@ -662,6 +948,98 @@ mod tests {
     }
 
     #[test]
+    fn restore_rejects_unlisted_payload_and_unexpected_bundle_files() {
+        let (temp, gate, lease, vault, recovery) = fixture();
+        let source = temp.path().join("vault");
+        let backup = temp.path().join("complete-bundle");
+        PortableBackup::create(&gate, lease, &vault, &source, &backup, 104).unwrap();
+
+        let foreign = backup.join("payload/backups/ff/foreign");
+        fs::create_dir_all(foreign.parent().unwrap()).unwrap();
+        fs::write(&foreign, b"MPOS\\x01unlisted").unwrap();
+        let target = temp.path().join("must-not-restore");
+        assert!(PortableBackup::restore(&gate, lease, &backup, &target, &recovery).is_err());
+        assert!(
+            !target.exists(),
+            "unlisted payload published a recovery root"
+        );
+        fs::remove_file(&foreign).unwrap();
+
+        let extra = backup.join("unlisted-metadata.json");
+        fs::write(&extra, b"{}").unwrap();
+        assert!(PortableBackup::restore(&gate, lease, &backup, &target, &recovery).is_err());
+        assert!(!target.exists(), "unlisted package content was accepted");
+        fs::remove_file(&extra).unwrap();
+
+        PortableBackup::restore(&gate, lease, &backup, &target, &recovery).unwrap();
+        assert_eq!(
+            fs::read(target.join("state.sqlite3")).unwrap(),
+            fs::read(source.join("state.sqlite3")).unwrap()
+        );
+    }
+
+    #[test]
+    fn restore_never_replaces_ambiguous_partial_or_existing_destination() {
+        let (temp, gate, lease, vault, recovery) = fixture();
+        let source = temp.path().join("vault");
+        let backup = temp.path().join("good-bundle");
+        PortableBackup::create(&gate, lease, &vault, &source, &backup, 105).unwrap();
+        let target = temp.path().join("recovery");
+        let partial = target.with_extension("mp9b-restore-partial");
+        fs::create_dir(&partial).unwrap();
+        fs::write(partial.join("owner-kept"), b"keep").unwrap();
+        assert!(PortableBackup::restore(&gate, lease, &backup, &target, &recovery).is_err());
+        assert!(!target.exists());
+        assert_eq!(fs::read(partial.join("owner-kept")).unwrap(), b"keep");
+
+        fs::remove_dir_all(&partial).unwrap();
+        fs::create_dir(&target).unwrap();
+        fs::write(target.join("owner-kept"), b"keep").unwrap();
+        assert!(PortableBackup::restore(&gate, lease, &backup, &target, &recovery).is_err());
+        assert_eq!(fs::read(target.join("owner-kept")).unwrap(), b"keep");
+    }
+
+    #[test]
+    fn stale_unlock_and_corrupted_authenticated_manifest_never_publish() {
+        let (temp, gate, lease, vault, recovery) = fixture();
+        let source = temp.path().join("vault");
+        let backup = temp.path().join("authenticated-bundle");
+        PortableBackup::create(&gate, lease, &vault, &source, &backup, 106).unwrap();
+        let manifest_file = backup.join("manifest.enc");
+        let mut encrypted = fs::read(&manifest_file).unwrap();
+        *encrypted.last_mut().unwrap() ^= 0x01;
+        fs::write(&manifest_file, encrypted).unwrap();
+        let target = temp.path().join("corrupt-recovery");
+        assert!(PortableBackup::restore(&gate, lease, &backup, &target, &recovery).is_err());
+        assert!(!target.exists());
+
+        gate.lock();
+        let denied = temp.path().join("locked-backup");
+        assert!(PortableBackup::create(&gate, lease, &vault, &source, &denied, 107).is_err());
+        assert!(!denied.exists());
+        assert!(!denied.with_extension("mp9b-partial").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restore_rejects_symlinked_package_payload_without_touching_target() {
+        use std::os::unix::fs::symlink;
+        let (temp, gate, lease, vault, recovery) = fixture();
+        let source = temp.path().join("vault");
+        let backup = temp.path().join("good-bundle");
+        PortableBackup::create(&gate, lease, &vault, &source, &backup, 108).unwrap();
+        let untouched = temp.path().join("untouched");
+        fs::write(&untouched, b"outside").unwrap();
+        let foreign = backup.join("payload/backups/aa/foreign");
+        fs::create_dir_all(foreign.parent().unwrap()).unwrap();
+        symlink(&untouched, &foreign).unwrap();
+        let target = temp.path().join("should-not-restore");
+        assert!(PortableBackup::restore(&gate, lease, &backup, &target, &recovery).is_err());
+        assert!(!target.exists());
+        assert_eq!(fs::read(&untouched).unwrap(), b"outside");
+    }
+
+    #[test]
     fn never_mistake_legacy_plaintext_for_an_encrypted_state() {
         let (temp, gate, lease, vault, _) = fixture();
         let root = temp.path().join("vault");
@@ -673,5 +1051,414 @@ mod tests {
         let backup = temp.path().join("backup");
         assert!(PortableBackup::create(&gate, lease, &vault, &root, &backup, 1).is_err());
         assert!(!backup.exists());
+    }
+
+    #[test]
+    fn directory_sync_enforces_payload_file_limit_at_exact_boundary() {
+        let temp = tempfile::tempdir().unwrap();
+        let staging = temp.path().join("synthetic-stage");
+        let payload = staging.join("payload");
+        fs::create_dir_all(&payload).unwrap();
+        fs::write(staging.join("vault-v1.json"), b"synthetic metadata").unwrap();
+        fs::write(
+            payload.join("state.sqlite3"),
+            b"synthetic encrypted payload",
+        )
+        .unwrap();
+
+        let exact = InventoryLimits {
+            max_entries: 3,
+            max_directories: 1,
+            max_files: 1,
+            max_depth: 1,
+        };
+        let mut accepted = InventoryBudget::new(exact);
+        sync_directory_tree(&staging, &payload, &mut accepted).unwrap();
+        assert_eq!(accepted.entries, 3);
+        assert_eq!(accepted.directories, 1);
+        assert_eq!(accepted.files, 1, "root metadata must not count as payload");
+
+        let too_few = InventoryLimits {
+            max_files: 0,
+            ..exact
+        };
+        let mut rejected = InventoryBudget::new(too_few);
+        assert!(sync_directory_tree(&staging, &payload, &mut rejected).is_err());
+    }
+
+    #[test]
+    fn final_publication_and_restore_checkpoint_faults_preserve_recovery() {
+        let (temp, gate, lease, vault, recovery) = fixture();
+        let source = temp.path().join("vault");
+        let interrupted_backup = temp.path().join("backup-before-publish");
+        let backup_staging = interrupted_backup.with_extension("mp9b-partial");
+        assert!(PortableBackup::create_with_checkpoint(
+            &gate,
+            lease,
+            &vault,
+            &source,
+            &interrupted_backup,
+            118,
+            |point, _| {
+                if point == BackupCheckpoint::BeforeBackupPublish {
+                    Err(SecurityError::InvalidConfig)
+                } else {
+                    Ok(())
+                }
+            },
+        )
+        .is_err());
+        assert!(!interrupted_backup.exists());
+        assert!(backup_staging.join("bundle.json").is_file());
+        assert!(
+            PortableBackup::create(&gate, lease, &vault, &source, &interrupted_backup, 118)
+                .is_err(),
+            "retry must not adopt prior staging"
+        );
+
+        let valid_backup = temp.path().join("valid-published-recovery");
+        PortableBackup::create(&gate, lease, &vault, &source, &valid_backup, 119).unwrap();
+        for checkpoint in [
+            BackupCheckpoint::RestoreStagingCreated,
+            BackupCheckpoint::BeforeRestorePublish,
+        ] {
+            let destination = temp
+                .path()
+                .join(format!("interrupted-restore-{checkpoint:?}"));
+            let staging = destination.with_extension("mp9b-restore-partial");
+            assert!(PortableBackup::restore_with_limits_and_checkpoint(
+                &gate,
+                lease,
+                &valid_backup,
+                &destination,
+                &recovery,
+                PRODUCTION_INVENTORY_LIMITS,
+                |point, _| {
+                    if point == checkpoint {
+                        Err(SecurityError::InvalidConfig)
+                    } else {
+                        Ok(())
+                    }
+                },
+            )
+            .is_err());
+            assert!(!destination.exists(), "partial generation was published");
+            assert!(staging.is_dir(), "interrupted staging was deleted");
+            assert!(
+                PortableBackup::restore(&gate, lease, &valid_backup, &destination, &recovery)
+                    .is_err(),
+                "retry adopted existing partial staging"
+            );
+        }
+        let recovered = temp.path().join("fresh-valid-recovery");
+        PortableBackup::restore(&gate, lease, &valid_backup, &recovered, &recovery).unwrap();
+        assert!(recovered.join("state.sqlite3").is_file());
+    }
+
+    #[test]
+    fn inventory_limits_accept_exact_boundary_and_reject_directory_fanout() {
+        let (temp, gate, lease, vault, recovery) = fixture();
+        let source = temp.path().join("vault");
+        let backup = temp.path().join("bounded-bundle");
+        PortableBackup::create(&gate, lease, &vault, &source, &backup, 109).unwrap();
+        let expected = std::collections::HashSet::from(["state.sqlite3".to_owned()]);
+
+        let exact = InventoryLimits {
+            max_entries: 5,
+            max_directories: 1,
+            max_files: 1,
+            max_depth: 5,
+        };
+        verify_package_inventory_with_limits(&backup, &expected, exact)
+            .expect("a package exactly at every configured limit remains valid");
+
+        for name in ["empty-a", "empty-b", "empty-c"] {
+            fs::create_dir(backup.join("payload").join(name)).unwrap();
+        }
+        let bounded = InventoryLimits {
+            max_entries: 7,
+            max_directories: 100,
+            max_files: 10,
+            max_depth: 5,
+        };
+        let target = temp.path().join("fanout-must-not-restore");
+        let partial = target.with_extension("mp9b-restore-partial");
+        assert!(PortableBackup::restore_with_limits_and_checkpoint(
+            &gate,
+            lease,
+            &backup,
+            &target,
+            &recovery,
+            bounded,
+            |_, _| Ok(())
+        )
+        .is_err());
+        assert!(
+            !target.exists(),
+            "fan-out rejection published a restore destination"
+        );
+        assert!(
+            !partial.exists(),
+            "preflight rejection created restore staging"
+        );
+    }
+
+    #[test]
+    fn inventory_limits_reject_directory_count_depth_and_mixed_entry_overflow() {
+        let (temp, gate, lease, vault, _) = fixture();
+        let source = temp.path().join("vault");
+        let backup = temp.path().join("inventory-limits");
+        PortableBackup::create(&gate, lease, &vault, &source, &backup, 110).unwrap();
+        let expected = std::collections::HashSet::from(["state.sqlite3".to_owned()]);
+
+        fs::create_dir(backup.join("payload/dir-a")).unwrap();
+        fs::create_dir(backup.join("payload/dir-b")).unwrap();
+        let directory_limit = InventoryLimits {
+            max_entries: 100,
+            max_directories: 2,
+            max_files: 10,
+            max_depth: 5,
+        };
+        assert!(verify_package_inventory_with_limits(&backup, &expected, directory_limit).is_err());
+        fs::remove_dir(backup.join("payload/dir-a")).unwrap();
+        fs::remove_dir(backup.join("payload/dir-b")).unwrap();
+
+        fs::create_dir_all(backup.join("payload/archive/a/b/c/d/e")).unwrap();
+        let depth_limit = InventoryLimits {
+            max_entries: 100,
+            max_directories: 100,
+            max_files: 10,
+            max_depth: 5,
+        };
+        assert!(verify_package_inventory_with_limits(&backup, &expected, depth_limit).is_err());
+        fs::remove_dir_all(backup.join("payload/archive")).unwrap();
+
+        let shard = backup.join("payload/archive/shard");
+        fs::create_dir_all(&shard).unwrap();
+        fs::write(shard.join("one"), b"one").unwrap();
+        fs::write(shard.join("two"), b"two").unwrap();
+        let mixed_expected = std::collections::HashSet::from([
+            "state.sqlite3".to_owned(),
+            "archive/shard/one".to_owned(),
+            "archive/shard/two".to_owned(),
+        ]);
+        let total_limit = InventoryLimits {
+            max_entries: 8,
+            max_directories: 100,
+            max_files: 10,
+            max_depth: 5,
+        };
+        assert!(
+            verify_package_inventory_with_limits(&backup, &mixed_expected, total_limit).is_err()
+        );
+    }
+
+    #[test]
+    fn interrupted_backup_stages_are_preserved_and_never_published() {
+        for interrupted_at in [
+            BackupCheckpoint::PackageStagingCreated,
+            BackupCheckpoint::PayloadCopyChunk,
+            BackupCheckpoint::ManifestPartiallyWritten,
+        ] {
+            let (temp, gate, lease, vault, _) = fixture();
+            let source = temp.path().join("vault");
+            if interrupted_at == BackupCheckpoint::PayloadCopyChunk {
+                fs::write(source.join("state.sqlite3"), vec![0x53; 128 * 1024]).unwrap();
+            }
+            let destination = temp.path().join("interrupted-backup");
+            let staging = destination.with_extension("mp9b-partial");
+            let result = PortableBackup::create_with_checkpoint(
+                &gate,
+                lease,
+                &vault,
+                &source,
+                &destination,
+                111,
+                |point, _| {
+                    if point == interrupted_at {
+                        Err(SecurityError::InvalidConfig)
+                    } else {
+                        Ok(())
+                    }
+                },
+            );
+            assert!(
+                result.is_err(),
+                "fault at {interrupted_at:?} did not interrupt creation"
+            );
+            assert!(!destination.exists(), "partial package was published");
+            assert!(staging.is_dir(), "failed staging was automatically removed");
+            match interrupted_at {
+                BackupCheckpoint::PackageStagingCreated => {
+                    assert!(staging.join("vault-v1.json").is_file());
+                    assert!(!staging.join("payload").exists());
+                }
+                BackupCheckpoint::PayloadCopyChunk => {
+                    assert_eq!(
+                        fs::metadata(staging.join("payload/state.sqlite3"))
+                            .unwrap()
+                            .len(),
+                        64 * 1024,
+                        "copy fault must leave a deterministic partial payload"
+                    );
+                }
+                BackupCheckpoint::ManifestPartiallyWritten => {
+                    assert!(fs::metadata(staging.join("manifest.enc")).unwrap().len() > 0);
+                    assert!(!staging.join("bundle.json").exists());
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    #[test]
+    fn final_backup_rename_collision_preserves_both_owner_paths() {
+        let (temp, gate, lease, vault, _) = fixture();
+        let source = temp.path().join("vault");
+        let destination = temp.path().join("rename-race");
+        let staging = destination.with_extension("mp9b-partial");
+        let result = PortableBackup::create_with_checkpoint(
+            &gate,
+            lease,
+            &vault,
+            &source,
+            &destination,
+            112,
+            |point, path| {
+                if point == BackupCheckpoint::BeforeBackupPublish {
+                    fs::create_dir(path)?;
+                    fs::write(path.join("owner-kept"), b"existing owner data")?;
+                }
+                Ok(())
+            },
+        );
+        assert!(
+            result.is_err(),
+            "a destination created during publication was replaced"
+        );
+        assert_eq!(
+            fs::read(destination.join("owner-kept")).unwrap(),
+            b"existing owner data"
+        );
+        assert!(
+            staging.is_dir(),
+            "failed package staging must remain for owner disposition"
+        );
+
+        let collision = temp.path().join("existing-destination");
+        fs::create_dir(&collision).unwrap();
+        fs::write(collision.join("owner-kept"), b"pre-existing").unwrap();
+        assert!(PortableBackup::create(&gate, lease, &vault, &source, &collision, 113).is_err());
+        assert_eq!(
+            fs::read(collision.join("owner-kept")).unwrap(),
+            b"pre-existing"
+        );
+        assert!(!collision.with_extension("mp9b-partial").exists());
+    }
+
+    #[test]
+    fn restart_refuses_to_adopt_interrupted_backup_or_restore_staging() {
+        let (temp, gate, lease, vault, recovery) = fixture();
+        let source = temp.path().join("vault");
+        let destination = temp.path().join("restart-backup");
+        let staging = destination.with_extension("mp9b-partial");
+        assert!(PortableBackup::create_with_checkpoint(
+            &gate,
+            lease,
+            &vault,
+            &source,
+            &destination,
+            114,
+            |point, _| {
+                if point == BackupCheckpoint::PackageStagingCreated {
+                    Err(SecurityError::InvalidConfig)
+                } else {
+                    Ok(())
+                }
+            },
+        )
+        .is_err());
+        let preserved_manifest = fs::read(staging.join("vault-v1.json")).unwrap();
+        assert!(PortableBackup::create(&gate, lease, &vault, &source, &destination, 114).is_err());
+        assert_eq!(
+            fs::read(staging.join("vault-v1.json")).unwrap(),
+            preserved_manifest
+        );
+        assert!(!destination.exists());
+
+        let backup = temp.path().join("valid-restart-source");
+        PortableBackup::create(&gate, lease, &vault, &source, &backup, 115).unwrap();
+        let restore_target = temp.path().join("restart-restore");
+        let restore_staging = restore_target.with_extension("mp9b-restore-partial");
+        fs::create_dir(&restore_staging).unwrap();
+        fs::write(restore_staging.join("owner-kept"), b"disposition required").unwrap();
+        assert!(
+            PortableBackup::restore(&gate, lease, &backup, &restore_target, &recovery).is_err()
+        );
+        assert!(!restore_target.exists());
+        assert_eq!(
+            fs::read(restore_staging.join("owner-kept")).unwrap(),
+            b"disposition required"
+        );
+    }
+
+    #[test]
+    fn interrupted_restore_payload_copy_preserves_partial_and_original_vault() {
+        let (temp, gate, lease, vault, recovery) = fixture();
+        let source = temp.path().join("vault");
+        fs::write(source.join("state.sqlite3"), vec![0x53; 128 * 1024]).unwrap();
+        let original = fs::read(source.join("state.sqlite3")).unwrap();
+        let backup = temp.path().join("restore-copy-source");
+        PortableBackup::create(&gate, lease, &vault, &source, &backup, 116).unwrap();
+
+        let destination = temp.path().join("restore-copy-interrupted");
+        let staging = destination.with_extension("mp9b-restore-partial");
+        assert!(PortableBackup::restore_with_limits_and_checkpoint(
+            &gate,
+            lease,
+            &backup,
+            &destination,
+            &recovery,
+            PRODUCTION_INVENTORY_LIMITS,
+            |point, _| {
+                if point == BackupCheckpoint::RestorePayloadCopyChunk {
+                    Err(SecurityError::InvalidConfig)
+                } else {
+                    Ok(())
+                }
+            },
+        )
+        .is_err());
+        assert!(!destination.exists());
+        assert_eq!(
+            fs::metadata(staging.join("state.sqlite3")).unwrap().len(),
+            64 * 1024
+        );
+        assert_eq!(fs::read(source.join("state.sqlite3")).unwrap(), original);
+        assert!(PortableBackup::restore(&gate, lease, &backup, &destination, &recovery).is_err());
+        assert!(
+            staging.is_dir(),
+            "restart must not adopt or clean partial restore staging"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restore_rejects_special_file_in_package_inventory_before_staging() {
+        use std::os::unix::net::UnixListener;
+        let (temp, gate, lease, vault, recovery) = fixture();
+        let source = temp.path().join("vault");
+        let backup = temp.path().join("special-file-bundle");
+        PortableBackup::create(&gate, lease, &vault, &source, &backup, 117).unwrap();
+        let socket_path = backup.join("payload/archive/socket");
+        fs::create_dir_all(socket_path.parent().unwrap()).unwrap();
+        let listener = UnixListener::bind(&socket_path).unwrap();
+
+        let destination = temp.path().join("special-file-must-not-restore");
+        let staging = destination.with_extension("mp9b-restore-partial");
+        assert!(PortableBackup::restore(&gate, lease, &backup, &destination, &recovery).is_err());
+        assert!(!destination.exists());
+        assert!(!staging.exists());
+        drop(listener);
     }
 }

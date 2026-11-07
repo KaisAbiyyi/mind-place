@@ -17,6 +17,7 @@ use mind_place_state::{CipherKey, StateStore};
 use rusqlite::{backup::Backup, Connection, OpenFlags};
 use sha2::{Digest, Sha256};
 use std::{
+    collections::HashSet,
     fs::{self, File, OpenOptions},
     io::{Read, Write},
     path::Path,
@@ -30,6 +31,81 @@ const DB_DOMAINS: [(&str, &[u8]); 4] = [
     ("document-index.sqlite3", b"document-index/sqlcipher/v1"),
     ("archive-index.sqlite3", b"archive-index/sqlcipher/v1"),
 ];
+
+const MAX_OBJECT_TREE_ENTRIES: usize = 200_000;
+const MAX_OBJECT_TREE_DIRECTORIES: usize = 100_000;
+const MAX_OBJECT_TREE_FILES: usize = 100_000;
+const MAX_OBJECT_TREE_DEPTH: usize = 12;
+
+#[derive(Clone, Copy)]
+struct ObjectTreeLimits {
+    max_entries: usize,
+    max_directories: usize,
+    max_files: usize,
+    max_depth: usize,
+}
+
+const PRODUCTION_OBJECT_TREE_LIMITS: ObjectTreeLimits = ObjectTreeLimits {
+    max_entries: MAX_OBJECT_TREE_ENTRIES,
+    max_directories: MAX_OBJECT_TREE_DIRECTORIES,
+    max_files: MAX_OBJECT_TREE_FILES,
+    max_depth: MAX_OBJECT_TREE_DEPTH,
+};
+
+struct ObjectTreeBudget {
+    limits: ObjectTreeLimits,
+    entries: usize,
+    directories: usize,
+    files: usize,
+}
+
+impl ObjectTreeBudget {
+    fn new(limits: ObjectTreeLimits) -> Self {
+        Self {
+            limits,
+            entries: 0,
+            directories: 0,
+            files: 0,
+        }
+    }
+
+    fn production() -> Self {
+        Self::new(PRODUCTION_OBJECT_TREE_LIMITS)
+    }
+
+    fn record_entry(&mut self) -> Result<()> {
+        self.entries = self
+            .entries
+            .checked_add(1)
+            .ok_or(IndexError::InvalidEvidence)?;
+        if self.entries > self.limits.max_entries {
+            return Err(IndexError::InvalidEvidence);
+        }
+        Ok(())
+    }
+
+    fn record_directory(&mut self, depth: usize) -> Result<()> {
+        self.directories = self
+            .directories
+            .checked_add(1)
+            .ok_or(IndexError::InvalidEvidence)?;
+        if self.directories > self.limits.max_directories || depth > self.limits.max_depth {
+            return Err(IndexError::InvalidEvidence);
+        }
+        Ok(())
+    }
+
+    fn record_file(&mut self) -> Result<()> {
+        self.files = self
+            .files
+            .checked_add(1)
+            .ok_or(IndexError::InvalidEvidence)?;
+        if self.files > self.limits.max_files {
+            return Err(IndexError::InvalidEvidence);
+        }
+        Ok(())
+    }
+}
 
 pub struct VaultOnlineBackup;
 
@@ -68,65 +144,88 @@ impl VaultOnlineBackup {
         // All supported encrypted state/index/immutable object writers take
         // shared lock; no source write can advance during this snapshot cut.
         let _fence = VaultWriterFence::snapshot(source).map_err(|_| IndexError::InvalidEvidence)?;
-        let scratch_parent = tempfile::Builder::new()
+        // Detach the scratch path from TempDir immediately. A panic or any
+        // returned error must leave the encrypted snapshot for owner disposition.
+        let scratch_parent_path = tempfile::Builder::new()
             .prefix(".mp9b-encrypted-online-")
-            .tempdir_in(parent)?;
-        let scratch = scratch_parent.path().join("vault");
-        manifest
-            .persist_new(&scratch)
-            .map_err(|_| IndexError::InvalidEvidence)?;
+            .tempdir_in(parent)?
+            .keep();
+        let result = (|| -> Result<BackupMetadata> {
+            let scratch = scratch_parent_path.join("vault");
+            manifest
+                .persist_new(&scratch)
+                .map_err(|_| IndexError::InvalidEvidence)?;
 
-        let mut have_state = false;
-        let mut count = 0usize;
-        for entry in fs::read_dir(source)? {
-            gate.validate_lease(lease)
-                .map_err(|_| IndexError::Revoked)?;
-            let entry = entry?;
-            let path = entry.path();
-            guarded(&path)?;
-            let name = entry.file_name();
-            let name = name.to_str().ok_or(IndexError::UnsafePath)?;
-            let meta = fs::symlink_metadata(&path)?;
-            if DB_DOMAINS.iter().any(|(n, _)| *n == name) && meta.is_file() {
-                let domain = DB_DOMAINS.iter().find(|(n, _)| *n == name).unwrap().1;
-                snapshot_sqlcipher(gate, lease, vault, domain, &path, &scratch.join(name))?;
-                if name == "state.sqlite3" {
-                    have_state = true;
+            let mut have_state = false;
+            let mut object_budget = ObjectTreeBudget::production();
+            for entry in fs::read_dir(source)? {
+                gate.validate_lease(lease)
+                    .map_err(|_| IndexError::Revoked)?;
+                let entry = entry?;
+                let path = entry.path();
+                guarded(&path)?;
+                let name = entry.file_name();
+                let name = name.to_str().ok_or(IndexError::UnsafePath)?;
+                let meta = fs::symlink_metadata(&path)?;
+                if DB_DOMAINS.iter().any(|(n, _)| *n == name) && meta.is_file() {
+                    let domain = DB_DOMAINS.iter().find(|(n, _)| *n == name).unwrap().1;
+                    snapshot_sqlcipher(gate, lease, vault, domain, &path, &scratch.join(name))?;
+                    if name == "state.sqlite3" {
+                        have_state = true;
+                    }
+                } else if ["archive", "document-objects", "backups"].contains(&name)
+                    && meta.is_dir()
+                {
+                    object_budget.record_entry()?;
+                    object_budget.record_directory(0)?;
+                    copy_ciphertext_tree(&path, &scratch.join(name), 0, &mut object_budget)?;
+                } else if ["vault-v1.json", ".state-schema.lock", ".vault-writer.lock"]
+                    .contains(&name)
+                    && meta.is_file()
+                    && (name == "vault-v1.json" || meta.len() == 0)
+                {
+                    // New manifest already persisted. Lock and schema sentinels
+                    // have no authoritative content to capture.
+                } else if DB_DOMAINS.iter().any(|(n, _)| {
+                    ["-wal", "-shm", "-journal"]
+                        .iter()
+                        .any(|suffix| name == format!("{n}{suffix}"))
+                }) && meta.is_file()
+                {
+                    // SQLCipher Online Backup includes committed WAL content.
+                    // Neither WAL nor SHM may be copied as independent files.
+                } else {
+                    return Err(IndexError::InvalidEvidence);
                 }
-            } else if ["archive", "document-objects", "backups"].contains(&name) && meta.is_dir() {
-                copy_ciphertext_tree(&path, &scratch.join(name), 0, &mut count)?;
-            } else if ["vault-v1.json", ".state-schema.lock", ".vault-writer.lock"].contains(&name)
-                && meta.is_file()
-                && (name == "vault-v1.json" || meta.len() == 0)
-            {
-                // New manifest already persisted. Lock and schema sentinels
-                // have no authoritative content to capture.
-            } else if DB_DOMAINS.iter().any(|(n, _)| {
-                ["-wal", "-shm", "-journal"]
-                    .iter()
-                    .any(|suffix| name == format!("{n}{suffix}"))
-            }) && meta.is_file()
-            {
-                // SQLCipher Online Backup includes committed WAL content.
-                // Neither WAL nor SHM may be copied as independent files.
-            } else {
+            }
+            if !have_state {
                 return Err(IndexError::InvalidEvidence);
             }
+            verify_coherent_snapshot(gate, lease, vault, &scratch)?;
+            gate.validate_lease(lease)
+                .map_err(|_| IndexError::Revoked)?;
+            // Package a fully quiesced scratch root. Existing portable restore
+            // authenticates the manifest and verifies each file digest.
+            let metadata =
+                PortableBackup::create(gate, lease, vault, &scratch, destination, generation)
+                    .map_err(|_| IndexError::InvalidEvidence)?;
+            gate.validate_lease(lease)
+                .map_err(|_| IndexError::Revoked)?;
+            Ok(metadata)
+        })();
+        match result {
+            Ok(metadata) => {
+                // The package is fully published and verified; only this
+                // successful path may dispose of its temporary duplicate.
+                let _ = fs::remove_dir_all(&scratch_parent_path);
+                Ok(metadata)
+            }
+            Err(error) => {
+                // Failed encrypted scratch snapshots remain for explicit
+                // owner disposition; never auto-clean them on error or panic.
+                Err(error)
+            }
         }
-        if !have_state {
-            return Err(IndexError::InvalidEvidence);
-        }
-        verify_coherent_snapshot(gate, lease, vault, &scratch)?;
-        gate.validate_lease(lease)
-            .map_err(|_| IndexError::Revoked)?;
-        // Package a fully quiesced scratch root. Existing portable restore
-        // authenticates the manifest and verifies each file digest.
-        let metadata =
-            PortableBackup::create(gate, lease, vault, &scratch, destination, generation)
-                .map_err(|_| IndexError::InvalidEvidence)?;
-        gate.validate_lease(lease)
-            .map_err(|_| IndexError::Revoked)?;
-        Ok(metadata)
     }
 
     /// Owner-authorized new-destination restore: authenticate the portable
@@ -279,6 +378,7 @@ fn verify_coherent_snapshot(
     let _validation = VaultWriterFence::writer(root).map_err(|_| IndexError::InvalidEvidence)?;
     let storage = ImmutableVaultStorage::new(root, vault, gate, lease)
         .map_err(|_| IndexError::InvalidEvidence)?;
+    let mut expected_documents = HashSet::new();
     for (filename, domain) in DB_DOMAINS {
         let path = root.join(filename);
         if !path.exists() {
@@ -344,17 +444,28 @@ fn verify_coherent_snapshot(
                 {
                     return Err(IndexError::InvalidEvidence);
                 }
+                let identity = format!("document/{hash}");
                 let bytes = storage
                     .read(
                         gate,
                         lease,
                         mind_place_security::vault::ContentKind::DocumentObject,
-                        format!("document/{hash}").as_bytes(),
+                        identity.as_bytes(),
                     )
                     .map_err(|_| IndexError::InvalidEvidence)?;
                 if bytes.len() as i64 != length || format!("{:x}", Sha256::digest(&bytes)) != hash {
                     return Err(IndexError::InvalidEvidence);
                 }
+                expected_documents.insert(
+                    vault
+                        .storage_name(
+                            gate,
+                            lease,
+                            mind_place_security::vault::ContentKind::DocumentObject,
+                            identity.as_bytes(),
+                        )
+                        .map_err(|_| IndexError::InvalidEvidence)?,
+                );
             }
         }
     }
@@ -366,32 +477,139 @@ fn verify_coherent_snapshot(
     {
         return Err(IndexError::InvalidEvidence);
     }
+    let mut expected_archive = VaultCaptureStore::verify_backup_catalog(root, vault, gate, lease)?;
     if let Some(raw) = raw {
         raw.verify_all(&storage, gate, lease)
             .map_err(|_| IndexError::InvalidEvidence)?;
+        let (archive, documents) = raw
+            .referenced_storage_names(vault, gate, lease)
+            .map_err(|_| IndexError::InvalidEvidence)?;
+        expected_archive.extend(archive);
+        expected_documents.extend(documents);
+        expected_archive.insert(
+            vault
+                .storage_name(
+                    gate,
+                    lease,
+                    mind_place_security::vault::ContentKind::Archive,
+                    crate::vault_legacy_objects::RAW_MAP_ID,
+                )
+                .map_err(|_| IndexError::InvalidEvidence)?,
+        );
     }
-    VaultCaptureStore::verify_backup_catalog(root, vault, gate, lease)?;
+    // A catalog-to-object check alone misses unreferenced, potentially
+    // attacker-added ciphertext. Require exact inverse correspondence too.
+    let mut budget = ObjectTreeBudget::production();
+    verify_exact_object_tree(&root.join("archive"), &expected_archive, &mut budget)?;
+    verify_exact_object_tree(
+        &root.join("document-objects"),
+        &expected_documents,
+        &mut budget,
+    )?;
     gate.validate_lease(lease)
         .map_err(|_| IndexError::Revoked)?;
     Ok(())
 }
 
-fn copy_ciphertext_tree(root: &Path, target: &Path, depth: usize, count: &mut usize) -> Result<()> {
-    if depth > 12 || *count > 100_000 {
+/// Reject orphaned or unexpected immutable objects, not only missing references.
+/// Both roots consume the same checked total-entry/file/directory budget.
+fn verify_exact_object_tree(
+    root: &Path,
+    expected: &HashSet<String>,
+    budget: &mut ObjectTreeBudget,
+) -> Result<()> {
+    let metadata = match fs::symlink_metadata(root) {
+        Ok(meta) => meta,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return if expected.is_empty() {
+                Ok(())
+            } else {
+                Err(IndexError::InvalidEvidence)
+            };
+        }
+        Err(err) => return Err(err.into()),
+    };
+    guarded(root)?;
+    if !metadata.is_dir() {
+        return Err(IndexError::InvalidEvidence);
+    }
+    budget.record_entry()?;
+    budget.record_directory(0)?;
+    let mut found = HashSet::new();
+    for shard in fs::read_dir(root)? {
+        let shard = shard?;
+        budget.record_entry()?;
+        let path = shard.path();
+        guarded(&path)?;
+        if !fs::symlink_metadata(&path)?.is_dir() {
+            return Err(IndexError::InvalidEvidence);
+        }
+        budget.record_directory(1)?;
+        let shard_name = shard
+            .file_name()
+            .to_str()
+            .ok_or(IndexError::InvalidEvidence)?
+            .to_owned();
+        if shard_name.len() != 2
+            || !shard_name
+                .bytes()
+                .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+        {
+            return Err(IndexError::InvalidEvidence);
+        }
+        for entry in fs::read_dir(path)? {
+            let entry = entry?;
+            budget.record_entry()?;
+            let object_path = entry.path();
+            guarded(&object_path)?;
+            if !fs::symlink_metadata(&object_path)?.is_file() {
+                return Err(IndexError::InvalidEvidence);
+            }
+            budget.record_file()?;
+            let name = entry
+                .file_name()
+                .to_str()
+                .ok_or(IndexError::InvalidEvidence)?
+                .to_owned();
+            if name.len() != 64
+                || !name.starts_with(&shard_name)
+                || !expected.contains(&name)
+                || !found.insert(name)
+            {
+                return Err(IndexError::InvalidEvidence);
+            }
+        }
+    }
+    if found.len() != expected.len() {
+        return Err(IndexError::InvalidEvidence);
+    }
+    Ok(())
+}
+
+fn copy_ciphertext_tree(
+    root: &Path,
+    target: &Path,
+    depth: usize,
+    budget: &mut ObjectTreeBudget,
+) -> Result<()> {
+    if depth > budget.limits.max_depth {
         return Err(IndexError::InvalidEvidence);
     }
     guarded(root)?;
     fs::create_dir(target)?;
     for entry in fs::read_dir(root)? {
         let entry = entry?;
+        budget.record_entry()?;
         let source = entry.path();
         guarded(&source)?;
         let file_name = entry.file_name();
         let output = target.join(file_name);
         let meta = fs::symlink_metadata(&source)?;
         if meta.is_dir() {
-            copy_ciphertext_tree(&source, &output, depth + 1, count)?;
+            budget.record_directory(depth + 1)?;
+            copy_ciphertext_tree(&source, &output, depth + 1, budget)?;
         } else if meta.is_file() {
+            budget.record_file()?;
             if meta.len() > 8 * 1024 * 1024 * 1024 {
                 return Err(IndexError::InvalidEvidence);
             }
@@ -411,7 +629,6 @@ fn copy_ciphertext_tree(root: &Path, target: &Path, depth: usize, count: &mut us
             }
             target_file.flush()?;
             target_file.sync_all()?;
-            *count += 1;
         } else {
             return Err(IndexError::UnsafePath);
         }
@@ -438,4 +655,34 @@ fn guarded(path: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ciphertext_copy_rejects_empty_directory_fanout_with_injected_budget() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source");
+        let target = temp.path().join("target");
+        fs::create_dir(&source).unwrap();
+        for name in ["empty-a", "empty-b", "empty-c"] {
+            fs::create_dir(source.join(name)).unwrap();
+        }
+        let limits = ObjectTreeLimits {
+            max_entries: 2,
+            max_directories: 10,
+            max_files: 10,
+            max_depth: 12,
+        };
+        let mut budget = ObjectTreeBudget::new(limits);
+        budget.record_entry().unwrap();
+        budget.record_directory(0).unwrap();
+        assert!(copy_ciphertext_tree(&source, &target, 0, &mut budget).is_err());
+        assert!(target.is_dir());
+        assert!(source.join("empty-a").is_dir());
+        assert!(source.join("empty-b").is_dir());
+        assert!(source.join("empty-c").is_dir());
+    }
 }
