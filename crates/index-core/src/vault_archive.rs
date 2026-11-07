@@ -316,9 +316,10 @@ impl VaultCaptureStore {
         provider: &str,
         conversation_id: &str,
     ) -> Result<bool> {
-        let Some(namespace) = crate::namespace_for_provider(provider) else {
-            return Ok(false);
-        };
+        // Unknown/legacy provider types must never bypass source authority.
+        // Generic imports have their own explicit, canonical namespace.
+        let namespace =
+            crate::namespace_for_provider(provider).ok_or(IndexError::InvalidEvidence)?;
         let source_id = canonical_source_id(&SourceDescriptor {
             provider,
             source_namespace: namespace,
@@ -400,6 +401,17 @@ impl VaultCaptureStore {
         let authority = self.open_state_store()?;
         let _writer =
             VaultWriterFence::writer(&self.root).map_err(|_| IndexError::InvalidEvidence)?;
+        // Ingestion itself establishes canonical authority, including a generic
+        // migration source. Otherwise a captured conversation could never be
+        // redacted if another subsystem had not registered it beforehand.
+        let namespace = crate::namespace_for_provider(&capture.provider)
+            .ok_or(IndexError::InvalidEvidence)?;
+        authority.register_source(&SourceDescriptor {
+            provider: &capture.provider,
+            source_namespace: namespace,
+            source_kind: "conversation",
+            key: SourceKey::External(&capture.conversation_id),
+        })?;
         self.require_visible(&authority, &capture.provider, &capture.conversation_id)?;
         after_visibility_check();
         let mut db = self.connection()?;
