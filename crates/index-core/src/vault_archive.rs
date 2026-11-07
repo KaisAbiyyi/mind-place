@@ -401,17 +401,21 @@ impl VaultCaptureStore {
         let authority = self.open_state_store()?;
         let _writer =
             VaultWriterFence::writer(&self.root).map_err(|_| IndexError::InvalidEvidence)?;
-        // Ingestion itself establishes canonical authority, including a generic
-        // migration source. Otherwise a captured conversation could never be
-        // redacted if another subsystem had not registered it beforehand.
-        let namespace =
-            crate::namespace_for_provider(&capture.provider).ok_or(IndexError::InvalidEvidence)?;
-        authority.register_source(&SourceDescriptor {
-            provider: &capture.provider,
-            source_namespace: namespace,
-            source_kind: "conversation",
-            key: SourceKey::External(&capture.conversation_id),
-        })?;
+        // New live captures establish canonical owner authority. An explicit
+        // offline migration MUST preserve source-state rows byte-for-byte:
+        // registration during conversion breaks independently verified legacy
+        // SQLite equality. Migrated records can be registered through the
+        // trusted owner-state API before owner-authorized redaction.
+        if !migration {
+            let namespace = crate::namespace_for_provider(&capture.provider)
+                .ok_or(IndexError::InvalidEvidence)?;
+            authority.register_source(&SourceDescriptor {
+                provider: &capture.provider,
+                source_namespace: namespace,
+                source_kind: "conversation",
+                key: SourceKey::External(&capture.conversation_id),
+            })?;
+        }
         self.require_visible(&authority, &capture.provider, &capture.conversation_id)?;
         after_visibility_check();
         let mut db = self.connection()?;
@@ -1328,7 +1332,20 @@ mod privacy_capture_race_tests {
             key: SourceKey::External(&generic_key),
         })
         .unwrap();
-        assert!(state.source(&generic_source).unwrap().is_some());
+        // Owner-consented migration preserves its original state DB exactly.
+        // Register provenance only after the import verification boundary.
+        assert!(state.source(&generic_source).unwrap().is_none());
+        assert_eq!(
+            state
+                .register_source(&SourceDescriptor {
+                    provider: "generic",
+                    source_namespace: crate::namespace_for_provider("generic").unwrap(),
+                    source_kind: "conversation",
+                    key: SourceKey::External(&generic_key),
+                })
+                .unwrap(),
+            generic_source
+        );
         state
             .redact_source(&admin, &generic_source, "Synthetic generic import")
             .unwrap();
