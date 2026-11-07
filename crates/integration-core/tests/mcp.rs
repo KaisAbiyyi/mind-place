@@ -348,6 +348,9 @@ async fn real_http_deny_rebinding_origin_and_locked_epoch() {
         "Origin: https://chatgpt.com\r\n",
         "Forwarded: for=198.51.100.7;host=evil.example\r\n",
         "X-Forwarded-Host: evil.example\r\n",
+        "X-Forwarded-For: 198.51.100.7\r\n",
+        "X-Forwarded-Proto: https\r\n",
+        "X-Real-IP: 198.51.100.7\r\n",
     ] {
         let denied = simulated_forward(
             hosted_token.clone(),
@@ -357,6 +360,47 @@ async fn real_http_deny_rebinding_origin_and_locked_epoch() {
         )
         .await;
         assert!(denied.starts_with("HTTP/1.1 403"), "{denied}");
+    }
+    // Positive weighted values remain valid over the actual HTTP endpoint.
+    let weighted =
+        simulated_forwarded_rpc(&hosted_token, "tools/list", json!({"_meta":meta()}), "").replace(
+            "Accept: application/json, text/event-stream\r\n",
+            "Accept: application/json; charset=utf-8; q=0.8, text/event-stream; q=0.2\r\n",
+        );
+    let weighted_response = tokio::task::spawn_blocking(move || tcp_request(weighted))
+        .await
+        .unwrap();
+    assert!(
+        weighted_response.starts_with("HTTP/1.1 200"),
+        "{weighted_response}"
+    );
+
+    // Malformed, zero-quality, substring and wildcard values fail closed.
+    // Replacing rather than adding avoids the duplicate-header rejection path.
+    for bad_accept in [
+        "application/json-evil, text/event-stream",
+        "application/json, text/event-stream-evil",
+        "application/jsonian, text/event-stream-ish",
+        "application/json;q=0, text/event-stream",
+        "application/json, text/event-stream;q=0",
+        "application/json;q=0, text/event-stream;q=0",
+        "application/json;q=1.001, text/event-stream",
+        "application/json;q=0.5;q=0.6, text/event-stream",
+        "application/json; charset, text/event-stream",
+        "application/json; charset=\"unterminated, text/event-stream",
+        "application/*, text/*",
+    ] {
+        let valid =
+            simulated_forwarded_rpc(&hosted_token, "tools/list", json!({"_meta":meta()}), "");
+        let spoofed = valid.replace(
+            "Accept: application/json, text/event-stream\r\n",
+            &format!("Accept: {bad_accept}\r\n"),
+        );
+        let response = tokio::task::spawn_blocking(move || tcp_request(spoofed))
+            .await
+            .unwrap();
+        assert!(response.starts_with("HTTP/1.1 406"), "{response}");
+        assert!(!response.contains("amber eclipse knowledge"));
     }
     let duplicated = format!("Authorization: Bearer {}\r\n", f.token);
     let denied = simulated_forwarded_rpc(
