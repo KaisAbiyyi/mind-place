@@ -461,7 +461,6 @@ fn deterministic_adversarial_document_mutations_remain_bounded() {
     }
 }
 
-
 #[test]
 fn pdf_long_dictionary_and_content_skips_preserve_visible_text() {
     use flate2::write::ZlibEncoder;
@@ -485,8 +484,7 @@ fn pdf_long_dictionary_and_content_skips_preserve_visible_text() {
     pdf.extend_from_slice(&compressed);
     pdf.extend_from_slice(b"\nendstream\nendobj\n%%EOF");
 
-    let extracted =
-        extract_bytes(DocumentFormat::Pdf, &pdf, ExtractionLimits::default()).unwrap();
+    let extracted = extract_bytes(DocumentFormat::Pdf, &pdf, ExtractionLimits::default()).unwrap();
     assert_eq!(extracted.text, "visible PDF text");
     assert!(extracted
         .warnings

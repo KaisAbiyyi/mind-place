@@ -212,9 +212,7 @@ fn content_text(ctx: &mut Context<'_>, data: &[u8]) -> Result<String> {
             }
             match block[pos] {
                 b'%' => {
-                    pos = skip_while(ctx, block, pos, |byte| {
-                        !matches!(byte, b'\r' | b'\n')
-                    })?;
+                    pos = skip_while(ctx, block, pos, |byte| !matches!(byte, b'\r' | b'\n'))?;
                 }
                 b'(' => {
                     let (literal, end) = string_literal(ctx, block, pos)?;
@@ -282,9 +280,7 @@ fn stream_filter(ctx: &mut Context<'_>, bytes: &[u8]) -> Result<Option<bool>> {
         }
         match bytes[at] {
             b'%' => {
-                at = skip_while(ctx, bytes, at, |byte| {
-                    !matches!(byte, b'\r' | b'\n')
-                })?;
+                at = skip_while(ctx, bytes, at, |byte| !matches!(byte, b'\r' | b'\n'))?;
             }
             b'(' => {
                 at = string_literal(ctx, bytes, at)?.1;
@@ -427,7 +423,6 @@ pub(super) fn extract_pdf(ctx: &mut Context<'_>, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -470,11 +465,7 @@ mod tests {
             checks += 1;
             checks < 2
         };
-        let mut ctx = test_context(
-            ExtractionLimits::default(),
-            Instant::now(),
-            &mut authorized,
-        );
+        let mut ctx = test_context(ExtractionLimits::default(), Instant::now(), &mut authorized);
         assert_eq!(
             content_text(&mut ctx, data.as_bytes()),
             Err(ExtractionError::Revoked)
@@ -490,10 +481,7 @@ mod tests {
                 "comment",
                 format!("<< %{}\n /Filter /FlateDecode >>", "x".repeat(8192)),
             ),
-            (
-                "name",
-                format!("<< /{} /Length 12 >>", "x".repeat(8192)),
-            ),
+            ("name", format!("<< /{} /Length 12 >>", "x".repeat(8192))),
             (
                 "whitespace",
                 format!("<< /Filter {} /FlateDecode >>", " ".repeat(8192)),
@@ -505,11 +493,8 @@ mod tests {
                 checks += 1;
                 checks < 2
             };
-            let mut ctx = test_context(
-                ExtractionLimits::default(),
-                Instant::now(),
-                &mut authorized,
-            );
+            let mut ctx =
+                test_context(ExtractionLimits::default(), Instant::now(), &mut authorized);
             assert_eq!(
                 stream_filter(&mut ctx, input.as_bytes()),
                 Err(ExtractionError::Revoked),
@@ -538,7 +523,8 @@ mod tests {
                 Instant::now(),
                 &mut authorized,
             );
-            ctx.poll().expect("initial authorization/deadline check passes");
+            ctx.poll()
+                .expect("initial authorization/deadline check passes");
             // Expire the clock after the initial check; the inner scan must
             // observe it at its next bounded poll without sleeping.
             ctx.started = Instant::now() - Duration::from_millis(10);

@@ -71,8 +71,20 @@ fn is_http_token(value: &str) -> bool {
             byte.is_ascii_alphanumeric()
                 || matches!(
                     byte,
-                    b'!' | b'#' | b'$' | b'%' | b'&' | b'\'' | b'*' | b'+' | b'-'
-                        | b'.' | b'^' | b'_' | b'\x60' | b'|' | b'~'
+                    b'!' | b'#'
+                        | b'$'
+                        | b'%'
+                        | b'&'
+                        | b'\''
+                        | b'*'
+                        | b'+'
+                        | b'-'
+                        | b'.'
+                        | b'^'
+                        | b'_'
+                        | b'\x60'
+                        | b'|'
+                        | b'~'
                 )
         })
 }
@@ -604,7 +616,6 @@ impl Drop for LocalMcpServer {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -686,7 +697,9 @@ mod tests {
         let (release_tx, release_rx) = mpsc::channel();
         let worker = tokio::task::spawn_blocking(move || {
             let _dispatch_permit = permit;
-            started_tx.send(()).expect("test observer remains connected");
+            started_tx
+                .send(())
+                .expect("test observer remains connected");
             release_rx.recv().expect("test releases the worker");
         });
         (worker, started_rx, release_tx)

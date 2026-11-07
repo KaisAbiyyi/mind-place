@@ -362,20 +362,18 @@ async fn real_http_deny_rebinding_origin_and_locked_epoch() {
         assert!(denied.starts_with("HTTP/1.1 403"), "{denied}");
     }
     // Positive weighted values remain valid over the actual HTTP endpoint.
-    let weighted = simulated_forwarded_rpc(
-        &hosted_token,
-        "tools/list",
-        json!({"_meta":meta()}),
-        "",
-    )
-    .replace(
-        "Accept: application/json, text/event-stream\r\n",
-        "Accept: application/json; charset=utf-8; q=0.8, text/event-stream; q=0.2\r\n",
-    );
+    let weighted =
+        simulated_forwarded_rpc(&hosted_token, "tools/list", json!({"_meta":meta()}), "").replace(
+            "Accept: application/json, text/event-stream\r\n",
+            "Accept: application/json; charset=utf-8; q=0.8, text/event-stream; q=0.2\r\n",
+        );
     let weighted_response = tokio::task::spawn_blocking(move || tcp_request(weighted))
         .await
         .unwrap();
-    assert!(weighted_response.starts_with("HTTP/1.1 200"), "{weighted_response}");
+    assert!(
+        weighted_response.starts_with("HTTP/1.1 200"),
+        "{weighted_response}"
+    );
 
     // Malformed, zero-quality, substring and wildcard values fail closed.
     // Replacing rather than adding avoids the duplicate-header rejection path.
