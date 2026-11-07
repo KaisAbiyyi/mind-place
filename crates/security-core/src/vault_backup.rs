@@ -1351,6 +1351,4 @@ mod tests {
         assert!(!staging.exists());
         drop(listener);
     }
-
-
 }

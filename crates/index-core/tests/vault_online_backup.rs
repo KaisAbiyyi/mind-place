@@ -254,16 +254,14 @@ fn online_backup_failure_injection_never_publishes_incomplete_restores() {
     *manifest_bytes.last_mut().unwrap() ^= 0x01;
     fs::write(&manifest_path, manifest_bytes).unwrap();
     let manifest_target = home.path().join("manifest-must-not-restore");
-    assert!(
-        VaultOnlineBackup::restore(
-            &gate,
-            lease,
-            &manifest_backup,
-            &manifest_target,
-            &recovery
-        )
-        .is_err()
-    );
+    assert!(VaultOnlineBackup::restore(
+        &gate,
+        lease,
+        &manifest_backup,
+        &manifest_target,
+        &recovery
+    )
+    .is_err());
     assert!(!manifest_target.exists());
     assert!(!manifest_target
         .with_extension("mp9b-verified-restore-partial")
