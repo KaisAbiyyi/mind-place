@@ -234,7 +234,13 @@ impl LegacyEncryptedConversion<'_> {
         // Unknown staging data is retained for explicit rollback/disposition.
         if actual != expected {
             #[cfg(debug_assertions)]
-            eprintln!("MP9C_MIGRATION: layout unexpected count={} expected={} unexpected={:?} missing={:?}", actual.len(), expected.len(), actual.difference(&expected).collect::<Vec<_>>(), expected.difference(&actual).collect::<Vec<_>>());
+            eprintln!(
+                "MP9C_MIGRATION: layout unexpected count={} expected={} unexpected={:?} missing={:?}",
+                actual.len(),
+                expected.len(),
+                actual.difference(&expected).collect::<Vec<_>>(),
+                expected.difference(&actual).collect::<Vec<_>>()
+            );
             return Err(SecurityError::Crypto);
         }
         Ok(())
