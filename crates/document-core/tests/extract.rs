@@ -460,3 +460,36 @@ fn deterministic_adversarial_document_mutations_remain_bounded() {
         }
     }
 }
+
+
+#[test]
+fn pdf_long_dictionary_and_content_skips_preserve_visible_text() {
+    use flate2::write::ZlibEncoder;
+
+    let content = format!(
+        "BT %{}\n(visible PDF text) Tj ET",
+        "content-comment".repeat(700)
+    );
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+    encoder.write_all(content.as_bytes()).unwrap();
+    let compressed = encoder.finish().unwrap();
+
+    let dictionary = format!(
+        "<< %{}\n /{} /Length {} /Filter{} /FlateDecode >>",
+        "dictionary-comment".repeat(700),
+        "UnusedName".repeat(700),
+        compressed.len(),
+        " ".repeat(8192)
+    );
+    let mut pdf = format!("%PDF-1.7\n1 0 obj\n{dictionary}\nstream\n").into_bytes();
+    pdf.extend_from_slice(&compressed);
+    pdf.extend_from_slice(b"\nendstream\nendobj\n%%EOF");
+
+    let extracted =
+        extract_bytes(DocumentFormat::Pdf, &pdf, ExtractionLimits::default()).unwrap();
+    assert_eq!(extracted.text, "visible PDF text");
+    assert!(extracted
+        .warnings
+        .iter()
+        .any(|warning| warning.contains("no OCR")));
+}

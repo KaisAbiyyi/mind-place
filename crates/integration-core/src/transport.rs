@@ -65,16 +65,209 @@ fn error(status: u16) -> WireResponse {
     wire(status, None)
 }
 
-fn accepts_mcp_media_types(value: &str) -> bool {
-    let mut json = false;
-    let mut events = false;
-    for part in value.split(',') {
-        // Substring matching admits fake media types such as application/json-evil.
-        let name = part.split(';').next().unwrap_or_default().trim();
-        json |= name.eq_ignore_ascii_case("application/json");
-        events |= name.eq_ignore_ascii_case("text/event-stream");
+fn is_http_token(value: &str) -> bool {
+    !value.is_empty()
+        && value.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric()
+                || matches!(
+                    byte,
+                    b'!' | b'#' | b'$' | b'%' | b'&' | b'\'' | b'*' | b'+' | b'-'
+                        | b'.' | b'^' | b'_' | b'\x60' | b'|' | b'~'
+                )
+        })
+}
+
+// Split a list/parameter sequence without treating separators inside quoted
+// parameter values as delimiters. Invalid quoting and line breaks fail closed.
+fn split_quoted(value: &str, separator: u8) -> Option<Vec<&str>> {
+    let mut parts = Vec::new();
+    let mut start = 0usize;
+    let mut quoted = false;
+    let mut escaped = false;
+    for (index, byte) in value.bytes().enumerate() {
+        if quoted {
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            match byte {
+                b'\\' => escaped = true,
+                b'"' => quoted = false,
+                b'\r' | b'\n' => return None,
+                _ => {}
+            }
+        } else {
+            match byte {
+                b'"' => quoted = true,
+                b'\r' | b'\n' => return None,
+                byte if byte == separator => {
+                    let part = value[start..index].trim();
+                    if part.is_empty() {
+                        return None;
+                    }
+                    parts.push(part);
+                    start = index + 1;
+                }
+                _ => {}
+            }
+        }
     }
-    json && events
+    if quoted || escaped {
+        return None;
+    }
+    let last = value[start..].trim();
+    if last.is_empty() {
+        return None;
+    }
+    parts.push(last);
+    Some(parts)
+}
+
+fn valid_quoted_string(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.len() < 2 || bytes[0] != b'"' || bytes[bytes.len() - 1] != b'"' {
+        return false;
+    }
+    let mut at = 1usize;
+    while at + 1 < bytes.len() {
+        let byte = bytes[at];
+        if byte == b'\\' {
+            at += 1;
+            if at + 1 >= bytes.len() {
+                return false;
+            }
+            let escaped = bytes[at];
+            if !(escaped == b'\t' || (0x20..=0x7e).contains(&escaped) || escaped >= 0x80) {
+                return false;
+            }
+        } else if byte == b'"'
+            || !(byte == b'\t'
+                || byte == b' '
+                || byte == 0x21
+                || (0x23..=0x5b).contains(&byte)
+                || (0x5d..=0x7e).contains(&byte)
+                || byte >= 0x80)
+        {
+            return false;
+        }
+        at += 1;
+    }
+    true
+}
+
+fn valid_parameter_value(value: &str) -> bool {
+    if value.starts_with('"') {
+        valid_quoted_string(value)
+    } else {
+        is_http_token(value)
+    }
+}
+
+// RFC qvalue precision is limited to three decimal places. Return thousandths
+// so q=0 is exact and no floating-point rounding can change acceptance.
+fn parse_quality(value: &str) -> Option<u16> {
+    let (whole, fraction) = match value.split_once('.') {
+        Some((whole, fraction)) if !fraction.contains('.') => (whole, fraction),
+        Some(_) => return None,
+        None => (value, ""),
+    };
+    if fraction.len() > 3 || !fraction.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    match whole {
+        "0" => {
+            let digits = if fraction.is_empty() {
+                0
+            } else {
+                fraction.parse::<u16>().ok()?
+            };
+            Some(digits * 10u16.pow((3 - fraction.len()) as u32))
+        }
+        "1" if fraction.bytes().all(|byte| byte == b'0') => Some(1000),
+        _ => None,
+    }
+}
+
+fn parse_accept_item(item: &str) -> Option<(&str, u16)> {
+    let parts = split_quoted(item, b';')?;
+    let media_type = parts.first()?.trim();
+    let (type_name, subtype) = media_type.split_once('/')?;
+    if subtype.contains('/') || !is_http_token(type_name) || !is_http_token(subtype) {
+        return None;
+    }
+
+    let mut quality = 1000u16;
+    let mut quality_seen = false;
+    let mut parameter_names: Vec<String> = Vec::new();
+    for parameter in parts.iter().skip(1) {
+        if let Some((name, value)) = parameter.split_once('=') {
+            let name = name.trim();
+            let value = value.trim();
+            if !is_http_token(name) || !valid_parameter_value(value) {
+                return None;
+            }
+            if name.eq_ignore_ascii_case("q") {
+                if quality_seen {
+                    return None;
+                }
+                quality_seen = true;
+                quality = parse_quality(value)?;
+            } else {
+                if parameter_names
+                    .iter()
+                    .any(|existing| existing.eq_ignore_ascii_case(name))
+                {
+                    return None;
+                }
+                parameter_names.push(name.to_owned());
+            }
+        } else {
+            // A valueless accept-extension is legal only after the weight.
+            if !quality_seen || !is_http_token(parameter) || parameter.eq_ignore_ascii_case("q") {
+                return None;
+            }
+            if parameter_names
+                .iter()
+                .any(|existing| existing.eq_ignore_ascii_case(parameter))
+            {
+                return None;
+            }
+            parameter_names.push((*parameter).to_owned());
+        }
+    }
+    Some((media_type, quality))
+}
+
+fn accepts_mcp_media_types(value: &str) -> bool {
+    let Some(parts) = split_quoted(value, b',') else {
+        return false;
+    };
+    let mut json_quality = None;
+    let mut event_quality = None;
+    for part in parts {
+        let Some((media_type, quality)) = parse_accept_item(part) else {
+            return false;
+        };
+        if media_type.eq_ignore_ascii_case("application/json") {
+            if json_quality.is_some() {
+                return false;
+            }
+            json_quality = Some(quality);
+        } else if media_type.eq_ignore_ascii_case("text/event-stream") {
+            if event_quality.is_some() {
+                return false;
+            }
+            event_quality = Some(quality);
+        }
+    }
+    matches!(json_quality, Some(quality) if quality > 0)
+        && matches!(event_quality, Some(quality) if quality > 0)
+}
+
+fn acquire_dispatch_permit(
+    slots: &Arc<Semaphore>,
+) -> Result<tokio::sync::OwnedSemaphorePermit, WireResponse> {
+    slots.clone().try_acquire_owned().map_err(|_| error(503))
 }
 
 fn exactly_one<'a>(
@@ -147,10 +340,8 @@ async fn handle_bounded(request: Request<Incoming>, ctx: ServerContext) -> WireR
     {
         return error(415);
     }
-    let accepts = exactly_one(request.headers(), ACCEPT)
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    if !accepts_mcp_media_types(&accepts) {
+    let accepts = exactly_one(request.headers(), ACCEPT).unwrap_or_default();
+    if !accepts_mcp_media_types(accepts) {
         return error(406);
     }
     if request.headers().get_all(CONTENT_LENGTH).iter().count() > 1
@@ -224,9 +415,9 @@ async fn handle_bounded(request: Request<Incoming>, ctx: ServerContext) -> WireR
     }
     // Unlike a per-connection limit, this permit is owned by the blocking
     // worker. Disconnects and Tokio deadlines cannot release it prematurely.
-    let dispatch_permit = match ctx.dispatch_slots.clone().try_acquire_owned() {
+    let dispatch_permit = match acquire_dispatch_permit(&ctx.dispatch_slots) {
         Ok(permit) => permit,
-        Err(_) => return error(503),
+        Err(response) => return response,
     };
     let post_security = ctx.security.clone();
     let active = ctx.active.clone();
@@ -410,5 +601,187 @@ impl LocalMcpServer {
 impl Drop for LocalMcpServer {
     fn drop(&mut self) {
         self.stop();
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    #[test]
+    fn accept_media_types_require_both_explicit_positive_qualities() {
+        assert!(accepts_mcp_media_types(
+            "application/json, text/event-stream"
+        ));
+        assert!(accepts_mcp_media_types(
+            "application/json;q=0.8, text/event-stream;q=0.2"
+        ));
+        assert!(accepts_mcp_media_types(
+            "APPLICATION/JSON; CHARSET=\"utf-8\"; Q=0.9, Text/Event-Stream;Q=0.1"
+        ));
+        assert!(accepts_mcp_media_types(
+            "application/json; profile=\"a,b;c\"; q=0.8, text/event-stream; q=0.2"
+        ));
+    }
+
+    #[test]
+    fn accept_media_types_reject_zero_and_invalid_quality_values() {
+        for value in [
+            "application/json;q=0, text/event-stream",
+            "application/json, text/event-stream;q=0",
+            "application/json;q=0, text/event-stream;q=0",
+            "application/json;q=1.001, text/event-stream",
+            "application/json;q=0.0000, text/event-stream",
+            "application/json;q=.5, text/event-stream",
+            "application/json;q=2, text/event-stream",
+            "application/json;q=0.5.0, text/event-stream",
+        ] {
+            assert!(!accepts_mcp_media_types(value), "{value}");
+        }
+    }
+
+    #[test]
+    fn accept_media_types_reject_duplicate_and_malformed_parameters() {
+        for value in [
+            "application/json;q=0.5;Q=0.6, text/event-stream",
+            "application/json; charset, text/event-stream",
+            "application/json; charset=\"unterminated, text/event-stream",
+            "application/json; charset=\"bad\n\", text/event-stream",
+            "application/json; charset=utf-8; CHARSET=utf-16, text/event-stream",
+            "application/json;q=0.5; q, text/event-stream",
+        ] {
+            assert!(!accepts_mcp_media_types(value), "{value}");
+        }
+    }
+
+    #[test]
+    fn accept_media_types_reject_substring_and_wildcard_spoofing() {
+        for value in [
+            "application/json-evil, text/event-stream",
+            "application/json, text/event-stream-evil",
+            "application/jsonian, text/event-stream-ish",
+            "application/*, text/*",
+            "*/*",
+            "application/json;q=1, */*",
+        ] {
+            assert!(!accepts_mcp_media_types(value), "{value}");
+        }
+    }
+
+    fn gated_worker(
+        slots: &Arc<Semaphore>,
+    ) -> (
+        tokio::task::JoinHandle<()>,
+        mpsc::Receiver<()>,
+        mpsc::Sender<()>,
+    ) {
+        let permit = match acquire_dispatch_permit(slots) {
+            Ok(permit) => permit,
+            Err(_) => panic!("test worker must acquire a dispatch permit"),
+        };
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let worker = tokio::task::spawn_blocking(move || {
+            let _dispatch_permit = permit;
+            started_tx.send(()).expect("test observer remains connected");
+            release_rx.recv().expect("test releases the worker");
+        });
+        (worker, started_rx, release_tx)
+    }
+
+    #[tokio::test]
+    async fn four_dispatch_workers_exhaust_capacity_and_recovery_admits_next_request() {
+        let slots = Arc::new(Semaphore::new(MAX_DISPATCH_TASKS));
+        let mut workers = Vec::new();
+        let mut started = Vec::new();
+        let mut releases = Vec::new();
+        for _ in 0..MAX_DISPATCH_TASKS {
+            let (worker, started_rx, release_tx) = gated_worker(&slots);
+            workers.push(worker);
+            started.push(started_rx);
+            releases.push(release_tx);
+        }
+        for started_rx in started {
+            started_rx.recv().expect("each blocking worker started");
+        }
+        assert_eq!(slots.available_permits(), 0);
+        match acquire_dispatch_permit(&slots) {
+            Err(response) => assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE),
+            Ok(permit) => {
+                drop(permit);
+                panic!("fifth request must fail closed with HTTP 503");
+            }
+        }
+
+        for release in releases {
+            release.send(()).expect("release blocking worker");
+        }
+        for worker in workers {
+            worker.await.expect("blocking worker exits cleanly");
+        }
+        assert_eq!(slots.available_permits(), MAX_DISPATCH_TASKS);
+        let subsequent = match acquire_dispatch_permit(&slots) {
+            Ok(permit) => permit,
+            Err(_) => panic!("a subsequent request must succeed after capacity returns"),
+        };
+        drop(subsequent);
+    }
+
+    #[tokio::test]
+    async fn http_timeout_does_not_release_permit_while_blocking_worker_is_active() {
+        let slots = Arc::new(Semaphore::new(1));
+        let (worker, started_rx, release_tx) = gated_worker(&slots);
+        started_rx.recv().expect("blocking worker started");
+
+        // Zero-duration timeout is deterministic; the worker remains blocked
+        // on its channel and the timed-out request future drops its JoinHandle.
+        let timed_out = tokio::time::timeout(Duration::ZERO, async move {
+            worker.await.expect("blocking worker exits cleanly");
+        })
+        .await;
+        assert!(timed_out.is_err());
+        assert_eq!(slots.available_permits(), 0);
+        match acquire_dispatch_permit(&slots) {
+            Err(response) => assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE),
+            Ok(permit) => {
+                drop(permit);
+                panic!("HTTP timeout must not free an active worker slot");
+            }
+        }
+
+        release_tx.send(()).expect("release blocking worker");
+        let recovered = slots
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("permit returns after the worker exits");
+        drop(recovered);
+    }
+
+    #[tokio::test]
+    async fn disconnected_client_does_not_release_permit_before_worker_exit() {
+        let slots = Arc::new(Semaphore::new(1));
+        let (worker, started_rx, release_tx) = gated_worker(&slots);
+        started_rx.recv().expect("blocking worker started");
+        drop(worker); // Dropping the HTTP request's JoinHandle models disconnect.
+        assert_eq!(slots.available_permits(), 0);
+        match acquire_dispatch_permit(&slots) {
+            Err(response) => assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE),
+            Ok(permit) => {
+                drop(permit);
+                panic!("disconnect must not free an active worker slot");
+            }
+        }
+
+        release_tx.send(()).expect("release blocking worker");
+        let recovered = slots
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("permit returns only after the worker exits");
+        drop(recovered);
     }
 }

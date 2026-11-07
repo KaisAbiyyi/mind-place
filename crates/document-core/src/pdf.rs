@@ -157,6 +157,28 @@ fn delimiter(b: u8) -> bool {
     b.is_ascii_whitespace() || b"()<>[]{}/%".contains(&b)
 }
 
+// Skip a single untrusted token/comment/whitespace run while checking both
+// revocation and the extraction deadline at bounded 4 KiB intervals.
+fn skip_while<F>(
+    ctx: &mut Context<'_>,
+    bytes: &[u8],
+    mut at: usize,
+    mut should_skip: F,
+) -> Result<usize>
+where
+    F: FnMut(u8) -> bool,
+{
+    let mut next_poll = at.saturating_add(4096);
+    while at < bytes.len() && should_skip(bytes[at]) {
+        if at >= next_poll {
+            ctx.poll()?;
+            next_poll = at.saturating_add(4096);
+        }
+        at += 1;
+    }
+    Ok(at)
+}
+
 fn content_text(ctx: &mut Context<'_>, data: &[u8]) -> Result<String> {
     let mut output = String::new();
     let mut cursor = 0usize;
@@ -190,9 +212,9 @@ fn content_text(ctx: &mut Context<'_>, data: &[u8]) -> Result<String> {
             }
             match block[pos] {
                 b'%' => {
-                    while pos < block.len() && !matches!(block[pos], b'\r' | b'\n') {
-                        pos += 1;
-                    }
+                    pos = skip_while(ctx, block, pos, |byte| {
+                        !matches!(byte, b'\r' | b'\n')
+                    })?;
                 }
                 b'(' => {
                     let (literal, end) = string_literal(ctx, block, pos)?;
@@ -260,9 +282,9 @@ fn stream_filter(ctx: &mut Context<'_>, bytes: &[u8]) -> Result<Option<bool>> {
         }
         match bytes[at] {
             b'%' => {
-                while at < bytes.len() && !matches!(bytes[at], b'\r' | b'\n') {
-                    at += 1;
-                }
+                at = skip_while(ctx, bytes, at, |byte| {
+                    !matches!(byte, b'\r' | b'\n')
+                })?;
             }
             b'(' => {
                 at = string_literal(ctx, bytes, at)?.1;
@@ -291,19 +313,13 @@ fn stream_filter(ctx: &mut Context<'_>, bytes: &[u8]) -> Result<Option<bool>> {
             b'/' => {
                 let begin = at + 1;
                 at = begin;
-                while at < bytes.len() && !delimiter(bytes[at]) {
-                    at += 1;
-                }
+                at = skip_while(ctx, bytes, at, |byte| !delimiter(byte))?;
                 if depth == 1 && &bytes[begin..at] == b"Filter" {
-                    while at < bytes.len() && bytes[at].is_ascii_whitespace() {
-                        at += 1;
-                    }
+                    at = skip_while(ctx, bytes, at, |byte| byte.is_ascii_whitespace())?;
                     if bytes.get(at) == Some(&b'/') {
                         let name = at + 1;
                         at = name;
-                        while at < bytes.len() && !delimiter(bytes[at]) {
-                            at += 1;
-                        }
+                        at = skip_while(ctx, bytes, at, |byte| !delimiter(byte))?;
                         filter = if &bytes[name..at] == b"FlateDecode" {
                             Some(true)
                         } else {
@@ -409,4 +425,128 @@ pub(super) fn extract_pdf(ctx: &mut Context<'_>, bytes: &[u8]) -> Result<()> {
         ctx.warn("Some PDF streams use unsupported compression filters and were skipped.");
     }
     Ok(())
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ExtractionLimits;
+    use std::time::{Duration, Instant};
+
+    fn test_context<'a>(
+        limits: ExtractionLimits,
+        started: Instant,
+        authorized: &'a mut dyn FnMut() -> bool,
+    ) -> Context<'a> {
+        Context {
+            limits,
+            started,
+            authorized,
+            expanded: 0,
+            output_bytes: 0,
+            chunks: Vec::new(),
+            warnings: Vec::new(),
+        }
+    }
+
+    fn before_line_end(byte: u8) -> bool {
+        !matches!(byte, b'\r' | b'\n')
+    }
+
+    fn before_delimiter(byte: u8) -> bool {
+        !delimiter(byte)
+    }
+
+    fn whitespace(byte: u8) -> bool {
+        byte.is_ascii_whitespace()
+    }
+
+    #[test]
+    fn content_text_long_comment_scan_observes_revocation() {
+        let data = format!("BT %{}\n(visible) Tj ET", "x".repeat(8192));
+        let mut checks = 0usize;
+        let mut authorized = || {
+            checks += 1;
+            checks < 2
+        };
+        let mut ctx = test_context(
+            ExtractionLimits::default(),
+            Instant::now(),
+            &mut authorized,
+        );
+        assert_eq!(
+            content_text(&mut ctx, data.as_bytes()),
+            Err(ExtractionError::Revoked)
+        );
+        drop(ctx);
+        assert_eq!(checks, 2);
+    }
+
+    #[test]
+    fn stream_filter_long_comment_name_and_whitespace_scans_observe_revocation() {
+        let cases = [
+            (
+                "comment",
+                format!("<< %{}\n /Filter /FlateDecode >>", "x".repeat(8192)),
+            ),
+            (
+                "name",
+                format!("<< /{} /Length 12 >>", "x".repeat(8192)),
+            ),
+            (
+                "whitespace",
+                format!("<< /Filter {} /FlateDecode >>", " ".repeat(8192)),
+            ),
+        ];
+        for (label, input) in cases {
+            let mut checks = 0usize;
+            let mut authorized = || {
+                checks += 1;
+                checks < 2
+            };
+            let mut ctx = test_context(
+                ExtractionLimits::default(),
+                Instant::now(),
+                &mut authorized,
+            );
+            assert_eq!(
+                stream_filter(&mut ctx, input.as_bytes()),
+                Err(ExtractionError::Revoked),
+                "{label}"
+            );
+            drop(ctx);
+            assert_eq!(checks, 2, "{label}");
+        }
+    }
+
+    #[test]
+    fn pdf_inner_comment_name_and_whitespace_scans_observe_deadlines() {
+        let cases: [(&str, Vec<u8>, fn(u8) -> bool); 4] = [
+            ("content_text comment", vec![b'x'; 8192], before_line_end),
+            ("stream_filter comment", vec![b'x'; 8192], before_line_end),
+            ("stream_filter name", vec![b'x'; 8192], before_delimiter),
+            ("stream_filter whitespace", vec![b' '; 8192], whitespace),
+        ];
+        for (label, bytes, predicate) in cases {
+            let mut authorized = || true;
+            let mut ctx = test_context(
+                ExtractionLimits {
+                    max_millis: 1,
+                    ..ExtractionLimits::default()
+                },
+                Instant::now(),
+                &mut authorized,
+            );
+            ctx.poll().expect("initial authorization/deadline check passes");
+            // Expire the clock after the initial check; the inner scan must
+            // observe it at its next bounded poll without sleeping.
+            ctx.started = Instant::now() - Duration::from_millis(10);
+            assert_eq!(
+                skip_while(&mut ctx, &bytes, 0, predicate),
+                Err(ExtractionError::Limit("elapsed_millis")),
+                "{label}"
+            );
+        }
+    }
 }
