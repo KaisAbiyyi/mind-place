@@ -24,6 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
       - name: Install pinned Rust 1.90
         run: |
@@ -44,3 +45,5 @@ jobs:
         run: cargo test --locked -p mind-place-index --features sqlcipher-preview --test vault_capture_encrypted -- --nocapture
       - name: Encrypted MCP synthetic capability and revocation
         run: cargo test --locked -p mind-place-integration --features vault-mcp --test mcp_vault -- --nocapture
+      - name: Legacy encrypted migration interruption and restart
+        run: cargo test --locked -p mind-place-index --features sqlcipher-preview --test vault_migration_restart -- --nocapture
