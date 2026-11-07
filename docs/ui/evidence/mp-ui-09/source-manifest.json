@@ -1,6 +1,6 @@
 {
   "task": "MP-UI-09",
-  "scope": "owner-authorized pre-acceptance preparation, strict cloud-only",
+  "scope": "owner-authorized full UI remaster & HTML fidelity recovery",
   "main": "24648c74f3f59e176974d3878049b882478db69b",
   "main_tree": "72208912cce5429a5a3e578806de198784f348b9",
   "sources": [
@@ -55,15 +55,21 @@
       "submitted_reviews": []
     }
   ],
-  "strategy": "normal no-ff merges #156 \u2192 #147 \u2192 #148 \u2192 #157 \u2192 #158; reconcile shared reader routes and lifecycle, retain full ancestry",
+  "strategy": "normal no-ff merges #156 -> #147 -> #148 -> #157 -> #158; full monochrome Knowledge OS presentation layer remaster preserving all 5 source histories",
   "ground_truth_sha256": "b28acf5d50c62bfbaecc6285c0621e9903c04fe73b5a10de6f22948cdcf47579",
-  "claim": "mp-ui09-20261106-g1",
+  "prior_candidate": {
+    "head": "c1ce4a586bfdc0520a53248fe9276ad82331808e",
+    "product_head": "1fde14f9a8c1956360cdb5c73bb6ebd641609ae0",
+    "claim": "mp-ui09-20261106-g1",
+    "owner_verdict": "CHANGES REQUIRED — rejected visual quality and canonical HTML fidelity"
+  },
+  "claim": "Antigravity · mp-ui09-remaster-20261107-g2",
   "lock": "ui-rollout-integration/shared-route-resolution",
   "formal_status": "Blocked; predecessor feature tasks Review, not accepted",
-  "frozen_product_head": "1fde14f9a8c1956360cdb5c73bb6ebd641609ae0",
-  "frozen_product_tree": "ca9c42ee8bd6e8df673614f950fec24e29a84988",
+  "frozen_product_head": "77abfa45f37d14bf558e235e47b48cf67468fa95",
+  "frozen_product_tree": "d2f5664ce280445810e8a9121d0694e6f0b90a2f",
   "product_paths": {
-    "src": "813ab59513fe9e90089f0ef4792e86df84f8fc35",
+    "src": "60c514b3f7b764a43f7a3d3329e271b9ccfa7bb3",
     "src-tauri": "ff10cf66085fe643fa9164d32c31161778364d71",
     "crates": "ff6b43321a79b5d7f20d919f0a54c763bfab22f4",
     "extension": "ea84a4fbe020705d26adbe3589ca76989d9e13e7",
@@ -71,10 +77,9 @@
     "package-lock.json": "06ada74991515cb18372fc8a2b736d4841ae630d"
   },
   "source_review": {
-    "reviewer": "independent read-only subagent integration_review",
-    "head": "1fde14f9a8c1956360cdb5c73bb6ebd641609ae0",
-    "tree": "ca9c42ee8bd6e8df673614f950fec24e29a84988",
-    "verdict": "advisory: no unresolved confirmed P0/P1 or actionable P2 in inspected paths; not security approval",
-    "focused_pass": 24
+    "reviewer": "independent read-only subagent 44426f1a-9881-4d67-99f5-07804dd7ad6f",
+    "head": "77abfa45f37d14bf558e235e47b48cf67468fa95",
+    "tree": "d2f5664ce280445810e8a9121d0694e6f0b90a2f",
+    "verdict": "advisory PASS: 0 P0/P1 findings and 0 actionable P2 findings across monochrome tokens, shell, 8 primary destinations, modals/drawers, and security/lifecycle fences; not owner or security approval"
   }
 }

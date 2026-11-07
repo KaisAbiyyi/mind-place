@@ -1,49 +1,90 @@
-# MP-UI-09 Windows preview and owner acceptance
+# MP-UI-09 Windows Preview & Page-by-Page Owner Acceptance Runbook
 
-**Current gates:** cloud candidate preparation only. Windows qualification NOT_RUN; owner visual/product acceptance NOT_RUN. UI-09 formal predecessor gate remains Blocked; this is the explicitly authorized pre-acceptance integrated preview. Do not merge, release, or mark UI-U1 accepted.
+**Current gate status:**
+- **Prior candidate (`c1ce4a586bfdc0520a53248fe9276ad82331808e` / product `1fde14f9a8c1956360cdb5c73bb6ebd641609ae0`):** **CHANGES REQUIRED** (owner rejected visual fidelity).
+- **Remastered candidate (frozen product source `77abfa45f37d14bf558e235e47b48cf67468fa95`, tree `d2f5664ce280445810e8a9121d0694e6f0b90a2f`):** **Cloud verification PASS**; **Windows qualification (`MP-UI-L1`) NOT_RUN**; **Owner visual/product acceptance (`MP-UI-U1`) NOT_RUN**.
+- Formal `MP-UI-09` task status remains **Blocked** until predecessor feature tasks and native/owner gates are accepted. Do not merge PR #159 or mark `MP-UI-U1` accepted without explicit owner sign-off.
 
-## Immutable source and responsibility
+---
 
-One candidate is in [Draft PR #159](https://github.com/KaisAbiyyi/mind-place/pull/159), branch `codex/mp-ui-09-full-integration-20261106`. The PR's final execution receipt records the immutable integration HEAD and tree; use that frozen SHA, not a later moving branch tip. Frozen Windows preview product source was independently reviewed at `1fde14f9a8c1956360cdb5c73bb6ebd641609ae0`; later test/evidence/document commits preserve that product source unless a subsequent receipt explicitly says otherwise.
+## 1. Immutable Source & Responsibility Split
 
-The Codex Local / Windows qualification implementor performs the build and prepares a click-to-launch preview. The owner only launches and reviews the application; the owner is not assigned developer debugging or the full test suite.
+- **Draft PR:** [#159](https://github.com/KaisAbiyyi/mind-place/pull/159) (`codex/mp-ui-09-full-integration-20261106`)
+- **Frozen Product Source SHA:** `77abfa45f37d14bf558e235e47b48cf67468fa95`
+- **Frozen Product Tree SHA:** `d2f5664ce280445810e8a9121d0694e6f0b90a2f`
+- **Canonical HTML Reference:** `docs/ui/evidence/mp-ui-09/reference.html` (SHA-256 `b28acf5d50c62bfbaecc6285c0621e9903c04fe73b5a10de6f22948cdcf47579`)
 
-No downloadable Windows binary is claimed. The existing trusted `windows-product.yml` builds an executable only when its exact-source authority gate permits and uploads a proof JSON, not a distributable preview package. The release workflow is deliberately untouched. Linux cloud checkout lacks Cargo/Rust; use this bounded local handoff rather than claim packaging happened.
+**Role separation:**
+1. **Codex Local / Windows Qualification Agent:** Checks out the frozen SHA on Windows x64, verifies toolchain prerequisites (including Perl for vendored OpenSSL), builds the portable preview package (`npm run dist:win`), verifies license/provenance receipts, runs bounded native qualification in an isolated profile, and prepares a click-to-launch shortcut for the owner.
+2. **Repository Owner:** Launches the prepared isolated preview, walks through the UI pages against the canonical monochrome Knowledge OS design, and records **PASS / CHANGES REQUIRED / BLOCKED**. The owner is not assigned developer builds, debugging, or test suite execution.
 
-## Codex Local qualification assignment
+---
 
-Use Windows x64 with Node 24, Git, Rust **1.90.0** + rustfmt, Visual Studio C++ build tools and Windows SDK, and WebView2 Runtime. Use a fresh task checkout. Close existing Mind Place processes. Never use the owner's live data root or register browser hosts during initial visual inspection.
+## 2. Codex Local / Windows x64 Qualification Runbook
 
-1. Build frozen integrated source `1fde14f9a8c1956360cdb5c73bb6ebd641609ae0` (tree `ca9c42ee8bd6e8df673614f950fec24e29a84988`) using the literal SHA below. The final PR receipt records the later evidence-only HEAD and verifies identical product bytes. Verify the frozen source before building; do not substitute a moving branch tip.
-2. Fetch and detach at that exact SHA in an isolated checkout:
+### 2.1 Required Windows x64 Prerequisites
+Ensure the qualification machine has:
+- **Windows x64** with **WebView2 Runtime** installed
+- **Node.js 24** and **Git**
+- **Rust `1.90.0`** (`rustfmt` component installed)
+- **Visual Studio C++ Build Tools** and **Windows 10/11 SDK**
+- **Perl (`perl.exe` on `PATH`)** — **REQUIRED** because `openssl-sys` (pulled in by `reqwest` in `mind-place-integration` / `src-tauri`) compiles vendored OpenSSL via `perl Configure`. (An earlier local build attempt failed with `Command 'perl' not found`; verify `Get-Command perl` before running `npm run dist:win`. Strawberry Perl or Git for Windows `/usr/bin/perl` added to `PATH` satisfies this requirement.)
+
+### 2.2 Exact Frozen-Source Build Commands (PowerShell)
 
 ```powershell
-# Frozen integrated application source; later evidence-only commits do not change product bytes.
-$Candidate = '1fde14f9a8c1956360cdb5c73bb6ebd641609ae0'
+$ErrorActionPreference = 'Stop'
+
+# 1. Verify Perl is available on PATH for vendored OpenSSL (openssl-sys)
+if (-not (Get-Command perl -ErrorAction SilentlyContinue)) {
+  if (Test-Path 'C:\Program Files\Git\usr\bin\perl.exe') {
+    $env:PATH = "C:\Program Files\Git\usr\bin;$env:PATH"
+  } else {
+    throw "Perl is required on PATH to build vendored OpenSSL (openssl-sys). Install Strawberry Perl or add Git\usr\bin to PATH."
+  }
+}
+perl -v | Select-Object -First 2
+
+# 2. Fetch and checkout the exact frozen product source SHA
+$Candidate = '77abfa45f37d14bf558e235e47b48cf67468fa95'
+$ExpectedSrcTree = '60c514b3f7b764a43f7a3d3329e271b9ccfa7bb3'
 git clone https://github.com/KaisAbiyyi/mind-place.git mind-place-ui09-preview
 Set-Location mind-place-ui09-preview
 git fetch origin $Candidate
 if ($LASTEXITCODE -ne 0) { throw 'Cannot fetch frozen candidate' }
 git checkout --detach $Candidate
-if ((git rev-parse HEAD).Trim() -ne $Candidate) { throw 'Wrong source' }
+if ((git rev-parse HEAD).Trim() -ne $Candidate) { throw 'HEAD mismatch' }
+if ((git rev-parse 'HEAD:src').Trim() -ne $ExpectedSrcTree) { throw 'src tree mismatch' }
 git status --porcelain
+
+# 3. Pin Rust 1.90.0 and install locked npm dependencies
 rustup toolchain install 1.90.0 --profile minimal --component rustfmt --no-self-update
 rustup override set 1.90.0
 npm ci
 if ($LASTEXITCODE -ne 0) { throw 'Dependency install failed' }
+
+# 4. Run full native verification and build portable Windows x64 package
+npm run verify:repo
+npm run typecheck
+npm test
+if ($LASTEXITCODE -ne 0) { throw 'Full test suite failed; return logs to cloud' }
 npm run dist:win
 if ($LASTEXITCODE -ne 0) { throw 'Windows preview build failed; return logs to cloud' }
 npm run verify:distribution-license
-if ($LASTEXITCODE -ne 0) { throw 'Distribution verification failed' }
+if ($LASTEXITCODE -ne 0) { throw 'Distribution license verification failed' }
 ```
 
-`dist:win` runs the existing wrapper, builds the capture sidecar, verifies/stages the pinned tunnel helper and notices, builds the frontend and NSIS installer, and stages `release\win32-x64\`. It does not publish a release. Do not edit source, signing settings, secrets, registry policies, or release workflows locally.
-
-3. Expected artifacts: `release\win32-x64\mind-place.exe`, `mind-place-capture-host.exe`, extension, helper/resources, `LICENSE`, `THIRD-PARTY-NOTICES.txt`; NSIS installer under `target\release\bundle\nsis\`. Check actual paths; never invent an installer filename. Zip the **entire** staged directory, not a lone EXE. Record SHA-256 for the ZIP, installer and both app/host executables, source HEAD/tree, Node/Rust/WebView2/Windows versions, build log, and helper provenance receipt. Keep generated binaries out of Git.
-4. Create a safe portable launcher beside the staged app:
+### 2.3 Expected Staged Outputs & Isolated Preview Launcher
+1. Verify staged files in `release\win32-x64\`:
+   - `mind-place.exe`
+   - `mind-place-capture-host.exe`
+   - `extension\` (unpacked browser extension)
+   - `resources\` / verified `cloudflared.exe` helper and provenance receipt
+   - `LICENSE` and `THIRD-PARTY-NOTICES.txt`
+   - NSIS installer under `target\release\bundle\nsis\`
+2. Save `Launch-UI09-Preview.ps1` inside `release\win32-x64\`:
 
 ```powershell
-# Save as Launch-UI09-Preview.ps1 inside release\win32-x64.
 $ErrorActionPreference = 'Stop'
 $PreviewRoot = Join-Path $env:LOCALAPPDATA 'MindPlace-UI09-Isolated-Preview'
 New-Item -ItemType Directory -Force $PreviewRoot | Out-Null
@@ -52,33 +93,32 @@ $env:WEBVIEW2_USER_DATA_FOLDER = Join-Path $PreviewRoot 'webview'
 Start-Process -FilePath (Join-Path $PSScriptRoot 'mind-place.exe') -WorkingDirectory $PSScriptRoot
 ```
 
-These process-local overrides are supported by the app. They preserve the owner's ordinary profile. Do not set a real password/code on a command line, in logs, fixtures or screenshots. Do not enable debugging ports for the owner walkthrough. Provide a shortcut that launches this script under the machine's normal PowerShell policy; do not weaken execution policy.
-5. Qualification implementor runs the bounded native startup/lock/unlock/restart, all primary navigation, isolated root approve/index/preview/revoke, browser-setup cancel, Settings recovery cancel, focus and DPI checks. Existing `scripts/mp8l1-native-smoke.mjs` can assist but contains older selectors: inspect compatibility first and do not count filtered/empty/skipped results as PASS. Do not dispatch 100K/1M. Provide concise PASS/FAIL/BLOCKED evidence per action and return any defect to cloud for correction.
-6. Upload the verified ZIP/installer plus SHA-256/provenance receipt to an authorized artifact location linked from PR #159. Before delivery, extract and launch the ZIP once on Windows x64 and record screenshot/version identity. Leave native acceptance NOT_RUN until performed; “build succeeded” alone is insufficient.
+3. Zip the **entire** `release\win32-x64\` directory (never a lone `.exe`), compute SHA-256 hashes for the ZIP, NSIS installer, `mind-place.exe`, and `mind-place-capture-host.exe`, and execute the bounded `MP-UI-L1` native smoke checks in the isolated profile before handing the ready-to-open folder/shortcut to the owner.
 
-## Owner installation, launch and rollback
+---
 
-Preferred visual preview: download and verify the qualification agent's ZIP hash, extract to a new folder, and open the prepared shortcut. This avoids replacing the existing installation. If an installer is used later, the qualifier must first demonstrate profile isolation and document its actual current-user install location; the same product identifier can replace an existing app.
+## 3. Owner Launch, Walkthrough & Rollback
 
-Rollback: exit the preview and remove its extracted folder/shortcut. The isolated data is under `%LOCALAPPDATA%\MindPlace-UI09-Isolated-Preview`; retain it for evidence or delete it only after owner consent. The normal application/profile stays separate. If the owner explicitly enabled a browser registration or provider during qualification, revoke/stop it through the app and restore the documented previous registration before deleting the preview. Never delete the owner's existing archive.
+### 3.1 Safe Launch & Rollback
+- **Launch:** Extract the verified preview ZIP to a temporary folder and double-click the prepared `Launch-UI09-Preview` shortcut. Your existing Mind Place installation and real archive remain untouched because data is isolated under `%LOCALAPPDATA%\MindPlace-UI09-Isolated-Preview`.
+- **Rollback:** Close the preview window and delete the extracted preview folder and `%LOCALAPPDATA%\MindPlace-UI09-Isolated-Preview`.
 
-## Page-by-page owner walkthrough
+### 3.2 Page-by-Page Owner Visual & Functional Checklist
 
-Use the artifact's `ui09/gallery.html` beside its manifest for original-versus-integrated cloud screenshots. Those images are synthetic; Windows screenshots from the qualifier are the native evidence. Compare light/dark, sidebar expanded/collapsed, and widths near 1440/1120/780/390, plus Windows scaling 100/150/175% and zoom as practical.
+Compare against the canonical monochrome Knowledge OS design (`docs/ui/evidence/mp-ui-09/reference.html` and the `ui09/gallery.html` A/B artifact in the `Visual` GitHub Actions run) across Light and Dark themes, Expanded (`256px`) and Collapsed (`64px`) sidebar, and responsive widths:
 
-| Page / flow | Inspect and expected behavior | Evidence / known limit |
+| Surface / Flow | What to Verify | Factual Boundary / Expected Behavior |
 | --- | --- | --- |
-| First launch / lock | Starts behind security gate; isolated first run explains protection; cancel/retry never opens archive without confirmed unlock | Onboarding and manual-lock tests; no owner secret screenshots |
-| Onboarding | Welcome → Vault → optional capture/providers → first useful result; skip/resume; returning users not forced back | `*-onboarding-*.png`; empty archive never claims a verified result |
-| Overview | Actual saved counts, recent captures, navigation, factual runtime health | `*-home-*.png`; no prototype telemetry or fabricated totals |
-| Conversations | Provider filter, page 1/2, long title, full transcript, revision selector, back, copy/export | `*-conversations-*.png`, `*-transcript-*.png`; partial captures labeled |
-| Curated Memory | Collections/cards/Quick Peek, detail/history/as-of, conflict/related memory, Projects/People/Topics | `*-memory-*.png`, `*-memory-detail-*.png`; opaque proof refs copy only; writes disabled where unsupported |
-| Hive | Query, clusters and isolated nodes, filters, zoom/pan/branch/back, evidence, matched conversation | `*-hive-*.png`; bounded native graph; no fabricated generation/edges |
-| Files & Vault | Authorize a disposable folder → Stage → Approve → Index → search/exact preview → revoke; original files remain | `*-files-*.png`; manual absolute path, no native picker; external files not implied encrypted |
-| Providers & MCP | Capture support, registration, import, setup/cancel/return, start/stop/revoke only if explicitly chosen | `*-providers-*.png`; listener/configuration ≠ tested client connection |
-| Global search | Ctrl/Meta K, keyboard selection, results, exact saved revision, multi-query/context/trace, copy | `*-search-results.png`, `*-context.png`, `*-trace.png`; bounded index results; JSON copy, no fabricated file export |
-| Settings | Theme/density/provenance, tab keyboard focus, actual diagnostics, rebuild confirmation/cancel, storage/recovery cancel | `*-settings-*.png`; unknown service health unavailable; recovery uses locked gate; legacy backup disabled |
-| Cross-module / lock | Repeated page changes, modal Escape and return focus; lock clears transcript/search/drawers, revoked content cannot reopen | Native qualifier adds screen/receipt; backend authorization tests ≠ real device approval |
-| Empty / error / responsiveness | Clear next step, no phantom data, readable narrow pages, scrolling controls and keyboard access | `empty-*`, `error-*`; cloud layout does not certify WebView2/DPI |
+| **1. Security Gate (`#vaultLockOverlay`)** | Centered monochrome card on zinc backdrop; first-run secret creation, unlock, and recovery mode | Starts locked; never exposes archive or MCP before unlock |
+| **2. Application Shell & Topbar** | `256px`/`64px` sidebar with brand mark, vault pill, grouped nav with dynamic counts, footer, and single `58px` topbar | Single topbar with breadcrumb, `Ctrl K` search trigger, and `Technical`/`Density`/`Theme`/`Lock` pills |
+| **3. Setup & Onboarding (`page-setup`)** | 4-step horizontal stepper (`Welcome`, `Secure vault`, `Capture & AI providers`, `First useful result`) | Never asks for secrets outside lock screen; requires a real `read_conversation` before marking verified |
+| **4. Overview (`page-home`)** | Overline, header + CTAs, `.status-strip`, 4 metric cards, 3-column lower grid (`Recent conversations`, `Quick access`, `Runtime health`) | Shows real archive counts and observed local index/MCP state; zero fabricated demo numbers |
+| **5. Conversations Archive & Detail** | Header with `Capture & import setup` CTA, filter bar, table with `.tag.outline.mono` provider pills, and 2-column detail view (`1fr 340px` right provenance rail) | Preserves immutable snapshot selector, partial-capture warnings, and Markdown copy/export |
+| **6. Curated Memory & Quick Peek** | Segmented view toggle, 3-column collection cards, 2-column list + `380px` detail inspector, right-hand Quick Peek drawer, and `Projects`/`People`/`Topics` lenses | Monochrome zinc styling throughout; opaque proof refs offer copy; unsupported writes stay disabled/draft-only |
+| **7. Hive Mind Graph (`page-hive`)** | Radial dot-matrix canvas with concentric orbital rings, node labels, floating controls, and side-by-side `330px` right node inspector | Bounded 120-node/240-edge read-only graph; opens conversation only on exact archive/import identity match |
+| **8. Files & Secure Vault (`page-files`)** | Storage protection banner with policy pill, 3-column step cards (`01 Stage`, `02 Approve`, `03 Index`), folder list, modal authorize dialog, and provenance inspector | Closed dialog stays hidden until clicked; manual absolute path input; original external files remain untouched on revoke |
+| **9. AI Providers & MCP (`page-providers`)** | 3-column provider cards (`ChatGPT`, `Claude`, `Gemini`), transport status, and `Browser & host setup` dialog | Clearly distinguishes browser capture adapter support from MCP client handshakes |
+| **10. Global Search (`Ctrl+K` → `Search all sources`)** | Command palette dialog, search input + `Multi-Query & Policies`, segmented source tabs, result cards, provenance preview, `Context Pack` and `Technical Trace` drawers | Collapsed multi-query panel stays hidden; selected filter tabs use monochrome surface contrast |
+| **11. Settings (`page-settings`)** | `220px` left category nav (`General & Appearance`, `Storage & Vault`, `Privacy & security`, `Operational diagnostics`) + right cards | Theme/density/technical toggles sync with topbar; recovery uses locked security gate; online backup requires encrypted unlocked vault |
 
-Record one decision per row: **PASS / CHANGES REQUIRED / BLOCKED**, with candidate SHA, Windows build/hash, page/theme/width/scaling, expected versus observed, and screenshot when useful. “CHANGES REQUIRED” should name a concrete issue; “BLOCKED” should state missing setup/capability. Final overall owner decision remains **NOT_RUN** until the actual complete candidate is opened and reviewed. A recorded visual PASS does not accept unrelated security/native gates or authorize a merge.
+Record **PASS / CHANGES REQUIRED / BLOCKED** for the candidate. Final approval and manual merge of PR #159 remain exclusively with the repository owner.
