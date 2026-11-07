@@ -1,6 +1,6 @@
 # MP-9E — Atomic portable backup / restore integrity hardening
 
-**Task:** MP-9E · [#149](https://github.com/KaisAbiyyi/mind-place/issues/149). **Execution:** ChatGPT GPT-6 Cloud, exclusive `backup` lock. **Source baseline:** `main` at `24648c74f3f59e176974d3878049b882478db69b`.
+**Task:** MP-9E · [#149](https://github.com/KaisAbiyyi/mind-place/issues/149). **Execution:** ChatGPT GPT-6 Cloud, exclusive `backup` lock. **Original source baseline:** `main` at `24648c74f3f59e176974d3878049b882478db69b`; **reconciled with main** `428cb2df6c931024ff13fe58494f33e2640a787e` without rewriting prior MP-9E commits.
 
 ## Architecture and boundaries
 
@@ -72,3 +72,12 @@ Synthetic SQLCipher integration coverage now exercises the real encrypted state,
 ### Additional bounded traversal and interruption regressions (2026-11-07)
 
 Following the reconciliation of PR #152 with current main, the bounded `sync_directory_tree` walk also increments and enforces the payload-file budget. Package-root metadata is included in the total-entry budget but not counted toward the 100,000-file payload cap. Synthetic injected-limit regressions cover exact-boundary file acceptance and rejection during directory sync. New checkpoint regressions cover an interrupted backup before publication, restore staging interruption, interruption immediately before final restore publication, rejection of conflicting partial staging on retry, and successful recovery to a distinct new destination. Source added to the existing Draft PR. Execution and exact-HEAD qualification remain NOT RUN until recorded by CI; these source additions do not certify SQLCipher/native Windows or real hardware durability.
+
+
+### Two-way immutable object inventory and valid recovery (2026-11-07)
+
+The online snapshot validator now requires **inverse object/catalog correspondence** in addition to opening every referenced object. The archive catalog derives expected encrypted object filenames from every immutable revision; the state SQLCipher `document_objects` table derives expected document names. Legacy raw-file inventory and its encrypted raw-map object are included, rather than silently dropped. The archive and document object roots share a checked entry/directory/file budget and reject stray names, unexpected shard layouts, missing referenced objects and extra ciphertext objects before backup or restore publication. No encryption key, backup v1 schema or existing ciphertext format changes are made.
+
+A synthetic SQLCipher regression injects both a physically orphaned archive ciphertext and an independently encrypted but unreferenced document object; `VaultOnlineBackup::create()` must reject either without publishing the backup destination. The full-application recovery regression additionally preserves a good published encrypted generation while damaging other packages and injecting staging conflicts, then requires that the valid generation restores readable archive content and the original vault identity. An inserted object does not become accepted merely because its `MPOS\x01` header is syntactically plausible.
+
+**Unverified limits:** These SQLCipher integration tests are code-added but require actual feature-enabled execution on hosted Windows and Ubuntu; ordinary source compilation is not proof they ran. The `backups` opaque ciphertext subtree is preserved under the MP-9B contract and has no separately authenticated logical object catalog in this task. Native owner-installed recovery and physical power-loss replay remain a distinct NOT RUN gate. 100K/1M workflow dispatch remains unauthorized. Keep PR Draft with no merge or release.

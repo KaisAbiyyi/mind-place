@@ -276,12 +276,21 @@ fn online_backup_failure_injection_never_publishes_incomplete_restores() {
     VaultOnlineBackup::restore(&gate, lease, &safe_recovery, &recovered, &recovery).unwrap();
     let recovered_vault =
         CryptoVault::restore_with_recovery(&gate, lease, &manifest, &recovery).unwrap();
-    let recovered_archive = VaultCaptureStore::open(&recovered, recovered_vault, &gate, lease).unwrap();
+    let recovered_archive =
+        VaultCaptureStore::open(&recovered, recovered_vault, &gate, lease).unwrap();
     assert_eq!(
-        recovered_archive.read(&receipt.id, None).unwrap().capture.messages[0].text,
+        recovered_archive
+            .read(&receipt.id, None)
+            .unwrap()
+            .capture
+            .messages[0]
+            .text,
         "synthetic"
     );
-    assert_eq!(VaultManifest::read(&recovered).unwrap().vault_id_b64, manifest.vault_id_b64);
+    assert_eq!(
+        VaultManifest::read(&recovered).unwrap().vault_id_b64,
+        manifest.vault_id_b64
+    );
 
     gate.lock();
     let locked_backup = home.path().join("locked-online-backup");
