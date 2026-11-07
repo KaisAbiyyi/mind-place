@@ -12,7 +12,9 @@ use mind_place_security::{
     vault_storage::ImmutableVaultStorage,
     SecurityError, SecurityGate, UnlockLease,
 };
-use mind_place_state::{CipherKey, StateStore};
+use mind_place_state::{
+    canonical_source_id, CipherKey, SourceDescriptor, SourceKey, StateStore,
+};
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use sha2::{Digest, Sha256};
 use std::{
@@ -307,6 +309,39 @@ impl VaultCaptureStore {
         format!("capture/{archive_id}/{snapshot_id}")
     }
 
+    /// Map an archive conversation back to its versioned state authority.
+    /// Unindexed legacy import types have no provider canonical identity here;
+    /// migration/unsupported-provider policy is a separate release gate.
+    fn capture_redacted(
+        &self,
+        authority: &StateStore,
+        provider: &str,
+        conversation_id: &str,
+    ) -> Result<bool> {
+        let Some(namespace) = crate::namespace_for_provider(provider) else {
+            return Ok(false);
+        };
+        let source_id = canonical_source_id(&SourceDescriptor {
+            provider,
+            source_namespace: namespace,
+            source_kind: "conversation",
+            key: SourceKey::External(conversation_id),
+        })?;
+        Ok(authority.source_is_redacted(&source_id)?)
+    }
+
+    fn require_visible(
+        &self,
+        authority: &StateStore,
+        provider: &str,
+        conversation_id: &str,
+    ) -> Result<()> {
+        if self.capture_redacted(authority, provider, conversation_id)? {
+            return Err(IndexError::Revoked);
+        }
+        Ok(())
+    }
+
     pub fn save(&self, capture: Capture) -> Result<SaveReceipt> {
         self.save_internal(capture, false)
     }
@@ -346,8 +381,13 @@ impl VaultCaptureStore {
             )
         );
         let identity = Self::identity(&id, &snapshot_id);
+        // Open authority BEFORE the outer writer fence: vault open itself may
+        // perform fenced schema validation. Check under the SAME writer fence
+        // as the immutable archive write to close the redaction/capture race.
+        let authority = self.open_state_store()?;
         let _writer =
             VaultWriterFence::writer(&self.root).map_err(|_| IndexError::InvalidEvidence)?;
+        self.require_visible(&authority, &capture.provider, &capture.conversation_id)?;
         let mut db = self.connection()?;
         if db
             .query_row(
@@ -509,6 +549,7 @@ impl VaultCaptureStore {
     }
 
     pub fn read(&self, archive_id: &str, revision: Option<&str>) -> Result<Conversation> {
+        let authority = self.open_state_store()?;
         let _writer =
             VaultWriterFence::writer(&self.root).map_err(|_| IndexError::InvalidEvidence)?;
         let db = self.connection()?;
@@ -542,6 +583,8 @@ impl VaultCaptureStore {
             })
             .optional()?
             .ok_or(IndexError::InvalidEvidence)?;
+        // Direct archive-id + revision fetch cannot bypass logical redaction.
+        self.require_visible(&authority, &row.2, &row.3)?;
         let snapshot_count: i64 = db.query_row(
             "SELECT count(*) FROM vault_captures WHERE archive_id=?1",
             [archive_id],
@@ -652,7 +695,15 @@ impl VaultCaptureStore {
         archive_id: &str,
         revision: Option<&str>,
     ) -> Result<ExportResult> {
+        let authority = self.open_state_store()?;
         let conversation = self.read(archive_id, revision)?;
+        let _writer =
+            VaultWriterFence::writer(&self.root).map_err(|_| IndexError::InvalidEvidence)?;
+        self.require_visible(
+            &authority,
+            &conversation.capture.provider,
+            &conversation.capture.conversation_id,
+        )?;
         if conversation.capture.messages.iter().any(|message| {
             message
                 .attachments
@@ -688,7 +739,15 @@ impl VaultCaptureStore {
         {
             return Err(IndexError::InvalidEvidence);
         }
-        self.read(archive_id, None)?;
+        let authority = self.open_state_store()?;
+        let conversation = self.read(archive_id, None)?;
+        let _writer =
+            VaultWriterFence::writer(&self.root).map_err(|_| IndexError::InvalidEvidence)?;
+        self.require_visible(
+            &authority,
+            &conversation.capture.provider,
+            &conversation.capture.conversation_id,
+        )?;
         let storage = self.storage()?;
         let inventory = crate::vault_legacy_objects::RawLegacyInventory::read(
             &self.root,
@@ -724,6 +783,7 @@ impl VaultCaptureStore {
         if query.len() > 1024 {
             return Err(IndexError::InvalidQuery);
         }
+        let authority = self.open_state_store()?;
         let _writer =
             VaultWriterFence::writer(&self.root).map_err(|_| IndexError::InvalidEvidence)?;
         let mut db = self.connection()?;
@@ -731,11 +791,21 @@ impl VaultCaptureStore {
         // or updates a conversation between keyset pages.
         let tx = db.transaction()?;
         let result = Self::catalog_rows(&tx, query, complete)?;
+        // Hide even historical catalogue titles and metadata for a redacted
+        // source; the complete reindex inventory drops these derived rows.
+        let mut filtered = Vec::with_capacity(result.len());
+        for summary in result {
+            if !self.capture_redacted(
+                &authority, &summary.provider, &summary.conversation_id,
+            )? {
+                filtered.push(summary);
+            }
+        }
         self.gate
             .validate_lease(self.lease)
             .map_err(|_| IndexError::Revoked)?;
         tx.commit()?;
-        Ok(result)
+        Ok(filtered)
     }
 
     fn catalog_rows(
@@ -922,9 +992,19 @@ impl VaultCaptureStore {
     }
 
     pub fn snapshots(&self, archive_id: &str) -> Result<Vec<SnapshotSummary>> {
+        let authority = self.open_state_store()?;
         let _writer =
             VaultWriterFence::writer(&self.root).map_err(|_| IndexError::InvalidEvidence)?;
         let db = self.connection()?;
+        let identity: Option<(String, String)> = db.query_row(
+            "SELECT provider,conversation_id FROM vault_captures
+             WHERE archive_id=?1 LIMIT 1",
+            [archive_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        ).optional()?;
+        if let Some((provider, conversation_id)) = identity {
+            self.require_visible(&authority, &provider, &conversation_id)?;
+        }
         let mut statement = db.prepare(
             "SELECT snapshot_id,captured_at,message_count,completeness
              FROM vault_captures WHERE archive_id=?1 ORDER BY captured_at DESC",
