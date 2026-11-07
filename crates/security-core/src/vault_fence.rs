@@ -17,6 +17,8 @@ use std::{
 pub const WRITER_LOCK_NAME: &str = ".vault-writer.lock";
 /// Independent privacy serialization: capture and source redaction acquire
 /// this EXCLUSIVE lock before any nested shared writer/SQLite connection.
+// Advisory sentinel lives BESIDE the vault (not inside its strict backup
+// inventory). It contains no authority or user data.
 pub const PRIVACY_LOCK_NAME: &str = ".vault-privacy.lock";
 
 pub struct VaultWriterFence {
@@ -40,7 +42,13 @@ impl VaultWriterFence {
     /// encrypted object publication and catalog commit. Never upgrade the
     /// shared writer fence: nested SQLCipher/storage operations reacquire it.
     pub fn privacy(vault_root: &Path) -> Result<Self> {
-        let file = open_lock(vault_root, PRIVACY_LOCK_NAME)?;
+        if !vault_root.is_dir() {
+            return Err(SecurityError::InvalidConfig);
+        }
+        let parent = vault_root.parent().ok_or(SecurityError::InvalidConfig)?;
+        // The sibling file is intentionally outside the strict portable-backup
+        // inventory; it is process coordination, never restored authority.
+        let file = open_lock(parent, PRIVACY_LOCK_NAME)?;
         FileExt::lock_exclusive(&file)?;
         Ok(Self { _file: file })
     }
@@ -103,8 +111,10 @@ mod tests {
     #[test]
     fn privacy_exclusive_is_separate_from_shared_writer_and_snapshot_lock() {
         let home = tempfile::tempdir().unwrap();
-        let _writer = VaultWriterFence::writer(home.path()).unwrap();
-        let _privacy = VaultWriterFence::privacy(home.path()).unwrap();
+        let root = home.path().join("vault");
+        fs::create_dir(&root).unwrap();
+        let _writer = VaultWriterFence::writer(&root).unwrap();
+        let _privacy = VaultWriterFence::privacy(&root).unwrap();
         let competing = OpenOptions::new()
             .read(true)
             .write(true)
