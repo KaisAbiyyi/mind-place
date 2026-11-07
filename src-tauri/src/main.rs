@@ -481,13 +481,22 @@ async fn search_archive_index(
     limit: Option<usize>,
 ) -> Result<Vec<SearchHit>, String> {
     let index_path = state.index_path.clone();
+    let state_path = state.state_path.clone();
     let vault = owner_vault(&state);
     index_task(&state, move |_, _| {
-        open_owner_index(&vault, &index_path)?.search(
+        let authority = open_owner_state(&vault, &state_path)?;
+        let hits = open_owner_index(&vault, &index_path)?.search(
             &query,
             include_history.unwrap_or(false),
             limit.unwrap_or(20),
-        )
+        )?;
+        let mut visible = Vec::new();
+        for hit in hits {
+            if !authority.source_is_redacted(&hit.source_id)? {
+                visible.push(hit);
+            }
+        }
+        Ok(visible)
     })
     .await
 }
@@ -498,9 +507,19 @@ async fn search_retrieval(
     request: RetrievalRequest,
 ) -> Result<RetrievalResponse, String> {
     let index_path = state.index_path.clone();
+    let state_path = state.state_path.clone();
     let vault = owner_vault(&state);
     index_task(&state, move |_, _| {
-        open_owner_index(&vault, &index_path)?.retrieve(&request)
+        let authority = open_owner_state(&vault, &state_path)?;
+        let mut result = open_owner_index(&vault, &index_path)?.retrieve(&request)?;
+        let mut visible = Vec::new();
+        for hit in result.hits {
+            if !authority.source_is_redacted(&hit.source_id)? {
+                visible.push(hit);
+            }
+        }
+        result.hits = visible;
+        Ok(result)
     })
     .await
 }
