@@ -515,7 +515,8 @@ impl StateStore {
         if source_redaction::source_is_redacted(&db, id)? {
             return Ok(None);
         }
-        let saved = db.query_row(
+        let saved = db
+            .query_row(
                 "SELECT id,provider,source_namespace,source_kind,key_type,source_key
                  FROM source_identities WHERE id=?1",
                 [id],
@@ -545,12 +546,15 @@ impl StateStore {
         let mut db = self.connection()?;
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
         source_redaction::assert_source_not_redacted(&tx, source_id)?;
-        let source = tx.query_row(
-            "SELECT id,provider,source_namespace,source_kind,key_type,source_key
+        let source = tx
+            .query_row(
+                "SELECT id,provider,source_namespace,source_kind,key_type,source_key
              FROM source_identities WHERE id=?1",
-            [source_id],
-            source_record,
-        ).optional()?.ok_or(StateError::InvalidValue)?;
+                [source_id],
+                source_record,
+            )
+            .optional()?
+            .ok_or(StateError::InvalidValue)?;
         verify_source_record(&source)?;
         tx.execute(
             "INSERT INTO claim_evidence(claim_id,source_ref,evidence_kind) VALUES(?1,?2,?3)",

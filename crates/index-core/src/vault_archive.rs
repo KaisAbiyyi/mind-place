@@ -12,9 +12,7 @@ use mind_place_security::{
     vault_storage::ImmutableVaultStorage,
     SecurityError, SecurityGate, UnlockLease,
 };
-use mind_place_state::{
-    canonical_source_id, CipherKey, SourceDescriptor, SourceKey, StateStore,
-};
+use mind_place_state::{canonical_source_id, CipherKey, SourceDescriptor, SourceKey, StateStore};
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use sha2::{Digest, Sha256};
 use std::{
@@ -795,9 +793,7 @@ impl VaultCaptureStore {
         // source; the complete reindex inventory drops these derived rows.
         let mut filtered = Vec::with_capacity(result.len());
         for summary in result {
-            if !self.capture_redacted(
-                &authority, &summary.provider, &summary.conversation_id,
-            )? {
+            if !self.capture_redacted(&authority, &summary.provider, &summary.conversation_id)? {
                 filtered.push(summary);
             }
         }
@@ -996,12 +992,14 @@ impl VaultCaptureStore {
         let _writer =
             VaultWriterFence::writer(&self.root).map_err(|_| IndexError::InvalidEvidence)?;
         let db = self.connection()?;
-        let identity: Option<(String, String)> = db.query_row(
-            "SELECT provider,conversation_id FROM vault_captures
+        let identity: Option<(String, String)> = db
+            .query_row(
+                "SELECT provider,conversation_id FROM vault_captures
              WHERE archive_id=?1 LIMIT 1",
-            [archive_id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        ).optional()?;
+                [archive_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
         if let Some((provider, conversation_id)) = identity {
             self.require_visible(&authority, &provider, &conversation_id)?;
         }

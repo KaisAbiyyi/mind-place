@@ -2,8 +2,8 @@
 //! This module is deliberately not exposed over Tauri/MCP. Phase 5C owns
 //! capability-checked write entry points and destructive/forget behavior.
 use crate::{
-    source_record, source_redaction, valid_id, valid_text, verify_source_record, MemoryClaim, Result, StateError,
-    StateStore,
+    source_record, source_redaction, valid_id, valid_text, verify_source_record, MemoryClaim,
+    Result, StateError, StateStore,
 };
 use rusqlite::{params, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};

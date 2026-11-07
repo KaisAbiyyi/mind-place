@@ -2,8 +2,8 @@
 //! No external write surface is exposed here. MP-5C owns authorization and forget.
 use crate::{
     memory::{claim_as_of_connection, next_claim_clock},
-    source_record, source_redaction, valid_id, valid_text, verify_source_record, ClaimState, Result, StateError,
-    StateStore,
+    source_record, source_redaction, valid_id, valid_text, verify_source_record, ClaimState,
+    Result, StateError, StateStore,
 };
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::Serialize;

@@ -3,8 +3,8 @@
 use crate::{IntegrationCore, IntegrationError, Result, ToolBatch, ToolBatchResponse};
 use mind_place_security::SecurityGate;
 use mind_place_state::{ClientCapability, ClientRecord, StateStore};
-use sha2::{Digest, Sha256};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
 pub const CREDENTIAL_PREFIX: &str = "mpc_v1_";
@@ -108,11 +108,10 @@ impl<'a> ClientAuthority<'a> {
     }
 }
 
-
 /* Strict post-result privacy guard for the credentialed MCP dispatcher.
-   A stale FTS generation may still contain pre-redaction snippets; never
-   serialize those snippets to a model even if source indexing has not caught
-   up. Fail closed on malformed source references. */
+A stale FTS generation may still contain pre-redaction snippets; never
+serialize those snippets to a model even if source indexing has not caught
+up. Fail closed on malformed source references. */
 fn reject_redacted_sources(state: &StateStore, value: &Value) -> Result<()> {
     let mut pending = vec![value];
     let mut visited = 0usize;
@@ -192,7 +191,8 @@ impl IntegrationCore<'_> {
             }
             if state
                 .authorize_client_hash(&hash, ClientCapability::Read)?
-                .as_deref() != Some(client.as_str())
+                .as_deref()
+                != Some(client.as_str())
             {
                 return Err(IntegrationError::AccessDenied);
             }

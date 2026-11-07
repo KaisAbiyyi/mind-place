@@ -8,8 +8,8 @@
 //! trusted owner-only commands. Redaction is append-only through this API;
 //! a future schema migration must make this invariant database-enforced.
 use crate::{
-    memory::next_claim_clock, source_record, valid_text, verify_source_record,
-    Result, StateError, StateStore,
+    memory::next_claim_clock, source_record, valid_text, verify_source_record, Result, StateError,
+    StateStore,
 };
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
@@ -42,9 +42,7 @@ fn valid_sha256(hash: &str) -> bool {
 }
 
 fn valid_source_id(id: &str) -> bool {
-    id.len() == 71
-        && id.starts_with("src:v1:")
-        && valid_sha256(&id[7..])
+    id.len() == 71 && id.starts_with("src:v1:") && valid_sha256(&id[7..])
 }
 
 fn key(id: &str) -> Result<String> {
@@ -130,21 +128,27 @@ impl StateStore {
         // IMMEDIATE serializes credential revocation and evidence writes.
         let mut db = self.connection()?;
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let actor: String = tx.query_row(
-            "SELECT c.id FROM clients c
+        let actor: String = tx
+            .query_row(
+                "SELECT c.id FROM clients c
              JOIN client_credentials k ON k.client_id=c.id
              JOIN client_capabilities p ON p.client_id=c.id
              WHERE k.token_sha256=?1 AND c.state='enabled'
                AND p.capability='admin' AND p.revoked_at IS NULL",
-            [admin_token_sha256],
-            |row| row.get(0),
-        ).optional()?.ok_or(StateError::MemoryDenied)?;
-        let source = tx.query_row(
-            "SELECT id,provider,source_namespace,source_kind,key_type,source_key
+                [admin_token_sha256],
+                |row| row.get(0),
+            )
+            .optional()?
+            .ok_or(StateError::MemoryDenied)?;
+        let source = tx
+            .query_row(
+                "SELECT id,provider,source_namespace,source_kind,key_type,source_key
              FROM source_identities WHERE id=?1",
-            [source_id],
-            source_record,
-        ).optional()?.ok_or(StateError::InvalidValue)?;
+                [source_id],
+                source_record,
+            )
+            .optional()?
+            .ok_or(StateError::InvalidValue)?;
         verify_source_record(&source)?;
         if let Some(existing) = tombstone(&tx, source_id)? {
             tx.commit()?;
