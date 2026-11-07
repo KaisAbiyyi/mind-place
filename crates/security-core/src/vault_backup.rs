@@ -544,7 +544,15 @@ fn sync_directory_tree(
             };
             budget.record_directory(depth)?;
             sync_directory_tree(&path, data_root, budget)?;
-        } else if !metadata.is_file() {
+        } else if metadata.is_file() {
+            // Package metadata consumes the entry budget, not the payload-file
+            // budget. Enforce the payload cap on this sync walk as well.
+            if let Ok(relative) = path.strip_prefix(data_root) {
+                if allowed(relative) {
+                    budget.record_payload_file()?;
+                }
+            }
+        } else {
             return Err(SecurityError::UnsafePath);
         }
     }
@@ -1043,6 +1051,84 @@ mod tests {
         let backup = temp.path().join("backup");
         assert!(PortableBackup::create(&gate, lease, &vault, &root, &backup, 1).is_err());
         assert!(!backup.exists());
+    }
+
+    #[test]
+    fn directory_sync_enforces_payload_file_limit_at_exact_boundary() {
+        let temp = tempfile::tempdir().unwrap();
+        let staging = temp.path().join("synthetic-stage");
+        let payload = staging.join("payload");
+        fs::create_dir_all(&payload).unwrap();
+        fs::write(staging.join("vault-v1.json"), b"synthetic metadata").unwrap();
+        fs::write(payload.join("state.sqlite3"), b"synthetic encrypted payload").unwrap();
+
+        let exact = InventoryLimits {
+            max_entries: 3,
+            max_directories: 1,
+            max_files: 1,
+            max_depth: 1,
+        };
+        let mut accepted = InventoryBudget::new(exact);
+        sync_directory_tree(&staging, &payload, &mut accepted).unwrap();
+        assert_eq!(accepted.entries, 3);
+        assert_eq!(accepted.directories, 1);
+        assert_eq!(accepted.files, 1, "root metadata must not count as payload");
+
+        let too_few = InventoryLimits { max_files: 0, ..exact };
+        let mut rejected = InventoryBudget::new(too_few);
+        assert!(sync_directory_tree(&staging, &payload, &mut rejected).is_err());
+    }
+
+    #[test]
+    fn final_publication_and_restore_checkpoint_faults_preserve_recovery() {
+        let (temp, gate, lease, vault, recovery) = fixture();
+        let source = temp.path().join("vault");
+        let interrupted_backup = temp.path().join("backup-before-publish");
+        let backup_staging = interrupted_backup.with_extension("mp9b-partial");
+        assert!(PortableBackup::create_with_checkpoint(
+            &gate, lease, &vault, &source, &interrupted_backup, 118,
+            |point, _| {
+                if point == BackupCheckpoint::BeforeBackupPublish {
+                    Err(SecurityError::InvalidConfig)
+                } else {
+                    Ok(())
+                }
+            },
+        ).is_err());
+        assert!(!interrupted_backup.exists());
+        assert!(backup_staging.join("bundle.json").is_file());
+        assert!(PortableBackup::create(
+            &gate, lease, &vault, &source, &interrupted_backup, 118
+        ).is_err(), "retry must not adopt prior staging");
+
+        let valid_backup = temp.path().join("valid-published-recovery");
+        PortableBackup::create(&gate, lease, &vault, &source, &valid_backup, 119).unwrap();
+        for checkpoint in [
+            BackupCheckpoint::RestoreStagingCreated,
+            BackupCheckpoint::BeforeRestorePublish,
+        ] {
+            let destination = temp.path().join(format!("interrupted-restore-{checkpoint:?}"));
+            let staging = destination.with_extension("mp9b-restore-partial");
+            assert!(PortableBackup::restore_with_limits_and_checkpoint(
+                &gate, lease, &valid_backup, &destination, &recovery,
+                PRODUCTION_INVENTORY_LIMITS,
+                |point, _| {
+                    if point == checkpoint {
+                        Err(SecurityError::InvalidConfig)
+                    } else {
+                        Ok(())
+                    }
+                },
+            ).is_err());
+            assert!(!destination.exists(), "partial generation was published");
+            assert!(staging.is_dir(), "interrupted staging was deleted");
+            assert!(PortableBackup::restore(
+                &gate, lease, &valid_backup, &destination, &recovery
+            ).is_err(), "retry adopted existing partial staging");
+        }
+        let recovered = temp.path().join("fresh-valid-recovery");
+        PortableBackup::restore(&gate, lease, &valid_backup, &recovered, &recovery).unwrap();
+        assert!(recovered.join("state.sqlite3").is_file());
     }
 
     #[test]

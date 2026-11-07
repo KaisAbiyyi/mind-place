@@ -67,3 +67,8 @@ Synthetic SQLCipher integration coverage now exercises the real encrypted state,
 - \`mp9b-sqlcipher-qualification.yml\` is skipped for \`pull_request\` events while the PR is Draft. Its \`workflow_dispatch\` path checks out the PR merge ref and can qualify a Draft PR without changing its Draft state. The dispatch was not available through the connected GitHub actions in this execution; SQLCipher integration execution therefore remains **NOT RUN** until an owner dispatches it.
 - Native installed-Windows backup/recovery acceptance, owner-vault recovery, and physical power-loss durability remain **NOT RUN**. Hosted Windows jobs are not native owner acceptance.
 - PR #152 remains Draft. No merge, release, owner-data access, or main-branch change is authorized.
+
+
+### Additional bounded traversal and interruption regressions (2026-11-07)
+
+Following the reconciliation of PR #152 with current main, the bounded `sync_directory_tree` walk also increments and enforces the payload-file budget. Package-root metadata is included in the total-entry budget but not counted toward the 100,000-file payload cap. Synthetic injected-limit regressions cover exact-boundary file acceptance and rejection during directory sync. New checkpoint regressions cover an interrupted backup before publication, restore staging interruption, interruption immediately before final restore publication, rejection of conflicting partial staging on retry, and successful recovery to a distinct new destination. Source added to the existing Draft PR. Execution and exact-HEAD qualification remain NOT RUN until recorded by CI; these source additions do not certify SQLCipher/native Windows or real hardware durability.
