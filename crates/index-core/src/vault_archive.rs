@@ -1354,6 +1354,25 @@ mod privacy_capture_race_tests {
     }
 
     #[test]
+    fn redacted_source_is_pruned_from_encrypted_fts_sync_and_rebuild() {
+        let (_home, _gate, _lease, _manifest, _recovery, archive, admin, source) = fixture();
+        archive.save(synthetic_capture("fts")).unwrap();
+        let state = archive.open_state_store().unwrap();
+        let index = archive.open_index_store().unwrap();
+        index.sync_vault_with_check(&archive, &state, || Ok(())).unwrap();
+        assert!(!index.search("privacy", false, 20).unwrap().is_empty());
+
+        state
+            .redact_source(&admin, &source, "Synthetic FTS redaction")
+            .unwrap();
+        index.sync_vault_with_check(&archive, &state, || Ok(())).unwrap();
+        assert!(index.search("privacy", true, 20).unwrap().is_empty());
+
+        index.rebuild_vault_with_check(&archive, &state, || Ok(())).unwrap();
+        assert!(index.search("privacy", true, 20).unwrap().is_empty());
+    }
+
+    #[test]
     fn interrupted_capture_releases_privacy_lock_and_restart_preserves_denial() {
         let (home, gate, lease, manifest, recovery, archive, admin, source) = fixture();
         let interrupted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
