@@ -128,6 +128,11 @@ impl LegacyEncryptedConversion<'_> {
         self.verify_archives(source, stage)?;
         self.verify_raw_archive(source, stage)?;
         self.verify_documents(source, stage)?;
+        // Redaction authorization reads open SQLCipher state in WAL mode during
+        // archive verification. Quiesce ONLY the isolated conversion stage
+        // after its last reader closes, before strict inventory/digest checks.
+        // Never silently remove unknown sidecars or weaken layout validation.
+        self.quiesce_state_for_publication(stage)?;
         let vault = self.crypto()?;
         let storage = ImmutableVaultStorage::new(stage, &vault, self.gate, self.lease)?;
         let actual = RawLegacyInventory::read(stage, &vault, &storage, self.gate, self.lease)?
@@ -136,6 +141,41 @@ impl LegacyEncryptedConversion<'_> {
             return Err(SecurityError::Crypto);
         }
         self.verify_layout(source, stage)?;
+        self.gate.validate_lease(self.lease)
+    }
+
+    fn quiesce_state_for_publication(&self, stage: &Path) -> SecResult<()> {
+        self.gate.validate_lease(self.lease)?;
+        let path = stage.join("state.sqlite3");
+        safe_regular(&path)?;
+        let db = sql(Connection::open_with_flags(
+            &path,
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+        ))?;
+        self.key()?.unlock(&db).map_err(|_| SecurityError::Crypto)?;
+        sqlite_healthy(&db)?;
+        // A busy WAL checkpoint is not a clean shutdown. Fail closed and keep
+        // staging for explicit retry rather than deleting files with live data.
+        let (busy, _, _): (i64, i64, i64) =
+            sql(db.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            }))?;
+        if busy != 0 {
+            return Err(SecurityError::Crypto);
+        }
+        // Preserve the encrypted database's WAL mode. Switching WAL -> DELETE
+        // -> WAL on every verified reopen changes SQLCipher page ciphertext
+        // and breaks the authenticated migration output digest on resume.
+        // The writable pager checkpoints and closes the empty sidecars.
+        sqlite_healthy(&db)?;
+        drop(db);
+        for suffix in ["-wal", "-shm"] {
+            let sidecar = stage.join(format!("state.sqlite3{suffix}"));
+            if sidecar.exists() {
+                // The strict layout verifier must not accept a dirty pager.
+                return Err(SecurityError::Crypto);
+            }
+        }
         self.gate.validate_lease(self.lease)
     }
 

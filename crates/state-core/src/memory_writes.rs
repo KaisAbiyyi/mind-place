@@ -181,6 +181,38 @@ impl StateStore {
             .optional()?
             .ok_or(StateError::MemoryDenied)?;
 
+        // MP-9C: a global Write grant cannot choose an arbitrary private
+        // scope. A scoped create/supersession requires both Write and Admin
+        // on the SAME verified credential, rechecked under this transaction.
+        // Scope labels alone must never act as model-client permissions.
+        let scoped_write = matches!(
+            operation,
+            MemoryWrite::Create {
+                scope_id: Some(_),
+                ..
+            } | MemoryWrite::Supersede {
+                scope_id: Some(_),
+                ..
+            }
+        );
+        if scoped_write {
+            let admin: bool = tx.query_row(
+                "SELECT EXISTS(
+                   SELECT 1 FROM client_credentials k
+                   JOIN clients c ON c.id=k.client_id
+                   JOIN client_capabilities p ON p.client_id=c.id
+                   WHERE k.token_sha256=?1 AND c.id=?2
+                     AND c.state='enabled' AND p.capability='admin'
+                     AND p.revoked_at IS NULL
+                 )",
+                params![token_sha256, client_id],
+                |r| r.get(0),
+            )?;
+            if !admin {
+                return Err(StateError::MemoryDenied);
+            }
+        }
+
         let receipt = tx
             .query_row(
                 "SELECT operation_hash,operation_kind,claim_id,revision,recorded_at_ms
