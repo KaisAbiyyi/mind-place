@@ -101,6 +101,61 @@ fn incomplete_capture_or_invalid_authority_is_never_restored_as_a_valid_vault() 
     }
 }
 
+#[test]
+fn online_backup_rejects_unreferenced_archive_and_document_objects() {
+    use mind_place_security::vault_storage::ImmutableVaultStorage;
+
+    for mode in ["archive", "document"] {
+        let f = fixture();
+        f.archive.save(capture()).unwrap();
+        if mode == "archive" {
+            let archive_root = f.root.join("archive");
+            let first_shard = fs::read_dir(&archive_root)
+                .unwrap()
+                .next()
+                .unwrap()
+                .unwrap()
+                .path();
+            let original = fs::read_dir(first_shard)
+                .unwrap()
+                .next()
+                .unwrap()
+                .unwrap()
+                .path();
+            let orphan_shard = archive_root.join("ff");
+            fs::create_dir_all(&orphan_shard).unwrap();
+            let orphan = orphan_shard.join("f".repeat(64));
+            fs::copy(original, orphan).unwrap();
+        } else {
+            let storage =
+                ImmutableVaultStorage::new(&f.root, &f.vault, &f.gate, f.lease).unwrap();
+            storage
+                .write_immutable(
+                    &f.gate,
+                    f.lease,
+                    ContentKind::DocumentObject,
+                    b"document/synthetic-orphan",
+                    b"unreferenced synthetic object",
+                )
+                .unwrap();
+        }
+        let destination = f.home.path().join(format!("orphan-{mode}-backup"));
+        assert!(
+            VaultOnlineBackup::create(
+                &f.gate,
+                f.lease,
+                &f.vault,
+                &f.root,
+                &destination,
+                8,
+            )
+            .is_err(),
+            "unreferenced {mode} object was silently included"
+        );
+        assert!(!destination.exists());
+    }
+}
+
 #[cfg(windows)]
 #[test]
 fn online_snapshot_waits_for_real_document_object_and_state_index_commit() {

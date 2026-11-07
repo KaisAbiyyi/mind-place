@@ -843,13 +843,13 @@ impl VaultCaptureStore {
         vault: &CryptoVault,
         gate: &SecurityGate,
         lease: UnlockLease,
-    ) -> Result<()> {
+    ) -> Result<std::collections::HashSet<String>> {
         let path = root.join("archive-index.sqlite3");
         if !path.exists() {
             return if Self::archive_objects_present(root)? {
                 Err(IndexError::InvalidEvidence)
             } else {
-                Ok(())
+                Ok(std::collections::HashSet::new())
             };
         }
         let derived = vault
@@ -873,6 +873,7 @@ impl VaultCaptureStore {
             .map_err(|_| IndexError::InvalidEvidence)?;
         let mut statement = db.prepare("SELECT archive_id,snapshot_id,identity,provider,conversation_id,title,source_url,captured_at,message_count,completeness,warnings_json FROM vault_captures ORDER BY archive_id,snapshot_id")?;
         let mut rows = statement.query([])?;
+        let mut expected_archive = std::collections::HashSet::new();
         while let Some(row) = rows.next()? {
             gate.validate_lease(lease)
                 .map_err(|_| IndexError::Revoked)?;
@@ -880,6 +881,12 @@ impl VaultCaptureStore {
             let snapshot: String = row.get(1)?;
             let identity: String = row.get(2)?;
             if identity != Self::identity(&id, &snapshot) {
+                return Err(IndexError::InvalidEvidence);
+            }
+            let object_name = vault
+                .storage_name(gate, lease, ContentKind::Archive, identity.as_bytes())
+                .map_err(|_| IndexError::InvalidEvidence)?;
+            if !expected_archive.insert(object_name) {
                 return Err(IndexError::InvalidEvidence);
             }
             let bytes = storage
@@ -918,7 +925,7 @@ impl VaultCaptureStore {
                 return Err(IndexError::InvalidEvidence);
             }
         }
-        Ok(())
+        Ok(expected_archive)
     }
 
     pub fn snapshots(&self, archive_id: &str) -> Result<Vec<SnapshotSummary>> {

@@ -17,6 +17,7 @@ use mind_place_state::{CipherKey, StateStore};
 use rusqlite::{backup::Backup, Connection, OpenFlags};
 use sha2::{Digest, Sha256};
 use std::{
+    collections::HashSet,
     fs::{self, File, OpenOptions},
     io::{Read, Write},
     path::Path,
@@ -377,6 +378,7 @@ fn verify_coherent_snapshot(
     let _validation = VaultWriterFence::writer(root).map_err(|_| IndexError::InvalidEvidence)?;
     let storage = ImmutableVaultStorage::new(root, vault, gate, lease)
         .map_err(|_| IndexError::InvalidEvidence)?;
+    let mut expected_documents = HashSet::new();
     for (filename, domain) in DB_DOMAINS {
         let path = root.join(filename);
         if !path.exists() {
@@ -442,17 +444,28 @@ fn verify_coherent_snapshot(
                 {
                     return Err(IndexError::InvalidEvidence);
                 }
+                let identity = format!("document/{hash}");
                 let bytes = storage
                     .read(
                         gate,
                         lease,
                         mind_place_security::vault::ContentKind::DocumentObject,
-                        format!("document/{hash}").as_bytes(),
+                        identity.as_bytes(),
                     )
                     .map_err(|_| IndexError::InvalidEvidence)?;
                 if bytes.len() as i64 != length || format!("{:x}", Sha256::digest(&bytes)) != hash {
                     return Err(IndexError::InvalidEvidence);
                 }
+                expected_documents.insert(
+                    vault
+                        .storage_name(
+                            gate,
+                            lease,
+                            mind_place_security::vault::ContentKind::DocumentObject,
+                            identity.as_bytes(),
+                        )
+                        .map_err(|_| IndexError::InvalidEvidence)?,
+                );
             }
         }
     }
@@ -464,13 +477,113 @@ fn verify_coherent_snapshot(
     {
         return Err(IndexError::InvalidEvidence);
     }
+    let mut expected_archive =
+        VaultCaptureStore::verify_backup_catalog(root, vault, gate, lease)?;
     if let Some(raw) = raw {
         raw.verify_all(&storage, gate, lease)
             .map_err(|_| IndexError::InvalidEvidence)?;
+        let (archive, documents) = raw
+            .referenced_storage_names(vault, gate, lease)
+            .map_err(|_| IndexError::InvalidEvidence)?;
+        expected_archive.extend(archive);
+        expected_documents.extend(documents);
+        expected_archive.insert(
+            vault
+                .storage_name(
+                    gate,
+                    lease,
+                    mind_place_security::vault::ContentKind::Archive,
+                    crate::vault_legacy_objects::RAW_MAP_ID,
+                )
+                .map_err(|_| IndexError::InvalidEvidence)?,
+        );
     }
-    VaultCaptureStore::verify_backup_catalog(root, vault, gate, lease)?;
+    // A catalog-to-object check alone misses unreferenced, potentially
+    // attacker-added ciphertext. Require exact inverse correspondence too.
+    let mut budget = ObjectTreeBudget::production();
+    verify_exact_object_tree(&root.join("archive"), &expected_archive, &mut budget)?;
+    verify_exact_object_tree(
+        &root.join("document-objects"),
+        &expected_documents,
+        &mut budget,
+    )?;
     gate.validate_lease(lease)
         .map_err(|_| IndexError::Revoked)?;
+    Ok(())
+}
+
+/// Reject orphaned or unexpected immutable objects, not only missing references.
+/// Both roots consume the same checked total-entry/file/directory budget.
+fn verify_exact_object_tree(
+    root: &Path,
+    expected: &HashSet<String>,
+    budget: &mut ObjectTreeBudget,
+) -> Result<()> {
+    let metadata = match fs::symlink_metadata(root) {
+        Ok(meta) => meta,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return if expected.is_empty() {
+                Ok(())
+            } else {
+                Err(IndexError::InvalidEvidence)
+            };
+        }
+        Err(err) => return Err(err.into()),
+    };
+    guarded(root)?;
+    if !metadata.is_dir() {
+        return Err(IndexError::InvalidEvidence);
+    }
+    budget.record_entry()?;
+    budget.record_directory(0)?;
+    let mut found = HashSet::new();
+    for shard in fs::read_dir(root)? {
+        let shard = shard?;
+        budget.record_entry()?;
+        let path = shard.path();
+        guarded(&path)?;
+        if !fs::symlink_metadata(&path)?.is_dir() {
+            return Err(IndexError::InvalidEvidence);
+        }
+        budget.record_directory(1)?;
+        let shard_name = shard
+            .file_name()
+            .to_str()
+            .ok_or(IndexError::InvalidEvidence)?
+            .to_owned();
+        if shard_name.len() != 2
+            || !shard_name
+                .bytes()
+                .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+        {
+            return Err(IndexError::InvalidEvidence);
+        }
+        for entry in fs::read_dir(path)? {
+            let entry = entry?;
+            budget.record_entry()?;
+            let object_path = entry.path();
+            guarded(&object_path)?;
+            if !fs::symlink_metadata(&object_path)?.is_file() {
+                return Err(IndexError::InvalidEvidence);
+            }
+            budget.record_file()?;
+            let name = entry
+                .file_name()
+                .to_str()
+                .ok_or(IndexError::InvalidEvidence)?
+                .to_owned();
+            if name.len() != 64
+                || !name.starts_with(&shard_name)
+                || !expected.contains(&name)
+                || !found.insert(name)
+            {
+                return Err(IndexError::InvalidEvidence);
+            }
+        }
+    }
+    if found.len() != expected.len() {
+        return Err(IndexError::InvalidEvidence);
+    }
     Ok(())
 }
 
