@@ -15,6 +15,9 @@ use std::{
 };
 
 pub const WRITER_LOCK_NAME: &str = ".vault-writer.lock";
+/// Independent privacy serialization: capture and source redaction acquire
+/// this EXCLUSIVE lock before any nested shared writer/SQLite connection.
+pub const PRIVACY_LOCK_NAME: &str = ".vault-privacy.lock";
 
 pub struct VaultWriterFence {
     _file: File,
@@ -22,19 +25,28 @@ pub struct VaultWriterFence {
 
 impl VaultWriterFence {
     pub fn writer(vault_root: &Path) -> Result<Self> {
-        let file = open_lock(vault_root)?;
+        let file = open_lock(vault_root, WRITER_LOCK_NAME)?;
         FileExt::lock_shared(&file)?;
         Ok(Self { _file: file })
     }
 
     pub fn snapshot(vault_root: &Path) -> Result<Self> {
-        let file = open_lock(vault_root)?;
+        let file = open_lock(vault_root, WRITER_LOCK_NAME)?;
+        FileExt::lock_exclusive(&file)?;
+        Ok(Self { _file: file })
+    }
+
+    /// An independent exclusive fence spanning the redaction authority check,
+    /// encrypted object publication and catalog commit. Never upgrade the
+    /// shared writer fence: nested SQLCipher/storage operations reacquire it.
+    pub fn privacy(vault_root: &Path) -> Result<Self> {
+        let file = open_lock(vault_root, PRIVACY_LOCK_NAME)?;
         FileExt::lock_exclusive(&file)?;
         Ok(Self { _file: file })
     }
 }
 
-fn open_lock(vault_root: &Path) -> Result<File> {
+fn open_lock(vault_root: &Path, name: &str) -> Result<File> {
     for ancestor in vault_root.ancestors() {
         if !ancestor.as_os_str().is_empty() {
             crate::validate_path(ancestor)?;
@@ -43,7 +55,7 @@ fn open_lock(vault_root: &Path) -> Result<File> {
     if !vault_root.is_dir() {
         return Err(SecurityError::InvalidConfig);
     }
-    let path = vault_root.join(WRITER_LOCK_NAME);
+    let path = vault_root.join(name);
     crate::validate_path(&path)?;
     let file = match OpenOptions::new()
         .read(true)
@@ -86,6 +98,21 @@ mod tests {
         FileExt::try_lock_exclusive(&competing).unwrap();
         FileExt::unlock(&competing).unwrap();
         let _snapshot = VaultWriterFence::snapshot(home.path()).unwrap();
+    }
+
+    #[test]
+    fn privacy_exclusive_is_separate_from_shared_writer_and_snapshot_lock() {
+        let home = tempfile::tempdir().unwrap();
+        let _writer = VaultWriterFence::writer(home.path()).unwrap();
+        let _privacy = VaultWriterFence::privacy(home.path()).unwrap();
+        let competing = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(home.path().join(PRIVACY_LOCK_NAME))
+            .unwrap();
+        assert!(FileExt::try_lock_exclusive(&competing).is_err());
+        // The shared writer and privacy locks can coexist, avoiding a
+        // self-deadlock in nested encrypted SQLite/object writes.
     }
 
     #[test]
