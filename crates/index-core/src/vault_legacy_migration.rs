@@ -102,6 +102,8 @@ impl LegacyEncryptedConversion<'_> {
     ) -> SecResult<()> {
         self.gate.validate_lease(self.lease)?;
         self.ensure_manifest(stage)?;
+        #[cfg(debug_assertions)]
+        eprintln!("MP9C_MIGRATION: manifest");
         // Establish the encrypted archive catalog before preserving the raw
         // legacy archive map or any immutable archive objects. A missing
         // catalog after object publication must never be mistaken for empty.
@@ -109,10 +111,14 @@ impl LegacyEncryptedConversion<'_> {
             .map_err(|_| SecurityError::Crypto)?;
         drop(_archive);
         self.copy_state(source, stage)?;
+        #[cfg(debug_assertions)]
+        eprintln!("MP9C_MIGRATION: state copied");
         checkpoint(LegacyConversionCheckpoint::StateCopied)?;
         // Preserve a stable, encrypted raw mapping before normalized views.
         self.preserve_raw_inventory(source, stage)?;
         self.import_archives(source, stage)?;
+        #[cfg(debug_assertions)]
+        eprintln!("MP9C_MIGRATION: archives imported");
         checkpoint(LegacyConversionCheckpoint::ArchiveImported)?;
         self.preserve_raw_archive(source, stage)?;
         checkpoint(LegacyConversionCheckpoint::RawArchivePreserved)?;
@@ -125,7 +131,11 @@ impl LegacyEncryptedConversion<'_> {
         self.gate.validate_lease(self.lease)?;
         self.ensure_manifest(stage)?;
         self.verify_state(source, stage)?;
+        #[cfg(debug_assertions)]
+        eprintln!("MP9C_MIGRATION: state verified");
         self.verify_archives(source, stage)?;
+        #[cfg(debug_assertions)]
+        eprintln!("MP9C_MIGRATION: archives verified");
         self.verify_raw_archive(source, stage)?;
         self.verify_documents(source, stage)?;
         let vault = self.crypto()?;
@@ -136,6 +146,8 @@ impl LegacyEncryptedConversion<'_> {
             return Err(SecurityError::Crypto);
         }
         self.verify_layout(source, stage)?;
+        #[cfg(debug_assertions)]
+        eprintln!("MP9C_MIGRATION: layout verified");
         self.gate.validate_lease(self.lease)
     }
 
