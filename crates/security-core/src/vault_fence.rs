@@ -38,20 +38,31 @@ impl VaultWriterFence {
         Ok(Self { _file: file })
     }
 
-    /// An independent exclusive fence spanning the redaction authority check,
-    /// encrypted object publication and catalog commit. Never upgrade the
-    /// shared writer fence: nested SQLCipher/storage operations reacquire it.
+    /// Shared disclosure fence. A source-redaction commit holds the matching
+    /// EXCLUSIVE fence, so a reader which checked visibility cannot overlap a
+    /// committed tombstone. Acquire before opening state or writer connections.
+    pub fn privacy_reader(vault_root: &Path) -> Result<Self> {
+        let file = privacy_file(vault_root)?;
+        FileExt::lock_shared(&file)?;
+        Ok(Self { _file: file })
+    }
+
+    /// Exclusive source mutation fence; always acquire before shared writer,
+    /// SQLCipher and immutable storage locks (never upgrade a shared lock).
     pub fn privacy(vault_root: &Path) -> Result<Self> {
-        if !vault_root.is_dir() {
-            return Err(SecurityError::InvalidConfig);
-        }
-        let parent = vault_root.parent().ok_or(SecurityError::InvalidConfig)?;
-        // The sibling file is intentionally outside the strict portable-backup
-        // inventory; it is process coordination, never restored authority.
-        let file = open_lock(parent, PRIVACY_LOCK_NAME)?;
+        let file = privacy_file(vault_root)?;
         FileExt::lock_exclusive(&file)?;
         Ok(Self { _file: file })
     }
+}
+
+fn privacy_file(vault_root: &Path) -> Result<File> {
+    if !vault_root.is_dir() {
+        return Err(SecurityError::InvalidConfig);
+    }
+    let parent = vault_root.parent().ok_or(SecurityError::InvalidConfig)?;
+    // Outside the portable-backup inventory: coordination is never authority.
+    open_lock(parent, PRIVACY_LOCK_NAME)
 }
 
 fn open_lock(vault_root: &Path, name: &str) -> Result<File> {
@@ -123,6 +134,27 @@ mod tests {
         assert!(FileExt::try_lock_exclusive(&competing).is_err());
         // The shared writer and privacy locks can coexist, avoiding a
         // self-deadlock in nested encrypted SQLite/object writes.
+    }
+
+    #[test]
+    fn shared_disclosure_fence_blocks_exclusive_redaction_transition() {
+        let home = tempfile::tempdir().unwrap();
+        let root = home.path().join("vault");
+        fs::create_dir(&root).unwrap();
+        let _read1 = VaultWriterFence::privacy_reader(&root).unwrap();
+        let _read2 = VaultWriterFence::privacy_reader(&root).unwrap();
+        let competing = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(home.path().join(PRIVACY_LOCK_NAME))
+            .unwrap();
+        assert!(FileExt::try_lock_exclusive(&competing).is_err());
+        drop(_read1);
+        assert!(FileExt::try_lock_exclusive(&competing).is_err());
+        drop(_read2);
+        FileExt::try_lock_exclusive(&competing).unwrap();
+        FileExt::unlock(&competing).unwrap();
+        let _privacy = VaultWriterFence::privacy(&root).unwrap();
     }
 
     #[test]
