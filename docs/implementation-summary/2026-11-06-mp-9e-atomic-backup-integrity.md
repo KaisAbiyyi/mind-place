@@ -32,3 +32,38 @@ cargo test -p mind-place-index --features sqlcipher-preview --test vault_online_
 ```
 
 These are suggested verification commands, not claims that the cloud connector executed them.
+
+
+## Reclaim implementation — 2026-11-07 (existing PR #152)
+
+### Bounded inventory correction
+
+The recursive inventory now shares one explicit budget across the package-root and payload walks. Every encountered directory entry increments the total-entry counter before path/type processing; directories also increment their own counter and are checked against the preserved depth limit.
+
+| Budget | Production limit | Purpose |
+|---|---:|---|
+| Payload regular files | 100,000 | Preserves the existing \`MAX_FILES\` limit |
+| Total entries | 200,000 | Bounds files plus directories and package metadata |
+| Directories | 100,000 | Prevents empty-directory fan-out from bypassing file limits |
+| Payload directory depth | 5 | Preserves the existing depth boundary |
+
+The total-entry and directory limits bound worst-case enumeration independently of file count. Tests inject small limits; they do not create production-scale directory trees. The same bounded accounting is applied to the online encrypted-object copier (200,000 total entries, 100,000 directories, 100,000 files, depth 12). Symlink/reparse-point and special-file rejection remains fail-closed.
+
+Backup publication revalidates the package inventory after directory sync. Restore performs bounded preflight before creating staging, rechecks the source package after payload copy, compares the restored file inventory with the authenticated manifest, and only then syncs and publishes the new directory.
+
+### Interruption and recovery evidence added
+
+Deterministic checkpoints cover package staging creation, payload-copy interruption, partial encrypted-manifest publication, restore-copy interruption, and a destination collision introduced immediately before final backup publication. Regression cases also cover existing destination collisions, restart against preserved partial backup/restore staging, empty-directory fan-out, directory-count overflow, depth overflow, mixed file/directory total-entry overflow, exactly-at-limit acceptance, symlink and special-file rejection, corrupted payload digest, corrupted encrypted manifest, stale unlock lease, and valid published-backup recovery.
+
+Failed online encrypted scratch snapshots are detached from automatic temporary-directory cleanup immediately. Failed or interrupted scratch/staging paths remain for explicit owner disposition; successful online backup removes only its temporary duplicate after the portable package has been published.
+
+### Full application integration scope
+
+Synthetic SQLCipher integration coverage now exercises the real encrypted state, archive catalog, archive FTS/index, document-index database, immutable archive objects, vault manifest metadata, and online create/restore flow. The Windows-only approved-document-root integration additionally verifies a real encrypted document object, document FTS search, and preview after restore. No fake encrypted-looking fixture substitutes for these SQLCipher integration tests.
+
+### Qualification status and boundaries
+
+- Exact-head hosted CI: record the run ID and executed job/test counts in the PR and this page after the branch update.
+- \`mp9b-sqlcipher-qualification.yml\` is skipped for \`pull_request\` events while the PR is Draft. Its \`workflow_dispatch\` path checks out the PR merge ref and can qualify a Draft PR without changing its Draft state. The dispatch was not available through the connected GitHub actions in this execution; SQLCipher integration execution therefore remains **NOT RUN** until an owner dispatches it.
+- Native installed-Windows backup/recovery acceptance, owner-vault recovery, and physical power-loss durability remain **NOT RUN**. Hosted Windows jobs are not native owner acceptance.
+- PR #152 remains Draft. No merge, release, owner-data access, or main-branch change is authorized.
