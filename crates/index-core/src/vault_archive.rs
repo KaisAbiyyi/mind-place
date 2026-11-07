@@ -404,8 +404,8 @@ impl VaultCaptureStore {
         // Ingestion itself establishes canonical authority, including a generic
         // migration source. Otherwise a captured conversation could never be
         // redacted if another subsystem had not registered it beforehand.
-        let namespace = crate::namespace_for_provider(&capture.provider)
-            .ok_or(IndexError::InvalidEvidence)?;
+        let namespace =
+            crate::namespace_for_provider(&capture.provider).ok_or(IndexError::InvalidEvidence)?;
         authority.register_source(&SourceDescriptor {
             provider: &capture.provider,
             source_namespace: namespace,
