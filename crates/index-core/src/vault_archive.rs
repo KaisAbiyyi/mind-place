@@ -1292,6 +1292,49 @@ mod privacy_capture_race_tests {
     }
 
     #[test]
+    fn raw_capture_and_consented_generic_import_register_redactable_authority() {
+        let (_home, _gate, _lease, _manifest, _recovery, archive, admin, _) = fixture();
+        let raw_id = "123e4567-e89b-12d3-a456-426614174098";
+        let mut raw = synthetic_capture("unregistered browser source");
+        raw.conversation_id = raw_id.to_owned();
+        raw.source_url = format!("https://chatgpt.com/c/{raw_id}");
+        let saved = archive.save(raw.clone()).unwrap();
+        let state = archive.open_state_store().unwrap();
+        let raw_source = canonical_source_id(&SourceDescriptor {
+            provider: "chatgpt",
+            source_namespace: crate::namespace_for_provider("chatgpt").unwrap(),
+            source_kind: "conversation",
+            key: SourceKey::External(raw_id),
+        })
+        .unwrap();
+        assert!(state.source(&raw_source).unwrap().is_some());
+        state.redact_source(&admin, &raw_source, "Synthetic capture").unwrap();
+        assert!(archive.read(&saved.id, None).is_err());
+        assert!(archive.save(raw).is_err());
+
+        let generic_key = "f".repeat(64);
+        let mut generic = synthetic_capture("consented generic import");
+        generic.provider = "generic".to_owned();
+        generic.conversation_id = generic_key.clone();
+        generic.source_url = format!("mindplace-import://generic/{generic_key}");
+        generic.capture_method = "generic-import".to_owned();
+        let imported = archive.save_internal(generic.clone(), true).unwrap();
+        let generic_source = canonical_source_id(&SourceDescriptor {
+            provider: "generic",
+            source_namespace: crate::namespace_for_provider("generic").unwrap(),
+            source_kind: "conversation",
+            key: SourceKey::External(&generic_key),
+        })
+        .unwrap();
+        assert!(state.source(&generic_source).unwrap().is_some());
+        state
+            .redact_source(&admin, &generic_source, "Synthetic generic import")
+            .unwrap();
+        assert!(archive.read(&imported.id, None).is_err());
+        assert!(archive.save_internal(generic, true).is_err());
+    }
+
+    #[test]
     fn interrupted_capture_releases_privacy_lock_and_restart_preserves_denial() {
         let (home, gate, lease, manifest, recovery, archive, admin, source) = fixture();
         let interrupted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
