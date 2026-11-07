@@ -1359,16 +1359,22 @@ mod privacy_capture_race_tests {
         archive.save(synthetic_capture("fts")).unwrap();
         let state = archive.open_state_store().unwrap();
         let index = archive.open_index_store().unwrap();
-        index.sync_vault_with_check(&archive, &state, || Ok(())).unwrap();
+        index
+            .sync_vault_with_check(&archive, &state, || Ok(()))
+            .unwrap();
         assert!(!index.search("privacy", false, 20).unwrap().is_empty());
 
         state
             .redact_source(&admin, &source, "Synthetic FTS redaction")
             .unwrap();
-        index.sync_vault_with_check(&archive, &state, || Ok(())).unwrap();
+        index
+            .sync_vault_with_check(&archive, &state, || Ok(()))
+            .unwrap();
         assert!(index.search("privacy", true, 20).unwrap().is_empty());
 
-        index.rebuild_vault_with_check(&archive, &state, || Ok(())).unwrap();
+        index
+            .rebuild_vault_with_check(&archive, &state, || Ok(()))
+            .unwrap();
         assert!(index.search("privacy", true, 20).unwrap().is_empty());
     }
 
