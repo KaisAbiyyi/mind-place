@@ -124,8 +124,19 @@ impl StateStore {
         if reason.len() > 4096 {
             return Err(StateError::InvalidValue);
         }
-        // FencedStateConnection obtains the vault writer lease FIRST;
-        // IMMEDIATE serializes credential revocation and evidence writes.
+        // Lock order: privacy exclusive -> state connection's shared writer
+        // fence -> SQLite IMMEDIATE. Capture takes the same privacy lock
+        // before its visibility check and holds it through publication.
+        // Plaintext legacy state (without a vault root) is not a vault writer.
+        let parent = self.path.parent().ok_or(StateError::UnsafePath)?;
+        let _privacy = if self.cipher_key.is_some() && parent.join("vault-v1.json").exists() {
+            Some(
+                mind_place_security::vault_fence::VaultWriterFence::privacy(parent)
+                    .map_err(|_| StateError::Corrupt)?,
+            )
+        } else {
+            None
+        };
         let mut db = self.connection()?;
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let actor: String = tx
