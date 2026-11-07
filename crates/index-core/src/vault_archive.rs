@@ -1150,3 +1150,148 @@ mod vault_catalog_pagination_tests {
         assert!(!root.join("archive-index.sqlite3").exists());
     }
 }
+
+#[cfg(test)]
+mod privacy_capture_race_tests {
+    use super::*;
+    use mind_place_security::vault::CryptoVault;
+    use mind_place_state::ClientCapability;
+    use std::{
+        sync::{mpsc, Arc},
+        thread,
+        time::Duration,
+    };
+
+    fn synthetic_capture(title: &str) -> Capture {
+        serde_json::from_value(serde_json::json!({
+            "schema_version": 1,
+            "provider": "chatgpt",
+            "conversation_id": "123e4567-e89b-12d3-a456-426614174099",
+            "source_url": "https://chatgpt.com/c/123e4567-e89b-12d3-a456-426614174099",
+            "title": title,
+            "captured_at": "2026-11-07T10:00:00Z",
+            "capture_method": "manual-dom",
+            "completeness": "partial",
+            "warnings": [],
+            "messages": [{
+                "id": "synthetic-message",
+                "role": "user",
+                "text": "synthetic privacy fence evidence",
+                "format": "plain",
+                "attachments": []
+            }]
+        }))
+        .unwrap()
+    }
+
+    fn fixture() -> (
+        tempfile::TempDir,
+        SecurityGate,
+        UnlockLease,
+        mind_place_security::vault::VaultManifest,
+        mind_place_security::vault::RecoverySecret,
+        Arc<VaultCaptureStore>,
+        String,
+        String,
+    ) {
+        let home = tempfile::tempdir().unwrap();
+        let gate = SecurityGate::open(home.path().join("security.json")).unwrap();
+        gate.initialize(b"synthetic-redaction-race-password").unwrap();
+        let lease = gate.require_unlocked().unwrap();
+        let (vault, recovery, manifest) = CryptoVault::provision(&gate, lease).unwrap();
+        let root = home.path().join("vault");
+        manifest.persist_new(&root).unwrap();
+        let archive = Arc::new(VaultCaptureStore::open(&root, vault, &gate, lease).unwrap());
+        let state = archive.open_state_store().unwrap();
+        let admin = "a".repeat(64);
+        state
+            .issue_client("client:v1:owner", "Synthetic owner", &admin, &[ClientCapability::Admin])
+            .unwrap();
+        let source = state
+            .register_source(&SourceDescriptor {
+                provider: "chatgpt",
+                source_namespace: crate::namespace_for_provider("chatgpt").unwrap(),
+                source_kind: "conversation",
+                key: SourceKey::External("123e4567-e89b-12d3-a456-426614174099"),
+            })
+            .unwrap();
+        (home, gate, lease, manifest, recovery, archive, admin, source)
+    }
+
+    #[test]
+    fn redaction_waits_for_checked_capture_publication_then_denies_later_writes() {
+        let (_home, _gate, _lease, _manifest, _recovery, archive, admin, source) = fixture();
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (resume_tx, resume_rx) = mpsc::channel();
+        let producer = Arc::clone(&archive);
+        let capturing = thread::spawn(move || {
+            producer.save_internal_with_checkpoint(synthetic_capture("first"), false, || {
+                entered_tx.send(()).unwrap();
+                resume_rx.recv_timeout(Duration::from_secs(30)).unwrap();
+            })
+        });
+        entered_rx.recv_timeout(Duration::from_secs(30)).unwrap();
+
+        let state = archive.open_state_store().unwrap();
+        let (began_tx, began_rx) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel();
+        let redactor = thread::spawn(move || {
+            began_tx.send(()).unwrap();
+            done_tx
+                .send(state.redact_source(&admin, &source, "Synthetic owner redaction"))
+                .unwrap();
+        });
+        began_rx.recv_timeout(Duration::from_secs(30)).unwrap();
+        // The mutation cannot commit while capture is between its visibility
+        // check and immutable publication. The old shared-only fence failed here.
+        assert!(matches!(
+            done_rx.recv_timeout(Duration::from_millis(150)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
+        resume_tx.send(()).unwrap();
+        let saved = capturing.join().unwrap().unwrap();
+        redactor.join().unwrap();
+        assert!(done_rx.recv_timeout(Duration::from_secs(30)).unwrap().is_ok());
+
+        assert!(archive.read(&saved.id, Some(&saved.snapshot_id)).is_err());
+        assert!(archive.save(synthetic_capture("new revision")).is_err());
+        let state = archive.open_state_store().unwrap();
+        let source_id = state
+            .register_source(&SourceDescriptor {
+                provider: "chatgpt",
+                source_namespace: crate::namespace_for_provider("chatgpt").unwrap(),
+                source_kind: "conversation",
+                key: SourceKey::External("123e4567-e89b-12d3-a456-426614174099"),
+            });
+        assert!(source_id.is_err(), "redacted source cannot re-enter ingestion");
+    }
+
+    #[test]
+    fn interrupted_capture_releases_privacy_lock_and_restart_preserves_denial() {
+        let (home, gate, lease, manifest, recovery, archive, admin, source) = fixture();
+        let interrupted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            archive
+                .save_internal_with_checkpoint(synthetic_capture("interrupted"), false, || {
+                    panic!("synthetic interruption before immutable publication")
+                })
+                .unwrap();
+        }));
+        assert!(interrupted.is_err());
+        let authority = archive.open_state_store().unwrap();
+        authority
+            .redact_source(&admin, &source, "After interrupted capture")
+            .unwrap();
+        assert!(archive.save(synthetic_capture("after interruption")).is_err());
+        drop(archive);
+
+        let vault = CryptoVault::restore_with_recovery(&gate, lease, &manifest, &recovery).unwrap();
+        let reopened = VaultCaptureStore::open(home.path().join("vault"), vault, &gate, lease).unwrap();
+        assert!(reopened
+            .open_state_store()
+            .unwrap()
+            .source_is_redacted(&source)
+            .unwrap());
+        assert!(reopened.save(synthetic_capture("after restart")).is_err());
+        assert!(!home.path().join("vault").join("archive").exists());
+    }
+}
