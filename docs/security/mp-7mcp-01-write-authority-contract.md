@@ -1,9 +1,9 @@
-# MP-7MCP-01 — Scoped MCP write-authority contract (v2)
+# MP-7MCP-01 — Scoped MCP write-authority contract (v3)
 
 **Status: PROPOSED; NOT APPROVED; production MCP stays READ-ONLY.**
-Task: MP-7MCP-01 | Lock: mcp-write-authority | Contract v2, 2026-11-08 (v1: 2026-11-06, baseline main `24648c74f3f59e176974d3878049b882478db69b`).
+Task: MP-7MCP-01 | Lock: mcp-write-authority | Contract v3, 2026-11-08 (v2 earlier the same day; v1: 2026-11-06, baseline main `24648c74f3f59e176974d3878049b882478db69b`).
 
-v2 incorporates the owner's direction of 2026-11-08 (recorded on the PR and in the task record) and the independent-review findings F1–F8. The owner direction is **not** an ADR acceptance: the amendment is accepted only when the owner confirms this final text.
+v2 incorporated the owner's direction of 2026-11-08 and review findings F1–F8; v3 resolves the independent review's C1 (owner-configurable hard caps), C2 (worker lease vs proposal lifetime) and C3 (review by exception). The owner direction is **not** an ADR acceptance: the amendment is accepted only when the owner confirms this final text.
 
 References: [canonical ADR register](https://app.notion.com/p/40ac4a6aaf7381aa93cdc99957ae9fee), [vault security](https://app.notion.com/p/40ac4a6aaf7381969fddc8d0284131d2), [Phase 3B](../implementation-plan/phase-3b-client-authorization.md), [ADR-006 write amendment proposal](mp-adr-006-mcp-write-amendment-proposed.md).
 
@@ -57,19 +57,79 @@ The authorization predicate is the conjunction of: authenticated, enabled princi
 
 `create_import` ids are **server-assigned**; a caller-supplied id is denied opaquely so that existence of other collections' objects cannot be probed. Denials never disclose object or collection existence, keys or native paths.
 
-Limits (owner-configurable per grant; defaults): **cloud** — grant lifetime ≤ 30 days, ≤ 1 MiB and ≤ 20 objects per request, ≤ 60 writes per hour per grant. **local** single writes — as granted by the owner. Limit failures return a distinct `LIMIT` result.
+### Limits: safe defaults, owner hard caps, engine ceilings
+
+Every limit has three levels, and **the effective value is `min(override ?? default, owner cap, engine ceiling)`, recomputed from the current policy on every use**:
+
+1. **Safe defaults** (smallest).
+2. **Owner-configurable hard caps** (`ownerPolicy.caps`), settable only in the trusted local UI, never over MCP. A cap must be an integer ≥ the default and ≤ the ceiling; invalid, negative, zero, fractional, non-numeric, unknown-key or oversized values are rejected, and a multi-key change is atomic. Until the owner sets a cap, the factory cap applies. A grant or job may **override a limit downward or up to the current owner cap, never above it**: the issuance validator rejects an over-cap override, and enforcement independently clamps one, so a lowered cap takes effect immediately on existing grants and a record that bypassed the validator still cannot exceed it. A malformed override fails closed; a malformed stored cap falls back to the safe default.
+3. **Engine safety ceilings**, compile-time constants that no policy, grant or request can exceed; they protect against resource exhaustion.
+
+| Limit | Default | Factory owner cap | Engine ceiling |
+| --- | --- | --- | --- |
+| payload bytes per request (`maxBytes`) | 32 KiB | 48 KiB | 48 KiB |
+| objects per request (`maxObjects`) | 20 | 50 | 100 |
+| writes per hour per grant (`maxWritesPerHour`) | 60 | 600 | 3,600 |
+| cloud grant lifetime (`maxGrantMs`) | 30 days | 60 days | 90 days |
+| worker lease (`leaseMs`) | 15 min | 30 min | 60 min |
+| items per staged batch (`maxBatch`) | 512 | 1,024 | 2,048 |
+| items per job (`maxItems`) | 20,000 | 50,000 | 100,000 |
+| concurrent dreaming workers (`maxConcurrentWorkers`) | **3** | **5** | 8 |
+| staged-proposal lifetime (`proposalTtlMs`) | 7 days | 14 days | 30 days |
+| owner approval lifetime (`approvalTtlMs`) | 10 min | 60 min | 24 h |
+
+Worker concurrency is enforced per client (effective limit) **and** vault-wide (owner cap). A lowered cap blocks new workers at once and lets running ones finish. The numbers are Stage A proposals for the owner to set; only the relations (default ≤ cap ≤ ceiling) are normative, and Stage B fixes the ceilings from measured resource budgets.
+
+**Correction to the earlier proposal.** The production MCP **request** envelope is 64 KiB (`BODY_LIMIT` / `MAX_REQUEST_BYTES`); the 1 MiB figure in the earlier text is the transport wire cap, not the request cap. This contract therefore does **not** promise 1 MiB requests: the payload ceiling is set under the current request envelope. Raising the envelope is a separate Stage B transport and security decision that the owner must take explicitly; no limit in this contract may silently enlarge it. Limit failures return a distinct `LIMIT` result.
 
 Audit: every decision, allow and deny, writes an append-only, content-free record (time, principal, operation, collection, decision, code). Audit never stores payloads, paths, passwords, keys or tokens.
 
 ## 6. Local-tier bulk jobs ("dreaming")
 
-Bulk mirrors an out-of-band curation pass: asynchronous, user-scoped, evidence-backed, versioned and reversible. It is **not** whole-vault processing; the owner scopes it in the prompt to a project/topic/collection set, and the job declares that scope up front (for example: "gather and build comprehensive curated data for project mind-place; use sub-agents as needed").
+Bulk mirrors an out-of-band curation pass: asynchronous, user-scoped, evidence-backed, versioned and reversible. It is **not** whole-vault processing; the owner scopes it in the prompt to a project/topic/collection set, and the job declares that scope up front. The AI side performs clustering, deduplication and consolidation; the **engine** performs deterministic validation and risk classification, so the owner reviews by exception rather than item by item.
 
-1. **Start** — local tier on loopback only; requires a `bulk_stage` grant on the target collection; the declared scope collections each need a read grant; target layer must be curated or derived. A **private** source may only feed a target whose readers it also covers; ordinary raw → curated promotion is the purpose of the job and is gated by tier and the apply step.
-2. **Stage** — proposals are written to a staged generation, **invisible to every reader**. Each item carries operation (`create_import`, `append` or `update` only — never `move` or tombstone in bulk), a payload, source collections inside the scope, and non-empty **evidence pointers** into the scope. Item `update`/`append` require `expected_revision`. Defaults, owner-configurable: lease 15 min, ≤ 512 items per batch, ≤ 20,000 items per job (existing graph-maintenance constants).
-3. **Apply** — a separate step requiring a `bulk_apply` grant. Default mode `ask_first`. **Precedence — the strictest policy wins:** the batch needs an owner approval if `bulk_apply` **or the grant of any operation contained in the batch** is `ask_first`; a bulk grant can never weaken a per-operation policy. One approval, single-use and bound to the batch digest, satisfies all of them. The need for approval is re-evaluated inside the commit, so tightening a mode between stage and apply takes effect. Apply is **all-or-nothing**: the following are re-validated before and again inside the commit, and any failure applies nothing: epoch, principal, policy revision, `bulk_apply` and per-operation grants, tombstone state and `expected_revision` of every item, and **the declared scope itself** — every scope collection must still exist, still carry a current read grant for the principal, and still satisfy the private-source audience rule. Revoking or narrowing a source after staging therefore blocks the batch. Lock, revoke, epoch or policy change between stage and apply denies the batch.
-4. **Rollback** — owner-only and logical: objects created by the batch are tombstoned; objects changed by the batch receive a **new revision restoring prior content**; history is retained; rollback refuses (conflict, nothing changed) if any affected object was edited afterwards.
-5. Concurrency: expected-revision/hash compare-and-swap in the single writer; a stale proposal conflicts instead of overwriting.
+### 6.1 Three independent lifetimes
+
+| Lifetime | Meaning | Rules |
+| --- | --- | --- |
+| **Worker execution lease** | how long a worker may stage | renewable by the worker only while **unexpired** and still fully authorized (grant, scope read grants, private-audience rule); an expired lease cannot be revived (start a new job); counts toward worker concurrency while active; governs **staging only** |
+| **Staged-proposal TTL** | how long a staged proposal may still be reviewed and applied | set at staging, owner-configurable within caps; **never extended by lease renewal**; tightening a TTL or cap reaches already staged proposals, loosening never resurrects one; after expiry a proposal is `expired`, can be neither approved nor applied, and stays expired |
+| **Owner apply approval** | the authorization to apply one exact batch | short-lived (default 10 min), **single-use**, bound to the batch; expires independently of the proposal and of the worker |
+
+Worker lease expiry **never destroys** a valid staged proposal, and apply does not require a live worker lease.
+
+### 6.2 Pipeline
+
+1. **Start** — local tier on loopback only; `bulk_stage` grant on the target collection; target layer curated or derived; each declared scope collection needs a current read grant; a **private** source may only feed a target whose readers it also covers; concurrency limits (section 5) apply.
+2. **Stage** — items are written to a staged generation **invisible to every reader**. Each item has an operation (`create_import`, `append` or `update` only — never `move` or tombstone in bulk), a payload, source collections inside the scope, a cluster, an optional claim `subject`, and **evidence pointers** `{collection, ref, content digest}` into the scope. The engine rejects exact duplicate payloads within a batch and updates that change nothing, requires every evidence pointer to resolve to the **current** source digest and not be redacted, and keeps only deterministic fields: any model-supplied confidence, score or label is dropped and never enters a digest.
+3. **Classify (deterministic, versioned)** — each item is `low` (new object, no flags), `medium` (append or overwrite of a non-owner object), or `high` (an **exception**) when any flag holds: `owner_claim` (changes an owner-authored object), `conflict` (contradicts another item of the batch on the same subject), `private_source`, `sensitive_target`. Model confidence is never an input. The rules carry a `riskPolicyVersion` bound into every digest and approval.
+4. **Review surface** — see 6.3.
+5. **Apply** — a separate step requiring a `bulk_apply` grant (default `ask_first`). It needs the owner approval unless the batch qualifies for auto-apply (6.4). **Strictest policy wins:** a single `ask_first` on `bulk_apply` or on any contained operation, a missing grant, any non-low item, a disabled policy or an unlisted client routes the batch to the owner. Apply is **all-or-nothing**.
+6. **Rollback** — owner-only and logical: objects created by the batch are tombstoned; objects changed by it receive a **new revision restoring prior content**; history is retained; rollback refuses (nothing changed) if an affected object was edited afterwards.
+
+### 6.3 Review by exception: the approval interface contract
+
+The review surface is a pure function of the immutable batch and current state. It exposes:
+
+- a concise **thematic summary** (clusters flagged `themeIsUntrustedText`, since themes are model-authored and never influence policy), total and per-operation counts, consolidated-item count, evidence count, scope and target;
+- the **risk breakdown** (low / medium / high) and the **exception list**: only high-risk items, each with its flags, operation, object, cluster and evidence count; item content is not part of the summary;
+- **expandable** per-item evidence and the **complete diff** (before and after) on demand, never required;
+- `requiredDecisions` (indices of exceptions) and `autoApplyEligible`;
+- a `summaryDigest` over the whole surface, including the batch digest and `riskPolicyVersion`.
+
+**One approval for the whole eligible batch**, created only in the trusted local UI, requires the `summaryDigest` the owner is looking at **now** (a stale view is rejected) and an explicit **`confirm` or `withhold` decision for every exception** (a missing decision, an extra decision or an unknown value is invalid). Sensitive, contradictory, owner-claim and private-scope changes are therefore never approved implicitly: they are separately confirmed or withheld. A withheld item is never applied and does not block the rest. The approval is bound to the batch digest, summary digest, decisions digest, risk-policy version, client, collection, policy revision and unlock epoch, and is single-use.
+
+**Immutability.** The staged batch must hash, at apply, to the digest recorded at staging, and the approval must match the digest and summary recomputed **at apply**. Any mutation of items, clusters or themes, any change in classification (for example a target becoming owner-authored), a different risk-policy version, a tampered decision, or an approval for another batch invalidates the approval and applies nothing, including a change made inside the commit. Raw archives remain immutable.
+
+### 6.4 Auto-apply
+
+Auto-apply is **off by default**. It exists only under an explicit owner policy (`autoApply`: enabled, listed local clients, `maxRisk` = `low`, item limit within the batch cap), written only in the trusted local UI, and only when deterministic checks pass: every item `low`, no exception flag, within the item limit, `bulk_apply` and every contained operation `allow`, proposal unexpired, and all revalidation below passing. Model confidence is insufficient and ignored. The policy is re-read inside the commit, so disabling it between staging and commit stops the apply. Auto-applied batches are audited and remain fully rollback-able.
+
+### 6.5 Revalidation before and inside the final apply transaction
+
+Epoch and principal; policy revisions; `bulk_apply` and per-operation grants; the declared scope (every scope collection exists, has a current read grant and satisfies the private-audience rule); **source evidence authority** — every evidence pointer of every item that will be applied must not be redacted or forgotten and must still resolve to the same content digest (`DENIED` for redaction, `STALE_EVIDENCE` for stale or removed); tombstone state and `expected_revision` of every target; proposal expiry; approval validity and route. Any failure applies nothing.
+
+**MP-9C coordination (no change to its files).** Redaction and forget authority belongs to the MP-9C privacy contract. This contract only consumes it through a read-only interface, "is evidence pointer (collection, ref), or the whole collection, redacted?", evaluated inside the writer. It guarantees that a staged, unapplied proposal citing forgotten evidence is never applied. Propagating a forget to **already-applied** derived objects is MP-9C's concern and is not claimed here.
 
 ## 7. Idempotency, recovery and ordering
 
@@ -92,6 +152,12 @@ Every mutation requires an unpredictable `operation_id`; the durable receipt ide
 | Privilege escalation via legacy bits | closed operation set, grant required | legacy `read`/`write`/`admin` bits confer nothing |
 | Source revoked or narrowed after staging | scope (read grant, layer, private audience) re-validated inside the apply commit | revoked/narrowed/removed source blocks the staged batch |
 | Bulk weakening per-operation policy | strictest mode wins; approval re-evaluated at commit | `bulk_apply=allow` with an `ask_first` operation still needs approval |
+| Override above the owner cap / cap lowered later | issuance validator, enforcement clamp, fail-closed on malformed values; caps bounded by default and ceiling | over-cap, negative, oversized, tampered overrides and cap decreases |
+| Worker or approval outliving its purpose | independent worker lease, proposal TTL and short single-use approval | apply after worker expiry works; expired proposals and expired approvals never apply |
+| Forgotten or stale evidence behind a staged proposal | evidence authority and digest revalidated before and inside the commit | redaction, whole-collection forget, stale digest and removed source block apply |
+| Owner rubber-stamping hundreds of items | review by exception with mandatory per-exception decisions | exceptions need confirm/withhold; surface carries no item content |
+| Approval for something other than what was shown | approval bound to batch, summary and decisions digests and the risk-policy version | any mutation or stale view invalidates; a failed apply consumes nothing |
+| Unauthorized auto-apply | off by default, owner policy, deterministic low-risk checks, strictest policy wins | model confidence ignored; disabled, unlisted, medium/high, ask_first and a late policy change all route to the owner |
 | Resource exhaustion | per-grant limits, bulk caps, lease | LIMIT results |
 | Crash/partial failure | staging, journal, atomic activation, all-or-nothing apply | fail at stage, commit, ack |
 | Missing authority store | fail closed | unreadable store denies |
@@ -109,8 +175,9 @@ Every mutation requires an unpredictable `operation_id`; the durable receipt ide
 | Direction: operation-scoped grants, per-operation allow/ask_first/deny, default deny | owner direction recorded 2026-11-08 — **final acceptance PENDING** |
 | Tiers cloud/local; cloud curated-only; local raw + bulk | owner direction recorded — **final acceptance PENDING** |
 | Full operation set from the first release; tombstone only | owner direction recorded — **final acceptance PENDING** |
-| Cloud limits (30 days, 1 MiB, 20 objects, 60 writes/hour); local limits owner-configurable | owner direction recorded — **final acceptance PENDING** |
+| Cloud limits (30 days, 20 objects, 60 writes/hour) and owner-configurable local limits; the earlier '1 MiB per request' is **withdrawn** because the production request envelope is 64 KiB | owner direction recorded — **final acceptance PENDING**; the owner must separately decide whether a larger request envelope is wanted in Stage B |
 | Bulk model (section 6), apply default `ask_first` | owner direction recorded — **final acceptance PENDING** |
-| Independent review of this v2 text | NOT RUN |
+| Hard caps, worker concurrency (default 3, owner cap 5), lease/proposal/approval lifetimes, review by exception, auto-apply policy | owner direction recorded — **final acceptance PENDING** |
+| Independent review of this v3 text | NOT RUN |
 | Real endpoint/native tests | NOT RUN |
 | Current ADR-006 read-only | ACCEPTED and unchanged |
