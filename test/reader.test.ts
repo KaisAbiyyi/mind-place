@@ -583,3 +583,39 @@ function openSetupFromWizard(root: HTMLElement) {
   root.querySelector<HTMLButtonElement>(".onboarding-workspace [data-step='providers']")!.click();
   root.querySelector<HTMLButtonElement>(".onboarding-workspace [data-focus-key='open-details']")!.click();
 }
+
+test("onboarding capture settings opens Archive controls and Done restores the wizard and focus", async () => {
+  const commands: string[] = [];
+  const invoke: Invoke = async <T>(command: string) => {
+    commands.push(command);
+    if (["list_conversations", "list_document_roots", "list_local_mcp_clients"].includes(command)) return [] as T;
+    if (command === "get_local_mcp_status" || command === "get_hosted_tunnel_status") return { running: false } as T;
+    if (command === "get_setup") return {
+      archive_path: "D:\\archive", extension_path: "D:\\extension", host_path: "D:\\host",
+      extension_id: "test-extension", native_host_name: "com.mindplace.capture",
+      registered_browsers: [], platform: "windows", legacy_available: false,
+    } as T;
+    throw Error(`Unexpected command ${command}`);
+  };
+  const { root, app, dom } = createReader(invoke);
+  await app.ready;
+  root.querySelector<HTMLButtonElement>("[data-route='setup-onboarding']")!.click();
+  assert.ok(root.querySelector(".onboarding-workspace"));
+  const dialog = root.querySelector<HTMLDialogElement>("#setup-dialog")!;
+  assert.equal(dialog.hasAttribute("open"), false, "Sidebar entry opens the wizard first");
+  root.querySelector<HTMLButtonElement>(".onboarding-workspace [data-step='providers']")!.click();
+  const details = root.querySelector<HTMLButtonElement>(".onboarding-workspace [data-focus-key='open-details']")!;
+  details.click();
+  await delay(0);
+  assert.equal(dialog.hasAttribute("open"), true);
+  assert.equal(root.querySelector("#settings-tab-archive")?.getAttribute("aria-selected"), "true");
+  const panel = root.querySelector<HTMLElement>("#settings-panel-archive")!;
+  assert.equal(panel.hidden, false);
+  panel.querySelector<HTMLButtonElement>("[data-action='import-generic']")!.click();
+  assert.equal(panel.querySelector("[data-generic-status]")?.textContent, "Choose a JSON, Markdown or HTML file first.");
+  assert.equal(commands.includes("import_generic_text"), false, "No-file validation must not import anything");
+  root.querySelector<HTMLButtonElement>("#setup-dialog .dialog-footer [data-action='close-setup']")!.click();
+  assert.equal(dialog.hasAttribute("open"), false);
+  assert.equal(root.querySelector(".app-shell")?.getAttribute("data-active-route"), "setup-onboarding");
+  assert.equal(dom.window.document.activeElement, details);
+});
