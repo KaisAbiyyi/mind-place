@@ -604,6 +604,7 @@ test("onboarding capture settings opens Archive controls and Done restores the w
   const dialog = root.querySelector<HTMLDialogElement>("#setup-dialog")!;
   assert.equal(dialog.hasAttribute("open"), false, "Sidebar entry opens the wizard first");
   root.querySelector<HTMLButtonElement>(".onboarding-workspace [data-step='providers']")!.click();
+  await delay(0); // Let native status responses finish rerendering the capture step.
   const details = root.querySelector<HTMLButtonElement>(".onboarding-workspace [data-focus-key='open-details']")!;
   details.click();
   await delay(0);
