@@ -360,14 +360,22 @@ const activeWorkers = (state, clientId) => Object.values(state.jobs ?? {})
 // Scope is the owner/prompt-declared project boundary; every source needs a CURRENT read grant. Ordinary raw -> curated promotion is
 // the purpose of a bulk job (gated by tier + review); a PRIVATE source may only feed a target whose readers it also covers.
 // Evaluated at job start, at lease renewal AND again inside the apply commit.
-function scopeAuthorized(state, auth, targetId, scope) {
+function sourceAuthorized(state, auth, targetId, collectionId) {
   const target = state.collections?.[targetId];
-  if (!target) return false;
-  return scope.every((c) => {
-    const source = state.collections?.[c];
-    return !!source && canRead(state, auth, c) && !(source.private === true && !audienceCovers(source.audience, target.audience));
-  });
+  const source = state.collections?.[collectionId];
+  return !!target && !!source && canRead(state, auth, collectionId) &&
+    !(source.private === true && !audienceCovers(source.audience, target.audience));
 }
+function scopeAuthorized(state, auth, targetId, scope) {
+  return !!state.collections?.[targetId] && scope.every((c) => sourceAuthorized(state, auth, targetId, c));
+}
+const sameSet = (a, b) => Array.isArray(a) && Array.isArray(b) && a.length === b.length &&
+  [...a].sort().every((x, i) => x === [...b].sort()[i]);
+// Item-level provenance: every source and evidence collection an item cites must belong to the STAGING job's declared scope
+// (the immutable scope recorded on the batch) and still be individually authorized for this principal and target.
+const itemProvenanceAuthorized = (state, auth, batch, item) =>
+  [...item.sources, ...item.evidence.map((e) => e.collectionId)]
+    .every((c) => batch.scope.includes(c) && sourceAuthorized(state, auth, batch.target, c));
 
 // Source evidence authority (coordinates with the MP-9C privacy contract without touching its files): a pointer must still
 // resolve to the same content digest and must not have been forgotten. state.privacy.redacted holds "collection#ref" keys
@@ -467,18 +475,20 @@ function classify(state, batch) {
   });
 }
 
+// The digest binds the batch to the exact job that staged it (identity, target, kind and source scope), not only to its items.
 const batchDigestOf = (batch) => sha256(canonical({
-  items: batch.items, clusters: batch.clusters, target: batch.target, kind: batch.kind, riskPolicyVersion: RISK_POLICY_VERSION
+  items: batch.items, clusters: batch.clusters, jobKey: batch.jobKey, target: batch.target, kind: batch.kind,
+  scope: [...batch.scope].sort(), riskPolicyVersion: RISK_POLICY_VERSION
 }));
 const countBy = (list, f) => list.reduce((m, x) => { const k = f(x); m[k] = (m[k] ?? 0) + 1; return m; }, {});
 
-function autoApplyAllowed(state, client, clientId, job, batch, cls) {
+function autoApplyAllowed(state, client, clientId, batch, cls) {
   const policy = state.ownerPolicy?.autoApply;
   if (policy?.enabled !== true || !Array.isArray(policy.clients) || !policy.clients.includes(clientId) ||
       policy.maxRisk !== 'low' || !validLimit(policy.maxItems)) return false;
   const fake = { clientId };
-  const grants = [applyGrant(state, { client }, fake, job), ...[...new Set(batch.items.map((i) => i.operation))]
-    .map((op) => findGrant(state, client, fake, { collectionId: job.target, objectKind: job.kind, operation: op }))];
+  const grants = [applyGrant(state, { client }, fake, batch), ...[...new Set(batch.items.map((i) => i.operation))]
+    .map((op) => findGrant(state, client, fake, { collectionId: batch.target, objectKind: batch.kind, operation: op }))];
   // Strictest policy wins: a single ask_first or missing grant forbids auto-apply.
   if (grants.some((g) => !g || g.mode !== 'allow')) return false;
   return batch.items.length <= policy.maxItems && cls.every((c) => c.risk === 'low');
@@ -496,7 +506,7 @@ export function buildReviewSurface(state, clientId, batchId) {
     .map((c) => ({ index: c.index, flags: c.flags, operation: batch.items[c.index].operation, objectId: batch.items[c.index].objectId, cluster: batch.items[c.index].cluster, evidenceCount: batch.items[c.index].evidence.length }));
   const summary = {
     batchId, batchDigest: batchDigestOf(batch), riskPolicyVersion: RISK_POLICY_VERSION,
-    targetCollectionId: batch.target, scopeCollections: [...job.scope],
+    jobKey: batch.jobKey, targetCollectionId: batch.target, scopeCollections: [...batch.scope],
     totalItems: batch.items.length, operations: countBy(batch.items, (i) => i.operation),
     risk: { low: 0, medium: 0, high: 0, ...countBy(cls, (c) => c.risk) },
     consolidatedItems: batch.items.filter((i) => i.evidence.length > 1).length,
@@ -511,7 +521,7 @@ export function buildReviewSurface(state, clientId, batchId) {
   return {
     ...summary, summaryDigest: sha256(canonical(summary)),
     requiredDecisions: exceptions.map((e) => e.index),
-    autoApplyEligible: autoApplyAllowed(state, client, clientId, job, batch, cls)
+    autoApplyEligible: autoApplyAllowed(state, client, clientId, batch, cls)
   };
 }
 
@@ -571,7 +581,7 @@ export function stageBulkBatch(state, auth, jobId, batchId, items, meta = {}) {
   const normalized = items.map((i) => ({ operation: i.operation, objectId: i.objectId ?? null, expectedRevision: i.expectedRevision ?? null,
     payload: i.payload, evidence: i.evidence.map((e) => ({ collectionId: e.collectionId, ref: e.ref, digest: e.digest })),
     sources: [...i.sources], cluster: i.cluster, subject: i.subject ?? null }));
-  const batch = { jobKey: jobKey(auth, jobId), target: job.target, kind: job.kind, items: normalized,
+  const batch = { jobKey: jobKey(auth, jobId), target: job.target, kind: job.kind, scope: [...job.scope], items: normalized,
     clusters: clusters.map((c) => ({ id: c.id, theme: c.theme })), status: 'staged',
     stagedAt: state.now, expiresAt: state.now + limits.proposalTtlMs };
   batch.digest = batchDigestOf(batch);
@@ -628,24 +638,31 @@ export function setAutoApplyPolicy(state, owner, policy) {
 
 export function applyBulkBatch(state, auth, jobId, batchId, options = {}) {
   const res = (r) => audit(state ?? {}, auth, { operation: 'bulk_apply', collectionId: null }, r);
-  const ctx = openJob(state, auth, jobId, { leaseRequired: false }); // the WORKER lease is deliberately not required
-  const batch = ctx && state.batches?.[auth.clientId + ':' + batchId];
-  if (!batch || batch.status !== 'staged') return res(DENIED);
-  const { p, job } = ctx;
-  // Revalidated before and again inside the commit: lifetime, permissions, scope, evidence authority/redaction, epoch,
-  // tombstones, expected revisions, and the approval route. Any failure applies nothing.
+  const early = openJob(state, auth, jobId, { leaseRequired: false }); // the WORKER lease is deliberately not required
+  const first = early && state.batches?.[auth.clientId + ':' + batchId];
+  if (!first || first.status !== 'staged') return res(DENIED);
+  // Revalidated before and again inside the commit, with FRESH lookups each time: binding to the staging job, lifetime,
+  // permissions, scope and item-level provenance, evidence authority/redaction, epoch, tombstones, expected revisions and
+  // the approval route. Any failure applies nothing.
   const verify = () => {
-    if (!principal(state, auth).ok || job.epoch !== state.epoch || job.policyRevision !== p.client.writePolicyRevision) return { err: DENIED };
-    if (state.now >= proposalExpiry(state, batch, stageGrant(state, p, auth, job))) return { err: EXPIRED };
-    if (!applyGrant(state, p, auth, job) || !scopeAuthorized(state, auth, job.target, job.scope)) return { err: DENIED };
+    const pr = principal(state, auth);
+    const job = state.jobs?.[jobKey(auth, jobId)];
+    const batch = state.batches?.[auth.clientId + ':' + batchId];
+    if (!pr.ok || pr.client.tier !== 'local' || !job || !batch || job.status !== 'open' || batch.status !== 'staged') return { err: DENIED };
+    // A staged batch applies only through the job that staged it, and only while that job still carries the same immutable
+    // target, kind and source scope the batch was staged under. Everything below uses the BATCH's target and scope.
+    if (batch.jobKey !== jobKey(auth, jobId) || job.target !== batch.target || job.kind !== batch.kind || !sameSet(job.scope, batch.scope)) return { err: DENIED };
+    if (job.epoch !== state.epoch || job.policyRevision !== pr.client.writePolicyRevision) return { err: DENIED };
+    if (state.now >= proposalExpiry(state, batch, stageGrant(state, pr, auth, batch))) return { err: EXPIRED };
+    if (!applyGrant(state, pr, auth, batch) || !scopeAuthorized(state, auth, batch.target, batch.scope)) return { err: DENIED };
     if (batchDigestOf(batch) !== batch.digest) return { err: DENIED }; // the staged batch was mutated after staging
     const surface = buildReviewSurface(state, auth.clientId, batchId);
     const approval = state.approvals?.find((a) =>
       a.used !== true && a.ownerApproved === true && a.operation === 'bulk_apply' && a.operationId === batchId &&
-      a.clientId === auth.clientId && a.vaultId === state.vaultId && a.collectionId === job.target &&
+      a.clientId === auth.clientId && a.vaultId === state.vaultId && a.collectionId === batch.target &&
       a.bodyDigest === surface.batchDigest && a.summaryDigest === surface.summaryDigest &&
       a.decisionsDigest === decisionsDigest(a.decisions) && sameIndices(a.decisions, surface.requiredDecisions) &&
-      a.riskPolicyVersion === RISK_POLICY_VERSION && a.policyRevision === p.client.writePolicyRevision &&
+      a.riskPolicyVersion === RISK_POLICY_VERSION && a.policyRevision === pr.client.writePolicyRevision &&
       a.epoch === state.epoch && a.expiresAt > state.now) ?? null;
     // Strictest policy wins: autoApplyEligible already requires bulk_apply AND every contained operation to be `allow`, so a single
     // ask_first (or any non-low risk, disabled policy, unlisted client) routes the batch to the owner approval.
@@ -653,26 +670,29 @@ export function applyBulkBatch(state, auth, jobId, batchId, options = {}) {
     if (!auto && !approval) return { err: APPROVAL_REQUIRED };
     const withheld = new Set(auto ? [] : Object.entries(approval.decisions).filter(([, d]) => d === 'withhold').map(([i]) => Number(i)));
     const live = batch.items.filter((_, i) => !withheld.has(i));
+    if (!live.every((item) => itemProvenanceAuthorized(state, auth, batch, item))) return { err: DENIED };
     const staleOrRedacted = evidenceAuthorized(state, live);
     if (staleOrRedacted) return { err: staleOrRedacted };
     for (const item of live) {
-      const bad = itemEligible(state, p, auth, job, { ...item, objectId: item.objectId ?? undefined, expectedRevision: item.expectedRevision ?? undefined });
+      const bad = itemEligible(state, pr, auth, batch, { ...item, objectId: item.objectId ?? undefined, expectedRevision: item.expectedRevision ?? undefined });
       if (bad) return { err: bad };
     }
-    return { ok: true, auto, approval, withheld };
+    return { ok: true, auto, approval, withheld, batch };
   };
+  const stop = (v) => { if (v.err === EXPIRED) first.status = 'expired'; return res(v.err); };
   let v = verify();
-  if (v.err) { if (v.err === EXPIRED) batch.status = 'expired'; return res(v.err); }
+  if (v.err) return stop(v);
   if (typeof options.beforeCommit === 'function') options.beforeCommit(state);
   v = verify(); // all-or-nothing: re-authorize everything inside the commit
-  if (v.err) { if (v.err === EXPIRED) batch.status = 'expired'; return res(v.err); }
+  if (v.err) return stop(v);
+  const { batch } = v; // the object verified inside the commit is the one applied
   if (v.approval) v.approval.used = true; // single-use, bound to this batch and decisions
   const created = []; const changed = [];
   batch.items.forEach((item, index) => {
     if (v.withheld.has(index)) return;
     if (item.operation === 'create_import') {
       const id = 'obj:' + auth.clientId + ':' + batchId + ':' + index;
-      state.objects[id] = { vaultId: state.vaultId, collectionId: job.target, objectKind: job.kind, revision: 1, tombstoned: false, data: item.payload, history: [], batchId };
+      state.objects[id] = { vaultId: state.vaultId, collectionId: batch.target, objectKind: batch.kind, revision: 1, tombstoned: false, data: item.payload, history: [], batchId };
       created.push({ id, resultRevision: 1 });
     } else {
       const old = state.objects[item.objectId];
