@@ -597,6 +597,59 @@ test('bulk rollback refuses to clobber later edits', () => {
   assert.equal(b.state.objects['obj:local-L:b1:0'].tombstoned, false, 'all-or-nothing');
 });
 
+test('bulk apply re-validates the declared scope at commit: a source revoked after staging blocks the batch', () => {
+  const cases = {
+    'read grant revoked': (s) => { s.readGrants.find((g) => g.clientId === 'local-L' && g.collectionId === 'raw-A').revoked = true; },
+    'read policy revision bumped': (s) => { s.clients['local-L'].readPolicyRevision += 1; },
+    'source became private for a broader target': (s) => { s.collections['raw-A'].private = true; s.collections['raw-A'].audience = ['owner']; },
+    'source collection removed': (s) => { delete s.collections['raw-A']; }
+  };
+  for (const [label, mutate] of Object.entries(cases)) {
+    for (const when of ['before apply', 'inside commit']) {
+      const b = bulk({ applyMode: 'allow' });
+      startBulkJob(b.state, b.local, b.job);
+      stageBulkBatch(b.state, b.local, 'job-1', 'b1', b.items());
+      const expected = structuredClone(b.state.objects);
+      let res;
+      if (when === 'before apply') { mutate(b.state); res = applyBulkBatch(b.state, b.local, 'job-1', 'b1'); }
+      else res = applyBulkBatch(b.state, b.local, 'job-1', 'b1', { beforeCommit: mutate });
+      assert.equal(res.code, 'DENIED', label + ' / ' + when);
+      assert.deepEqual(b.state.objects, expected, label + ' / ' + when + ': nothing applied');
+      assert.equal(b.state.batches['local-L:b1'].status, 'staged');
+    }
+  }
+});
+
+test('bulk apply never weakens a per-operation policy: the strictest mode wins', () => {
+  const b = bulk({ applyMode: 'allow' });
+  b.state.grants.find((g) => g.operation === 'update' && g.clientId === 'local-L').mode = 'ask_first';
+  startBulkJob(b.state, b.local, b.job);
+  const staged = stageBulkBatch(b.state, b.local, 'job-1', 'b1', b.items());
+  assert.equal(applyBulkBatch(b.state, b.local, 'job-1', 'b1').code, 'APPROVAL_REQUIRED', 'bulk_apply=allow does not bypass update=ask_first');
+  b.approveBatch('b1', 'f'.repeat(64));
+  assert.equal(applyBulkBatch(b.state, b.local, 'job-1', 'b1').code, 'APPROVAL_REQUIRED', 'approval must be bound to this batch digest');
+  b.approveBatch('b1', staged.batchDigest);
+  assert.equal(applyBulkBatch(b.state, b.local, 'job-1', 'b1').code, 'APPLIED', 'one batch approval satisfies every ask_first operation inside it');
+  assert.equal(b.state.approvals.at(-1).used, true, 'single-use');
+});
+
+test('bulk: ask_first on an operation absent from the batch does not demand approval; a mode flip before commit does', () => {
+  const b = bulk({ applyMode: 'allow' });
+  b.state.grants.find((g) => g.operation === 'append' && g.clientId === 'local-L').mode = 'ask_first';
+  startBulkJob(b.state, b.local, b.job);
+  stageBulkBatch(b.state, b.local, 'job-1', 'b1', b.items()); // create_import + update only
+  assert.equal(applyBulkBatch(b.state, b.local, 'job-1', 'b1').code, 'APPLIED', 'append is not in this batch');
+  const c = bulk({ applyMode: 'allow' });
+  startBulkJob(c.state, c.local, c.job);
+  stageBulkBatch(c.state, c.local, 'job-1', 'b1', c.items());
+  const expected = structuredClone(c.state.objects);
+  const res = applyBulkBatch(c.state, c.local, 'job-1', 'b1', {
+    beforeCommit(s) { s.grants.find((g) => g.operation === 'update' && g.clientId === 'local-L').mode = 'ask_first'; }
+  });
+  assert.equal(res.code, 'APPROVAL_REQUIRED', 'policy tightened between stage and commit');
+  assert.deepEqual(c.state.objects, expected);
+});
+
 test('sub-agent and model choice carry no authority of their own', () => {
   const b = bulk({ applyMode: 'allow' });
   startBulkJob(b.state, b.local, b.job);

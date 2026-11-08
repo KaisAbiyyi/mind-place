@@ -253,6 +253,18 @@ export function ownerRestoreTombstone(state, owner, objectId) {
 const jobKey = (auth, jobId) => auth.clientId + ':' + jobId;
 const audienceCovers = (source, target) => Array.isArray(source) && Array.isArray(target) && target.every((r) => source.includes(r));
 
+// Scope is the owner/prompt-declared project boundary; every source needs a CURRENT read grant. Ordinary raw -> curated promotion is
+// the purpose of a bulk job (gated by tier + apply approval); a PRIVATE source may only feed a target whose readers it also covers.
+// Evaluated at job start AND again inside the apply commit, so revoking a source after staging blocks the batch.
+function scopeAuthorized(state, auth, targetId, scope) {
+  const target = state.collections?.[targetId];
+  if (!target) return false;
+  return scope.every((c) => {
+    const source = state.collections?.[c];
+    return !!source && canRead(state, auth, c) && !(source.private === true && !audienceCovers(source.audience, target.audience));
+  });
+}
+
 export function startBulkJob(state, auth, job) {
   const p = principal(state, auth);
   const res = (r) => audit(state ?? {}, auth, { operation: 'bulk_start', collectionId: job?.targetCollectionId }, r);
@@ -262,13 +274,7 @@ export function startBulkJob(state, auth, job) {
   if (!layer || layer === 'raw' || state.collections?.[job.targetCollectionId]?.layer !== layer) return res(DENIED);
   const grant = findGrant(state, p.client, auth, { collectionId: job.targetCollectionId, objectKind: job.objectKind, operation: 'bulk_stage' });
   if (!grant) return res(DENIED);
-  const target = state.collections[job.targetCollectionId];
-  for (const c of job.scopeCollections) {
-    // Scope is the owner/prompt-declared project boundary; every source needs a read grant. Ordinary raw -> curated promotion is the
-    // purpose of a bulk job (gated by tier + apply approval); a PRIVATE source may only feed a target whose readers it also covers.
-    const source = state.collections[c];
-    if (!canRead(state, auth, c) || (source?.private === true && !audienceCovers(source.audience, target.audience))) return res(DENIED);
-  }
+  if (!scopeAuthorized(state, auth, job.targetCollectionId, job.scopeCollections)) return res(DENIED);
   const key = jobKey(auth, job.jobId);
   if (state.jobs?.[key]) return res(CONFLICT);
   const limits = { ...BULK_DEFAULTS, ...(grant.limits ?? {}) };
@@ -326,18 +332,20 @@ export function applyBulkBatch(state, auth, jobId, batchId, options = {}) {
   const batch = ctx && state.batches?.[auth.clientId + ':' + batchId];
   if (!batch || batch.status !== 'staged') return res(DENIED);
   const { p, job } = ctx;
-  const grant = findGrant(state, p.client, auth, { collectionId: job.target, objectKind: job.kind, operation: 'bulk_apply' });
-  if (!grant) return res(DENIED);
   const spec = { collectionId: job.target, operation: 'bulk_apply', operationId: batchId, digest: batch.digest };
-  const needsApproval = grant.mode === 'ask_first';
-  if (needsApproval && !findApproval(state, p.client, auth, spec)) return res(APPROVAL_REQUIRED);
+  // Strictest policy wins: the batch needs an owner approval if bulk_apply OR any operation inside it is ask_first. One approval,
+  // bound to the batch digest, satisfies all of them; a bulk grant can never weaken a per-operation policy. Re-evaluated at commit.
+  const approvalNeeded = () => findGrant(state, p.client, auth, { collectionId: job.target, objectKind: job.kind, operation: 'bulk_apply' })?.mode === 'ask_first' ||
+    batch.items.some((i) => findGrant(state, p.client, auth, { collectionId: job.target, objectKind: job.kind, operation: i.operation })?.mode === 'ask_first');
   const verify = () => {
     if (!principal(state, auth).ok || job.epoch !== state.epoch || job.policyRevision !== p.client.writePolicyRevision) return DENIED;
+    if (!findGrant(state, p.client, auth, { collectionId: job.target, objectKind: job.kind, operation: 'bulk_apply' })) return DENIED;
+    if (!scopeAuthorized(state, auth, job.target, job.scope)) return DENIED;
     for (const item of batch.items) {
       const bad = itemEligible(state, p, auth, job, { ...item, objectId: item.objectId ?? undefined, expectedRevision: item.expectedRevision ?? undefined });
       if (bad) return bad;
     }
-    if (needsApproval && !findApproval(state, p.client, auth, spec)) return APPROVAL_REQUIRED;
+    if (approvalNeeded() && !findApproval(state, p.client, auth, spec)) return APPROVAL_REQUIRED;
     return null;
   };
   let bad = verify();
@@ -345,7 +353,7 @@ export function applyBulkBatch(state, auth, jobId, batchId, options = {}) {
   if (typeof options.beforeCommit === 'function') options.beforeCommit(state);
   bad = verify(); // all-or-nothing: re-authorize every item inside the commit
   if (bad) return res(bad);
-  if (needsApproval) findApproval(state, p.client, auth, spec).used = true; // single-use, bound to this batch digest
+  if (approvalNeeded()) findApproval(state, p.client, auth, spec).used = true; // single-use, bound to this batch digest
   const created = []; const changed = [];
   batch.items.forEach((item, index) => {
     if (item.operation === 'create_import') {
