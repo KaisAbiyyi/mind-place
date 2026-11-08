@@ -131,11 +131,13 @@ test('transient helper downloads retry boundedly, preserve exact verification an
     verifyPinnedFile(destination, pin.sha256, pin.bytes);
     fs.unlinkSync(destination);
     assert.equal(fs.existsSync(destination), false);
-    calls = 0;
-    await assert.rejects(downloadPinnedAsset('https://api.github.com/fixture', destination, pin, async () => {
-      calls++; return new Response('', { status: 404 });
-    }), /HTTP 404/);
-    assert.equal(calls, 1);
+    for (const status of [404, 429]) {
+      calls = 0;
+      await assert.rejects(downloadPinnedAsset('https://api.github.com/fixture', destination, pin, async () => {
+        calls++; return new Response('', { status, headers: { 'Retry-After': '60' } });
+      }), new RegExp(`HTTP ${status}`));
+      assert.equal(calls, 1, 'terminal/rate-limit responses must not be retried early');
+    }
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
