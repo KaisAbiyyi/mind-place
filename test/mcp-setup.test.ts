@@ -27,3 +27,22 @@ test('hosted setup explains included helper and gives repair guidance without ex
     assert.doesNotMatch(parent.textContent ?? '', /sk-private-fixture/);
   } finally { Object.assign(globalThis, previous); dom.window.close(); }
 });
+
+test('disposed MCP setup ignores delayed credentials and clears password fields', async () => {
+  const dom = new JSDOM('<main></main>');
+  const parent = dom.window.document.querySelector('main')!;
+  let finish!: (value: unknown) => void;
+  const pending = new Promise(resolve => { finish = resolve; });
+  const invoke: Invoke = async <T>(cmd: string) => {
+    if (cmd === 'issue_local_mcp_reader') return pending as Promise<T>;
+    if (cmd === 'list_local_mcp_clients') return [] as T;
+    return { running: false, connection_verified: false } as T;
+  };
+  const handle = mountLocalMcpSetup(parent, invoke, { writeText: async () => {} });
+  const key = parent.querySelector<HTMLInputElement>('#hosted-runtime-key')!; key.value = 'synthetic-private-key';
+  parent.querySelector<HTMLButtonElement>('[data-mcp-action="issue"]')!.click();
+  handle.destroy(); finish({ client_id: 'late', credential: 'synthetic-late-credential' });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(key.value, ''); assert.doesNotMatch(parent.textContent ?? '', /synthetic-/);
+  dom.window.close();
+});

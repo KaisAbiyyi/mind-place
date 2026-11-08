@@ -378,3 +378,116 @@ fn pdf_revoke_after_first_expanded_decode_discards_text() {
     assert_eq!(result, Err(ExtractionError::Revoked));
     assert_eq!(checks, 5);
 }
+
+#[test]
+fn pdf_long_literal_cancellation_and_depth_fail_closed() {
+    // The authorization callback must run DURING a long PDF token, not only
+    // before and after decoding a potentially expensive untrusted literal.
+    let mut long = b"%PDF-1.7\nBT (".to_vec();
+    long.extend(std::iter::repeat_n(b'A', 128 * 1024));
+    long.extend_from_slice(b") Tj ET\n");
+    let mut checks = 0usize;
+    let denied = extract_with_check(
+        DocumentFormat::Pdf,
+        &long,
+        ExtractionLimits::default(),
+        || {
+            checks += 1;
+            checks < 10
+        },
+    );
+    assert_eq!(denied, Err(ExtractionError::Revoked));
+    assert_eq!(checks, 10);
+
+    // Nested PDF string delimiters must not consume unbounded parser work.
+    let nested = format!(
+        "%PDF-1.7\nBT ({}X{}) Tj ET\n",
+        "(".repeat(65),
+        ")".repeat(65)
+    );
+    assert_eq!(
+        extract_bytes(
+            DocumentFormat::Pdf,
+            nested.as_bytes(),
+            ExtractionLimits::default()
+        ),
+        Err(ExtractionError::Limit("pdf_string_depth"))
+    );
+}
+
+#[test]
+fn deterministic_adversarial_document_mutations_remain_bounded() {
+    // Reproducible, synthetic mutation corpus: no owner documents are read.
+    // Every accepted result must respect caps; corrupt inputs may fail closed
+    // with any structured extractor error but must never panic or leak text.
+    let source = make_zip(&[(
+        "word/document.xml",
+        b"<w:document><w:t>synthetic fixture</w:t></w:document>",
+        true,
+    )]);
+    let cases = [
+        (DocumentFormat::Docx, source),
+        (
+            DocumentFormat::Pdf,
+            b"%PDF-1.7\n1 0 obj\n<< /Length 22 >>\nstream\nBT (fixture) Tj ET\nendstream\nendobj"
+                .to_vec(),
+        ),
+        (
+            DocumentFormat::Markdown,
+            b"# Fixture\nsynthetic text".to_vec(),
+        ),
+    ];
+    let limits = ExtractionLimits {
+        max_input_bytes: 128 * 1024,
+        max_expanded_bytes: 128 * 1024,
+        max_output_bytes: 4096,
+        max_chunks: 16,
+        ..ExtractionLimits::default()
+    };
+    for (format, sample) in cases {
+        for mutation in 0..96usize {
+            let mut input = sample.clone();
+            let index = (mutation * 977 + 17) % input.len();
+            input[index] ^= (mutation as u8).wrapping_mul(31).wrapping_add(1);
+            if let Ok(document) = extract_bytes(format, &input, limits) {
+                assert!(document.text.len() <= limits.max_output_bytes);
+                assert!(document.chunks.len() <= limits.max_chunks);
+                assert!(document
+                    .chunks
+                    .iter()
+                    .all(|chunk| { !chunk.text.contains('\0') }));
+            }
+        }
+    }
+}
+
+#[test]
+fn pdf_long_dictionary_and_content_skips_preserve_visible_text() {
+    use flate2::write::ZlibEncoder;
+
+    let content = format!(
+        "BT %{}\n(visible PDF text) Tj ET",
+        "content-comment".repeat(700)
+    );
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+    encoder.write_all(content.as_bytes()).unwrap();
+    let compressed = encoder.finish().unwrap();
+
+    let dictionary = format!(
+        "<< %{}\n /{} /Length {} /Filter{} /FlateDecode >>",
+        "dictionary-comment".repeat(700),
+        "UnusedName".repeat(700),
+        compressed.len(),
+        " ".repeat(8192)
+    );
+    let mut pdf = format!("%PDF-1.7\n1 0 obj\n{dictionary}\nstream\n").into_bytes();
+    pdf.extend_from_slice(&compressed);
+    pdf.extend_from_slice(b"\nendstream\nendobj\n%%EOF");
+
+    let extracted = extract_bytes(DocumentFormat::Pdf, &pdf, ExtractionLimits::default()).unwrap();
+    assert_eq!(extracted.text, "visible PDF text");
+    assert!(extracted
+        .warnings
+        .iter()
+        .any(|warning| warning.contains("no OCR")));
+}
