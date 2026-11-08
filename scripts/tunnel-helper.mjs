@@ -46,7 +46,7 @@ async function request(url, accept, fetcher) {
   }
   if (!response.ok || !response.body) {
     await response.body?.cancel();
-    const ErrorType = [429, 500, 502, 503, 504].includes(response.status) ? TransientDownloadError : Error;
+    const ErrorType = [500, 502, 503, 504].includes(response.status) ? TransientDownloadError : Error;
     throw new ErrorType(`Helper download failed: HTTP ${response.status}`);
   }
   return response;
