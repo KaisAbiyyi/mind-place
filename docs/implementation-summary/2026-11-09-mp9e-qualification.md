@@ -47,6 +47,12 @@ verdict for MP-9E; actual execution logs establish the tested feature profile.
 Tests receive no token or repository secret; the short provenance step has only
 the workflow's read-only GitHub token. No `pull_request_target` or write grant.
 
+Confirmed workflow failure: the first instrumented Windows run selected Git
+Bash's incomplete MSYS Perl and vendored OpenSSL failed to configure because
+`Locale::Maketext::Simple` was absent. The workflow now selects the runner's
+native Strawberry Perl explicitly and probes the required modules before Cargo.
+SQLCipher and vendored OpenSSL remain real builds; no feature or test is stubbed.
+
 ## MP-9C authority boundary — proposed, not implemented acceptance
 
 Coordination is posted to [MP-9C PR #151](https://github.com/KaisAbiyyi/mind-place/pull/151#issuecomment-6744286667).
