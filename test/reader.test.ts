@@ -64,8 +64,40 @@ function createReader(invoke: Invoke, copied: string[] = []) {
     clipboard: { writeText: async (value) => { copied.push(value); } },
   });
   mounted.push(app);
+  root.querySelector<HTMLButtonElement>('[data-route="conversations"]')?.click();
+  // Reader assertions exercise an explicitly opened transcript; the route itself is now an archive table.
+  void app.ready.then(() => root.querySelector<HTMLButtonElement>("#conversation-list [data-conversation-id]")?.click());
   return { dom, root, app, copied };
 }
+
+
+test("overview uses live archive data and opens the selected transcript through Conversations", async () => {
+  const item = summary("overview-one", "Overview fixture");
+  const invoke: Invoke = async <T>(command: string) => {
+    if (command === "list_conversations") return [item] as T;
+    if (command === "read_conversation") return conversation(item, "Overview answer") as T;
+    if (command === "list_snapshots") return [] as T;
+    throw new Error("Unexpected command: " + command);
+  };
+  const dom = new JSDOM("<!doctype html><html><body><div id='app'></div></body></html>", { url: "https://archive.test/" });
+  const root = dom.window.document.querySelector<HTMLElement>("#app")!;
+  const app = mountReader({ root, invoke });
+  mounted.push(app);
+  await app.ready;
+  await delay(0);
+  assert.equal(root.querySelector(".app-shell")?.getAttribute("data-active-route"), "overview");
+  const overview = root.querySelector("#reader-view")?.textContent ?? "";
+  assert.match(overview, /Saved conversations/);
+  assert.match(overview, /Messages captured/);
+  assert.match(overview, /Overview fixture/);
+  assert.doesNotMatch(overview, /Overview answer/);
+  root.querySelector<HTMLButtonElement>('[data-route="conversations"]')!.click();
+  await delay(0);
+  assert.equal(root.querySelector("#reader-view h1")?.textContent, "Conversations Archive");
+  root.querySelector<HTMLButtonElement>("#reader-view [data-conversation-id]")!.click();
+  await delay(0);
+  assert.match(root.querySelector("#reader-view")?.textContent ?? "", /Overview answer/);
+});
 
 test("archived Markdown and HTML cannot execute scripts or load remote images", () => {
   const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "https://archive.test/" });
@@ -301,6 +333,27 @@ test("the reader has no chat composer and copy/export use archive actions", asyn
   assert.deepEqual(copied, ["A useful answer.", "# Notes\n\nA useful answer."]);
 });
 
+test("vault memory-only Markdown export does not claim a disk save", async () => {
+  const item = summary("f".repeat(64), "Encrypted notes");
+  const invoke: Invoke = async <T>(command: string) => {
+    if (command === "list_conversations") return [item] as T;
+    if (command === "read_conversation") return conversation(item, "Confidential synthetic reply.") as T;
+    if (command === "export_markdown") return { path: "", markdown: "# Synthetic encrypted export" } as T;
+    throw new Error(`Unexpected command: ${command}`);
+  };
+  const { root, app, copied } = createReader(invoke);
+  await app.ready;
+  await delay(0);
+  root.querySelector<HTMLButtonElement>("[data-action='export-markdown']")?.click();
+  await delay(0);
+  assert.match(root.textContent ?? "", /ready in memory, not saved to disk/i);
+  assert.doesNotMatch(root.textContent ?? "", /Saved Markdown to\s*$/);
+  assert.ok(root.querySelector<HTMLButtonElement>("[data-action='save-markdown']"));
+  root.querySelector<HTMLButtonElement>("[data-action='copy-markdown']")?.click();
+  await delay(0);
+  assert.deepEqual(copied, ["# Synthetic encrypted export"]);
+});
+
 test("capture history opens one selected snapshot without merging transcripts", async () => {
   const item = summary("d".repeat(64), "Revised conversation");
   const latest = { snapshot_id: "latest", captured_at: "2026-10-15T05:00:00.000Z", message_count: 2, completeness: "partial" as const };
@@ -435,10 +488,13 @@ test("Settings tabs preserve explicit consent, keyboard navigation and focus res
   };
   const { dom, root, app } = createReader(invoke);
   await app.ready;
-  const documents = root.querySelector<HTMLButtonElement>("[data-action='open-document-search']")!;
+  root.querySelector<HTMLButtonElement>("#knowledge-os-nav [data-route='ai-providers-mcp']")!.click();
+  await delay(0);
+  const documents = root.querySelector<HTMLButtonElement>(".providers-workspace [data-action='open-setup']")!;
   documents.focus();
   documents.click();
   await delay(0);
+  root.querySelector<HTMLButtonElement>("#settings-tab-documents")!.click();
   await delay(0);
   assert.equal(root.querySelector<HTMLButtonElement>("#settings-tab-documents")?.getAttribute("aria-selected"), "true");
   assert.equal(root.querySelector<HTMLElement>("#settings-panel-documents")?.hidden, false);
@@ -470,7 +526,7 @@ test("Settings contains only the selected panel at accessible tab focus", async 
   };
   const { dom, root, app } = createReader(invoke);
   await app.ready;
-  root.querySelector<HTMLButtonElement>("[data-action='open-setup']")!.click();
+  openSetupFromWizard(root);
   await delay(0);
   await delay(0);
   const panels = [...root.querySelectorAll<HTMLElement>("[data-settings-panel]")];
@@ -490,7 +546,7 @@ test("Settings contains only the selected panel at accessible tab focus", async 
   assert.match(root.querySelector<HTMLElement>("#settings-panel-privacy")!.textContent ?? "", /Lock closes owner-only retrieval/);
 });
 
-test("Register Brave is an explicit Settings action and reports native host registration", async () => {
+test("Register Brave is an explicit Settings action and reports unverified configuration", async () => {
   let registeredBrowser: string | null = null;
   const invoke: Invoke = async <T>(command: string, args?: Record<string, unknown>) => {
     if (command === "list_conversations" || command === "list_document_roots" || command === "list_local_mcp_clients") return [] as T;
@@ -509,13 +565,58 @@ test("Register Brave is an explicit Settings action and reports native host regi
   };
   const { root, app } = createReader(invoke);
   await app.ready;
-  root.querySelector<HTMLButtonElement>("[data-action='open-setup']")!.click();
+  openSetupFromWizard(root);
   await delay(0);
   await delay(0);
   assert.equal(registeredBrowser, null, "Opening Settings must not register Brave automatically");
   root.querySelector<HTMLButtonElement>("[data-action='register-brave']")!.click();
   await delay(0);
   assert.equal(registeredBrowser, "brave");
-  assert.match(root.querySelector<HTMLElement>(".registered-status")?.textContent ?? "", /Registered in Brave/);
+  assert.match(root.querySelector<HTMLElement>(".registered-status")?.textContent ?? "", /Configured for Brave.*browser connection has not been tested/);
   assert.equal(root.querySelector<HTMLButtonElement>("[data-action='register-chrome']")?.disabled, false);
+});
+
+
+/** The sidebar's Setup & Onboarding entry opens the wizard; the detailed dialog is reached from its capture step. */
+function openSetupFromWizard(root: HTMLElement) {
+  root.querySelector<HTMLButtonElement>("[data-route='setup-onboarding']")!.click();
+  root.querySelector<HTMLButtonElement>(".onboarding-workspace [data-step='providers']")!.click();
+  root.querySelector<HTMLButtonElement>(".onboarding-workspace [data-focus-key='open-details']")!.click();
+}
+
+test("onboarding capture settings opens Archive controls and Done restores the wizard and focus", async () => {
+  const commands: string[] = [];
+  const invoke: Invoke = async <T>(command: string) => {
+    commands.push(command);
+    if (["list_conversations", "list_document_roots", "list_local_mcp_clients"].includes(command)) return [] as T;
+    if (command === "get_local_mcp_status" || command === "get_hosted_tunnel_status") return { running: false } as T;
+    if (command === "get_setup") return {
+      archive_path: "D:\\archive", extension_path: "D:\\extension", host_path: "D:\\host",
+      extension_id: "test-extension", native_host_name: "com.mindplace.capture",
+      registered_browsers: [], platform: "windows", legacy_available: false,
+    } as T;
+    throw Error(`Unexpected command ${command}`);
+  };
+  const { root, app, dom } = createReader(invoke);
+  await app.ready;
+  root.querySelector<HTMLButtonElement>("[data-route='setup-onboarding']")!.click();
+  assert.ok(root.querySelector(".onboarding-workspace"));
+  const dialog = root.querySelector<HTMLDialogElement>("#setup-dialog")!;
+  assert.equal(dialog.hasAttribute("open"), false, "Sidebar entry opens the wizard first");
+  root.querySelector<HTMLButtonElement>(".onboarding-workspace [data-step='providers']")!.click();
+  await delay(0); // Let native status responses finish rerendering the capture step.
+  const details = root.querySelector<HTMLButtonElement>(".onboarding-workspace [data-focus-key='open-details']")!;
+  details.click();
+  await delay(0);
+  assert.equal(dialog.hasAttribute("open"), true);
+  assert.equal(root.querySelector("#settings-tab-archive")?.getAttribute("aria-selected"), "true");
+  const panel = root.querySelector<HTMLElement>("#settings-panel-archive")!;
+  assert.equal(panel.hidden, false);
+  panel.querySelector<HTMLButtonElement>("[data-action='import-generic']")!.click();
+  assert.equal(panel.querySelector("[data-generic-status]")?.textContent, "Choose a JSON, Markdown or HTML file first.");
+  assert.equal(commands.includes("import_generic_text"), false, "No-file validation must not import anything");
+  root.querySelector<HTMLButtonElement>("#setup-dialog .dialog-footer [data-action='close-setup']")!.click();
+  assert.equal(dialog.hasAttribute("open"), false);
+  assert.equal(root.querySelector(".app-shell")?.getAttribute("data-active-route"), "setup-onboarding");
+  assert.equal(dom.window.document.activeElement, details);
 });

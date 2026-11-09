@@ -1,7 +1,7 @@
-// Windows-only visual smoke of the real, merged Settings shell at multiple viewports.
+// Visual smoke of the real, merged Settings shell at multiple viewports (Edge on Windows).
 // This uses a synthetic native invoke surface, never an owner's archive or browser profile.
 import assert from 'node:assert/strict';
-import { chromium } from '@playwright/test';
+import { chromium, expect } from '@playwright/test';
 import { createServer } from 'vite';
 
 const viewports = [[1180, 820], [1180, 600], [800, 520], [590, 410], [390, 700], [360, 520]];
@@ -10,7 +10,9 @@ let browser;
 try {
   await vite.listen();
   // Use the installed Edge, without opening or taking over the user's browser profile.
-  browser = await chromium.launch({ headless: true, timeout: 15000, executablePath: 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe' });
+  browser = await chromium.launch({ headless: true, timeout: 15000, executablePath: process.platform === 'win32'
+    ? 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'
+    : process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH });
   const page = await browser.newPage();
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
@@ -36,9 +38,13 @@ try {
       };
       const handle = mountReader({ root, invoke });
       await handle.ready;
-      const button = root.querySelector('[data-action="open-setup"]');
-      button.click();
     });
+    // Exercise the public navigation path: the sidebar opens the wizard, not the dialog.
+    await page.locator('#knowledge-os-nav [data-route="setup-onboarding"]').click();
+    await expect(page.locator('.onboarding-workspace')).toBeVisible();
+    await expect(page.locator('#setup-dialog')).not.toBeVisible();
+    await page.locator('.onboarding-workspace button[data-step="providers"]').click();
+    await page.getByRole('button', { name: 'Open full capture settings', exact: true }).click();
     await page.waitForSelector('#settings-panel-archive [data-action="import-generic"]');
     const result = await page.evaluate(() => {
       const dialog = document.querySelector('#setup-dialog');
@@ -66,6 +72,14 @@ try {
         genericImportReachable: !!document.querySelector('#settings-panel-archive [data-action="import-generic"]'),
       };
     });
+    // A DOM node alone is not reachability: normal Playwright clicks must scroll to
+    // the real import button and execute its safe no-file validation, then close via Done.
+    await page.locator('#settings-panel-archive [data-action="import-generic"]').click();
+    await expect(page.locator('[data-generic-status]')).toHaveText('Choose a JSON, Markdown or HTML file first.');
+    await page.locator('#setup-dialog .dialog-footer [data-action="close-setup"]').click();
+    await expect(page.locator('#setup-dialog')).not.toBeVisible();
+    await expect(page.locator('.onboarding-workspace')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Open full capture settings', exact: true })).toBeFocused();
     results.push({ viewport: `${width}x${height}`, ...result });
     assert.ok(Object.values(result).every(Boolean), `Settings visual regression at ${width}x${height}: ${JSON.stringify(result)}`);
   }

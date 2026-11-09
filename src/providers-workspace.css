@@ -1,0 +1,135 @@
+/* Canonical Monochrome Knowledge OS AI Providers & MCP (`page-providers`) */
+
+.providers-workspace {
+  display: grid;
+  gap: 18px;
+}
+
+.providers-page-head h1 {
+  margin: 0 0 6px;
+  font-family: var(--font-sans);
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -0.025em;
+  line-height: 1.25;
+  color: var(--text-primary);
+}
+
+.providers-page-head p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.providers-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  align-items: stretch;
+}
+
+.providers-workspace p {
+  overflow-wrap: anywhere;
+  line-height: 1.55;
+}
+
+.provider-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.provider-card .ui-card-header {
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.provider-card .ui-card-title {
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+}
+
+.provider-card .ui-card-body {
+  align-content: start;
+  font-size: 12.5px;
+  gap: 10px;
+}
+
+.provider-card p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.provider-card label {
+  display: grid;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.provider-card select {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  opacity: 1;
+}
+
+.provider-card .provider-capability-note {
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.providers-workspace .setup-mcp {
+  min-width: 0;
+  padding: 20px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-xs);
+}
+
+.providers-workspace .setup-mcp p {
+  font-size: 12.5px;
+}
+
+.providers-workspace .setup-mcp input:not([type="checkbox"]) {
+  display: block;
+  width: min(100%, 520px);
+  min-width: 0;
+  height: 36px;
+  padding: 0 12px;
+  margin: 8px 0 12px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 12.5px;
+}
+
+.providers-workspace .setup-mcp [data-mcp-secret] {
+  overflow-wrap: anywhere;
+}
+
+.providers-workspace .setup-mcp [data-mcp-secret] code {
+  user-select: all;
+}
+
+@media (max-width: 1120px) {
+  .providers-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

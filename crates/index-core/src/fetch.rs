@@ -1,7 +1,7 @@
 //! Phase 2B: provenance-checked, bounded progressive archive fetch.
 //! All fetches are resolved from a stable indexed source+snapshot, never from
 //! arbitrary filesystem paths or transient FTS row IDs.
-use crate::{verify_snapshot, IndexError, IndexStore, Result};
+use crate::{verify_snapshot, CaptureArchiveReader, IndexError, IndexStore, Result};
 use mind_place_archive::ArchiveStore;
 use mind_place_state::{canonical_source_id, SourceDescriptor, SourceKey};
 use rusqlite::{params, OptionalExtension};
@@ -156,6 +156,25 @@ impl IndexStore {
         &self,
         archive: &ArchiveStore,
         request: &FetchRequest,
+        check: impl FnMut() -> Result<()>,
+    ) -> Result<FetchResponse> {
+        self.fetch_generic_with_check(archive, request, check)
+    }
+
+    #[cfg(feature = "sqlcipher-preview")]
+    pub fn fetch_vault_with_check(
+        &self,
+        archive: &crate::vault_archive::VaultCaptureStore,
+        request: &FetchRequest,
+        check: impl FnMut() -> Result<()>,
+    ) -> Result<FetchResponse> {
+        self.fetch_generic_with_check(archive, request, check)
+    }
+
+    pub(crate) fn fetch_generic_with_check(
+        &self,
+        archive: &impl CaptureArchiveReader,
+        request: &FetchRequest,
         mut check: impl FnMut() -> Result<()>,
     ) -> Result<FetchResponse> {
         let started = Instant::now();
@@ -217,7 +236,7 @@ impl IndexStore {
             |row| row.get(0),
         )?;
         check()?;
-        let conversation = archive.read(&request.archive_id, Some(&request.snapshot_id))?;
+        let conversation = archive.read_capture(&request.archive_id, Some(&request.snapshot_id))?;
         check()?;
         // A filename is not proof that its contents match the requested revision.
         verify_snapshot(&conversation.capture, &request.snapshot_id)?;
