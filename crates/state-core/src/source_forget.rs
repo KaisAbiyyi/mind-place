@@ -52,6 +52,11 @@ struct Intent {
     impact_sha256: String,
     reason_sha256: String,
     expires_at_ms: i64,
+    unlock_epoch: u64,
+}
+
+fn unlock_epoch(store: &StateStore) -> u64 {
+    store.cipher_key.as_ref().map_or(0, |key| key.lease_epoch())
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -214,6 +219,7 @@ impl StateStore {
             impact_sha256: impact_sha256.clone(),
             reason_sha256: sha(reason.as_bytes()),
             expires_at_ms,
+            unlock_epoch: unlock_epoch(self),
         };
         tx.execute(
             "INSERT INTO settings(key,value_json) VALUES(?1,?2)
@@ -276,6 +282,7 @@ impl StateStore {
             || intent.owner_client_id != actor
             || intent.token_sha256 != sha(one_time_token.as_bytes())
             || intent.expires_at_ms < now_ms()?
+            || intent.unlock_epoch != unlock_epoch(self)
         {
             return Err(StateError::MemoryDenied);
         }
