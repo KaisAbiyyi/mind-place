@@ -107,6 +107,40 @@ pub(crate) fn claim_has_redacted_source(db: &Connection, claim_id: &str) -> Resu
     Ok(false)
 }
 
+
+/// Insert the logical tombstone in an existing IMMEDIATE transaction while its
+/// caller owns the exclusive privacy fence. This is deliberately not an erase
+/// completion receipt; post-restore monotonic policy is a separate authority.
+pub(crate) fn commit_redaction(
+    db: &Connection,
+    source_id: &str,
+    actor_id: &str,
+    reason_sha256: &str,
+) -> Result<i64> {
+    if !valid_source_id(source_id) || !valid_sha256(reason_sha256) || actor_id.is_empty() {
+        return Err(StateError::InvalidValue);
+    }
+    if tombstone(db, source_id)?.is_some() {
+        return Err(StateError::MemoryDenied);
+    }
+    let at = next_claim_clock(db, 0)?;
+    let entry = Tombstone {
+        version: FORMAT,
+        source_id: source_id.to_owned(),
+        actor_id: actor_id.to_owned(),
+        reason_sha256: reason_sha256.to_owned(),
+        recorded_at_ms: at,
+    };
+    db.execute(
+        "INSERT INTO settings(key,value_json) VALUES(?1,?2)",
+        params![
+            key(source_id)?,
+            serde_json::to_string(&entry).map_err(|_| StateError::Corrupt)?
+        ],
+    )?;
+    Ok(at)
+}
+
 impl StateStore {
     /// Trusted local owner decision only. The caller MUST enforce an active
     /// unlocked vault lease and present the admin credential's verified hash.
@@ -168,20 +202,11 @@ impl StateStore {
                 recorded_at_ms: existing.recorded_at_ms,
             });
         }
-        let at = next_claim_clock(&tx, 0)?;
-        let entry = Tombstone {
-            version: FORMAT,
-            source_id: source_id.to_owned(),
-            actor_id: actor,
-            reason_sha256: format!("{:x}", Sha256::digest(reason.as_bytes())),
-            recorded_at_ms: at,
-        };
-        tx.execute(
-            "INSERT INTO settings(key,value_json) VALUES(?1,?2)",
-            params![
-                key(source_id)?,
-                serde_json::to_string(&entry).map_err(|_| StateError::Corrupt)?
-            ],
+        let at = commit_redaction(
+            &tx,
+            source_id,
+            &actor,
+            &format!("{:x}", Sha256::digest(reason.as_bytes())),
         )?;
         tx.commit()?;
         Ok(SourceRedactionReceipt {

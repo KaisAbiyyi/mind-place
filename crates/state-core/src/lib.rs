@@ -22,6 +22,7 @@ mod memory_writes;
 mod ntfs;
 mod private_scopes;
 mod source_redaction;
+mod source_forget;
 #[cfg(feature = "sqlcipher-preview")]
 pub mod vault_bootstrap;
 pub use clients::{ClientAuditEvent, ClientCapability, ClientRecord};
@@ -41,6 +42,7 @@ pub use memory_ranking::{
 pub use memory_writes::{MemoryWrite, MemoryWriteReceipt};
 pub use private_scopes::PrivateScope;
 pub use source_redaction::SourceRedactionReceipt;
+pub use source_forget::{SourceForgetPreview, SourceForgetProgress};
 
 pub const APPLICATION_ID: i64 = 0x4D504C43;
 pub const SCHEMA_VERSION: i64 = 9;
