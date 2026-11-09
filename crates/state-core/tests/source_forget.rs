@@ -1,34 +1,63 @@
 use mind_place_state::{
-    ClientCapability as Cap, ClaimEvidence, MemoryClaim, SourceDescriptor, SourceKey,
-    StateError, StateStore,
+    ClaimEvidence, ClientCapability as Cap, MemoryClaim, SourceDescriptor, SourceKey, StateError,
+    StateStore,
 };
 
-fn fixture() -> (tempfile::TempDir, StateStore, String, String, String, String) {
+fn fixture() -> (
+    tempfile::TempDir,
+    StateStore,
+    String,
+    String,
+    String,
+    String,
+) {
     let home = tempfile::tempdir().unwrap();
     let state = StateStore::open(home.path().join("state.sqlite3")).unwrap();
     let owner = "a".repeat(64);
     let other = "b".repeat(64);
-    state.issue_client("client:v1:owner", "Owner", &owner, &[Cap::Admin]).unwrap();
-    state.issue_client("client:v1:other", "Other", &other, &[Cap::Read]).unwrap();
-    let s = state.register_source(&SourceDescriptor {
-        provider: "chatgpt", source_namespace: "synthetic",
-        source_kind: "conversation", key: SourceKey::External("source-a"),
-    }).unwrap();
-    let second = state.register_source(&SourceDescriptor {
-        provider: "chatgpt", source_namespace: "synthetic",
-        source_kind: "conversation", key: SourceKey::External("source-b"),
-    }).unwrap();
+    state
+        .issue_client("client:v1:owner", "Owner", &owner, &[Cap::Admin])
+        .unwrap();
+    state
+        .issue_client("client:v1:other", "Other", &other, &[Cap::Read])
+        .unwrap();
+    let s = state
+        .register_source(&SourceDescriptor {
+            provider: "chatgpt",
+            source_namespace: "synthetic",
+            source_kind: "conversation",
+            key: SourceKey::External("source-a"),
+        })
+        .unwrap();
+    let second = state
+        .register_source(&SourceDescriptor {
+            provider: "chatgpt",
+            source_namespace: "synthetic",
+            source_kind: "conversation",
+            key: SourceKey::External("source-b"),
+        })
+        .unwrap();
     (home, state, owner, other, s, second)
 }
 
 fn claim(db: &StateStore, id: &str, sources: &[String]) {
-    db.create_evidenced_claim(&MemoryClaim {
-        id: id.to_owned(), statement: format!("synthetic {id}"),
-        asserted_by: "user".into(), epistemic_origin: "explicit".into(),
-        status: "active".into(),
-    }, &sources.iter().map(|s| ClaimEvidence {
-        source_ref: s.clone(), evidence_kind: "support".into(),
-    }).collect::<Vec<_>>()).unwrap();
+    db.create_evidenced_claim(
+        &MemoryClaim {
+            id: id.to_owned(),
+            statement: format!("synthetic {id}"),
+            asserted_by: "user".into(),
+            epistemic_origin: "explicit".into(),
+            status: "active".into(),
+        },
+        &sources
+            .iter()
+            .map(|s| ClaimEvidence {
+                source_ref: s.clone(),
+                evidence_kind: "support".into(),
+            })
+            .collect::<Vec<_>>(),
+    )
+    .unwrap();
 }
 
 #[test]
@@ -40,24 +69,46 @@ fn one_time_owner_confirmation_keeps_shared_source_and_pending_receipt_after_res
         db.preview_source_forget(&other, &src, "forbidden"),
         Err(StateError::MemoryDenied)
     ));
-    let preview = db.preview_source_forget(&owner, &src, "Owner deletion request").unwrap();
+    let preview = db
+        .preview_source_forget(&owner, &src, "Owner deletion request")
+        .unwrap();
     assert_eq!((preview.affected_claims, preview.shared_claims), (2, 1));
     assert!(!preview.physical_inventory_complete);
     assert!(preview.retained_backup_review_required);
-    assert!(db.confirm_source_forget(&owner, &src, "f".repeat(64).as_str(), &preview.preview_sha256).is_err());
+    assert!(db
+        .confirm_source_forget(
+            &owner,
+            &src,
+            "f".repeat(64).as_str(),
+            &preview.preview_sha256
+        )
+        .is_err());
     assert!(!db.source_is_redacted(&src).unwrap());
-    let progress = db.confirm_source_forget(
-        &owner, &src, &preview.one_time_token, &preview.preview_sha256,
-    ).unwrap();
+    let progress = db
+        .confirm_source_forget(
+            &owner,
+            &src,
+            &preview.one_time_token,
+            &preview.preview_sha256,
+        )
+        .unwrap();
     assert_eq!(progress.stage, "pending_independent_backup_reconciliation");
     assert!(!progress.physical_erase_verified);
-    assert!(db.confirm_source_forget(
-        &owner, &src, &preview.one_time_token, &preview.preview_sha256,
-    ).is_err());
+    assert!(db
+        .confirm_source_forget(
+            &owner,
+            &src,
+            &preview.one_time_token,
+            &preview.preview_sha256,
+        )
+        .is_err());
     assert!(db.claim_history("claim:shared").unwrap().is_none());
     assert!(db.source(&shared).unwrap().is_some());
     let restarted = StateStore::open(db.path()).unwrap();
-    assert_eq!(restarted.source_forget_progress(&owner, &src).unwrap(), Some(progress));
+    assert_eq!(
+        restarted.source_forget_progress(&owner, &src).unwrap(),
+        Some(progress)
+    );
     assert!(matches!(
         restarted.source_forget_progress(&other, &src),
         Err(StateError::MemoryDenied)
@@ -68,11 +119,16 @@ fn one_time_owner_confirmation_keeps_shared_source_and_pending_receipt_after_res
 fn concurrent_evidence_change_invalidates_prepared_owner_confirmation() {
     let (_home, db, owner, _, src, _) = fixture();
     claim(&db, "claim:initial", &[src.clone()]);
-    let preview = db.preview_source_forget(&owner, &src, "Owner deletion request").unwrap();
+    let preview = db
+        .preview_source_forget(&owner, &src, "Owner deletion request")
+        .unwrap();
     claim(&db, "claim:subsequent", &[src.clone()]);
     assert!(matches!(
         db.confirm_source_forget(
-            &owner, &src, &preview.one_time_token, &preview.preview_sha256
+            &owner,
+            &src,
+            &preview.one_time_token,
+            &preview.preview_sha256
         ),
         Err(StateError::MemoryDenied)
     ));

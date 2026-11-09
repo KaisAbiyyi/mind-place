@@ -107,7 +107,6 @@ pub(crate) fn claim_has_redacted_source(db: &Connection, claim_id: &str) -> Resu
     Ok(false)
 }
 
-
 /// Insert the logical tombstone in an existing IMMEDIATE transaction while its
 /// caller owns the exclusive privacy fence. This is deliberately not an erase
 /// completion receipt; post-restore monotonic policy is a separate authority.

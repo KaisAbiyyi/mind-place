@@ -103,12 +103,15 @@ fn source_exists(db: &Connection, id: &str) -> Result<()> {
     if !source_id_valid(id) {
         return Err(StateError::InvalidValue);
     }
-    let src = db.query_row(
-        "SELECT id,provider,source_namespace,source_kind,key_type,source_key
+    let src = db
+        .query_row(
+            "SELECT id,provider,source_namespace,source_kind,key_type,source_key
          FROM source_identities WHERE id=?1",
-        [id],
-        source_record,
-    ).optional()?.ok_or(StateError::InvalidValue)?;
+            [id],
+            source_record,
+        )
+        .optional()?
+        .ok_or(StateError::InvalidValue)?;
     verify_source_record(&src)?;
     Ok(())
 }
@@ -125,7 +128,8 @@ fn impact(db: &Connection, id: &str, actor_id: &str) -> Result<(usize, usize, St
          UNION SELECT to_claim_id FROM memory_claim_relation_resolutions WHERE source_ref=?1
          ORDER BY claim_id",
     )?;
-    let ids = stmt.query_map([id], |row| row.get::<_, String>(0))?
+    let ids = stmt
+        .query_map([id], |row| row.get::<_, String>(0))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let mut shared = 0usize;
     for claim in &ids {
@@ -147,10 +151,15 @@ fn impact(db: &Connection, id: &str, actor_id: &str) -> Result<(usize, usize, St
         }
     }
     let clock: i64 = db.query_row(
-        "SELECT last_ms FROM memory_claim_clock WHERE id=1", [],
+        "SELECT last_ms FROM memory_claim_clock WHERE id=1",
+        [],
         |row| row.get(0),
     )?;
-    let mut bytes = format!("mp9c-preview/v1\0{id}\0{actor_id}\0{clock}\0{}\0{shared}", ids.len()).into_bytes();
+    let mut bytes = format!(
+        "mp9c-preview/v1\0{id}\0{actor_id}\0{clock}\0{}\0{shared}",
+        ids.len()
+    )
+    .into_bytes();
     for claim in &ids {
         bytes.extend_from_slice(claim.as_bytes());
         bytes.push(0);
@@ -161,7 +170,9 @@ fn impact(db: &Connection, id: &str, actor_id: &str) -> Result<(usize, usize, St
 fn fence(store: &StateStore) -> Result<Option<VaultWriterFence>> {
     let root = store.path.parent().ok_or(StateError::UnsafePath)?;
     if store.cipher_key.is_some() && root.join("vault-v1.json").exists() {
-        Ok(Some(VaultWriterFence::privacy(root).map_err(|_| StateError::Corrupt)?))
+        Ok(Some(
+            VaultWriterFence::privacy(root).map_err(|_| StateError::Corrupt)?,
+        ))
     } else {
         Ok(None)
     }
@@ -172,7 +183,10 @@ impl StateStore {
     /// Caller must additionally verify local unlocked-session owner intent;
     /// this Rust primitive is deliberately not exposed to clients/MCP.
     pub fn preview_source_forget(
-        &self, admin_token_sha256: &str, source_id: &str, reason: &str,
+        &self,
+        admin_token_sha256: &str,
+        source_id: &str,
+        reason: &str,
     ) -> Result<SourceForgetPreview> {
         if reason.trim().is_empty() || reason.len() > 4096 {
             return Err(StateError::InvalidValue);
@@ -189,7 +203,9 @@ impl StateStore {
         let mut token = [0u8; 32];
         getrandom::fill(&mut token).map_err(|_| StateError::Corrupt)?;
         let one_time_token = hex(&token);
-        let expires_at_ms = now_ms()?.checked_add(EXPIRY_MS).ok_or(StateError::Corrupt)?;
+        let expires_at_ms = now_ms()?
+            .checked_add(EXPIRY_MS)
+            .ok_or(StateError::Corrupt)?;
         let record = Intent {
             version: 1,
             source_id: source_id.to_owned(),
@@ -225,8 +241,11 @@ impl StateStore {
     /// Never call this silently; UI must show the preview and seek explicit
     /// irreversible owner confirmation. No physical objects/backups are removed.
     pub fn confirm_source_forget(
-        &self, admin_token_sha256: &str, source_id: &str,
-        one_time_token: &str, preview_sha256: &str,
+        &self,
+        admin_token_sha256: &str,
+        source_id: &str,
+        one_time_token: &str,
+        preview_sha256: &str,
     ) -> Result<SourceForgetProgress> {
         if !source_id_valid(source_id)
             || one_time_token.len() != 64
@@ -243,12 +262,17 @@ impl StateStore {
             return Err(StateError::MemoryDenied);
         }
         let intent_key = format!("{INTENT_PREFIX}{source_id}");
-        let stored: String = tx.query_row(
-            "SELECT value_json FROM settings WHERE key=?1",
-            [&intent_key], |row| row.get(0),
-        ).optional()?.ok_or(StateError::MemoryDenied)?;
+        let stored: String = tx
+            .query_row(
+                "SELECT value_json FROM settings WHERE key=?1",
+                [&intent_key],
+                |row| row.get(0),
+            )
+            .optional()?
+            .ok_or(StateError::MemoryDenied)?;
         let intent: Intent = serde_json::from_str(&stored).map_err(|_| StateError::Corrupt)?;
-        if intent.version != 1 || intent.source_id != source_id
+        if intent.version != 1
+            || intent.source_id != source_id
             || intent.owner_client_id != actor
             || intent.token_sha256 != sha(one_time_token.as_bytes())
             || intent.expires_at_ms < now_ms()?
@@ -259,9 +283,7 @@ impl StateStore {
         if actual != intent.impact_sha256 || actual != preview_sha256 {
             return Err(StateError::MemoryDenied);
         }
-        let at = source_redaction::commit_redaction(
-            &tx, source_id, &actor, &intent.reason_sha256,
-        )?;
+        let at = source_redaction::commit_redaction(&tx, source_id, &actor, &intent.reason_sha256)?;
         let progress = SourceForgetProgress {
             source_id: source_id.to_owned(),
             owner_client_id: actor,
@@ -284,22 +306,29 @@ impl StateStore {
     /// Durable, intentionally non-sensitive status. Missing or malformed state
     /// is not treated as erased; admin credential is required even for reads.
     pub fn source_forget_progress(
-        &self, admin_token_sha256: &str, source_id: &str,
+        &self,
+        admin_token_sha256: &str,
+        source_id: &str,
     ) -> Result<Option<SourceForgetProgress>> {
         if !source_id_valid(source_id) {
             return Err(StateError::InvalidValue);
         }
         let db = self.read_connection()?;
         let actor = owner(&db, admin_token_sha256)?;
-        let value: Option<String> = db.query_row(
-            "SELECT value_json FROM settings WHERE key=?1",
-            [format!("{PROGRESS_PREFIX}{source_id}")], |row| row.get(0),
-        ).optional()?;
+        let value: Option<String> = db
+            .query_row(
+                "SELECT value_json FROM settings WHERE key=?1",
+                [format!("{PROGRESS_PREFIX}{source_id}")],
+                |row| row.get(0),
+            )
+            .optional()?;
         let Some(value) = value else { return Ok(None) };
         let progress: SourceForgetProgress =
             serde_json::from_str(&value).map_err(|_| StateError::Corrupt)?;
-        if progress.source_id != source_id || progress.owner_client_id != actor
-            || progress.physical_erase_verified || progress.confirmed_at_ms <= 0
+        if progress.source_id != source_id
+            || progress.owner_client_id != actor
+            || progress.physical_erase_verified
+            || progress.confirmed_at_ms <= 0
             || progress.stage != "pending_independent_backup_reconciliation"
             || !source_redaction::source_is_redacted(&db, source_id)?
         {
