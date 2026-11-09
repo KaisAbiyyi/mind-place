@@ -109,6 +109,20 @@ impl ObjectTreeBudget {
 
 pub struct VaultOnlineBackup;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OnlineCheckpoint {
+    SnapshotStagingCreated,
+    SqlcipherCopied,
+    CiphertextCopied,
+    SnapshotVerified,
+    BeforeBackupPublication,
+    BackupPublished,
+    RestoreCopied,
+    RestoreVerified,
+    BeforeRestorePublication,
+    RestorePublished,
+}
+
 impl VaultOnlineBackup {
     /// The caller must be the unlocked local owner and choose an empty,
     /// non-overlapping destination. The source remains immutable throughout.
@@ -119,6 +133,20 @@ impl VaultOnlineBackup {
         source: &Path,
         destination: &Path,
         generation: u64,
+    ) -> Result<BackupMetadata> {
+        Self::create_with_checkpoint(gate, lease, vault, source, destination, generation, |_| {
+            Ok(())
+        })
+    }
+
+    fn create_with_checkpoint(
+        gate: &SecurityGate,
+        lease: UnlockLease,
+        vault: &CryptoVault,
+        source: &Path,
+        destination: &Path,
+        generation: u64,
+        mut checkpoint: impl FnMut(OnlineCheckpoint) -> Result<()>,
     ) -> Result<BackupMetadata> {
         gate.validate_lease(lease)
             .map_err(|_| IndexError::Revoked)?;
@@ -155,6 +183,7 @@ impl VaultOnlineBackup {
             manifest
                 .persist_new(&scratch)
                 .map_err(|_| IndexError::InvalidEvidence)?;
+            checkpoint(OnlineCheckpoint::SnapshotStagingCreated)?;
 
             let mut have_state = false;
             let mut object_budget = ObjectTreeBudget::production();
@@ -170,6 +199,7 @@ impl VaultOnlineBackup {
                 if DB_DOMAINS.iter().any(|(n, _)| *n == name) && meta.is_file() {
                     let domain = DB_DOMAINS.iter().find(|(n, _)| *n == name).unwrap().1;
                     snapshot_sqlcipher(gate, lease, vault, domain, &path, &scratch.join(name))?;
+                    checkpoint(OnlineCheckpoint::SqlcipherCopied)?;
                     if name == "state.sqlite3" {
                         have_state = true;
                     }
@@ -179,6 +209,7 @@ impl VaultOnlineBackup {
                     object_budget.record_entry()?;
                     object_budget.record_directory(0)?;
                     copy_ciphertext_tree(&path, &scratch.join(name), 0, &mut object_budget)?;
+                    checkpoint(OnlineCheckpoint::CiphertextCopied)?;
                 } else if ["vault-v1.json", ".state-schema.lock", ".vault-writer.lock"]
                     .contains(&name)
                     && meta.is_file()
@@ -202,13 +233,16 @@ impl VaultOnlineBackup {
                 return Err(IndexError::InvalidEvidence);
             }
             verify_coherent_snapshot(gate, lease, vault, &scratch)?;
+            checkpoint(OnlineCheckpoint::SnapshotVerified)?;
             gate.validate_lease(lease)
                 .map_err(|_| IndexError::Revoked)?;
             // Package a fully quiesced scratch root. Existing portable restore
             // authenticates the manifest and verifies each file digest.
+            checkpoint(OnlineCheckpoint::BeforeBackupPublication)?;
             let metadata =
                 PortableBackup::create(gate, lease, vault, &scratch, destination, generation)
                     .map_err(|_| IndexError::InvalidEvidence)?;
+            checkpoint(OnlineCheckpoint::BackupPublished)?;
             gate.validate_lease(lease)
                 .map_err(|_| IndexError::Revoked)?;
             Ok(metadata)
@@ -238,6 +272,17 @@ impl VaultOnlineBackup {
         destination: &Path,
         recovery: &mind_place_security::vault::RecoverySecret,
     ) -> Result<BackupMetadata> {
+        Self::restore_with_checkpoint(gate, lease, backup_root, destination, recovery, |_| Ok(()))
+    }
+
+    fn restore_with_checkpoint(
+        gate: &SecurityGate,
+        lease: UnlockLease,
+        backup_root: &Path,
+        destination: &Path,
+        recovery: &mind_place_security::vault::RecoverySecret,
+        mut checkpoint: impl FnMut(OnlineCheckpoint) -> Result<()>,
+    ) -> Result<BackupMetadata> {
         gate.validate_lease(lease)
             .map_err(|_| IndexError::Revoked)?;
         let resolved =
@@ -264,6 +309,7 @@ impl VaultOnlineBackup {
         // inventory, ciphertext hashes, and a non-overwriting staged write.
         let meta = PortableBackup::restore(gate, lease, backup_root, &staged, recovery)
             .map_err(|_| IndexError::InvalidEvidence)?;
+        checkpoint(OnlineCheckpoint::RestoreCopied)?;
         let manifest = VaultManifest::read(&staged).map_err(|_| IndexError::InvalidEvidence)?;
         let vault = CryptoVault::restore_with_recovery(gate, lease, &manifest, recovery)
             .map_err(|_| IndexError::InvalidEvidence)?;
@@ -303,11 +349,14 @@ impl VaultOnlineBackup {
             return Err(IndexError::InvalidEvidence);
         }
         verify_coherent_snapshot(gate, lease, &vault, &staged)?;
+        checkpoint(OnlineCheckpoint::RestoreVerified)?;
         gate.validate_lease(lease)
             .map_err(|_| IndexError::Revoked)?;
         // All SQLite handles above have closed before Windows directory rename.
+        checkpoint(OnlineCheckpoint::BeforeRestorePublication)?;
         mind_place_security::vault_fs::publish_new_directory(&staged, destination)
             .map_err(|_| IndexError::InvalidEvidence)?;
+        checkpoint(OnlineCheckpoint::RestorePublished)?;
         Ok(meta)
     }
 }
@@ -660,6 +709,426 @@ fn guarded(path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mind_place_archive::Capture;
+    use mind_place_security::vault::RecoverySecret;
+    use std::process::{Command, Stdio};
+
+    const PASSWORD: &[u8] = b"synthetic-online-process-exit-only";
+
+    struct CrashFixture {
+        home: tempfile::TempDir,
+        gate: SecurityGate,
+        lease: UnlockLease,
+        vault: CryptoVault,
+        recovery: RecoverySecret,
+        capture_id: String,
+    }
+
+    fn crash_fixture() -> CrashFixture {
+        let home = tempfile::tempdir().unwrap();
+        let gate = SecurityGate::open(home.path().join("gate.json")).unwrap();
+        gate.initialize(PASSWORD).unwrap();
+        let lease = gate.require_unlocked().unwrap();
+        let (vault, recovery, manifest) = CryptoVault::provision(&gate, lease).unwrap();
+        let root = home.path().join("vault");
+        manifest.persist_new(&root).unwrap();
+        let archive = VaultCaptureStore::open(&root, vault, &gate, lease).unwrap();
+        let state = archive.open_state_store().unwrap();
+        let capture: Capture = serde_json::from_value(serde_json::json!({
+            "schema_version": 1, "provider": "chatgpt",
+            "conversation_id": "123e4567-e89b-12d3-a456-426614174009",
+            "source_url": "https://chatgpt.com/c/123e4567-e89b-12d3-a456-426614174009",
+            "title": "Synthetic crash fixture", "captured_at": "2026-11-09T00:00:00Z",
+            "capture_method": "manual-dom", "completeness": "partial", "warnings": [],
+            "messages": [{"id":"one", "role":"user", "text":"synthetic crashrecoverneedle",
+                "format":"plain", "attachments":[]}]
+        }))
+        .unwrap();
+        let receipt = archive.save(capture).unwrap();
+        let index = archive.open_index_store().unwrap();
+        index
+            .sync_vault_with_check(&archive, &state, || Ok(()))
+            .unwrap();
+        archive.open_document_index().unwrap();
+        drop(index);
+        drop(state);
+        drop(archive);
+        let vault = CryptoVault::restore_with_recovery(&gate, lease, &manifest, &recovery).unwrap();
+        let f = CrashFixture {
+            home,
+            gate,
+            lease,
+            vault,
+            recovery,
+            capture_id: receipt.id,
+        };
+        VaultOnlineBackup::create(
+            &f.gate,
+            f.lease,
+            &f.vault,
+            &root,
+            &f.home.path().join("good"),
+            1,
+        )
+        .unwrap();
+        f
+    }
+
+    fn assert_recovered(f: &CrashFixture, root: &Path) {
+        let manifest = VaultManifest::read(root).unwrap();
+        let vault =
+            CryptoVault::restore_with_recovery(&f.gate, f.lease, &manifest, &f.recovery).unwrap();
+        let archive = VaultCaptureStore::open(root, vault, &f.gate, f.lease).unwrap();
+        assert_eq!(
+            archive.read(&f.capture_id, None).unwrap().capture.messages[0].text,
+            "synthetic crashrecoverneedle"
+        );
+        assert_eq!(
+            archive
+                .open_index_store()
+                .unwrap()
+                .search("crashrecoverneedle", false, 5)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(!fs::read(root.join("state.sqlite3"))
+            .unwrap()
+            .starts_with(b"SQLite format 3\0"));
+    }
+
+    fn start_child(f: &CrashFixture, mode: &str) -> std::process::Child {
+        let mut process = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "vault_online_backup::tests::online_crash_child",
+                "--nocapture",
+            ])
+            .env("MP9E_SYNTHETIC_HOME", f.home.path())
+            .env("MP9E_SYNTHETIC_MODE", mode)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        // Synthetic recovery bytes travel only through an anonymous pipe.
+        process
+            .stdin
+            .as_mut()
+            .unwrap()
+            .write_all(f.recovery.as_bytes())
+            .unwrap();
+        process
+    }
+
+    fn child(f: &CrashFixture, mode: &str) -> std::process::Output {
+        let mut process = start_child(f, mode);
+        drop(process.stdin.take());
+        process.wait_with_output().unwrap()
+    }
+
+    #[test]
+    fn online_crash_child() {
+        let Some(home) = std::env::var_os("MP9E_SYNTHETIC_HOME") else {
+            return;
+        };
+        let home = std::path::PathBuf::from(home);
+        let mode = std::env::var("MP9E_SYNTHETIC_MODE").unwrap();
+        let mut raw = [0u8; 32];
+        std::io::stdin().read_exact(&mut raw).unwrap();
+        let recovery = RecoverySecret::from_exported_bytes(raw);
+        raw.zeroize();
+        let gate = SecurityGate::open(home.join("gate.json")).unwrap();
+        gate.unlock(PASSWORD).unwrap();
+        let lease = gate.require_unlocked().unwrap();
+        let root = home.join("vault");
+        if mode == "hold-writer" {
+            let _writer = VaultWriterFence::writer(&root).unwrap();
+            fs::write(home.join("writer-ready"), b"ready").unwrap();
+            let mut release = [0u8; 1];
+            std::io::stdin().read_exact(&mut release).unwrap();
+            return;
+        }
+        let manifest = VaultManifest::read(&root).unwrap();
+        let vault = CryptoVault::restore_with_recovery(&gate, lease, &manifest, &recovery).unwrap();
+        let exit_at = |point: OnlineCheckpoint| -> Result<()> {
+            if format!("{point:?}") == mode {
+                std::process::exit(73);
+            }
+            Ok(())
+        };
+        if mode == "reopen" {
+            let restored = home.join("fresh-recovery");
+            VaultOnlineBackup::restore(&gate, lease, &home.join("good"), &restored, &recovery)
+                .unwrap();
+            let archive = VaultCaptureStore::open(&restored, vault, &gate, lease).unwrap();
+            assert_eq!(
+                archive
+                    .open_index_store()
+                    .unwrap()
+                    .search("crashrecoverneedle", false, 5)
+                    .unwrap()
+                    .len(),
+                1
+            );
+        } else if mode.starts_with("Restore") || mode == "BeforeRestorePublication" {
+            VaultOnlineBackup::restore_with_checkpoint(
+                &gate,
+                lease,
+                &home.join("good"),
+                &home.join("candidate"),
+                &recovery,
+                exit_at,
+            )
+            .unwrap();
+            panic!("restore checkpoint was not reached");
+        } else {
+            fs::write(home.join("backup-started"), b"ready").unwrap();
+            VaultOnlineBackup::create_with_checkpoint(
+                &gate,
+                lease,
+                &vault,
+                &root,
+                &home.join("candidate"),
+                2,
+                exit_at,
+            )
+            .unwrap();
+            panic!("backup checkpoint was not reached");
+        }
+    }
+
+    #[test]
+    fn online_snapshot_waits_for_cross_process_writer_release() {
+        let f = crash_fixture();
+        let wait_for = |name: &str| {
+            let deadline = std::time::Instant::now() + Duration::from_secs(30);
+            while !f.home.path().join(name).exists() {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "child did not reach {name}"
+                );
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        };
+        let mut writer = start_child(&f, "hold-writer");
+        wait_for("writer-ready");
+        let mut snapshot = start_child(&f, "BackupPublished");
+        wait_for("backup-started");
+        std::thread::sleep(Duration::from_millis(150));
+        assert!(snapshot.try_wait().unwrap().is_none());
+        assert!(!f.home.path().join("candidate").exists());
+        writer.stdin.take().unwrap().write_all(b"x").unwrap();
+        assert!(writer.wait_with_output().unwrap().status.success());
+        let output = snapshot.wait_with_output().unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(73),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let restored = f.home.path().join("after-writer");
+        VaultOnlineBackup::restore(
+            &f.gate,
+            f.lease,
+            &f.home.path().join("candidate"),
+            &restored,
+            &f.recovery,
+        )
+        .unwrap();
+        assert_recovered(&f, &restored);
+    }
+
+    #[test]
+    fn malformed_and_truncated_packages_never_reach_online_publication() {
+        let f = crash_fixture();
+        for mode in [
+            "truncated-ciphertext",
+            "unexpected-root",
+            "extra-payload",
+            "symlink-payload",
+        ] {
+            // Windows symlink privilege is a separate native gate.
+            if mode == "symlink-payload" && !cfg!(unix) {
+                continue;
+            }
+            let package = f.home.path().join(mode);
+            VaultOnlineBackup::create(
+                &f.gate,
+                f.lease,
+                &f.vault,
+                &f.home.path().join("vault"),
+                &package,
+                3,
+            )
+            .unwrap();
+            match mode {
+                "truncated-ciphertext" => OpenOptions::new()
+                    .write(true)
+                    .open(package.join("payload/state.sqlite3"))
+                    .unwrap()
+                    .set_len(15)
+                    .unwrap(),
+                "unexpected-root" => fs::write(package.join("unknown"), b"synthetic").unwrap(),
+                "extra-payload" => {
+                    fs::write(package.join("payload/unlisted"), b"synthetic").unwrap()
+                }
+                _ => {
+                    #[cfg(unix)]
+                    {
+                        fs::remove_file(package.join("payload/state.sqlite3")).unwrap();
+                        std::os::unix::fs::symlink(
+                            f.home.path().join("good/payload/state.sqlite3"),
+                            package.join("payload/state.sqlite3"),
+                        )
+                        .unwrap();
+                    }
+                }
+            }
+            let target = f.home.path().join(format!("rejected-{mode}"));
+            assert!(
+                VaultOnlineBackup::restore(&f.gate, f.lease, &package, &target, &f.recovery)
+                    .is_err()
+            );
+            assert!(!target.exists());
+            assert!(!target
+                .with_extension("mp9b-verified-restore-partial")
+                .exists());
+        }
+        assert!(child(&f, "reopen").status.success());
+    }
+
+    #[test]
+    fn fresh_process_exit_at_every_online_boundary_preserves_good_generation() {
+        for point in [
+            OnlineCheckpoint::SnapshotStagingCreated,
+            OnlineCheckpoint::SqlcipherCopied,
+            OnlineCheckpoint::CiphertextCopied,
+            OnlineCheckpoint::SnapshotVerified,
+            OnlineCheckpoint::BeforeBackupPublication,
+            OnlineCheckpoint::BackupPublished,
+            OnlineCheckpoint::RestoreCopied,
+            OnlineCheckpoint::RestoreVerified,
+            OnlineCheckpoint::BeforeRestorePublication,
+            OnlineCheckpoint::RestorePublished,
+        ] {
+            let f = crash_fixture();
+            let good_before = fs::read(f.home.path().join("good/manifest.enc")).unwrap();
+            let output = child(&f, &format!("{point:?}"));
+            assert_eq!(
+                output.status.code(),
+                Some(73),
+                "{point:?}: {} {}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let target = f.home.path().join("candidate");
+            assert_eq!(
+                target.exists(),
+                matches!(
+                    point,
+                    OnlineCheckpoint::BackupPublished | OnlineCheckpoint::RestorePublished
+                )
+            );
+            if matches!(
+                point,
+                OnlineCheckpoint::RestoreCopied
+                    | OnlineCheckpoint::RestoreVerified
+                    | OnlineCheckpoint::BeforeRestorePublication
+            ) {
+                let stage = target.with_extension("mp9b-verified-restore-partial");
+                assert!(stage.join("state.sqlite3").is_file());
+                assert!(VaultOnlineBackup::restore(
+                    &f.gate,
+                    f.lease,
+                    &f.home.path().join("good"),
+                    &target,
+                    &f.recovery
+                )
+                .is_err());
+                assert!(stage.join("state.sqlite3").is_file());
+                assert!(!target.exists());
+            }
+            if point == OnlineCheckpoint::BackupPublished {
+                let restored = f.home.path().join("published-recovery");
+                VaultOnlineBackup::restore(&f.gate, f.lease, &target, &restored, &f.recovery)
+                    .unwrap();
+                assert_recovered(&f, &restored);
+            } else if point == OnlineCheckpoint::RestorePublished {
+                assert_recovered(&f, &target);
+            }
+            let reopened = child(&f, "reopen");
+            assert!(
+                reopened.status.success(),
+                "fresh recovery after {point:?}: {} {}",
+                String::from_utf8_lossy(&reopened.stdout),
+                String::from_utf8_lossy(&reopened.stderr)
+            );
+            assert_recovered(&f, &f.home.path().join("fresh-recovery"));
+            assert_eq!(
+                fs::read(f.home.path().join("good/manifest.enc")).unwrap(),
+                good_before
+            );
+        }
+    }
+
+    #[test]
+    fn online_final_publication_collision_preserves_both_generations() {
+        for restoring in [false, true] {
+            let f = crash_fixture();
+            let destination = f.home.path().join("collision");
+            let collision = |point| {
+                if point
+                    == if restoring {
+                        OnlineCheckpoint::BeforeRestorePublication
+                    } else {
+                        OnlineCheckpoint::BeforeBackupPublication
+                    }
+                {
+                    fs::create_dir(&destination).unwrap();
+                    fs::write(destination.join("owner-kept"), b"synthetic preserved").unwrap();
+                }
+                Ok(())
+            };
+            let result = if restoring {
+                VaultOnlineBackup::restore_with_checkpoint(
+                    &f.gate,
+                    f.lease,
+                    &f.home.path().join("good"),
+                    &destination,
+                    &f.recovery,
+                    collision,
+                )
+            } else {
+                VaultOnlineBackup::create_with_checkpoint(
+                    &f.gate,
+                    f.lease,
+                    &f.vault,
+                    &f.home.path().join("vault"),
+                    &destination,
+                    2,
+                    collision,
+                )
+            };
+            assert!(result.is_err());
+            assert_eq!(
+                fs::read(destination.join("owner-kept")).unwrap(),
+                b"synthetic preserved"
+            );
+            if restoring {
+                assert!(destination
+                    .with_extension("mp9b-verified-restore-partial")
+                    .join("state.sqlite3")
+                    .is_file());
+            }
+            let output = child(&f, "reopen");
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
 
     #[test]
     fn ciphertext_copy_rejects_empty_directory_fanout_with_injected_budget() {
