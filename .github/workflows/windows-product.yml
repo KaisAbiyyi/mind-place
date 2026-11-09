@@ -140,7 +140,11 @@ jobs:
       if: steps.slot.outputs.native == 'true'
     - name: Stage capture sidecar for native desktop tests
       shell: pwsh
-      run: 'cargo build -p mind-place-capture-host
+      run: '$ErrorActionPreference = "Stop"
+
+        cargo build -p mind-place-capture-host
+
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
         New-Item -ItemType Directory -Force src-tauri/binaries | Out-Null
 
@@ -148,9 +152,15 @@ jobs:
 
         node scripts/tunnel-helper.mjs
 
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
         node scripts/generate-notices.mjs
 
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
         npm run build:web
+
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
         '
       if: steps.slot.outputs.native == 'true'
