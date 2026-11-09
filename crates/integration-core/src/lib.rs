@@ -7,7 +7,9 @@
 #![forbid(unsafe_code)]
 
 use mind_place_archive::ArchiveStore;
-use mind_place_index::{ContextRequest, FetchRequest, IndexError, IndexStore, RetrievalRequest};
+use mind_place_index::{
+    ContextRequest, FetchRequest, IndexError, IndexStore, RetrievalRequest, SourceScope,
+};
 use mind_place_security::{SecurityError, SecurityGate, UnlockLease};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -274,9 +276,23 @@ impl<'a> IntegrationCore<'a> {
     /// complete response is returned. Failure discards the entire batch.
     /// The callback must check the client's current read capability, not a
     /// cached allow decision made at connection establishment.
+    ///
+    /// UNSCOPED: this transport-neutral entry point reads every indexed
+    /// source and is for trusted in-process callers only. Credentialed
+    /// clients MUST go through `execute_client_batch`, which enforces the
+    /// per-client/per-collection read scope server-side.
     pub fn execute_batch(
         &self,
         batch: &ToolBatch,
+        authorize_read: impl FnMut() -> Result<()>,
+    ) -> Result<ToolBatchResponse> {
+        self.execute_batch_scoped(batch, None, authorize_read)
+    }
+
+    pub(crate) fn execute_batch_scoped(
+        &self,
+        batch: &ToolBatch,
+        scope: Option<&SourceScope>,
         mut authorize_read: impl FnMut() -> Result<()>,
     ) -> Result<ToolBatchResponse> {
         if batch.calls.is_empty() || batch.calls.len() > MAX_BATCH_CALLS {
@@ -298,21 +314,28 @@ impl<'a> IntegrationCore<'a> {
                 ToolName::MemorySearch => {
                     let request: RetrievalRequest = serde_json::from_value(call.arguments.clone())
                         .map_err(|_| IntegrationError::InvalidArguments)?;
-                    serde_json::to_value(self.index.retrieve(&request)?)
+                    serde_json::to_value(self.index.retrieve_scoped(&request, scope)?)
                         .map_err(|_| IntegrationError::Serialization)?
                 }
                 ToolName::MemoryFetch => {
                     let request: FetchRequest = serde_json::from_value(call.arguments.clone())
                         .map_err(|_| IntegrationError::InvalidArguments)?;
                     let mut check = || self.check_index(lease, &mut authorize_read);
-                    let fetched = match self.archive {
-                        ArchiveSource::Legacy(archive) => {
+                    let fetched = match (self.archive, scope) {
+                        (ArchiveSource::Legacy(archive), None) => {
                             self.index.fetch_with_check(archive, &request, &mut check)?
                         }
+                        (ArchiveSource::Legacy(archive), Some(scope)) => self
+                            .index
+                            .fetch_scoped_with_check(archive, &request, scope, &mut check)?,
                         #[cfg(feature = "vault-mcp")]
-                        ArchiveSource::Vault(archive) => self
+                        (ArchiveSource::Vault(archive), None) => self
                             .index
                             .fetch_vault_with_check(archive, &request, &mut check)?,
+                        #[cfg(feature = "vault-mcp")]
+                        (ArchiveSource::Vault(archive), Some(scope)) => self
+                            .index
+                            .fetch_vault_scoped_with_check(archive, &request, scope, &mut check)?,
                     };
                     serde_json::to_value(fetched).map_err(|_| IntegrationError::Serialization)?
                 }
@@ -320,14 +343,25 @@ impl<'a> IntegrationCore<'a> {
                     let request: ContextRequest = serde_json::from_value(call.arguments.clone())
                         .map_err(|_| IntegrationError::InvalidArguments)?;
                     let mut check = || self.check_index(lease, &mut authorize_read);
-                    let context = match self.archive {
-                        ArchiveSource::Legacy(archive) => self
+                    let context = match (self.archive, scope) {
+                        (ArchiveSource::Legacy(archive), None) => self
                             .index
                             .build_context_with_check(archive, &request, &mut check)?,
+                        (ArchiveSource::Legacy(archive), Some(scope)) => {
+                            self.index.build_context_scoped_with_check(
+                                archive, &request, scope, &mut check,
+                            )?
+                        }
                         #[cfg(feature = "vault-mcp")]
-                        ArchiveSource::Vault(archive) => self
+                        (ArchiveSource::Vault(archive), None) => self
                             .index
                             .build_context_vault_with_check(archive, &request, &mut check)?,
+                        #[cfg(feature = "vault-mcp")]
+                        (ArchiveSource::Vault(archive), Some(scope)) => {
+                            self.index.build_context_vault_scoped_with_check(
+                                archive, &request, scope, &mut check,
+                            )?
+                        }
                     };
                     serde_json::to_value(context).map_err(|_| IntegrationError::Serialization)?
                 }

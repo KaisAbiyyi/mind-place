@@ -134,3 +134,97 @@ pub(super) fn revoke_local_mcp_client(
         .map_err(|_| "MP_MCP_CLIENT:Cannot revoke client".to_string())?;
     finish_unlocked(&state, lease)
 }
+
+// ---- MP-7MCP-02 per-client / per-collection read grants (owner only) ----
+// A collection is an explicit set of canonical source IDs. A reader sees only
+// the union of the collections granted to it; no grant means no evidence.
+// None of these are reachable through MCP or with a reader credential.
+
+#[tauri::command]
+pub(super) fn create_local_mcp_collection(
+    state: State<'_, AppState>,
+    name: String,
+    source_ids: Vec<String>,
+) -> Result<String, String> {
+    let lease = begin_unlocked(&state)?;
+    let authority = super::open_owner_state(&owner_vault(&state), &state.state_path)
+        .map_err(|_| "MP_MCP_AUTHORITY:Unavailable".to_string())?;
+    let id = ClientAuthority::new(&authority, &state.security)
+        .create_collection(&name, &source_ids)
+        .map_err(|_| "MP_MCP_COLLECTION:Cannot create collection".to_string())?;
+    finish_unlocked(&state, lease)?;
+    Ok(id)
+}
+
+#[tauri::command]
+pub(super) fn list_local_mcp_collections(
+    state: State<'_, AppState>,
+) -> Result<Vec<mind_place_state::CollectionRecord>, String> {
+    let lease = begin_unlocked(&state)?;
+    let authority = super::open_owner_state(&owner_vault(&state), &state.state_path)
+        .map_err(|_| "MP_MCP_AUTHORITY:Unavailable".to_string())?;
+    let collections = ClientAuthority::new(&authority, &state.security)
+        .list_collections()
+        .map_err(|_| "MP_MCP_COLLECTION:Could not list collections".to_string())?;
+    finish_unlocked(&state, lease)?;
+    Ok(collections)
+}
+
+#[tauri::command]
+pub(super) fn list_local_mcp_client_collections(
+    state: State<'_, AppState>,
+    client_id: String,
+) -> Result<Vec<String>, String> {
+    let lease = begin_unlocked(&state)?;
+    let authority = super::open_owner_state(&owner_vault(&state), &state.state_path)
+        .map_err(|_| "MP_MCP_AUTHORITY:Unavailable".to_string())?;
+    let granted = authority
+        .client_collections(&client_id)
+        .map_err(|_| "MP_MCP_COLLECTION:Could not list grants".to_string())?;
+    finish_unlocked(&state, lease)?;
+    Ok(granted)
+}
+
+#[tauri::command]
+pub(super) fn grant_local_mcp_collection(
+    state: State<'_, AppState>,
+    client_id: String,
+    collection_id: String,
+) -> Result<(), String> {
+    let lease = begin_unlocked(&state)?;
+    let authority = super::open_owner_state(&owner_vault(&state), &state.state_path)
+        .map_err(|_| "MP_MCP_AUTHORITY:Unavailable".to_string())?;
+    ClientAuthority::new(&authority, &state.security)
+        .grant_collection(&client_id, &collection_id)
+        .map_err(|_| "MP_MCP_COLLECTION:Cannot grant collection".to_string())?;
+    finish_unlocked(&state, lease)
+}
+
+#[tauri::command]
+pub(super) fn revoke_local_mcp_collection_grant(
+    state: State<'_, AppState>,
+    client_id: String,
+    collection_id: String,
+) -> Result<(), String> {
+    let lease = begin_unlocked(&state)?;
+    let authority = super::open_owner_state(&owner_vault(&state), &state.state_path)
+        .map_err(|_| "MP_MCP_AUTHORITY:Unavailable".to_string())?;
+    ClientAuthority::new(&authority, &state.security)
+        .revoke_collection_grant(&client_id, &collection_id)
+        .map_err(|_| "MP_MCP_COLLECTION:Cannot revoke grant".to_string())?;
+    finish_unlocked(&state, lease)
+}
+
+#[tauri::command]
+pub(super) fn delete_local_mcp_collection(
+    state: State<'_, AppState>,
+    collection_id: String,
+) -> Result<(), String> {
+    let lease = begin_unlocked(&state)?;
+    let authority = super::open_owner_state(&owner_vault(&state), &state.state_path)
+        .map_err(|_| "MP_MCP_AUTHORITY:Unavailable".to_string())?;
+    ClientAuthority::new(&authority, &state.security)
+        .delete_collection(&collection_id)
+        .map_err(|_| "MP_MCP_COLLECTION:Cannot delete collection".to_string())?;
+    finish_unlocked(&state, lease)
+}

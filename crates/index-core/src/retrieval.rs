@@ -57,6 +57,33 @@ impl QueryTerm {
 /// Filters operate only on fields actually projected in index schema v1.
 /// Unknown fields (such as projects, filesystem roots, tags) fail closed rather
 /// than silently broadening a search until their authorization-aware adapters exist.
+/// Closed set of canonical source IDs a credentialed client may read.
+/// An empty scope authorizes nothing. It is derived by the trusted owner
+/// authority per request and is never accepted from a wire request.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SourceScope {
+    allowed: std::collections::BTreeSet<String>,
+}
+impl SourceScope {
+    pub fn new(ids: impl IntoIterator<Item = String>) -> Self {
+        Self {
+            allowed: ids.into_iter().collect(),
+        }
+    }
+    pub fn contains(&self, source_id: &str) -> bool {
+        self.allowed.contains(source_id)
+    }
+    pub fn len(&self) -> usize {
+        self.allowed.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.allowed.is_empty()
+    }
+    pub(crate) fn to_json(&self) -> Result<String> {
+        serde_json::to_string(&self.allowed).map_err(|_| IndexError::InvalidQuery)
+    }
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct RetrievalFilters {
@@ -220,6 +247,18 @@ impl IndexStore {
     /// and check its unlock lease before disclosing the returned snippets.
     /// Later source adapters must apply root revocation before this point.
     pub fn retrieve(&self, request: &RetrievalRequest) -> Result<RetrievalResponse> {
+        self.retrieve_scoped(request, None)
+    }
+
+    /// Server-side scoped retrieval for credentialed clients. The allowed
+    /// source set is a SQL predicate, applied before ranking and LIMIT, so an
+    /// out-of-scope source can neither appear nor displace in-scope results.
+    /// `None` means the trusted, unscoped owner/diagnostic path.
+    pub fn retrieve_scoped(
+        &self,
+        request: &RetrievalRequest,
+        scope: Option<&SourceScope>,
+    ) -> Result<RetrievalResponse> {
         if request.queries.is_empty()
             || request.queries.len() > MAX_QUERIES
             || request.limit == 0
@@ -262,9 +301,11 @@ impl IndexStore {
               AND (?10 IS NULL OR c.message_id IN (SELECT value FROM json_each(?10)))
               AND (?11 IS NULL OR julianday(r.captured_at) >= julianday(?11))
               AND (?12 IS NULL OR julianday(r.captured_at) <= julianday(?12))
+              AND (?14 IS NULL OR c.source_id IN (SELECT value FROM json_each(?14)))
             ORDER BY bm25(chunks_fts),c.source_id,c.snapshot_id,c.message_id,c.part
             LIMIT ?13";
 
+        let scope_json = scope.map(SourceScope::to_json).transpose()?;
         let db = self.connection()?;
         let mut statement = db.prepare(sql)?;
         type Key = (String, String, String, String, i64);
@@ -289,6 +330,7 @@ impl IndexStore {
                     request.filters.captured_from.as_deref(),
                     request.filters.captured_to.as_deref(),
                     per_query_limit,
+                    scope_json.as_deref(),
                 ],
                 |row| {
                     let bm25: f64 = row.get(15)?;

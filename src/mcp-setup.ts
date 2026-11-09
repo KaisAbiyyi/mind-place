@@ -2,6 +2,8 @@ import type { Invoke, ClipboardWriter } from "./reader.js";
 interface Status { running: boolean; endpoint: string; }
 interface Issued { client_id: string; credential: string; }
 interface Registered { id: string; display_name: string; state: string; policy_revision: number; }
+interface Collection { id: string; name: string; source_count: number; }
+const SOURCE_ID = /^src:v1:[0-9a-f]{64}$/;
 interface HostedStatus { running: boolean; tunnel_id: string | null; connection_verified: boolean; }
 /** Owner-only UI. MCP clients cannot invoke these commands. */
 export function mountLocalMcpSetup(parent: HTMLElement, invoke: Invoke, clipboard: ClipboardWriter): { destroy(): void } {
@@ -24,6 +26,25 @@ export function mountLocalMcpSetup(parent: HTMLElement, invoke: Invoke, clipboar
     '<h4>Registered clients</h4>',
     '<div data-mcp-clients role="list"></div>',
     '<button type="button" class="quiet-button" data-mcp-action="more">Load more clients</button>',
+    '<details class="setup-mcp-collections" data-mcp-collections>',
+    '<summary>Read access: collections</summary>',
+    '<p>A reader can read only the conversations in collections granted to it. A new credential reads nothing until you grant a collection.</p>',
+    '<label class="search-label" for="mcp-collection-name">Collection name</label>',
+    '<input id="mcp-collection-name" maxlength="128" autocomplete="off">',
+    '<label class="search-label" for="mcp-collection-sources">Source IDs, one per line (copy each “Source: src:v1:…” from Search results)</label>',
+    '<textarea id="mcp-collection-sources" rows="4" spellcheck="false" autocomplete="off"></textarea>',
+    '<button type="button" class="quiet-button" data-mcp-action="collection-create">Create collection</button>',
+    '<h4>Collections</h4>',
+    '<div data-mcp-collection-list role="list"></div>',
+    '<label class="search-label" for="mcp-grant-client">Reader</label>',
+    '<select id="mcp-grant-client"></select>',
+    '<label class="search-label" for="mcp-grant-collection">Collection</label>',
+    '<select id="mcp-grant-collection"></select>',
+    '<div class="register-actions"><button type="button" class="quiet-button" data-mcp-action="collection-grant">Grant read access</button>',
+    '<button type="button" class="quiet-button" data-mcp-action="collection-revoke">Revoke this grant</button></div>',
+    '<p data-mcp-grants role="status" aria-live="polite"></p>',
+    '<p data-mcp-collection-status role="status" aria-live="polite"></p>',
+    '</details>',
     '<p>Use Streamable HTTP with an Authorization Bearer header in your client settings.',
     ' Never commit credentials or put them in a URL. Locking Mind Place stops the listener.</p>',
     '<div class="setup-mcp-hosted">',
@@ -70,6 +91,70 @@ export function mountLocalMcpSetup(parent: HTMLElement, invoke: Invoke, clipboar
     if (connected()) state.textContent = "MCP status unavailable.";
   });
 
+  const collectionList = section.querySelector<HTMLElement>("[data-mcp-collection-list]")!;
+  const collectionStatus = section.querySelector<HTMLElement>("[data-mcp-collection-status]")!;
+  const grantsLine = section.querySelector<HTMLElement>("[data-mcp-grants]")!;
+  const grantClient = section.querySelector<HTMLSelectElement>("#mcp-grant-client")!;
+  const grantCollection = section.querySelector<HTMLSelectElement>("#mcp-grant-collection")!;
+  let collections: Collection[] = [];
+  const showGrants = async (): Promise<void> => {
+    grantsLine.textContent = "";
+    if (!grantClient.value) return;
+    try {
+      const ids = await invoke<string[]>("list_local_mcp_client_collections", { clientId: grantClient.value });
+      if (!connected() || !Array.isArray(ids)) return;
+      const names = ids.map((id) => collections.find((c) => c.id === id)?.name ?? "unknown collection");
+      grantsLine.textContent = names.length ? "This reader can read: " + names.join(", ") : "This reader has no collections and can read nothing.";
+    } catch {
+      if (connected()) grantsLine.textContent = "Grants unavailable; access remains fail-closed.";
+    }
+  };
+  const loadCollections = async (): Promise<void> => {
+    try {
+      const [list, readers] = await Promise.all([
+        invoke<Collection[]>("list_local_mcp_collections"),
+        invoke<Registered[]>("list_local_mcp_clients", {}),
+      ]);
+      if (!connected() || !Array.isArray(list) || !Array.isArray(readers)) return;
+      collections = list;
+      collectionList.replaceChildren();
+      for (const item of list) {
+        const row = doc.createElement("div");
+        row.className = "register-actions";
+        row.setAttribute("role", "listitem");
+        const label = doc.createElement("span");
+        label.textContent = item.name + " (" + item.source_count + " conversations)";
+        const remove = doc.createElement("button");
+        remove.type = "button";
+        remove.className = "quiet-button";
+        remove.dataset.mcpAction = "collection-delete";
+        remove.dataset.collectionId = item.id;
+        remove.textContent = "Delete";
+        row.append(label, remove);
+        collectionList.append(row);
+      }
+      const fill = (select: HTMLSelectElement, entries: Array<[string, string]>): void => {
+        const previous = select.value;
+        select.replaceChildren();
+        for (const [value, text] of entries) {
+          const option = doc.createElement("option");
+          option.value = value;
+          option.textContent = text;
+          select.append(option);
+        }
+        if (entries.some(([value]) => value === previous)) select.value = previous;
+      };
+      fill(grantCollection, list.map((c) => [c.id, c.name]));
+      fill(grantClient, readers.filter((r) => r.state !== "revoked").map((r) => [r.id, r.display_name]));
+      await showGrants();
+    } catch {
+      if (connected()) collectionStatus.textContent = "Collections unavailable; access remains fail-closed.";
+    }
+  };
+  section.querySelector<HTMLDetailsElement>("[data-mcp-collections]")!.addEventListener("toggle", (event) => {
+    if ((event.target as HTMLDetailsElement).open) void loadCollections();
+  });
+  grantClient.addEventListener("change", () => { void showGrants(); });
   const clientsElement = section.querySelector<HTMLElement>("[data-mcp-clients]")!;
   const more = section.querySelector<HTMLButtonElement>('[data-mcp-action="more"]')!;
   let cursor: string | undefined;
@@ -154,6 +239,41 @@ export function mountLocalMcpSetup(parent: HTMLElement, invoke: Invoke, clipboar
           await loadClients();
           break;
         }
+        case "collection-create": {
+          const name = section.querySelector<HTMLInputElement>("#mcp-collection-name")?.value.trim() ?? "";
+          const lines = (section.querySelector<HTMLTextAreaElement>("#mcp-collection-sources")?.value ?? "")
+            .split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+          const unique = [...new Set(lines)];
+          if (!name || unique.length > 2048 || unique.some((id) => !SOURCE_ID.test(id))) {
+            collectionStatus.textContent = "Enter a name and valid source IDs (src:v1: followed by 64 hex characters); nothing was created.";
+            break;
+          }
+          await invoke<string>("create_local_mcp_collection", { name, sourceIds: unique });
+          collectionStatus.textContent = "Collection created. It grants nothing until you grant it to a reader.";
+          await loadCollections();
+          break;
+        }
+        case "collection-grant":
+        case "collection-revoke": {
+          if (!grantClient.value || !grantCollection.value) {
+            collectionStatus.textContent = "Choose a reader and a collection first.";
+            break;
+          }
+          const grant = button.dataset.mcpAction === "collection-grant";
+          await invoke(grant ? "grant_local_mcp_collection" : "revoke_local_mcp_collection_grant",
+            { clientId: grantClient.value, collectionId: grantCollection.value });
+          collectionStatus.textContent = grant ? "Read access granted." : "Read access revoked.";
+          await showGrants();
+          break;
+        }
+        case "collection-delete": {
+          const collectionId = button.dataset.collectionId;
+          if (!collectionId) throw new Error("Missing collection identity");
+          await invoke("delete_local_mcp_collection", { collectionId });
+          collectionStatus.textContent = "Collection deleted and removed from every reader.";
+          await loadCollections();
+          break;
+        }
         case "issue": {
           const displayName = section.querySelector<HTMLInputElement>("#mcp-client-name")?.value.trim() ?? "";
           const result = await invoke<Issued>("issue_local_mcp_reader", { displayName });
@@ -202,6 +322,10 @@ export function mountLocalMcpSetup(parent: HTMLElement, invoke: Invoke, clipboar
     } catch (error) {
       if (connected()) {
         const message = String(error);
+        if (button.dataset.mcpAction?.startsWith("collection-")) {
+          collectionStatus.textContent = "Collection operation failed; nothing was granted or changed unless shown above.";
+          return;
+        }
         state.textContent = /MP_TUNNEL_(BINARY|INTEGRITY):/.test(message)
           ? "The bundled tunnel helper is missing or damaged. Repair or reinstall Mind Place, then try again."
           : "MCP operation failed; check local setup, tunnel ID, and runtime key.";

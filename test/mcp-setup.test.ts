@@ -46,3 +46,53 @@ test('disposed MCP setup ignores delayed credentials and clears password fields'
   assert.equal(key.value, ''); assert.doesNotMatch(parent.textContent ?? '', /synthetic-/);
   dom.window.close();
 });
+
+test('collections panel validates source IDs, grants and revokes through owner commands only', async () => {
+  const dom = new JSDOM('<main></main>');
+  const previous = { document: globalThis.document, Element: globalThis.Element };
+  Object.assign(globalThis, { document: dom.window.document, Element: dom.window.Element });
+  try {
+    const calls: Array<[string, unknown]> = [];
+    const sourceId = 'src:v1:' + 'a'.repeat(64);
+    const collections = [{ id: 'collection:v1:' + '1'.repeat(32), name: 'Disposable synthetic', source_count: 1 }];
+    const invoke: Invoke = async <T>(command: string, args?: unknown) => {
+      calls.push([command, args]);
+      if (command === 'list_local_mcp_clients') return [{ id: 'client:v1:r', display_name: 'Claude Code', state: 'enabled', policy_revision: 1 }] as T;
+      if (command === 'list_local_mcp_collections') return collections as T;
+      if (command === 'list_local_mcp_client_collections') return [] as T;
+      if (command === 'create_local_mcp_collection') return collections[0].id as T;
+      return { running: false, connection_verified: false } as T;
+    };
+    const parent = dom.window.document.querySelector('main')!;
+    mountLocalMcpSetup(parent, invoke, { writeText: async () => {} });
+    const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+    const details = parent.querySelector<HTMLDetailsElement>('[data-mcp-collections]')!;
+    // Nothing collection-related is invoked until the owner opens the panel.
+    assert.equal(calls.some(([c]) => c.includes('collection')), false);
+    details.open = true;
+    details.dispatchEvent(new dom.window.Event('toggle'));
+    await tick(); await tick();
+    assert.match(parent.textContent ?? '', /Disposable synthetic \(1 conversations\)/);
+    assert.match(parent.textContent ?? '', /can read nothing/);
+
+    const name = parent.querySelector<HTMLInputElement>('#mcp-collection-name')!;
+    const sources = parent.querySelector<HTMLTextAreaElement>('#mcp-collection-sources')!;
+    name.value = 'Fixture'; sources.value = 'not-a-source-id';
+    parent.querySelector<HTMLButtonElement>('[data-mcp-action="collection-create"]')!.click();
+    await tick();
+    assert.equal(calls.some(([c]) => c === 'create_local_mcp_collection'), false, 'invalid IDs never reach the backend');
+    sources.value = sourceId + '\n' + sourceId + '\n';
+    parent.querySelector<HTMLButtonElement>('[data-mcp-action="collection-create"]')!.click();
+    await tick(); await tick();
+    const create = calls.find(([c]) => c === 'create_local_mcp_collection')!;
+    assert.deepEqual(create[1], { name: 'Fixture', sourceIds: [sourceId] });
+
+    parent.querySelector<HTMLButtonElement>('[data-mcp-action="collection-grant"]')!.click();
+    await tick();
+    assert.deepEqual(calls.find(([c]) => c === 'grant_local_mcp_collection')![1],
+      { clientId: 'client:v1:r', collectionId: collections[0].id });
+    parent.querySelector<HTMLButtonElement>('[data-mcp-action="collection-revoke"]')!.click();
+    await tick();
+    assert.ok(calls.some(([c]) => c === 'revoke_local_mcp_collection_grant'));
+  } finally { Object.assign(globalThis, previous); dom.window.close(); }
+});

@@ -3,7 +3,7 @@ use mind_place_index::IndexStore;
 use mind_place_integration::{
     mcp::{self, dispatch, LEGACY, MODERN},
     transport::LocalMcpServer,
-    ClientAuthority, IntegrationCore,
+    ClientAuthority, IntegrationCore, ToolBatch, ToolCall, ToolName,
 };
 use mind_place_security::SecurityGate;
 use mind_place_state::{ClientCapability, StateStore};
@@ -18,6 +18,36 @@ struct Fixture {
     state: StateStore,
     security: SecurityGate,
     token: String,
+}
+/// Reads are deny-by-default: grant a client an explicit collection holding
+/// every fixture source (resolved through the trusted unscoped core path).
+fn grant_fixture(
+    archive: &ArchiveStore,
+    index: &IndexStore,
+    state: &StateStore,
+    security: &SecurityGate,
+    client_id: &str,
+) {
+    let found = IntegrationCore::new(archive, index, security)
+        .execute_batch(
+            &ToolBatch {
+                calls: vec![ToolCall {
+                    name: ToolName::MemorySearch,
+                    arguments: json!({"queries": ["amber eclipse"]}),
+                }],
+            },
+            || Ok(()),
+        )
+        .unwrap();
+    let sources: Vec<String> = found.results[0].result["hits"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|hit| hit["source_id"].as_str().unwrap().to_owned())
+        .collect();
+    let authority = ClientAuthority::new(state, security);
+    let collection = authority.create_collection("Fixture", &sources).unwrap();
+    authority.grant_collection(client_id, &collection).unwrap();
 }
 impl Fixture {
     fn new() -> Self {
@@ -52,11 +82,11 @@ impl Fixture {
         index.sync(&archive, &state).unwrap();
         let security = SecurityGate::open(temp.path().join("security.json")).unwrap();
         security.initialize(b"test-password-456").unwrap();
-        let token = ClientAuthority::new(&state, &security)
+        let issued = ClientAuthority::new(&state, &security)
             .issue("Claude Code", &[ClientCapability::Read])
-            .unwrap()
-            .credential()
-            .to_string();
+            .unwrap();
+        grant_fixture(&archive, &index, &state, &security, &issued.client.id);
+        let token = issued.credential().to_string();
         Self {
             temp,
             archive,
@@ -418,6 +448,7 @@ async fn real_http_deny_rebinding_origin_and_locked_epoch() {
         .issue("Simulated hosted reader", &[ClientCapability::Read])
         .unwrap();
     let hosted_id = hosted.client.id.clone();
+    grant_fixture(&f.archive, &f.index, &f.state, &f.security, &hosted_id);
     let hosted_token = hosted.credential().to_string();
     let discovery = simulated_forward(
         hosted_token.clone(),

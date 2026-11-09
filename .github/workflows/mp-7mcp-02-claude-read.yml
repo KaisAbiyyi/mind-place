@@ -24,10 +24,16 @@ jobs:
           rustup default 1.90.0
       - name: Rust formatting
         run: cargo fmt --all -- --check
-      - name: Exercise actual MCP Rust integration suite
-        run: cargo test --locked -p mind-place-integration --test mcp -- --nocapture
+      - name: Exercise MCP wire and per-collection grant negative matrix
+        run: cargo test --locked -p mind-place-integration --test mcp --test scopes -- --nocapture
+      - name: Exercise full integration crate (dispatcher, clients, fences)
+        run: cargo test --locked -p mind-place-integration
+      - name: Exercise authoritative grant storage and client authority
+        run: cargo test --locked -p mind-place-state --test read_scopes --test clients
+      - name: Exercise encrypted-vault MCP path with scoped grants
+        run: cargo test --locked -p mind-place-integration --features vault-mcp --test mcp_vault
       - name: Record truthful qualification boundary
         if: always()
         run: |
           echo "Synthetic MCP tests only. No actual Claude account/client or owner vault was connected." >> "$GITHUB_STEP_SUMMARY"
-          echo "MP-7MCP-02 full acceptance remains blocked by real client and per-collection grants." >> "$GITHUB_STEP_SUMMARY"
+          echo "Per-client/per-collection grants are server-enforced in these synthetic tests; full MP-7MCP-02 acceptance remains blocked on the real Claude client and native owner gates." >> "$GITHUB_STEP_SUMMARY"

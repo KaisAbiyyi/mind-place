@@ -2,7 +2,9 @@
 //! Synthetic-only MP-9B transport core regression: keyed authority and epoch.
 use mind_place_archive::Capture;
 use mind_place_index::vault_archive::VaultCaptureStore;
-use mind_place_integration::{mcp, ClientAuthority, IntegrationCore};
+use mind_place_integration::{
+    mcp, ClientAuthority, IntegrationCore, ToolBatch, ToolCall, ToolName,
+};
 use mind_place_security::{vault::CryptoVault, SecurityGate};
 use mind_place_state::ClientCapability;
 use serde_json::json;
@@ -47,6 +49,33 @@ fn vaulted_mcp_read_is_keyed_authorized_and_revoked_on_lock() {
         .unwrap();
     let credential = grant.credential();
     let core = IntegrationCore::new_vault(&archive, &index, &security);
+    // Reads are deny-by-default: grant an explicit collection (trusted,
+    // unscoped lookup only to learn the synthetic source ID).
+    let found = core
+        .execute_batch(
+            &ToolBatch {
+                calls: vec![ToolCall {
+                    name: ToolName::MemorySearch,
+                    arguments: json!({"queries": ["luminous"]}),
+                }],
+            },
+            || Ok(()),
+        )
+        .unwrap();
+    let source = found.results[0].result["hits"][0]["source_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let owner = ClientAuthority::new(&authority, &security);
+    let collection = owner
+        .create_collection("Synthetic collection", &[source])
+        .unwrap();
+    owner
+        .grant_collection(&grant.client.id, &collection)
+        .unwrap();
+    let outsider = owner
+        .issue("Ungranted synthetic client", &[ClientCapability::Read])
+        .unwrap();
     let request = json!({
         "jsonrpc": "2.0",
         "id": 1,
@@ -77,6 +106,21 @@ fn vaulted_mcp_read_is_keyed_authorized_and_revoked_on_lock() {
     assert!(!std::fs::read(root.join("state.sqlite3"))
         .unwrap()
         .starts_with(b"SQLite format 3\0"));
+    // A valid credential without a grant over the vault corpus reads nothing.
+    let nothing = mcp::dispatch(
+        &core,
+        &authority,
+        outsider.credential(),
+        request.clone(),
+        mcp::MODERN,
+        Some("tools/call"),
+        Some("memory_search"),
+    );
+    assert_eq!(nothing.status, 200);
+    assert!(nothing.body.unwrap()["result"]["structuredContent"]["hits"]
+        .as_array()
+        .unwrap()
+        .is_empty());
     let unauthorized = mcp::dispatch(
         &core,
         &authority,

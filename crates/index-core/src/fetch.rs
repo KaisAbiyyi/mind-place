@@ -1,7 +1,7 @@
 //! Phase 2B: provenance-checked, bounded progressive archive fetch.
 //! All fetches are resolved from a stable indexed source+snapshot, never from
 //! arbitrary filesystem paths or transient FTS row IDs.
-use crate::{verify_snapshot, CaptureArchiveReader, IndexError, IndexStore, Result};
+use crate::{verify_snapshot, CaptureArchiveReader, IndexError, IndexStore, Result, SourceScope};
 use mind_place_archive::ArchiveStore;
 use mind_place_state::{canonical_source_id, SourceDescriptor, SourceKey};
 use rusqlite::{params, OptionalExtension};
@@ -158,7 +158,7 @@ impl IndexStore {
         request: &FetchRequest,
         check: impl FnMut() -> Result<()>,
     ) -> Result<FetchResponse> {
-        self.fetch_generic_with_check(archive, request, check)
+        self.fetch_generic_with_check(archive, request, None, check)
     }
 
     #[cfg(feature = "sqlcipher-preview")]
@@ -168,13 +168,38 @@ impl IndexStore {
         request: &FetchRequest,
         check: impl FnMut() -> Result<()>,
     ) -> Result<FetchResponse> {
-        self.fetch_generic_with_check(archive, request, check)
+        self.fetch_generic_with_check(archive, request, None, check)
+    }
+
+    /// Scoped exact fetch for credentialed clients. A source outside `scope`
+    /// is indistinguishable from an unknown source (`InvalidQuery`), and the
+    /// decision precedes every index/archive access.
+    pub fn fetch_scoped_with_check(
+        &self,
+        archive: &ArchiveStore,
+        request: &FetchRequest,
+        scope: &SourceScope,
+        check: impl FnMut() -> Result<()>,
+    ) -> Result<FetchResponse> {
+        self.fetch_generic_with_check(archive, request, Some(scope), check)
+    }
+
+    #[cfg(feature = "sqlcipher-preview")]
+    pub fn fetch_vault_scoped_with_check(
+        &self,
+        archive: &crate::vault_archive::VaultCaptureStore,
+        request: &FetchRequest,
+        scope: &SourceScope,
+        check: impl FnMut() -> Result<()>,
+    ) -> Result<FetchResponse> {
+        self.fetch_generic_with_check(archive, request, Some(scope), check)
     }
 
     pub(crate) fn fetch_generic_with_check(
         &self,
         archive: &impl CaptureArchiveReader,
         request: &FetchRequest,
+        scope: Option<&SourceScope>,
         mut check: impl FnMut() -> Result<()>,
     ) -> Result<FetchResponse> {
         let started = Instant::now();
@@ -198,6 +223,9 @@ impl IndexStore {
             return Err(IndexError::InvalidQuery);
         }
         check()?;
+        if scope.is_some_and(|scope| !scope.contains(&request.source_id)) {
+            return Err(IndexError::InvalidQuery);
+        }
         let db = self.connection()?;
         let indexed: Option<(String, String, String, String, String, String, i64)> = db
             .query_row(

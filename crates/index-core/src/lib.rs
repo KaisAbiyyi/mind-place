@@ -80,7 +80,7 @@ pub use graphify::{
 pub use inspection::{ContextInspection, FetchInspection, RetrievalTrace, SearchInspection};
 pub use retrieval::{
     MatchMode, QueryTerm, RetrievalFilters, RetrievalHit, RetrievalRequest, RetrievalResponse,
-    ScoreContribution, WeightedQuery,
+    ScoreContribution, SourceScope, WeightedQuery,
 };
 
 pub type Result<T> = std::result::Result<T, IndexError>;

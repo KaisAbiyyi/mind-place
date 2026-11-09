@@ -2,7 +2,7 @@
 //! A pack is a bounded projection, never a new authority or a memory truth claim.
 use crate::{
     CaptureArchiveReader, FetchBudget, FetchCursor, FetchGranularity, FetchRequest, IndexError,
-    IndexStore, QueryTerm, Result, RetrievalFilters, RetrievalHit, RetrievalRequest,
+    IndexStore, QueryTerm, Result, RetrievalFilters, RetrievalHit, RetrievalRequest, SourceScope,
 };
 use chrono::DateTime;
 use mind_place_archive::ArchiveStore;
@@ -252,7 +252,31 @@ impl IndexStore {
         request: &ContextRequest,
         check: impl FnMut() -> Result<()>,
     ) -> Result<ContextPack> {
-        self.build_context_generic_with_check(archive, request, check)
+        self.build_context_generic_with_check(archive, request, None, check)
+    }
+
+    /// Scoped context for credentialed clients: candidate retrieval AND each
+    /// per-excerpt exact fetch are bound to `scope`, so aggregation cannot
+    /// disclose an out-of-scope source.
+    pub fn build_context_scoped_with_check(
+        &self,
+        archive: &ArchiveStore,
+        request: &ContextRequest,
+        scope: &SourceScope,
+        check: impl FnMut() -> Result<()>,
+    ) -> Result<ContextPack> {
+        self.build_context_generic_with_check(archive, request, Some(scope), check)
+    }
+
+    #[cfg(feature = "sqlcipher-preview")]
+    pub fn build_context_vault_scoped_with_check(
+        &self,
+        archive: &crate::vault_archive::VaultCaptureStore,
+        request: &ContextRequest,
+        scope: &SourceScope,
+        check: impl FnMut() -> Result<()>,
+    ) -> Result<ContextPack> {
+        self.build_context_generic_with_check(archive, request, Some(scope), check)
     }
 
     #[cfg(feature = "sqlcipher-preview")]
@@ -262,13 +286,14 @@ impl IndexStore {
         request: &ContextRequest,
         check: impl FnMut() -> Result<()>,
     ) -> Result<ContextPack> {
-        self.build_context_generic_with_check(archive, request, check)
+        self.build_context_generic_with_check(archive, request, None, check)
     }
 
     pub(crate) fn build_context_generic_with_check(
         &self,
         archive: &impl CaptureArchiveReader,
         request: &ContextRequest,
+        scope: Option<&SourceScope>,
         mut check: impl FnMut() -> Result<()>,
     ) -> Result<ContextPack> {
         let started = Instant::now();
@@ -281,11 +306,14 @@ impl IndexStore {
         }
         let filters = apply_policy(request)?;
         check()?;
-        let search = self.retrieve(&RetrievalRequest {
-            queries: request.queries.clone(),
-            filters,
-            limit: SEARCH_POOL,
-        })?;
+        let search = self.retrieve_scoped(
+            &RetrievalRequest {
+                queries: request.queries.clone(),
+                filters,
+                limit: SEARCH_POOL,
+            },
+            scope,
+        )?;
         check()?;
 
         let mut groups: Vec<ContextGroup> = Vec::new();
@@ -361,7 +389,8 @@ impl IndexStore {
             };
             // Phase 2B checks canonical identity, exact snapshot, raw digest
             // and match against index metadata before any text is emitted.
-            let fetched = self.fetch_generic_with_check(archive, &fetch_request, &mut check)?;
+            let fetched =
+                self.fetch_generic_with_check(archive, &fetch_request, scope, &mut check)?;
             let key = (fetched.source_id.clone(), fetched.snapshot_id.clone());
             let group_at = groups.iter().position(|g| {
                 (g.source_id.as_str(), g.snapshot_id.as_str()) == (key.0.as_str(), key.1.as_str())

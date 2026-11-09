@@ -65,6 +65,23 @@ impl Fixture {
     fn unlock(&self) {
         self.security.initialize(b"test-secret-123").unwrap();
     }
+    /// Explicit owner grant over every fixture source (reads are deny-by-default).
+    fn grant_all(&self, client_id: &str) {
+        let found = self
+            .core()
+            .execute_batch(&Fixture::batch(), || Ok(()))
+            .unwrap();
+        let sources: Vec<String> = found.results[0].result["hits"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|hit| hit["source_id"].as_str().unwrap().to_owned())
+            .collect();
+        let collection = self.owner().create_collection("Fixture", &sources).unwrap();
+        self.owner()
+            .grant_collection(client_id, &collection)
+            .unwrap();
+    }
     fn batch() -> ToolBatch {
         ToolBatch {
             calls: vec![ToolCall {
@@ -106,6 +123,7 @@ fn read_is_not_write_or_admin_and_admin_is_not_implicit_read() {
     let f = Fixture::new();
     f.unlock();
     let reader = f.owner().issue("ChatGPT", &[Cap::Read]).unwrap();
+    f.grant_all(&reader.client.id);
     assert!(matches!(
         f.owner().authorize(reader.credential(), Cap::Admin),
         Err(IntegrationError::AccessDenied)
@@ -131,7 +149,9 @@ fn read_is_not_write_or_admin_and_admin_is_not_implicit_read() {
     let audit = f.state.client_audit(&reader.client.id, 10).unwrap();
     assert_eq!(audit[0].event, "read_completed");
     assert_eq!(audit[1].event, "read_attempt");
-    assert_eq!(audit[2].event, "issued");
+    // Owner grant is attributed; no source IDs, names or tokens enter the audit.
+    assert_eq!(audit[2].event, "capability_granted");
+    assert_eq!(audit[3].event, "issued");
 }
 
 #[test]
@@ -143,6 +163,7 @@ fn immediate_capability_revoke_disable_rotation_and_terminal_revoke() {
         .issue("One brain", &[Cap::Read, Cap::Write])
         .unwrap();
     let id = &client.client.id;
+    f.grant_all(id);
     assert!(f
         .core()
         .execute_client_batch(&f.state, client.credential(), &Fixture::batch())

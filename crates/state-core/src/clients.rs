@@ -59,7 +59,7 @@ fn client_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ClientRecord> {
         policy_revision: row.get(3)?,
     })
 }
-fn bump_policy(tx: &rusqlite::Transaction<'_>, revoke_generation: bool) -> Result<i64> {
+pub(crate) fn bump_policy(tx: &rusqlite::Transaction<'_>, revoke_generation: bool) -> Result<i64> {
     tx.execute(
         "UPDATE security_policy SET revision=revision+1,
          client_revocation_generation=client_revocation_generation+?1 WHERE id=1",
@@ -70,7 +70,7 @@ fn bump_policy(tx: &rusqlite::Transaction<'_>, revoke_generation: bool) -> Resul
     })
     .map_err(StateError::from)
 }
-fn audit(
+pub(crate) fn audit(
     tx: &rusqlite::Transaction<'_>,
     client_id: Option<&str>,
     event: &str,
