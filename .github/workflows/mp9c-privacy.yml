@@ -39,6 +39,8 @@ jobs:
         run: cargo test --locked -p mind-place-security --lib vault_fence -- --nocapture
       - name: Source redaction and evidence persistence
         run: cargo test --locked -p mind-place-state --features sqlcipher-preview --test source_redaction -- --nocapture
+      - name: Owner-bound one-time forget, shared source and restart regressions
+        run: cargo test --locked -p mind-place-state --features sqlcipher-preview --test source_forget -- --nocapture
       - name: Deterministic encrypted capture/redaction interleaving and restart
         run: cargo test --locked -p mind-place-index --features sqlcipher-preview --lib privacy_capture_race_tests -- --nocapture
       - name: Existing encrypted archive interruption and readback
