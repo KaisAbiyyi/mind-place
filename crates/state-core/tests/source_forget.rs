@@ -135,3 +135,90 @@ fn concurrent_evidence_change_invalidates_prepared_owner_confirmation() {
     assert!(!db.source_is_redacted(&src).unwrap());
     assert!(db.source_forget_progress(&owner, &src).unwrap().is_none());
 }
+
+#[cfg(feature = "sqlcipher-preview")]
+#[test]
+fn encrypted_forget_preview_is_bound_to_unlock_epoch_and_restart() {
+    use mind_place_security::{vault::CryptoVault, SecurityGate};
+
+    let home = tempfile::tempdir().unwrap();
+    let root = home.path().join("vault");
+    let gate = SecurityGate::open(home.path().join("security.json")).unwrap();
+    let password = b"synthetic owner unlock secret";
+    gate.initialize(password).unwrap();
+    let lease = gate.require_unlocked().unwrap();
+    let (_vault, _recovery, manifest) = CryptoVault::provision(&gate, lease).unwrap();
+    manifest.persist_new(&root).unwrap();
+    let path = root.join("state.sqlite3");
+    let key = [0x51u8; 32];
+    let db = StateStore::open_encrypted(&path, key, &gate, lease).unwrap();
+    let admin = "a".repeat(64);
+    let peer_admin = "c".repeat(64);
+    db.issue_client("client:v1:owner", "Owner", &admin, &[Cap::Admin])
+        .unwrap();
+    db.issue_client("client:v1:peer", "Peer", &peer_admin, &[Cap::Admin])
+        .unwrap();
+    let source = db
+        .register_source(&SourceDescriptor {
+            provider: "chatgpt",
+            source_namespace: "synthetic",
+            source_kind: "conversation",
+            key: SourceKey::External("encrypted-epoch-fixture"),
+        })
+        .unwrap();
+    claim(&db, "claim:encrypted", &[source.clone()]);
+    let original = db
+        .preview_source_forget(&admin, &source, "synthetic consent")
+        .unwrap();
+    assert!(matches!(
+        db.confirm_source_forget(
+            &peer_admin,
+            &source,
+            &original.one_time_token,
+            &original.preview_sha256
+        ),
+        Err(StateError::MemoryDenied)
+    ));
+    gate.lock();
+    assert!(db
+        .confirm_source_forget(
+            &admin,
+            &source,
+            &original.one_time_token,
+            &original.preview_sha256
+        )
+        .is_err());
+    drop(db);
+    gate.unlock(password).unwrap();
+    let new_lease = gate.require_unlocked().unwrap();
+    assert_ne!(lease.epoch(), new_lease.epoch());
+    let db = StateStore::open_encrypted(&path, key, &gate, new_lease).unwrap();
+    assert!(matches!(
+        db.confirm_source_forget(
+            &admin,
+            &source,
+            &original.one_time_token,
+            &original.preview_sha256
+        ),
+        Err(StateError::MemoryDenied)
+    ));
+    let renewed = db
+        .preview_source_forget(&admin, &source, "fresh synthetic consent")
+        .unwrap();
+    let pending = db
+        .confirm_source_forget(
+            &admin,
+            &source,
+            &renewed.one_time_token,
+            &renewed.preview_sha256,
+        )
+        .unwrap();
+    assert!(!pending.physical_erase_verified);
+    drop(db);
+    let reopened = StateStore::open_encrypted(&path, key, &gate, new_lease).unwrap();
+    assert_eq!(
+        reopened.source_forget_progress(&admin, &source).unwrap(),
+        Some(pending)
+    );
+    assert!(reopened.source(&source).unwrap().is_none());
+}
