@@ -5,6 +5,8 @@ on:
       - 'src/**'
       - 'test/**'
       - 'scripts/mp8f-visual-smoke.mjs'
+      - 'scripts/mp-ui09-visual.mjs'
+      - 'docs/ui/evidence/mp-ui-09/reference.html'
       - '.github/workflows/mp8f-visual.yml'
   workflow_dispatch:
 
@@ -27,6 +29,8 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - name: Synthetic desktop and narrow-screen screenshot/keyboard qualification
         run: node scripts/mp8f-visual-smoke.mjs
+      - name: Integrated UI-09 original versus candidate comparisons
+        run: node scripts/mp-ui09-visual.mjs
       - name: Save synthetic screenshot evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

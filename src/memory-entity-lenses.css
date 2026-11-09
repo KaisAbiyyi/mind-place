@@ -1,14 +1,134 @@
-.entity-lenses { margin: 28px 0; padding: 20px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
-.entity-lenses h2 { font-size: 18px; margin: 0 0 12px; }
-.entity-lens-tabs { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
-.entity-lens-tabs button { border: 1px solid var(--line); border-radius: 6px; padding: 9px 16px; color: var(--text); background: #212323; }
-.entity-lens-tabs button[aria-pressed="true"] { outline: 2px solid #ac9575; }
-.entity-lens-form { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; }
-.entity-lens-form input { flex: 1 1 190px; padding: 10px; background: #1b1d1e; color: var(--text); border: 1px solid var(--line); border-radius: 6px; }
-.entity-lens-layout { display: grid; grid-template-columns: minmax(180px,35%) 1fr; gap: 16px; }
-.entity-lens-results { display: grid; align-content: start; gap: 8px; }
-.entity-lens-item { text-align: left; display: grid; gap: 8px; color: var(--text); background: #212323; border: 1px solid var(--line); border-radius: 7px; padding: 10px; overflow-wrap: anywhere; }
-.entity-lens-detail { overflow-wrap: anywhere; padding: 12px; border: 1px solid var(--line); border-radius: 7px; }
-.entity-lens-detail li { margin-bottom: 10px; }
-.entity-lens-timeline p { margin: 5px 0; }
-@media(max-width:800px) { .entity-lens-layout { grid-template-columns: 1fr; } }
+/* Canonical Monochrome Knowledge OS Entity Lenses (`Projects`, `People`, `Topics`) */
+
+.entity-lenses {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 8px;
+  padding: 20px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-xs);
+}
+
+.entity-lenses h2 {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 18px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+}
+
+.entity-lens-tabs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  padding: 3px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+  gap: 2px;
+  align-self: flex-start;
+}
+
+.entity-lens-tabs button {
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.entity-lens-tabs button:hover {
+  color: var(--text-primary);
+}
+
+.entity-lens-tabs button[aria-pressed="true"] {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border-color: var(--border-subtle);
+  box-shadow: var(--shadow-xs);
+  font-weight: 600;
+}
+
+.entity-lens-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.entity-lens-form input {
+  flex: 1 1 200px;
+  height: 34px;
+  padding: 0 11px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-size: 12.5px;
+}
+
+.entity-lens-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 35%) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.entity-lens-results {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+
+.entity-lens-item {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  text-align: left;
+  overflow-wrap: anywhere;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.entity-lens-item:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
+}
+
+.entity-lens-item[aria-pressed="true"] {
+  border-color: var(--border-focus);
+  background: var(--bg-surface);
+  box-shadow: inset 0 0 0 1px var(--border-focus);
+}
+
+.entity-lens-detail {
+  padding: 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  overflow-wrap: anywhere;
+}
+
+.entity-lens-detail li {
+  margin-bottom: 8px;
+}
+
+.entity-lens-timeline p {
+  margin: 4px 0;
+}
+
+@media (max-width: 800px) {
+  .entity-lens-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
