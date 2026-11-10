@@ -4,6 +4,10 @@ Status dokumen: **PROPOSAL / advisory**. Tidak mengubah status task, DAG kanonis
 gate mana pun. Semua ID task baru di bawah berstatus `PROPOSED` sampai owner menyetujuinya dan
 memasukkannya ke database *Mind Place · Execution Tasks*. Tidak ada klaim PASS baru di sini.
 
+**Pembaruan:** owner sudah menjawab sebagian §8. Jawabannya, perubahan yang diakibatkan
+(termasuk ditariknya usulan "cuplikan bukti per-proyek" di §4.3), dan roadmap jangka panjang ada
+di [keputusan owner dan roadmap](2026-11-10-owner-decisions-and-long-term-roadmap.md).
+
 Sumber yang dibaca: `AGENTS.md`, `docs/BIG-IMPLEMENTATION-PLAN.md`,
 `docs/PARALLEL-EXECUTION-BOARD.md`, `docs/implementation-plan/CURRENT-PHASE.md`,
 `phase-9a-encryption-design.md`, ringkasan MP-9D, konfigurasi Tauri/extension/workflow, Notion
