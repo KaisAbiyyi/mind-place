@@ -290,13 +290,78 @@ diam-diam — ubah secara eksplisit:
 | Tidak memasukkan source tree aplikasi eksternal | Web client dan relay perlu keputusan letak repositori |
 | Data mutable hanya di `state.sqlite3` | Objek workspace = kelas data baru berbasis log operasi |
 
-## 12. Keputusan yang masih terbuka
+## 12. Status keputusan (diperbarui setelah jawaban owner kedua)
 
-1. `MP-SEC-13` mode unlock ketat: default atau opt-in?
-2. Tunnel universal: setuju Tailscale Funnel sebagai jalur utama?
-3. Setuju seleksi v1.0 di §5 — khususnya gateway remote dan kurasi masuk v1.0?
-4. Workspace mode Hosted: boleh ada, atau hanya Private dan Synced E2EE?
-5. Setuju mengganti lingkup MP-7MCP-03/05 menjadi per tier?
+| # | Pertanyaan | Jawaban owner |
+| --- | --- | --- |
+| 1 | `MP-SEC-13` mode unlock ketat: default atau opt-in? | **Belum** — penjelasan di §14 |
+| 2 | Tailscale Funnel sebagai jalur tunnel utama | **Setuju** |
+| 3 | Seleksi v1.0 di §5, termasuk gateway remote dan kurasi | **Setuju** |
+| 4 | Workspace mode Hosted | **Belum diputuskan**; ditunda ke ADR W0 (v2.x), tidak menghalangi apa pun sebelum itu |
+| 5 | Lingkup MP-7MCP-03/05 menjadi per tier | **Setuju** |
+| 6 | Ide tambahan di §10 | **Setuju**, dengan catatan: itu masih peningkatan atas task yang ada → kapabilitas yang benar-benar baru di §15 |
+
+## 14. Mode unlock ketat — penjelasan untuk keputusan #1
+
+**Cara kerja sekarang [repo: `src-tauri/src/main.rs:834`, `crates/security-core/src/vault.rs`].**
+Data dienkripsi dengan satu kunci induk acak (DEK). DEK disimpan dalam dua bungkus:
+
+1. dibungkus **Windows (DPAPI)**, terikat ke akun Windows owner;
+2. dibungkus **kode recovery**.
+
+Password Mind Place **tidak ikut membungkus apa pun**. Saat unlock, aplikasi hanya memeriksa
+"password benar?" lalu meminta Windows menyerahkan DEK. Password berfungsi sebagai penjaga
+pintu di dalam aplikasi, bukan sebagai gembok pada data.
+
+| Skenario | Sekarang | Mode ketat |
+| --- | --- | --- |
+| Laptop dicuri dalam keadaan mati | Aman selama password **Windows** kuat | Aman; perlu password Windows **dan** password Mind Place |
+| Orang lain memakai sesi Windows owner yang sedang login, Mind Place terkunci | Program apa pun bisa meminta DEK ke Windows tanpa tahu password Mind Place | Tidak bisa; tanpa password, kuncinya tidak bisa dihitung |
+| Malware berjalan sebagai user, Mind Place terkunci | Sama — bisa membuka | Tidak bisa, sampai owner mengetik password |
+| Malware berjalan saat Mind Place **terbuka**, atau keylogger | Tidak terlindungi | Tidak terlindungi (batas jujur kedua mode) |
+| Lupa password | Pakai kode recovery | Pakai kode recovery (sama) |
+
+**Mode ketat:** password diolah (Argon2id) menjadi kunci yang ikut membungkus DEK, lalu
+dilapisi DPAPI. Keduanya diperlukan.
+
+**Harganya:** unlock ±0,5–1 detik lebih lama; password pendek jadi berbahaya karena bisa
+ditebak offline oleh pemegang berkas, jadi perlu passphrase; tidak ada unlock otomatis tanpa
+mengetik (kelak bisa lewat Windows Hello). Migrasi hanya membungkus ulang DEK — beberapa
+detik, data tidak dienkripsi ulang.
+
+**Arti pilihannya:** *default* = setiap vault baru memakai mode ketat dan vault lama ditawari
+migrasi sekali; *opt-in* = perilaku sekarang tetap, mode ketat harus dinyalakan di Settings.
+
+**Rekomendasi: default.** Kata "terkunci" di UI seharusnya benar secara kriptografi, dan
+biayanya kecil.
+
+## 15. Kapabilitas yang benar-benar baru (bukan peningkatan task yang ada)
+
+Semua di bawah adalah permukaan produk yang hari ini **tidak ada sama sekali**. Aplikasi saat
+ini tidak punya klien HTTP keluar [repo]; butir A, B, dan C mengubah itu dan butuh ADR.
+
+| ID | Kapabilitas | Apa yang baru | Kenapa menjual | Rilis |
+| --- | --- | --- | --- | --- |
+| `MP-NEW-A` | **AI Gateway lokal** | Mind Place menjadi proxy API yang kompatibel dengan API provider. Tool apa pun (Claude Code, Codex, Cursor, skrip) cukup mengganti base URL. Setiap request/response tertangkap di tingkat API — tanpa extension, tanpa scraping DOM. | Capture lossless dan tahan perubahan UI; **Secret Shield di arah keluar** (rahasia disaring sebelum sampai ke provider, bukan hanya saat keluar dari vault); brankas API key terenkripsi; aturan budget | v1.2 |
+| `MP-NEW-B` | **Kokpit pemakaian dan limit** | Token, biaya, dan sesi per provider / agent / proyek / task, dari data gateway dan sesi yang diimpor; proyeksi "limit habis tanggal X" | Menjawab langsung kekhawatiran limit; belum ada alat lintas-provider untuk ini | v1.2 |
+| `MP-NEW-C` | **Lab Model Pribadi** | Putar ulang tugas nyata dari arsip sendiri ke model kandidat (kunci sendiri), bandingkan kualitas/biaya/latensi; **kartu skor agent** dari bukti workspace (model mana yang lolos review pertama kali, biaya per task diterima) | "Haruskah saya pindah model?" dijawab dengan data sendiri, bukan benchmark umum. Inti tesis "model bisa diganti" | v2.x |
+| `MP-NEW-D` | **Chat bawaan multi-model** | Jendela chat di Mind Place sendiri: model apa pun lewat kunci sendiri atau model lokal offline; mode "dewan" — satu pertanyaan ke beberapa model berdampingan, jawabannya diarsipkan dan dibandingkan | Riwayat jadi milik owner sejak lahir; tetap berguna tanpa internet. Inferensi tetap opsional | v2.x |
+| `MP-NEW-E` | **Hub portabilitas instruksi** | Aturan, skill, custom instruction, definisi agent sebagai objek berversi; diekspor ke format tiap tool (skill Claude Code, `AGENTS.md`, rules editor) dan diimpor dari provider lama | Yang dipindahkan bukan cuma ingatan tetapi *perilaku*. Pindah provider tanpa menyetel ulang dari nol | v1.2 |
+| `MP-NEW-F` | **Konteks di mana saja tanpa MCP** | (1) Panel samping extension: memori relevan muncul saat mengetik di situs AI mana pun, sisip satu klik. (2) Hotkey sistem: overlay cari → tempel ke aplikasi apa pun. (3) Extension editor: arahkan ke fungsi → diskusi yang melahirkannya | **Tanpa tunnel, tanpa endpoint publik, tanpa biaya**, dan jalan di provider yang tidak mendukung MCP. Sisip selalu atas gestur user; izin extension tetap minimal | v1.1 (1–2), v1.2 (3) |
+| `MP-NEW-G` | **Conductor** | Mesin alur kerja multi-agent: templat pipeline (rencana → implementasi → review independen → kualifikasi), tiap langkah diserahkan ke agent/model yang dipilih, gate dipaksakan, reclaim otomatis saat macet, routing sadar-budget | `AGENT-ORCHESTRATION.md` jadi bisa dieksekusi. Di atas Workspace, tetapi kapabilitas tersendiri | v2.x |
+| `MP-NEW-H` | **Otomasi dan event bus** | Mind Place memancarkan event (capture baru, konflik terdeteksi, status task berubah) ke aturan lokal, webhook, atau job agent terjadwal | Memori jadi reaktif, bukan hanya ditanya | v2.x |
+| `MP-NEW-I` | **Penerbitan pengetahuan dan knowledge pack** | Topik curated → buku panduan / situs statis / PDF bersitasi. **Pack bertanda tangan** yang bisa diimpor orang lain sebagai sumber eksternal berprovenance | Pengetahuan jadi produk yang bisa dibagikan atau dijual; memanfaatkan memori terverifikasi | v2.x |
+| `MP-NEW-J` | **Modalitas baru** | Transkripsi lokal rapat/catatan suara; OCR tangkapan layar — masuk arsip sebagai sumber berprovenance | Ingatan mencakup yang tidak pernah diketik | v3 |
+| `MP-NEW-K` | **Pemulihan sosial dan akses warisan** | Kode recovery dipecah ke beberapa orang tepercaya (mis. 2 dari 3 cukup); akses darurat tertunda | Layak untuk infrastruktur pribadi jangka panjang; hampir tidak ada di produk sejenis | v2.x |
+
+**Urutan yang disarankan di antara butir baru:** F(1–2) dulu karena murah dan menghapus
+ketergantungan pada tunnel; lalu A + B sebagai satu paket (gateway menghasilkan data kokpit);
+lalu E. C, D, G, H, I menunggu Workspace.
+
+**Catatan arsitektur:** A dan D menaruh Mind Place di jalur *eksekusi*, sedangkan BIG plan
+memisahkan capture dari eksekusi. Jaga pemisahan itu: gateway dan chat sebagai crate/proses
+terpisah yang menulis ke arsip lewat kontrak capture yang sama, bukan menyatu dengan inti
+vault.
 
 ## 13. Sumber web
 
