@@ -1,6 +1,9 @@
 # Mind Place — bedah plan, penyesuaian, dan proposal diferensiasi (10 November 2026)
 
-Status dokumen: **PROPOSAL / advisory**. Tidak mengubah status task, DAG kanonis, lock, atau
+**Diadopsi 10 Nov 2026:** temuan dan penyesuaian di sini yang disetujui owner sudah masuk ke
+[`docs/MAIN-PLAN.md`](../MAIN-PLAN.md), yang kini kanonis.
+
+Status dokumen: riwayat. Tidak mengubah status task, DAG kanonis, lock, atau
 gate mana pun. Semua ID task baru di bawah berstatus `PROPOSED` sampai owner menyetujuinya dan
 memasukkannya ke database *Mind Place · Execution Tasks*. Tidak ada klaim PASS baru di sini.
 

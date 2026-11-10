@@ -1,6 +1,18 @@
 # Mind Place — dependency and parallel execution board
 
-**Live reconciliation 2026-10-28:** owner-authorized single-agent local takeover holds `crypto-migration` (MP-9B) and `ci-document-scale-workflow` (MP-CI-100K-01). Both are In Progress / Now; MP-9C/9D/9E are the complete direct-successor Up Next set after all AND prerequisites were checked in the live Notion database. Last Done has five accepted entries; optional tasks remain outside the focus projection pending their separate authorization/measurement. See the [takeover summary](implementation-summary/2026-10-28-mp9b-ci100k-local-takeover.md). Historical claims below are not current claims. No accepted predecessor is reopened and no implementation/owner gate is falsely marked Done.
+**Reconciliation 2026-11-10 — owner-approved main plan.** [`MAIN-PLAN.md`](MAIN-PLAN.md) §4 is now the canonical registry for remaining and new work: scope, prerequisites, locks, gates and target release. The registry table further down is kept as history for completed units; where it disagrees with the main plan about a remaining task, the main plan wins. Live status is in Notion only. Changes to existing rows:
+
+| Task | Change |
+|---|---|
+| `MP-9C` | Re-scoped to slice 1: private scopes, logical redaction on every read path, owner preview/confirm. Physical erasure moves to new `MP-9C2`; restore ↔ tombstone contract to new `MP-9C3` |
+| `MP-9F` | Prerequisites are `MP-9C` (slice 1) and `MP-9E` |
+| `MP-7MCP-03` | Re-scoped from "Claude write" to **local-tier write for all local clients**; adds prerequisite `MP-SEC-11` |
+| `MP-7MCP-05` | Re-scoped from "ChatGPT write" to **cloud-tier write**; adds prerequisites `MP-SEC-11`, `MP-NET-01`; target v1.2 |
+| `MP-10S1` | No longer purely optional: the bilingual/paraphrase miss measurement is required; integration only if justified |
+| `MP-10E` | Prerequisites extended per main plan §4.2 |
+| `MP-LIC-00` | Root `LICENSE` and `package.json` on `main` are MIT; the "TOP PRIORITY / NOW" wording below is historical |
+
+**Live reconciliation 2026-10-28 (historical):** owner-authorized single-agent local takeover holds `crypto-migration` (MP-9B) and `ci-document-scale-workflow` (MP-CI-100K-01). Both are In Progress / Now; MP-9C/9D/9E are the complete direct-successor Up Next set after all AND prerequisites were checked in the live Notion database. Last Done has five accepted entries; optional tasks remain outside the focus projection pending their separate authorization/measurement. See the [takeover summary](implementation-summary/2026-10-28-mp9b-ci100k-local-takeover.md). Historical claims below are not current claims. No accepted predecessor is reopened and no implementation/owner gate is falsely marked Done.
 
 **Last coordinated baseline:** 2026-10-21. This supplements [the BIG plan](BIG-IMPLEMENTATION-PLAN.md) and [current phase](implementation-plan/CURRENT-PHASE.md); it does **not** replace acceptance gates or rewrite historical status. Read [agent orchestration policy](AGENT-ORCHESTRATION.md).
 

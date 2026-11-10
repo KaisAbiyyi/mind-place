@@ -1,6 +1,10 @@
 # Mind Place — keputusan owner 10 November 2026 dan roadmap jangka panjang
 
-Status dokumen: **PROPOSAL / advisory**, lanjutan dari
+**Diadopsi 10 Nov 2026:** owner menyetujui isi dokumen ini sebagai main plan. Versi kanonisnya
+adalah [`docs/MAIN-PLAN.md`](../MAIN-PLAN.md); dokumen ini tinggal sebagai alasan dan riwayat.
+Koreksi owner: objek utama adalah **topik**, bukan proyek.
+
+Status dokumen: riwayat keputusan, lanjutan dari
 [bedah plan 10 November](2026-11-10-plan-review-and-differentiation.md). Tidak mengubah status
 task, DAG, lock, gate, atau invariant produk. Semua ID baru berstatus `PROPOSED`. Tidak ada
 kode yang dijalankan untuk dokumen ini.

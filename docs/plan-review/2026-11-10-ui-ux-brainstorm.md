@@ -1,5 +1,10 @@
 # Mind Place — brainstorm UI/UX (10 November 2026)
 
+**Koreksi owner 10 Nov:** objek utama adalah **topik**, bukan proyek. Proyek adalah topik yang
+juga membawa state kerja; topik lebih luas (mis. `sibambo`, `politik`, `film`). Di seluruh
+dokumen ini "proyek dulu" dibaca "topik dulu". Ide yang disetujui sudah menjadi task `MP-UX-*`
+di [main plan](../MAIN-PLAN.md).
+
 Status: **brainstorm / advisory**. Bukan spesifikasi, tidak mengubah kontrak UI MP-UI-01, HTML
 ground truth, atau task MP-UI-L1/U1. Basis pengamatan: `docs/ui/MP-UI-01-shared-ui-contract.md`,
 matriks cakupan MP-UI-09, dokumen onboarding, dan render `docs/ui/evidence/mp-ui-09/reference.html`
@@ -41,14 +46,14 @@ aplikasi (§5) dan sebagian penggunanya adalah agent, bukan manusia (§6).
 
 ## 4. Ide untuk aplikasi
 
-### 4.1 Struktur: proyek dulu
+### 4.1 Struktur: topik dulu
 
-- **Sidebar = daftar proyek**, bukan jenis data. Di dalam proyek: *Ringkasan · Keputusan ·
+- **Sidebar = daftar topik**, bukan jenis data. Di dalam topik: *Ringkasan · Keputusan ·
   Curated · Sumber (chat + berkas) · Linimasa · Board (kelak)*.
 - Rute jenis data yang sekarang tetap ada sebagai tampilan global "Semua percakapan / Semua
   berkas" dan lewat palet perintah — tidak ada kemampuan yang hilang.
-- Selaras dengan riset rail ikon + panel kontekstual di MP-UXR-01 (#117): rail = proyek dan
-  sistem, panel = isi proyek terpilih.
+- Selaras dengan riset rail ikon + panel kontekstual di MP-UXR-01 (#117): rail = topik dan
+  sistem, panel = isi topik terpilih.
 
 ### 4.2 Beranda: "Lanjutkan" dan "Perlu perhatian"
 
@@ -186,9 +191,9 @@ Pembaca terbanyak data ini adalah agent. Respons tool adalah "layar" mereka.
 | Murah, bisa sebelum v1.0 | Mode biasa sebagai default + pembersihan istilah (U3); bilah paparan + aturan warna (U4, U5); beranda "Lanjutkan / Perlu perhatian" (U2); pusat aktivitas; upacara kode recovery |
 | Bersama fitur v1.0 | Layar persetujuan kurasi + bar cakupan; tampilan belah bukti + lencana verifikasi; inbox Secret Shield; linimasa disclosure; sinyal `coverage`/`freshness` di respons MCP |
 | v1.1 | Panel samping extension; hotkey sistem; layar Persona; perintah di agent |
-| v2.0 | Navigasi proyek-dulu penuh (U1); board cermin GitHub; graph ego |
+| v1.1 / v2.0 | Navigasi topik-dulu penuh (U1, `MP-UX-10`); board cermin GitHub; graph ego |
 
-Catatan: navigasi proyek-dulu mengubah registry delapan rute di MP-UI-01, jadi perlu keputusan
+Catatan: navigasi topik-dulu mengubah registry delapan rute di MP-UI-01, jadi perlu keputusan
 owner dan sebaiknya tidak disentuh sebelum MP-UI-L1/U1 selesai atas UI yang sekarang.
 
 ## 8. Yang belum diperiksa
