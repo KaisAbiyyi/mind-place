@@ -294,10 +294,10 @@ diam-diam — ubah secara eksplisit:
 
 | # | Pertanyaan | Jawaban owner |
 | --- | --- | --- |
-| 1 | `MP-SEC-13` mode unlock ketat: default atau opt-in? | **Belum** — penjelasan di §14 |
+| 1 | `MP-SEC-13` mode unlock ketat: default atau opt-in? | **Setuju: default** (vault baru ketat, vault lama ditawari migrasi) |
 | 2 | Tailscale Funnel sebagai jalur tunnel utama | **Setuju** |
 | 3 | Seleksi v1.0 di §5, termasuk gateway remote dan kurasi | **Setuju** |
-| 4 | Workspace mode Hosted | **Belum diputuskan**; ditunda ke ADR W0 (v2.x), tidak menghalangi apa pun sebelum itu |
+| 4 | Workspace mode Hosted | **Boleh, dengan syarat** — lihat §16: workspace adalah cermin GitHub dan tetap terkunci walau repositorinya publik |
 | 5 | Lingkup MP-7MCP-03/05 menjadi per tier | **Setuju** |
 | 6 | Ide tambahan di §10 | **Setuju**, dengan catatan: itu masih peningkatan atas task yang ada → kapabilitas yang benar-benar baru di §15 |
 
@@ -362,6 +362,59 @@ lalu E. C, D, G, H, I menunggu Workspace.
 memisahkan capture dari eksekusi. Jaga pemisahan itu: gateway dan chat sebagai crate/proses
 terpisah yang menulis ke arsip lewat kontrak capture yang sama, bukan menyatu dengan inti
 vault.
+
+## 16. Keputusan owner ketiga (10 November 2026)
+
+**Prinsip produk baru — berlaku untuk semua proposal:**
+*Mind Place adalah otak dan data; pekerjaan dijalankan di agent.* Aplikasi tidak menjadi
+tempat menjalankan model, membandingkan model, atau mengorkestrasi agent. Owner melakukan itu
+di Claude Code atau Codex; Mind Place cukup menyediakan data dan tool lewat MCP. Ini selaras
+dengan pemisahan capture/eksekusi di BIG plan.
+
+| Kapabilitas §15 | Keputusan | Bentuk akhirnya |
+| --- | --- | --- |
+| `MP-NEW-F` Konteks di mana saja (panel samping extension, hotkey) | **Ya** | Seperti diusulkan |
+| `MP-NEW-A` AI Gateway lokal | **Ya** | Proxy pasif; tidak menjalankan apa pun sendiri |
+| `MP-NEW-B` Kokpit pemakaian | **Tidak sebagai fitur** | Diturunkan: gateway dan impor sesi wajib **menyimpan metadata pemakaian** (model, token, waktu) karena tidak bisa diisi mundur; satu tool MCP untuk menanyakannya dari agent. Tanpa dasbor |
+| `MP-NEW-E` Hub portabilitas instruksi | **Wajib** | Diperluas jadi **kontinuitas persona**: "orang yang sama, otak yang berbeda" — lihat di bawah |
+| `MP-NEW-C` Lab Model, `MP-NEW-D` chat bawaan, `MP-NEW-G` Conductor | **Tidak di aplikasi** | Dicoret sebagai fitur app. Bila perlu, cukup skill di sisi agent di atas tool MCP yang sudah ada |
+| `MP-NEW-H` Otomasi dan event bus | **Ya** | Seperti diusulkan |
+| `MP-NEW-I` Penerbitan dan knowledge pack | **Tidak** | Impor oleh orang lain ditolak; ekspor panduan bisa dikerjakan agent dari data curated |
+| `MP-NEW-K` Pemulihan sosial | **Tidak** | Dicoret |
+| `MP-NEW-J` Modalitas baru | **Mungkin** | Prioritas rendah, v3 |
+
+**Kontinuitas persona (`MP-NEW-E`, diperluas).** Target rasa: ganti provider terasa seperti
+bicara dengan orang yang sama; yang berubah hanya kecerdasannya. Isi:
+
+- *Profil persona*: gaya bahasa, nada, preferensi, kesepakatan kerja — berversi.
+- *Aturan per proyek* dan skill.
+- *Buku koreksi*: setiap kali owner mengoreksi perilaku asisten, koreksi itu jadi kandidat
+  aturan; provider berikutnya mewarisinya.
+- *Render per tool*: satu sumber diekspor ke format masing-masing (skill dan memori Claude
+  Code, `AGENTS.md`, custom instruction). Status sinkron per tool terlihat.
+- *Uji konsistensi*: sekumpulan pertanyaan pancingan yang dijalankan dari agent untuk
+  memeriksa model baru berperilaku sesuai profil.
+
+Batas jujur: yang bisa dibawa adalah instruksi dan ingatan. Watak bawaan tiap model tetap
+berbeda; targetnya konsistensi perilaku, bukan identik.
+
+**Workspace = cermin GitHub (mengubah §6).** Pemahaman atas jawaban owner: workspace mencerminkan
+GitHub (issue, PR, dokumen repositori), bukan editor blok ala Notion yang berdiri sendiri; mode
+Hosted boleh; akses tetap terkunci walau repositori yang dicerminkan publik. Akibatnya:
+
+- GitHub tetap sumber kebenaran task dan dokumen (sudah jadi aturan repositori). Mind Place
+  menambah lapisan yang GitHub tidak punya: claim atomik, resource lock, DAG prasyarat, bukti,
+  dan tautan ke memori.
+- **Visibilitas GitHub tidak diwariskan.** Workspace selalu di belakang autentikasi; tidak ada
+  akses anonim; link berbagi eksplisit, berlingkup, kedaluwarsa, bisa dicabut.
+- Lingkup W1 mengecil: tidak perlu editor dokumen. W1 = cermin baca GitHub + proyeksi
+  *Last Done / Now / Up Next* yang **dihitung otomatis dari DAG** (menggantikan aturan
+  hitung-ulang manual di `AGENTS.md`).
+- Pertanyaan desain terbuka: metadata yang GitHub tidak punya (prasyarat, lock, bukti)
+  disimpan di mana — berkas di repositori, front-matter issue, atau hanya di Mind Place.
+  Rekomendasi: berkas di repositori, supaya GitHub tetap satu-satunya sumber.
+
+Brainstorm UI/UX ada di [dokumen terpisah](2026-11-10-ui-ux-brainstorm.md).
 
 ## 13. Sumber web
 
