@@ -49,6 +49,10 @@ gates, evidence rules and the owner-controlled merge policy in `AGENTS.md` still
    topic under that rule; the chat archive and vault never leave the device in readable form.
 10. **v1.0 is a selection of what is proper, not everything.** Mind Place is a long-term,
     continuously developed project; later work is scheduled on the release train in §3.
+11. **Provider parity (2026-11-11).** Claude, ChatGPT and Gemini get the same capabilities:
+    all can read and all can write. Parity is a property of Mind Place's contract (one tool
+    catalog, one conformance suite, no engine branch on provider name), not a promise about
+    each vendor's client. Authorization is always enforced server-side. See §6.
 
 Rejected as app features: built-in multi-model chat, a model comparison lab, an agent
 orchestration engine, knowledge packs imported by other people, social recovery, a usage
@@ -57,7 +61,7 @@ dashboard. Where useful, these are agent-side skills over existing MCP tools.
 ## 2. Process rules that change
 
 - **Risk-tiered review.** Work under the locks `mcp-write-authority`, `privacy-deletion`,
-  `crypto-migration`, `backup`, `folder-authority`, `remote-gateway`, or any change to
+  `crypto-migration`, `backup`, `folder-authority`, `remote-gateway`, `mcp-parity-contract`, or any change to
   `crates/security-core`, requires an independent read-only review by a different session or
   agent before it can be accepted. UI, documentation and non-trust-boundary CI may use
   implementor self-review.
@@ -75,9 +79,9 @@ dashboard. Where useful, these are agent-side skills over existing MCP tools.
 | Release | Theme | Exit condition |
 | --- | --- | --- |
 | **v0.9 Continuity Preview** | Safe for the owner's daily use | `main` protected; tunnel helper cannot outlive the app; logical redaction and backup merged; Claude local read qualified; UI native gate run |
-| **v1.0 Trust & Continuity** | Encrypted, recoverable, curated with evidence, readable from any AI | Every v1.0 task in §4 accepted; MP-10E candidate; MP-10L1–3 and MP-10U1–2 passed |
+| **v1.0 Trust & Continuity** | Encrypted, recoverable, curated with evidence, readable and writable from Claude, ChatGPT and Gemini with the same capabilities | Every v1.0 task in §4 accepted; Parity Matrix (§6) recorded for all three providers; MP-10E candidate; MP-10L1–3 and MP-10U1–2 passed |
 | **v1.1 Hardening & Reach** | Stronger and easier to install | Parser jail and fuzzing; context without MCP; persona continuity; topic-first navigation |
-| **v1.2 Memory UX** | Memory as a product surface | Cloud-tier write; AI gateway; decision and time-travel UI |
+| **v1.2 Memory UX** | Memory as a product surface | AI gateway; decision and time-travel UI; memory inbox |
 | **v2.0 Workspace** | Locked GitHub mirror, local | WS-00..03 |
 | **v2.x Cloud** | Sync, web, sharing | WS-04..06; other platforms |
 | **v3** | Reach | New modalities; team vaults; adapter SDK |
@@ -123,8 +127,13 @@ Existing IDs keep their Notion pages and history; changed scope is marked **(re-
 | `MP-CUR-03` | Coverage and staleness map per topic; coverage signal in cloud-tier MCP responses; incremental curation that skips unchanged shards | MP-CUR-01 | `curation-coverage` | C |
 | `MP-CUR-04` | Agent kit: orchestrator skill and cheap-model worker definitions for Claude Code and Codex; sampled audit and per-generation quality score | MP-CUR-02, MP-7MCP-03 | `curation-agent-kit` | C + L |
 | `MP-7MCP-01` | Scoped MCP write-authority contract (PR #153), plus shared JSON test vectors that both the JS reference model and the Rust engine must pass | as recorded | `mcp-write-authority` | C, IR |
-| `MP-7MCP-03` **(re-scoped)** | Local-tier write for all local clients (Claude Code, Codex, Cowork local): Rust write engine, bulk and curation operations, per-client conformance checklist | MP-7MCP-01, MP-7MCP-02, MP-SEC-11 | `mcp-write-local` | C + L, IR |
+| `MP-7MCP-03` **(re-scoped)** | Local-tier write for all local clients (Claude Code, Codex, Gemini CLI, Cowork local): Rust write engine, bulk and curation operations, per-client conformance checklist | MP-7MCP-01, MP-7MCP-02, MP-SEC-11, MP-PAR-01 | `mcp-write-local` | C + L, IR |
 | `MP-7MCP-04` | ChatGPT read qualification under the cloud-tier (curated-only) policy | as recorded | `chatgpt-mcp-client` | C |
+| `MP-PAR-01` | Provider-parity contract: one tool catalog with read-only/destructive annotations, one error model and limit set; Streamable HTTP that works without SSE; tool-schema subset rules; Parity Matrix schema; shared executable conformance suite extending the MP-7MCP-01 test vectors, run against the Rust engine and the JS reference model | MP-7MCP-01 | `mcp-parity-contract` | C, IR |
+| `MP-7MCP-05` **(re-scoped, moved to v1.0)** | Cloud-tier write for all hosted clients (Claude, ChatGPT, Gemini): staged proposals into per-client quarantine collections through the remote gateway, same operation set as the local tier | MP-7MCP-01, MP-PAR-01, MP-SEC-11, MP-NET-01 | `mcp-write-cloud` | C, IR |
+| `MP-7MCP-06` **(promoted from optional)** | Gemini read adaptation: Gemini CLI against the local-tier engine (stdio or local HTTP, per-server `trust` off); setup guides for Gemini CLI, the Gemini app and Gemini Business; tool-schema compatibility findings feed MP-PAR-01 | MP-7E, MP-7IX, MP-7L2, MP-7U2 (accepted) | `gemini-mcp-client` | C + L |
+| `MP-7MCP-07` **(promoted from optional)** | Gemini write adaptation: write tools through Gemini CLI (local tier) and through the Gemini app or Gemini Business (cloud tier) where the owner's account is eligible | MP-7MCP-03, MP-7MCP-05, MP-7MCP-06 | `gemini-mcp-write` | C + L |
+| `MP-PAR-02` | Parity qualification: real Claude, ChatGPT and Gemini clients × local and hosted surface × read and write, run with the shared suite on one exact SHA; records the Parity Matrix (§6). A client's hosted write is enabled only after its hosted read cell is PASS | MP-7MCP-02, MP-7MCP-04, MP-7MCP-06, MP-7MCP-03, MP-7MCP-05, MP-7MCP-07, MP-NET-03 | `parity-qualification` | L + O |
 | `MP-NET-01` | Remote gateway ADR and implementation: separate listener serving the cloud tier only, OAuth 2.1 with PKCE, owner approval of each client in the local UI, rate limits and per-client egress circuit breaker; active only while unlocked with explicit consent | MP-7MCP-01, MP-SEC-10 | `remote-gateway` | C, IR |
 | `MP-NET-02` | Tunnel adapters: Tailscale Funnel (installed CLI, not bundled), OpenAI Secure MCP Tunnel (existing), none | MP-NET-01 | `remote-gateway` | C + L |
 | `MP-NET-03` | Real qualification: Claude custom connector and ChatGPT through the universal URL; revoke and lock tests | MP-NET-02, MP-CUR-03 | `hosted-account` | L + O |
@@ -138,7 +147,7 @@ Existing IDs keep their Notion pages and history; changed scope is marked **(re-
 | `MP-UX-05` | Recovery-code ceremony with verification; passphrase strength for strict unlock; plain-language locked screen | MP-SEC-13 | `ui-security` | C + O |
 | `MP-UX-06` | Curation approval by exception (thematic summary, rejected items, risky exceptions, random sample) and per-topic coverage bar | MP-CUR-02, MP-CUR-03 | `ui-memory` | C |
 | `MP-UX-07` | Evidence split view, verification badges, decision thread (B above struck-through A), disclosure timeline per AI | MP-11B1 | `ui-memory` | C |
-| `MP-10E` **(re-scoped prerequisites)** | Signed immutable candidate, qualified integration and release | MP-8F, MP-9F, MP-9C2, MP-9C3, MP-10B, MP-10C, MP-10D, MP-UI-U1, MP-SEC-11, MP-SEC-12, MP-SEC-13, MP-REL-01, MP-NET-03, MP-CUR-04, MP-11A, MP-11B1, MP-11C, MP-11D | `release` | C |
+| `MP-10E` **(re-scoped prerequisites)** | Signed immutable candidate, qualified integration and release | MP-8F, MP-9F, MP-9C2, MP-9C3, MP-10B, MP-10C, MP-10D, MP-UI-U1, MP-SEC-11, MP-SEC-12, MP-SEC-13, MP-REL-01, MP-NET-03, MP-CUR-04, MP-11A, MP-11B1, MP-11C, MP-11D, MP-PAR-02 | `release` | C |
 | `MP-9L1`, `MP-9L2`, `MP-9U1`, `MP-9U2` | Unchanged; MP-9L1 also qualifies MP-SEC-13, MP-9L2 also qualifies MP-9C2 | MP-9F (+ MP-SEC-13 / MP-9C2) | as recorded | L / O |
 | `MP-10L1`–`MP-10L3`, `MP-10U1`, `MP-10U2` | Unchanged | MP-10E | as recorded | L / O |
 
@@ -162,12 +171,12 @@ Existing IDs keep their Notion pages and history; changed scope is marked **(re-
 | `MP-PER-01` | Persona continuity: versioned persona profile, per-topic rules, corrections ledger, per-tool rendering and sync status, consistency probes run from an agent | MP-7MCP-03 | C + L |
 | `MP-UX-10` | Topic-first navigation (changes the MP-UI-01 route registry) | MP-TOP-01, MP-UI-U1 | C + L + O |
 | `MP-UX-11` | Indonesian/English UI | MP-UX-01 | C |
+| `MP-PAR-03` | Capture parity: evaluate automatic saving and manual history for Claude and Gemini. Today only ChatGPT has all three capture modes (extension capability matrix) | ADR amending the ChatGPT-only automatic-saving rule and optional host permissions; MP-PAR-02 | C + L |
 
 ### 4.4 v1.2 and later
 
 | ID | Deliverable | Prerequisites | Release |
 | --- | --- | --- | --- |
-| `MP-7MCP-05` **(re-scoped)** | Cloud-tier write to per-client quarantine collections through the remote gateway | MP-7MCP-01, MP-7MCP-04, MP-SEC-11, MP-NET-01 | v1.2 |
 | `MP-GW-01` | Local AI gateway: passive API-compatible proxy capturing requests and responses, outbound Secret Shield, encrypted API-key store; **must retain usage metadata** (model, tokens, time); separate process from the vault core; requires an ADR | MP-11C | v1.2 |
 | `MP-11B3` | Verifiable memory level 4: client-signed writes and exportable proof bundles | MP-11B1, MP-7MCP-03 | v1.2 |
 | `MP-11I` | Time-travel (`as_of`) and decision ledger UI | MP-UX-07 | v1.2 |
@@ -186,7 +195,7 @@ Existing IDs keep their Notion pages and history; changed scope is marked **(re-
 | `MP-11K` | Rebuild claims and graph with a newer model while keeping old generations for audit | MP-CUR-04 | v2.x |
 | `MP-MOD-01` | New modalities: local transcription, screenshot OCR (low priority) | MP-JOB-01 | v3 |
 
-`MP-7MCP-06`, `MP-7MCP-07` and `MP-10S2` remain optional and unscheduled.
+`MP-10S2` remains optional and unscheduled. `MP-7MCP-06` and `MP-7MCP-07` (Gemini) are scheduled in §4.2 since 2026-11-11.
 
 ## 5. Invariants that need an explicit ADR before the work starts
 
@@ -198,10 +207,61 @@ Existing IDs keep their Notion pages and history; changed scope is marked **(re-
 | Mutable data lives only in `state.sqlite3` | Workspace mirror objects as an operation log | MP-WS-00 |
 | No external application source trees in this repository | Location of web client and relay | MP-WS-00 |
 | Eight primary routes (MP-UI-01) | Topic-first navigation | MP-UX-10 |
+| Automatic saving inspects only the loaded ChatGPT DOM (`AGENTS.md`) | Opt-in automatic saving and manual history for Claude and Gemini behind optional host permissions | MP-PAR-03 |
 
 Until its ADR is accepted, the current rule stays in force.
 
-## 6. Still open
+## 6. Provider parity (owner decision 2026-11-11)
+
+Owner direction: Claude, ChatGPT and Gemini have the same capabilities; all can read and all can write.
+
+**What parity means.**
+
+- One tool catalog, one set of read-only/destructive annotations, one error model, one set of
+  limits and one conformance suite. Nothing in the engine branches on provider name; the tier
+  comes from transport and credential class (§1, item 4).
+- Two surfaces per provider, identical across providers. *Local*: an agent with local access
+  (Claude Code, Codex, Gemini CLI, Cowork local) uses the local tier. *Hosted*: a web or app
+  client through the remote gateway uses the cloud tier (curated read, staged write).
+- Identical defaults. The owner still grants or denies per credential and per operation
+  (allow / ask first / deny); the defaults are the same for all three providers.
+- Authorization is enforced by Mind Place, never by the vendor client. A vendor's own
+  confirmation behaviour (ChatGPT prompts, the Gemini CLI per-server `trust` flag that skips
+  per-tool approval) is not a control. Writes are staged proposals under the owner's policy.
+
+**What parity does not mean.** Whether a vendor client can connect, or call write tools, depends
+on that vendor's plan, region and settings. The Parity Matrix (qualified by MP-PAR-02) records
+each cell as `PASS` (real client, exact SHA), `PROVIDER_BLOCKED` (evidence of the vendor
+restriction, plus the fallback surface) or `NOT_RUN`. A blocked cell is a finding to report, not
+a failure to hide.
+
+**What the research found (web search 2026-11-11; mostly third-party, verify against the vendors' own documentation).**
+
+| Provider | Local surface | Hosted surface | Constraints to check on the owner's account |
+| --- | --- | --- | --- |
+| Claude | Claude Code, Claude Desktop (MP-7MCP-02) | Custom connector; the connection is made from Anthropic's cloud, so the URL must be public HTTPS; Streamable HTTP; OAuth optional | Free plan limited to one custom connector |
+| ChatGPT | Codex | Custom connector through developer mode, or the existing OpenAI tunnel | OpenAI's help page describes full MCP including write as beta for Business/Enterprise/Edu; Plus/Pro is unclear. ChatGPT may ask for confirmation or block risky writes |
+| Gemini | Gemini CLI: stdio and remote HTTP, per-server `trust` | Gemini app custom apps reported since 2026-06-29; Gemini Business with admin-configured servers; Gemini API remote MCP for managed agents (July 2026) | The app reportedly needs a personal account, age 18+, English, Keep Activity on, and some sources say US only. The owner may not qualify, so expect `PROVIDER_BLOCKED` on this cell with Gemini CLI as the fallback. Gemini Business does not allow SSE |
+
+**Design constraints that follow.**
+
+1. The remote gateway speaks Streamable HTTP and must work without SSE.
+2. Tool input schemas stay flat and simple (no `$ref`, `anyOf` or `oneOf`; bounded sizes), because
+   Gemini function declarations accept only a subset of JSON Schema (general knowledge, verify).
+3. Every tool carries explicit read-only/destructive annotations, identical across providers.
+4. Cloud-tier writes are staged proposals into per-client quarantine collections, not direct
+   mutations. This also keeps them low-risk for vendors that block high-risk writes.
+5. Tool names and descriptions are short and provider-neutral; there are no provider-specific tools.
+6. Setup guides for each provider are generated from one source.
+
+**Tasks.** `MP-PAR-01` contract and suite; `MP-7MCP-02/04/06` read adaptation per provider;
+`MP-7MCP-03/05` write engines per tier; `MP-7MCP-07` Gemini write adaptation; `MP-PAR-02`
+qualification and Parity Matrix; `MP-PAR-03` capture parity (v1.1, needs an ADR).
+
+**Cost.** Moving cloud-tier write from v1.2 to v1.0 widens v1.0. It is sequenced last, after the
+hosted read cell is qualified, and stays default-deny per client.
+
+## 7. Still open
 
 - Where Workspace metadata that GitHub lacks (prerequisites, locks, evidence) is stored.
   Recommendation: files in the repository, so GitHub stays the only source.
