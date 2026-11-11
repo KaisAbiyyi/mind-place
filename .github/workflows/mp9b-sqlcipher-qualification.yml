@@ -30,6 +30,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   sqlcipher:
@@ -52,6 +53,23 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/pull/{0}/merge', inputs.pr_number) || github.sha }}
           persist-credentials: false
+      - name: Verify frozen PR source and capture provenance
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python scripts/mp10c_native_contract.py attest --output qualification/sqlcipher/source.json
+          python - <<'PY'
+          import json, pathlib, subprocess
+          path = pathlib.Path('qualification/sqlcipher/source.json')
+          proof = json.loads(path.read_text())
+          proof['source_tree'] = subprocess.check_output(['git', 'rev-parse', 'HEAD^{tree}'], text=True).strip()
+          proof['workflow_path'] = '.github/workflows/mp9b-sqlcipher-qualification.yml'
+          proof['execution_profile'] = 'mp9e-sqlcipher-backup/v1'
+          proof['evidence_scope'] = 'synthetic hosted SQLCipher execution; NOT installed owner or physical power-loss acceptance'
+          path.write_text(json.dumps(proof, indent=2) + '\n')
+          print(path.read_text())
+          PY
       - name: Install Rust 1.90
         shell: bash
         run: |
@@ -59,12 +77,39 @@ jobs:
           rustup default 1.90.0
       - name: Check Rust formatting
         run: cargo fmt --all -- --check
+      - name: Select native Windows Perl for vendored OpenSSL
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $nativePerl = 'C:\Strawberry\perl\bin\perl.exe'
+          if (-not (Test-Path -LiteralPath $nativePerl -PathType Leaf)) {
+            throw 'MP9E_NATIVE_PERL_MISSING'
+          }
+          & $nativePerl -MLocale::Maketext::Simple -MIPC::Cmd -e 'print "native Perl modules available\n"'
+          if ($LASTEXITCODE -ne 0) { throw 'MP9E_NATIVE_PERL_MODULES_MISSING' }
+          "OPENSSL_SRC_PERL=$nativePerl" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "PERL=$nativePerl" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Execute application backup crash and recovery tests
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --locked -p mind-place-index --features sqlcipher-preview --lib vault_online_backup -- --nocapture 2>&1 | tee qualification/sqlcipher/online-boundaries.log
+          cargo test --locked -p mind-place-index --features sqlcipher-preview --test vault_online_backup --test vault_backup_consistency --test sqlcipher_index_backup --test vault_capture_encrypted -- --nocapture 2>&1 | tee qualification/sqlcipher/backup-integration.log
+          cargo test --locked -p mind-place-security vault_backup -- --nocapture 2>&1 | tee qualification/sqlcipher/portable-faults.log
       - name: Encrypted state/index and FTS regression
         run: cargo test --locked -p mind-place-state -p mind-place-index --features sqlcipher-preview -- --nocapture
       - name: Keyed MCP synthetic authorization and revocation
         run: cargo test --locked -p mind-place-integration --features vault-mcp --test mcp_vault -- --nocapture
       - name: Vault and backup adversarial regression
         run: cargo test --locked -p mind-place-security -- --nocapture
+      - name: Preserve SQLCipher execution proof and logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: mp9e-sqlcipher-${{ matrix.os }}-attempt-${{ github.run_attempt }}
+          path: qualification/sqlcipher/
+          if-no-files-found: error
+          retention-days: 14
 
   foundation-regressions:
     name: Bounded vault regressions / ${{ matrix.os }} (NOT Product qualification)
