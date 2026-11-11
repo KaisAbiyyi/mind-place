@@ -309,3 +309,36 @@ fn failed_catalog_initialization_rolls_back_its_partial_schema() {
         "failed initialization must not publish a partial schema"
     );
 }
+
+/// MP-IMPORT-FIX-01 (P1-1): the encrypted vault's ordinary `save` is live-capture-only. Historical
+/// and generic methods reach the vault only through `import_legacy_consented`, which requires
+/// an `ExplicitMigrationConsent` and re-validates previously stored evidence.
+#[test]
+fn ordinary_vault_save_rejects_every_historical_and_generic_method() {
+    let home = tempfile::tempdir().unwrap();
+    let gate = SecurityGate::open(home.path().join("security.json")).unwrap();
+    gate.initialize(b"synthetic-encrypted-archive-secret")
+        .unwrap();
+    let lease = gate.require_unlocked().unwrap();
+    let (vault, _, manifest) = CryptoVault::provision(&gate, lease).unwrap();
+    let root = home.path().join("vault");
+    manifest.persist_new(&root).unwrap();
+    let store = VaultCaptureStore::open(&root, vault, &gate, lease).unwrap();
+
+    for (provider, method) in [
+        ("chatgpt", "export-import"),
+        ("chatgpt", "legacy-import"),
+        ("gemini", "takeout-import"),
+        ("generic", "generic-import"),
+    ] {
+        let mut historical = capture("2026-10-26T03:00:00Z");
+        historical.provider = provider.into();
+        historical.capture_method = method.into();
+        assert!(
+            store.save(historical).is_err(),
+            "{provider}/{method} must be refused by ordinary vault save"
+        );
+    }
+    // Control: a genuine live capture is still accepted.
+    assert!(store.save(capture("2026-10-26T03:00:00Z")).is_ok());
+}

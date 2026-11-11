@@ -1,5 +1,7 @@
 # Implementation Summary: Mind Place Import Core / Gemini / ChatGPT Corrective Implementation
 
+> **Amended 2026-11-11 by MP-IMPORT-FIX-01 (see [2026-11-11-mp-import-fix-01.md](2026-11-11-mp-import-fix-01.md)).** This branch provides **parsing and capture-only primitives** for ChatGPT exports and Gemini Takeout cards. It does **not** include raw-evidence persistence, independent source-manifest measurement, zip handling, Tauri commands or UI (MP-IMPORT-RAW-01 and later cards). It is **not** true that every historical write requires `HistoricalImportAuthorization`: takeout/export captures can be persisted only through `save_authorized_historical_import`, while the legacy-import and generic-import migration paths are documented exceptions listed in the FIX-01 handoff. Statements below that say otherwise are superseded.
+
 **Date:** 2026-11-05  
 **Repository:** `KaisAbiyyi/mind-place`  
 **Worktree:** `D:\projects\mind-place-import-dev`  
@@ -28,7 +30,7 @@
 1. `2bda92d` — `fix(security): unify import auth with gate lockout, instance binding and replay tracking (MP-IMPORT-CORE-01)`
    - Tracks A1 & A2: Integrates owner import session authorization with `SecurityGate` lockout/rate-limit tracking, binds capabilities to gate instance ID and registered runtime state, and tracks replay semantics.
 2. `c61b552` — `fix(archive): separate live capture validation from authorized historical imports (MP-IMPORT-CORE-01)`
-   - Track A3: Prohibits historical import capture methods from ordinary `ArchiveStore::save`, routing historical imports strictly through `ArchiveStore::save_historical_import`, while enforcing URL checks and preserving stored capture compatibility.
+   - Track A3: Prohibits historical import capture methods from ordinary `ArchiveStore::save`, refusing `takeout-import`/`export-import` there (they persist only through `ArchiveStore::save_authorized_historical_import` after the second correction; `save_historical_import` is now a rejecting shim), while enforcing URL checks and preserving stored capture compatibility.
 3. `36ebfef` — `fix(importers): structure-aware Gemini takeout parsing with occurrence identity and bounds (MP-7TAKEOUT-01A)`
    - Track B: Structure-aware multi-turn/prompt-only/response-only parsing, MDL `<p>` extraction, occurrence index identity for duplicate cards, 64 MiB input bounds, official URL validation, and explicit timezone support.
 4. `fac121b` — `fix(importers): lossless ChatGPT export streaming with active-branch honesty and bounds (MP-3EXPORT-01A)`
@@ -49,12 +51,12 @@
   - *Correction:* Generated a cryptographically random 16-byte `instance_id` per `SecurityGate`, embedded it into `ImportCapability`, registered active import sessions in `gate.inner.state.active_imports`, and bound verification to provider, job ID, canonical source root (`fs::canonicalize`), manifest hash, epoch, and lifetime. Added explicit revocation (`revoke_import_capability`, `revoke_import_job`) and cleared all active imports on gate lock or epoch rollover.
 - **A3. Separate Validator & Write Authorization Boundaries (P1):**
   - *Finding:* Ordinary `ArchiveStore::save` permitted historical import capture methods (`takeout-import`, `export-import`) via permissive validation.
-  - *Correction:* `validate_capture` enforces that `takeout-import` is validated as historical Gemini and `export-import` as historical ChatGPT (rejecting forged URLs). `ArchiveStore::save` explicitly rejects historical import capture methods, requiring caller authorization through `ArchiveStore::save_historical_import`.
+  - *Correction:* `validate_capture` enforces that `takeout-import` is validated as historical Gemini and `export-import` as historical ChatGPT (rejecting forged URLs). `ArchiveStore::save` explicitly rejects historical import capture methods, so those methods persist only through `ArchiveStore::save_authorized_historical_import` (`save_historical_import` is a rejecting shim since the second correction).
 
 ### Track B: Gemini Takeout Parser
 - **B1. Complete Turn Extraction (P1):**
   - *Finding:* Parser assumed first-prompt/first-paragraph structure, silently truncating multi-turn cards and fabricating user messages when only responses existed.
-  - *Correction:* Replaced naive string search with structure-aware turn extraction: parses all turns in multi-turn cards (`messages.len() == 4`), emits honest `completeness: "partial"` for prompt-only or response-only cards without synthesizing missing dialogue, and extracts nested Material Design Lite `<p>` blocks.
+  - *Correction:* Replaced naive string search with structure-aware turn extraction: parses all turns in multi-turn cards (`messages.len() == 4`), emitted `completeness: "partial"` for prompt-only or response-only cards (FIX-01: now partial for every Takeout card) without synthesizing missing dialogue, and extracts nested Material Design Lite `<p>` blocks.
 - **B2. Source Occurrence Identity (P2):**
   - *Finding:* Identical duplicate cards at different positions collapsed into identical conversation identifiers.
   - *Correction:* Disambiguated duplicate occurrences using stable position-derived occurrence keys (`#occ-{idx}`), maintaining non-colliding conversation identities while keeping raw evidence hashes byte-identical.
@@ -105,7 +107,7 @@
 2. **Brute-Force & Rate-Limit Unification:** Wrong passwords during import reauthentication trigger `SecurityGate` backoff (`SecurityError::RateLimited`), preventing offline or inline guessing attacks.
 3. **Lease Preservation:** Failed import attempts increment rate-limit counters but do not revoke an already valid owner unlock lease.
 4. **Context Pinning:** An import capability is cryptographically bound to its specific job ID, provider, canonical filesystem source root, manifest SHA-256, and unlock epoch.
-5. **Fail-Closed Write Boundaries:** Historical import methods (`takeout-import`, `export-import`) are barred from live `ArchiveStore::save`. Only authorized historical import callers may invoke `ArchiveStore::save_historical_import`.
+5. **Fail-Closed Write Boundaries:** Historical import methods (`takeout-import`, `export-import`) are barred from live `ArchiveStore::save`. `takeout-import`/`export-import` persist only through `ArchiveStore::save_authorized_historical_import`; `save_historical_import` always rejects. The legacy-import and generic-import migration paths are documented exceptions (see the FIX-01 handoff).
 6. **No Network Access:** Importers never make remote HTTP calls to resolve media, attachments, or canvas URLs.
 
 ---

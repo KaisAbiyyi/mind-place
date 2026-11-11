@@ -1,0 +1,18 @@
+{
+  "task": "MP-IMPORT-FIX-01",
+  "date": "2026-11-11",
+  "environment": {"os": "linux-x86_64", "cargo": "1.97.0", "node": "22.23.4", "hosted_ci_rust": "1.90.0 (not yet run on this branch)"},
+  "synthetic_fixtures_only": true,
+  "base": {"pr_166_head": "bb5c0cf1d2c655cca62d2c6b8064b568cc9768a9", "main": "06b619962a87003dd6d3364667e5acb7fa8d82c7"},
+  "commands": [
+    {"command": "cargo test --locked -p mind-place-archive --tests", "passed": 116, "failed": 0, "ignored": 0, "breakdown": {"unit": 48, "archive": 19, "generic": 5, "historical_write_authority": 8, "import_second_correction": 18, "legacy": 7, "registration": 2, "validation_boundaries": 9}},
+    {"command": "npm run test:rust", "passed": 347, "failed": 0, "ignored": 1, "exit": 0},
+    {"command": "npm run test:web", "tests": 271, "passed": 269, "failed": 0, "skipped": 2, "exit": 0, "note": "2 skipped are Windows-only"},
+    {"command": "cargo test --locked -p mind-place-index --features sqlcipher-preview --test vault_capture_encrypted", "passed": 5, "failed": 0, "scope": "local only; hosted CI only cargo-checks this feature"},
+    {"command": "cargo fmt --all -- --check", "result": "PASS"},
+    {"command": "npm run verify:repo", "result": "PASS"},
+    {"command": "node scripts/verify-workflow-security.mjs", "result": "PASS"},
+    {"command": "npm run verify:distribution-license", "result": "PARTIAL", "detail": "PASS against a throwaway portable directory with freshly generated notices (9 pinned crates covered); FAIL when the html5gum section was altered; NOT_RUN against a real release package"}
+  ],
+  "not_run": ["hosted CI on this branch", "Windows SQLCipher/installed-app/hostile-account qualification", "real ChatGPT/Gemini exports", "real release package license verification"]
+}

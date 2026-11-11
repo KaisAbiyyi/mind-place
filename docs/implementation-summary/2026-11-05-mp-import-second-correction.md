@@ -1,5 +1,7 @@
 # MP Import Second Correction — cloud implementation handoff
 
+
+> **Amended 2026-11-11 by MP-IMPORT-FIX-01 (see [2026-11-11-mp-import-fix-01.md](2026-11-11-mp-import-fix-01.md)).** This branch provides **parsing and capture-only primitives** for ChatGPT exports and Gemini Takeout cards. It does **not** include raw-evidence persistence, independent source-manifest measurement, zip handling, Tauri commands or UI (MP-IMPORT-RAW-01 and later cards). It is **not** true that every historical write requires `HistoricalImportAuthorization`: takeout/export captures can be persisted only through `save_authorized_historical_import`, while the legacy-import and generic-import migration paths are documented exceptions listed in the FIX-01 handoff. Statements below that say otherwise are superseded.
 Status: **READY FOR INDEPENDENT RE-REVIEW**. This is neither acceptance nor merge/release authorization.
 
 - Repository: `KaisAbiyyi/mind-place`.
