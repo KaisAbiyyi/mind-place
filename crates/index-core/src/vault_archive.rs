@@ -12,7 +12,7 @@ use mind_place_security::{
     vault_storage::ImmutableVaultStorage,
     SecurityError, SecurityGate, UnlockLease,
 };
-use mind_place_state::{CipherKey, StateStore};
+use mind_place_state::{canonical_source_id, CipherKey, SourceDescriptor, SourceKey, StateStore};
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use sha2::{Digest, Sha256};
 use std::{
@@ -307,6 +307,40 @@ impl VaultCaptureStore {
         format!("capture/{archive_id}/{snapshot_id}")
     }
 
+    /// Map an archive conversation back to its versioned state authority.
+    /// Unindexed legacy import types have no provider canonical identity here;
+    /// migration/unsupported-provider policy is a separate release gate.
+    fn capture_redacted(
+        &self,
+        authority: &StateStore,
+        provider: &str,
+        conversation_id: &str,
+    ) -> Result<bool> {
+        // Unknown/legacy provider types must never bypass source authority.
+        // Generic imports have their own explicit, canonical namespace.
+        let namespace =
+            crate::namespace_for_provider(provider).ok_or(IndexError::InvalidEvidence)?;
+        let source_id = canonical_source_id(&SourceDescriptor {
+            provider,
+            source_namespace: namespace,
+            source_kind: "conversation",
+            key: SourceKey::External(conversation_id),
+        })?;
+        Ok(authority.source_is_redacted(&source_id)?)
+    }
+
+    fn require_visible(
+        &self,
+        authority: &StateStore,
+        provider: &str,
+        conversation_id: &str,
+    ) -> Result<()> {
+        if self.capture_redacted(authority, provider, conversation_id)? {
+            return Err(IndexError::Revoked);
+        }
+        Ok(())
+    }
+
     pub fn save(&self, capture: Capture) -> Result<SaveReceipt> {
         self.save_internal(capture, false)
     }
@@ -322,7 +356,18 @@ impl VaultCaptureStore {
         self.save_internal(capture, true)
     }
 
-    fn save_internal(&self, mut capture: Capture, migration: bool) -> Result<SaveReceipt> {
+    fn save_internal(&self, capture: Capture, migration: bool) -> Result<SaveReceipt> {
+        self.save_internal_with_checkpoint(capture, migration, || {})
+    }
+
+    // Test checkpoint is invoked under the exact production privacy fence,
+    // immediately after authority visibility and before ciphertext publication.
+    fn save_internal_with_checkpoint(
+        &self,
+        mut capture: Capture,
+        migration: bool,
+        after_visibility_check: impl FnOnce(),
+    ) -> Result<SaveReceipt> {
         self.gate
             .validate_lease(self.lease)
             .map_err(|_| IndexError::Revoked)?;
@@ -346,8 +391,33 @@ impl VaultCaptureStore {
             )
         );
         let identity = Self::identity(&id, &snapshot_id);
+        // Lock order: privacy exclusive -> nested shared writer leases.
+        // The writer fence alone is SHARED and cannot serialize redaction.
+        // Keep this lock across the visibility check, immutable publication,
+        // and catalog commit; redaction takes the same exclusive privacy lock
+        // BEFORE it opens a writable state connection.
+        let _privacy =
+            VaultWriterFence::privacy(&self.root).map_err(|_| IndexError::InvalidEvidence)?;
+        let authority = self.open_state_store()?;
         let _writer =
             VaultWriterFence::writer(&self.root).map_err(|_| IndexError::InvalidEvidence)?;
+        // New live captures establish canonical owner authority. An explicit
+        // offline migration MUST preserve source-state rows byte-for-byte:
+        // registration during conversion breaks independently verified legacy
+        // SQLite equality. Migrated records can be registered through the
+        // trusted owner-state API before owner-authorized redaction.
+        if !migration {
+            let namespace = crate::namespace_for_provider(&capture.provider)
+                .ok_or(IndexError::InvalidEvidence)?;
+            authority.register_source(&SourceDescriptor {
+                provider: &capture.provider,
+                source_namespace: namespace,
+                source_kind: "conversation",
+                key: SourceKey::External(&capture.conversation_id),
+            })?;
+        }
+        self.require_visible(&authority, &capture.provider, &capture.conversation_id)?;
+        after_visibility_check();
         let mut db = self.connection()?;
         if db
             .query_row(
@@ -509,6 +579,32 @@ impl VaultCaptureStore {
     }
 
     pub fn read(&self, archive_id: &str, revision: Option<&str>) -> Result<Conversation> {
+        self.read_with_checkpoint(archive_id, revision, || {})
+    }
+
+    // Test-only checkpoints use the same production shared disclosure fence.
+    // Unlike the shared writer fence, this conflicts with source redaction's
+    // exclusive privacy transition. The lock is acquired BEFORE opening state.
+    fn read_with_checkpoint(
+        &self,
+        archive_id: &str,
+        revision: Option<&str>,
+        after_visibility_check: impl FnOnce(),
+    ) -> Result<Conversation> {
+        let _privacy = VaultWriterFence::privacy_reader(&self.root)
+            .map_err(|_| IndexError::InvalidEvidence)?;
+        self.read_under_privacy(archive_id, revision, after_visibility_check)
+    }
+
+    // The caller must already hold privacy_reader. Used by export/assets to
+    // avoid a second shared lock after an exclusive writer has queued.
+    fn read_under_privacy(
+        &self,
+        archive_id: &str,
+        revision: Option<&str>,
+        after_visibility_check: impl FnOnce(),
+    ) -> Result<Conversation> {
+        let authority = self.open_state_store()?;
         let _writer =
             VaultWriterFence::writer(&self.root).map_err(|_| IndexError::InvalidEvidence)?;
         let db = self.connection()?;
@@ -542,6 +638,10 @@ impl VaultCaptureStore {
             })
             .optional()?
             .ok_or(IndexError::InvalidEvidence)?;
+        // Direct archive-id + revision fetch cannot bypass logical redaction.
+        // Hold privacy_reader through decrypt, validation and the return handoff.
+        self.require_visible(&authority, &row.2, &row.3)?;
+        after_visibility_check();
         let snapshot_count: i64 = db.query_row(
             "SELECT count(*) FROM vault_captures WHERE archive_id=?1",
             [archive_id],
@@ -652,7 +752,17 @@ impl VaultCaptureStore {
         archive_id: &str,
         revision: Option<&str>,
     ) -> Result<ExportResult> {
-        let conversation = self.read(archive_id, revision)?;
+        let _privacy = VaultWriterFence::privacy_reader(&self.root)
+            .map_err(|_| IndexError::InvalidEvidence)?;
+        let authority = self.open_state_store()?;
+        let conversation = self.read_under_privacy(archive_id, revision, || {})?;
+        let _writer =
+            VaultWriterFence::writer(&self.root).map_err(|_| IndexError::InvalidEvidence)?;
+        self.require_visible(
+            &authority,
+            &conversation.capture.provider,
+            &conversation.capture.conversation_id,
+        )?;
         if conversation.capture.messages.iter().any(|message| {
             message
                 .attachments
@@ -672,6 +782,8 @@ impl VaultCaptureStore {
     }
 
     pub fn asset(&self, archive_id: &str, name: &str) -> Result<AssetResult> {
+        let _privacy = VaultWriterFence::privacy_reader(&self.root)
+            .map_err(|_| IndexError::InvalidEvidence)?;
         self.gate
             .validate_lease(self.lease)
             .map_err(|_| IndexError::Revoked)?;
@@ -688,7 +800,15 @@ impl VaultCaptureStore {
         {
             return Err(IndexError::InvalidEvidence);
         }
-        self.read(archive_id, None)?;
+        let authority = self.open_state_store()?;
+        let conversation = self.read_under_privacy(archive_id, None, || {})?;
+        let _writer =
+            VaultWriterFence::writer(&self.root).map_err(|_| IndexError::InvalidEvidence)?;
+        self.require_visible(
+            &authority,
+            &conversation.capture.provider,
+            &conversation.capture.conversation_id,
+        )?;
         let storage = self.storage()?;
         let inventory = crate::vault_legacy_objects::RawLegacyInventory::read(
             &self.root,
@@ -721,9 +841,12 @@ impl VaultCaptureStore {
     }
 
     fn list_catalog(&self, query: &str, complete: bool) -> Result<Vec<ConversationSummary>> {
+        let _privacy = VaultWriterFence::privacy_reader(&self.root)
+            .map_err(|_| IndexError::InvalidEvidence)?;
         if query.len() > 1024 {
             return Err(IndexError::InvalidQuery);
         }
+        let authority = self.open_state_store()?;
         let _writer =
             VaultWriterFence::writer(&self.root).map_err(|_| IndexError::InvalidEvidence)?;
         let mut db = self.connection()?;
@@ -731,11 +854,19 @@ impl VaultCaptureStore {
         // or updates a conversation between keyset pages.
         let tx = db.transaction()?;
         let result = Self::catalog_rows(&tx, query, complete)?;
+        // Hide even historical catalogue titles and metadata for a redacted
+        // source; the complete reindex inventory drops these derived rows.
+        let mut filtered = Vec::with_capacity(result.len());
+        for summary in result {
+            if !self.capture_redacted(&authority, &summary.provider, &summary.conversation_id)? {
+                filtered.push(summary);
+            }
+        }
         self.gate
             .validate_lease(self.lease)
             .map_err(|_| IndexError::Revoked)?;
         tx.commit()?;
-        Ok(result)
+        Ok(filtered)
     }
 
     fn catalog_rows(
@@ -922,9 +1053,23 @@ impl VaultCaptureStore {
     }
 
     pub fn snapshots(&self, archive_id: &str) -> Result<Vec<SnapshotSummary>> {
+        let _privacy = VaultWriterFence::privacy_reader(&self.root)
+            .map_err(|_| IndexError::InvalidEvidence)?;
+        let authority = self.open_state_store()?;
         let _writer =
             VaultWriterFence::writer(&self.root).map_err(|_| IndexError::InvalidEvidence)?;
         let db = self.connection()?;
+        let identity: Option<(String, String)> = db
+            .query_row(
+                "SELECT provider,conversation_id FROM vault_captures
+             WHERE archive_id=?1 LIMIT 1",
+                [archive_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        if let Some((provider, conversation_id)) = identity {
+            self.require_visible(&authority, &provider, &conversation_id)?;
+        }
         let mut statement = db.prepare(
             "SELECT snapshot_id,captured_at,message_count,completeness
              FROM vault_captures WHERE archive_id=?1 ORDER BY captured_at DESC",
@@ -1054,5 +1199,299 @@ mod vault_catalog_pagination_tests {
         let vault = CryptoVault::restore_with_recovery(&gate, lease, &manifest, &recovery).unwrap();
         assert!(VaultCaptureStore::verify_backup_catalog(&root, &vault, &gate, lease).is_err());
         assert!(!root.join("archive-index.sqlite3").exists());
+    }
+}
+
+#[cfg(test)]
+mod privacy_capture_race_tests {
+    use super::*;
+    use mind_place_security::vault::CryptoVault;
+    use mind_place_state::ClientCapability;
+    use std::{
+        sync::{mpsc, Arc},
+        thread,
+        time::Duration,
+    };
+
+    fn synthetic_capture(title: &str) -> Capture {
+        serde_json::from_value(serde_json::json!({
+            "schema_version": 1,
+            "provider": "chatgpt",
+            "conversation_id": "123e4567-e89b-12d3-a456-426614174099",
+            "source_url": "https://chatgpt.com/c/123e4567-e89b-12d3-a456-426614174099",
+            "title": title,
+            "captured_at": "2026-11-07T10:00:00Z",
+            "capture_method": "manual-dom",
+            "completeness": "partial",
+            "warnings": [],
+            "messages": [{
+                "id": "synthetic-message",
+                "role": "user",
+                "text": "synthetic privacy fence evidence",
+                "format": "plain",
+                "attachments": []
+            }]
+        }))
+        .unwrap()
+    }
+
+    fn fixture() -> (
+        tempfile::TempDir,
+        SecurityGate,
+        UnlockLease,
+        mind_place_security::vault::VaultManifest,
+        mind_place_security::vault::RecoverySecret,
+        Arc<VaultCaptureStore>,
+        String,
+        String,
+    ) {
+        let home = tempfile::tempdir().unwrap();
+        let gate = SecurityGate::open(home.path().join("security.json")).unwrap();
+        gate.initialize(b"synthetic-redaction-race-password")
+            .unwrap();
+        let lease = gate.require_unlocked().unwrap();
+        let (vault, recovery, manifest) = CryptoVault::provision(&gate, lease).unwrap();
+        let root = home.path().join("vault");
+        manifest.persist_new(&root).unwrap();
+        let archive = Arc::new(VaultCaptureStore::open(&root, vault, &gate, lease).unwrap());
+        let state = archive.open_state_store().unwrap();
+        let admin = "a".repeat(64);
+        state
+            .issue_client(
+                "client:v1:owner",
+                "Synthetic owner",
+                &admin,
+                &[ClientCapability::Admin],
+            )
+            .unwrap();
+        let source = state
+            .register_source(&SourceDescriptor {
+                provider: "chatgpt",
+                source_namespace: crate::namespace_for_provider("chatgpt").unwrap(),
+                source_kind: "conversation",
+                key: SourceKey::External("123e4567-e89b-12d3-a456-426614174099"),
+            })
+            .unwrap();
+        (
+            home, gate, lease, manifest, recovery, archive, admin, source,
+        )
+    }
+
+    #[test]
+    fn redaction_waits_for_inflight_archive_disclosure_and_denies_subsequent_reads() {
+        let (_home, _gate, _lease, _manifest, _recovery, archive, admin, source) = fixture();
+        let saved = archive
+            .save(synthetic_capture("sensitive synthetic read"))
+            .unwrap();
+        let (checked_tx, checked_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let reader = Arc::clone(&archive);
+        let snapshot_id = saved.snapshot_id.clone();
+        let id = saved.id.clone();
+        let reading = thread::spawn(move || {
+            reader.read_with_checkpoint(&id, Some(&snapshot_id), || {
+                checked_tx.send(()).unwrap();
+                release_rx.recv_timeout(Duration::from_secs(30)).unwrap();
+            })
+        });
+        checked_rx.recv_timeout(Duration::from_secs(30)).unwrap();
+
+        let state = archive.open_state_store().unwrap();
+        let (attempt_tx, attempt_rx) = mpsc::channel();
+        let (redacted_tx, redacted_rx) = mpsc::channel();
+        let redacting = thread::spawn(move || {
+            attempt_tx.send(()).unwrap();
+            redacted_tx
+                .send(state.redact_source(&admin, &source, "Synthetic in-flight read"))
+                .unwrap();
+        });
+        attempt_rx.recv_timeout(Duration::from_secs(30)).unwrap();
+        assert!(matches!(
+            redacted_rx.recv_timeout(Duration::from_millis(150)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
+        release_tx.send(()).unwrap();
+        let prior = reading.join().unwrap().unwrap();
+        assert_eq!(prior.summary.id, saved.id);
+        redacting.join().unwrap();
+        assert!(redacted_rx
+            .recv_timeout(Duration::from_secs(30))
+            .unwrap()
+            .is_ok());
+
+        // After the exclusive commit returns, every public archive disclosure
+        // path denies the source even when addressed by immutable snapshot ID.
+        assert!(archive.read(&saved.id, Some(&saved.snapshot_id)).is_err());
+        assert!(archive.export_markdown(&saved.id, None).is_err());
+        assert!(archive.snapshots(&saved.id).is_err());
+        assert!(archive.list("").unwrap().is_empty());
+    }
+
+    #[test]
+    fn redaction_waits_for_checked_capture_publication_then_denies_later_writes() {
+        let (_home, _gate, _lease, _manifest, _recovery, archive, admin, source) = fixture();
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (resume_tx, resume_rx) = mpsc::channel();
+        let producer = Arc::clone(&archive);
+        let capturing = thread::spawn(move || {
+            producer.save_internal_with_checkpoint(synthetic_capture("first"), false, || {
+                entered_tx.send(()).unwrap();
+                resume_rx.recv_timeout(Duration::from_secs(30)).unwrap();
+            })
+        });
+        entered_rx.recv_timeout(Duration::from_secs(30)).unwrap();
+
+        let state = archive.open_state_store().unwrap();
+        let (began_tx, began_rx) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel();
+        let redactor = thread::spawn(move || {
+            began_tx.send(()).unwrap();
+            done_tx
+                .send(state.redact_source(&admin, &source, "Synthetic owner redaction"))
+                .unwrap();
+        });
+        began_rx.recv_timeout(Duration::from_secs(30)).unwrap();
+        // The mutation cannot commit while capture is between its visibility
+        // check and immutable publication. The old shared-only fence failed here.
+        assert!(matches!(
+            done_rx.recv_timeout(Duration::from_millis(150)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
+        resume_tx.send(()).unwrap();
+        let saved = capturing.join().unwrap().unwrap();
+        redactor.join().unwrap();
+        assert!(done_rx
+            .recv_timeout(Duration::from_secs(30))
+            .unwrap()
+            .is_ok());
+
+        assert!(archive.read(&saved.id, Some(&saved.snapshot_id)).is_err());
+        assert!(archive.save(synthetic_capture("new revision")).is_err());
+        let state = archive.open_state_store().unwrap();
+        let source_id = state.register_source(&SourceDescriptor {
+            provider: "chatgpt",
+            source_namespace: crate::namespace_for_provider("chatgpt").unwrap(),
+            source_kind: "conversation",
+            key: SourceKey::External("123e4567-e89b-12d3-a456-426614174099"),
+        });
+        assert!(
+            source_id.is_err(),
+            "redacted source cannot re-enter ingestion"
+        );
+    }
+
+    #[test]
+    fn raw_capture_and_consented_generic_import_register_redactable_authority() {
+        let (_home, _gate, _lease, _manifest, _recovery, archive, admin, _) = fixture();
+        let raw_id = "123e4567-e89b-12d3-a456-426614174098";
+        let mut raw = synthetic_capture("unregistered browser source");
+        raw.conversation_id = raw_id.to_owned();
+        raw.source_url = format!("https://chatgpt.com/c/{raw_id}");
+        let saved = archive.save(raw.clone()).unwrap();
+        let state = archive.open_state_store().unwrap();
+        let raw_source = canonical_source_id(&SourceDescriptor {
+            provider: "chatgpt",
+            source_namespace: crate::namespace_for_provider("chatgpt").unwrap(),
+            source_kind: "conversation",
+            key: SourceKey::External(raw_id),
+        })
+        .unwrap();
+        assert!(state.source(&raw_source).unwrap().is_some());
+        state
+            .redact_source(&admin, &raw_source, "Synthetic capture")
+            .unwrap();
+        assert!(archive.read(&saved.id, None).is_err());
+        assert!(archive.save(raw).is_err());
+
+        let generic_key = "f".repeat(64);
+        let mut generic = synthetic_capture("consented generic import");
+        generic.provider = "generic".to_owned();
+        generic.conversation_id = generic_key.clone();
+        generic.source_url = format!("mindplace-import://generic/{generic_key}");
+        generic.capture_method = "generic-import".to_owned();
+        let imported = archive.save_internal(generic.clone(), true).unwrap();
+        let generic_source = canonical_source_id(&SourceDescriptor {
+            provider: "generic",
+            source_namespace: crate::namespace_for_provider("generic").unwrap(),
+            source_kind: "conversation",
+            key: SourceKey::External(&generic_key),
+        })
+        .unwrap();
+        // Owner-consented migration preserves its original state DB exactly.
+        // Register provenance only after the import verification boundary.
+        assert!(state.source(&generic_source).unwrap().is_none());
+        assert_eq!(
+            state
+                .register_source(&SourceDescriptor {
+                    provider: "generic",
+                    source_namespace: crate::namespace_for_provider("generic").unwrap(),
+                    source_kind: "conversation",
+                    key: SourceKey::External(&generic_key),
+                })
+                .unwrap(),
+            generic_source
+        );
+        state
+            .redact_source(&admin, &generic_source, "Synthetic generic import")
+            .unwrap();
+        assert!(archive.read(&imported.id, None).is_err());
+        assert!(archive.save_internal(generic, true).is_err());
+    }
+
+    #[test]
+    fn redacted_source_is_pruned_from_encrypted_fts_sync_and_rebuild() {
+        let (_home, _gate, _lease, _manifest, _recovery, archive, admin, source) = fixture();
+        archive.save(synthetic_capture("fts")).unwrap();
+        let state = archive.open_state_store().unwrap();
+        let index = archive.open_index_store().unwrap();
+        index
+            .sync_vault_with_check(&archive, &state, || Ok(()))
+            .unwrap();
+        assert!(!index.search("privacy", false, 20).unwrap().is_empty());
+
+        state
+            .redact_source(&admin, &source, "Synthetic FTS redaction")
+            .unwrap();
+        index
+            .sync_vault_with_check(&archive, &state, || Ok(()))
+            .unwrap();
+        assert!(index.search("privacy", true, 20).unwrap().is_empty());
+
+        index
+            .rebuild_vault_with_check(&archive, &state, || Ok(()))
+            .unwrap();
+        assert!(index.search("privacy", true, 20).unwrap().is_empty());
+    }
+
+    #[test]
+    fn interrupted_capture_releases_privacy_lock_and_restart_preserves_denial() {
+        let (home, gate, lease, manifest, recovery, archive, admin, source) = fixture();
+        let interrupted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            archive
+                .save_internal_with_checkpoint(synthetic_capture("interrupted"), false, || {
+                    panic!("synthetic interruption before immutable publication")
+                })
+                .unwrap();
+        }));
+        assert!(interrupted.is_err());
+        let authority = archive.open_state_store().unwrap();
+        authority
+            .redact_source(&admin, &source, "After interrupted capture")
+            .unwrap();
+        assert!(archive
+            .save(synthetic_capture("after interruption"))
+            .is_err());
+        drop(archive);
+
+        let vault = CryptoVault::restore_with_recovery(&gate, lease, &manifest, &recovery).unwrap();
+        let reopened =
+            VaultCaptureStore::open(home.path().join("vault"), vault, &gate, lease).unwrap();
+        assert!(reopened
+            .open_state_store()
+            .unwrap()
+            .source_is_redacted(&source)
+            .unwrap());
+        assert!(reopened.save(synthetic_capture("after restart")).is_err());
+        assert!(!home.path().join("vault").join("archive").exists());
     }
 }

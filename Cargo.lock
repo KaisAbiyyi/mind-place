@@ -2087,6 +2087,7 @@ name = "mind-place-state"
 version = "0.2.5"
 dependencies = [
  "fs2",
+ "getrandom 0.4.3",
  "mind-place-security",
  "rusqlite",
  "serde",

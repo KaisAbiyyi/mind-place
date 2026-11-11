@@ -28,6 +28,9 @@ pub(crate) fn namespace_for_provider(provider: &str) -> Option<&'static str> {
         "chatgpt" => Some(NAMESPACE),
         "gemini" => Some("mind-place-gemini-archive-v1"),
         "claude" => Some("mind-place-claude-archive-v1"),
+        // Explicit owner-consented legacy/generic records are a distinct
+        // canonical source, never an unaudited fallback to a named provider.
+        "generic" => Some("mind-place-generic-archive-v1"),
         _ => None,
     }
 }
