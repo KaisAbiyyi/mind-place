@@ -19,16 +19,18 @@ SQLCIPHER_WORKFLOW = ".github/workflows/mp9b-sqlcipher-qualification.yml"
 PRODUCT_WORKFLOW = ".github/workflows/windows-product.yml"
 
 # Explicit candidate policy. The separated Windows Product workflow is used
-# only by PRs 131/132; earlier candidates retain the integrated CI contract.
+# by the reviewed integrated candidates; earlier PRs retain the inline contract.
 CANDIDATE_REQUIREMENTS = {
     ("KaisAbiyyi/mind-place", 127): ("mp9b-vault", True),
     ("KaisAbiyyi/mind-place", 129): ("mp-ci-100k-infrastructure", False),
     ("KaisAbiyyi/mind-place", 131): ("mp-ci-win-policy", False),
     ("KaisAbiyyi/mind-place", 132): ("mp-p0-integration", True),
+    ("KaisAbiyyi/mind-place", 141): ("mp-governance-integrated-workflows", True),
 }
 SEPARATED_PRODUCT_CANDIDATES = {
     ("KaisAbiyyi/mind-place", 131),
     ("KaisAbiyyi/mind-place", 132),
+    ("KaisAbiyyi/mind-place", 141),
 }
 DEFAULT_REQUIREMENT = ("ordinary-non-vault-pr", False)
 

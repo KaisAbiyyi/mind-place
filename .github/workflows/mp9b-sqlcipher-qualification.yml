@@ -47,10 +47,10 @@ jobs:
       CARGO_INCREMENTAL: '0'
       CARGO_BUILD_JOBS: '2'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
-          ref: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.event_name == 'workflow_dispatch' && format('refs/pull/{0}/merge', inputs.pr_number) || github.sha }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/pull/{0}/merge', inputs.pr_number) || github.sha }}
           persist-credentials: false
       - name: Install Rust 1.90
         shell: bash
@@ -79,7 +79,9 @@ jobs:
       CARGO_INCREMENTAL: '0'
       CARGO_BUILD_JOBS: '2'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
       - name: Install Rust 1.90
         shell: bash
         run: |
@@ -129,7 +131,7 @@ jobs:
           cp target/debug/mind-place-capture-host src-tauri/binaries/mind-place-capture-host-x86_64-unknown-linux-gnu
       - name: Setup Node.js for distribution notices
         if: always()
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
         with:
           node-version: 24
           cache: npm

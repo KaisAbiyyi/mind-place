@@ -1,0 +1,718 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mind Place Wireframe</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
+<style>
+/* Layout: slim left rail (logo slot + 7 destinations), top bar = sidebar toggle + breadcrumb + tools, one calm content column, details in a right aside. */
+:root{
+  --bg:#fafafa; --surface:#ffffff; --sunken:#f4f4f5; --line:#e4e4e7; --line-strong:#d4d4d8;
+  --fg:#18181b; --fg-2:#52525b; --fg-3:#8b8b94; --accent:#18181b; --on-accent:#fafafa;
+  --warn-bg:#fef6e7; --warn-fg:#8a5a00; --ok:#1f7a4d; --scrim:rgba(9,9,11,.38);
+  --shadow:0 12px 40px rgba(9,9,11,.14);
+  --font:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  /* type scale */ --t-xs:12px; --t-sm:13px; --t-base:14px; --t-md:16px; --t-lg:20px; --t-xl:28px;
+  /* space scale */ --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px; --s6:32px; --s7:48px;
+  --r:10px; --r-sm:7px; --side-w:232px; --top-h:56px;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#09090b; --surface:#111113; --sunken:#18181b; --line:#27272a; --line-strong:#3f3f46;
+  --fg:#f4f4f5; --fg-2:#a1a1aa; --fg-3:#71717a; --accent:#f4f4f5; --on-accent:#09090b;
+  --warn-bg:#2a2210; --warn-fg:#e8c170; --ok:#5ec796; --scrim:rgba(0,0,0,.6); --shadow:0 12px 40px rgba(0,0,0,.5); color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#09090b; --surface:#111113; --sunken:#18181b; --line:#27272a; --line-strong:#3f3f46;
+  --fg:#f4f4f5; --fg-2:#a1a1aa; --fg-3:#71717a; --accent:#f4f4f5; --on-accent:#09090b;
+  --warn-bg:#2a2210; --warn-fg:#e8c170; --ok:#5ec796; --scrim:rgba(0,0,0,.6); --shadow:0 12px 40px rgba(0,0,0,.5); color-scheme:dark}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:400 var(--t-base)/1.55 var(--font);padding-left:max(0px,env(safe-area-inset-left,0px));padding-right:max(0px,env(safe-area-inset-right,0px))}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+h1,h2,h3,p{margin:0}
+a{color:inherit}
+:focus-visible{outline:2px solid var(--fg);outline-offset:2px}
+svg.i{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.muted{color:var(--fg-2)} .faint{color:var(--fg-3)} .small{font-size:var(--t-sm)} .xs{font-size:var(--t-xs)}
+
+/* shell */
+.app{display:grid;grid-template-columns:var(--side-w) minmax(0,1fr);height:100%;min-height:0}
+.app[data-sidebar="closed"]{grid-template-columns:64px minmax(0,1fr)}
+.side{background:var(--surface);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0;z-index:30}
+.brand{height:var(--top-h);display:flex;align-items:center;gap:var(--s3);padding:0 var(--s4);flex:none}
+.mark{width:32px;height:32px;border-radius:9px;background:var(--accent);color:var(--on-accent);display:grid;place-items:center;font-weight:600;font-size:var(--t-md);flex:none}
+.brandname{font-weight:600;font-size:var(--t-md);letter-spacing:-.01em}
+.nav{display:flex;flex-direction:column;gap:2px;padding:var(--s2) var(--s3);overflow:auto}
+.nav a{display:flex;align-items:center;gap:var(--s3);height:40px;padding:0 var(--s3);border-radius:var(--r-sm);color:var(--fg-2);text-decoration:none;font-weight:500}
+.nav a:hover{background:var(--sunken);color:var(--fg)}
+.nav a[aria-current="page"]{background:var(--sunken);color:var(--fg)}
+.nav .count{margin-left:auto;font-size:var(--t-xs);color:var(--fg-3)}
+.side-foot{margin-top:auto;padding:var(--s4);border-top:1px solid var(--line);display:flex;flex-direction:column;gap:var(--s2)}
+.proto{border:1px dashed var(--line-strong);border-radius:var(--r-sm);padding:var(--s2) var(--s3);font-size:var(--t-xs);color:var(--fg-2);display:flex;align-items:center;justify-content:space-between;gap:var(--s2)}
+.app[data-sidebar="closed"] .brandname,.app[data-sidebar="closed"] .nav .label,.app[data-sidebar="closed"] .nav .count,.app[data-sidebar="closed"] .side-foot{display:none}
+.app[data-sidebar="closed"] .brand{justify-content:center;padding:0}
+.app[data-sidebar="closed"] .nav a{justify-content:center;padding:0}
+.main{display:flex;flex-direction:column;min-width:0;min-height:0}
+.top{height:var(--top-h);flex:none;display:flex;align-items:center;gap:var(--s3);padding:0 var(--s4);border-bottom:1px solid var(--line);background:var(--bg)}
+.crumbs{min-width:0;flex:1}
+.crumbs ol{list-style:none;margin:0;padding:0;display:flex;align-items:center;gap:var(--s1);min-width:0}
+.crumbs li{display:flex;align-items:center;gap:var(--s1);min-width:0;white-space:nowrap}
+.crumbs li:last-child{min-width:0;flex:0 1 auto}
+.crumbs a{color:var(--fg-2);text-decoration:none;padding:2px 6px;border-radius:6px;font-weight:500;overflow:hidden;text-overflow:ellipsis;max-width:22ch;display:block}
+.crumbs a:hover{background:var(--sunken);color:var(--fg)}
+.crumbs li:last-child span.cur{color:var(--fg);font-weight:600;font-size:var(--t-md);letter-spacing:-.01em;padding:2px 6px;overflow:hidden;text-overflow:ellipsis;max-width:34ch;display:block}
+.crumbs .sep{color:var(--fg-3);display:flex}
+.crumbs .sep svg{width:14px;height:14px}
+.view{flex:1;min-height:0;overflow:auto;padding:var(--s6) var(--s5) var(--s7)}
+.wrap{max-width:880px;margin:0 auto;display:flex;flex-direction:column;gap:var(--s6)}
+.wrap.narrow{max-width:720px}
+.pagehead{display:flex;align-items:flex-end;justify-content:space-between;gap:var(--s4);flex-wrap:wrap}
+.pagehead h2{font-size:var(--t-xl);font-weight:600;letter-spacing:-.02em;line-height:1.15}
+.pagehead p{margin-top:var(--s1);color:var(--fg-2);max-width:56ch}
+.actions{display:flex;gap:var(--s2);flex-wrap:wrap}
+
+/* controls */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:var(--s2);height:36px;padding:0 var(--s4);border-radius:var(--r-sm);border:1px solid var(--line-strong);background:var(--surface);font-weight:500;white-space:nowrap}
+.btn:hover{background:var(--sunken)}
+.btn.primary{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+.btn.primary:hover{opacity:.9}
+.btn.ghost{border-color:transparent;background:transparent;color:var(--fg-2)}
+.btn.ghost:hover{background:var(--sunken);color:var(--fg)}
+.btn.icon{width:36px;padding:0}
+.btn.sm{height:30px;padding:0 var(--s3);font-size:var(--t-sm)}
+.btn.wide{width:100%;height:44px}
+.btn[disabled]{opacity:.5;cursor:not-allowed}
+.langbtn{font-weight:600;font-size:var(--t-xs);width:auto;padding:0 var(--s3);gap:var(--s1)}
+.searchbtn{display:flex;align-items:center;gap:var(--s2);height:36px;min-width:min(240px,30vw);padding:0 var(--s3);border:1px solid var(--line);border-radius:var(--r-sm);background:var(--surface);color:var(--fg-3)}
+.searchbtn kbd{margin-left:auto;font:500 var(--t-xs) var(--font);border:1px solid var(--line);border-radius:5px;padding:1px 6px;color:var(--fg-3)}
+.field{display:flex;flex-direction:column;gap:var(--s2)}
+.field label{font-weight:500}
+.field .help{font-size:var(--t-sm);color:var(--fg-2)}
+input[type=text],input[type=search],input[type=password],select{height:40px;width:100%;border:1px solid var(--line-strong);background:var(--surface);border-radius:var(--r-sm);padding:0 var(--s3)}
+input::placeholder{color:var(--fg-3)}
+.seg{display:inline-flex;border:1px solid var(--line-strong);border-radius:var(--r-sm);overflow:hidden;background:var(--surface)}
+.seg button{border:0;background:transparent;height:34px;padding:0 var(--s4);color:var(--fg-2);font-weight:500}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--on-accent)}
+.seg.sm button{height:30px;padding:0 var(--s3);font-size:var(--t-sm)}
+.chips{display:flex;gap:var(--s2);flex-wrap:wrap;align-items:center}
+.chip{height:32px;padding:0 var(--s3);border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--fg-2);font-weight:500}
+.chip[aria-pressed="true"]{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+.tag{display:inline-flex;align-items:center;height:22px;padding:0 var(--s2);border-radius:6px;background:var(--sunken);color:var(--fg-2);font-size:var(--t-xs);font-weight:500;white-space:nowrap}
+.tag.warn{background:var(--warn-bg);color:var(--warn-fg)}
+.tag.ok{color:var(--ok)}
+.switch{position:relative;width:40px;height:24px;border-radius:999px;border:0;background:var(--line-strong);flex:none}
+.switch::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:var(--surface);transition:transform .15s}
+.switch[aria-checked="true"]{background:var(--accent)}
+.switch[aria-checked="true"]::after{transform:translateX(16px);background:var(--on-accent)}
+
+/* surfaces */
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r)}
+.list{display:flex;flex-direction:column}
+.row{display:flex;align-items:center;gap:var(--s4);padding:var(--s4) var(--s5);border-top:1px solid var(--line);min-width:0;text-align:left;width:100%;background:transparent;border-left:0;border-right:0;border-bottom:0;color:inherit}
+.list>.row:first-child,.row.first{border-top:0}
+button.row:hover{background:var(--sunken)}
+.row .grow{flex:1;min-width:0}
+.row .title{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row .meta{color:var(--fg-2);font-size:var(--t-sm);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sectionhead{display:flex;align-items:baseline;justify-content:space-between;gap:var(--s4);margin-bottom:var(--s3)}
+.sectionhead h3{font-size:var(--t-md);font-weight:600}
+.stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--s4)}
+.stat{padding:var(--s5)}
+.stat .n{font-size:var(--t-xl);font-weight:600;letter-spacing:-.02em;line-height:1.1}
+.stat .l{color:var(--fg-2);margin-top:var(--s1)}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:var(--s4)}
+.mcard{text-align:left;padding:var(--s5);display:flex;flex-direction:column;gap:var(--s2);min-height:150px}
+.mcard:hover{background:var(--sunken)}
+.mcard .title{font-weight:600;font-size:var(--t-md)}
+.mcard .meta{color:var(--fg-2);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.mcard .foot{margin-top:auto;color:var(--fg-3);font-size:var(--t-sm)}
+.check{display:flex;align-items:center;gap:var(--s3)}
+.dot{width:20px;height:20px;border-radius:50%;border:1.5px solid var(--line-strong);display:grid;place-items:center;flex:none;background:transparent;padding:0}
+.dot.done{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.dot svg.i{width:12px;height:12px;stroke-width:2.4}
+.banner{display:flex;gap:var(--s3);align-items:center;padding:var(--s3) var(--s4);border-radius:var(--r-sm);background:var(--warn-bg);color:var(--warn-fg);font-size:var(--t-sm)}
+.banner button{margin-left:auto;background:none;border:0;color:inherit;text-decoration:underline;font:inherit;font-size:var(--t-sm)}
+.empty{text-align:center;padding:var(--s7) var(--s5);display:flex;flex-direction:column;align-items:center;gap:var(--s3)}
+.empty h3{font-size:var(--t-lg);font-weight:600}
+.empty p{max-width:46ch;color:var(--fg-2)}
+.empty .ring{width:64px;height:64px;border-radius:50%;border:1.5px dashed var(--line-strong);display:grid;place-items:center;color:var(--fg-3)}
+details.more{border-top:1px solid var(--line)}
+details.more summary{cursor:pointer;list-style:none;padding:var(--s4) var(--s5);display:flex;align-items:center;justify-content:space-between;font-weight:500;color:var(--fg-2)}
+details.more summary::-webkit-details-marker{display:none}
+details.more[open] summary svg{transform:rotate(180deg)}
+details.more .inner{padding:0 var(--s5) var(--s5);display:flex;flex-direction:column;gap:var(--s4)}
+code,.code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:var(--t-sm);background:var(--sunken);border-radius:6px;padding:2px 6px;word-break:break-all}
+.codebox{display:flex;align-items:center;gap:var(--s3);justify-content:space-between;padding:var(--s3) var(--s4);background:var(--sunken);border-radius:var(--r-sm)}
+.picked{display:flex;flex-direction:column;gap:var(--s2)}
+.picked .item{display:flex;align-items:center;gap:var(--s3);padding:var(--s3) var(--s4);background:var(--sunken);border-radius:var(--r-sm);min-width:0}
+.picked .item span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.toast{position:fixed;left:50%;bottom:max(24px,env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--accent);color:var(--on-accent);padding:var(--s3) var(--s5);border-radius:999px;z-index:90;box-shadow:var(--shadow);font-weight:500;display:none;max-width:calc(100% - 32px)}
+.toast.on{display:block}
+
+/* chat reader: simple thread like a chat app */
+.thread{display:flex;flex-direction:column;gap:var(--s5)}
+.msg.user{align-self:flex-end;max-width:78%;background:var(--sunken);padding:var(--s3) var(--s4);border-radius:18px}
+.msg.ai{display:flex;gap:var(--s3);line-height:1.7;font-size:var(--t-md)}
+.msg.ai .av{width:28px;height:28px;border-radius:50%;border:1px solid var(--line-strong);display:grid;place-items:center;font-size:var(--t-xs);font-weight:600;flex:none;margin-top:2px}
+.msg.ai p+p{margin-top:var(--s3)}
+.readerbar{display:flex;align-items:center;gap:var(--s3);flex-wrap:wrap}
+.readerbar h2{font-size:var(--t-lg);font-weight:600;letter-spacing:-.01em;flex:1;min-width:200px}
+.memhead{display:flex;flex-direction:column;gap:var(--s2)}
+.memhead h2{font-size:var(--t-xl);font-weight:600;letter-spacing:-.02em;line-height:1.15}
+.memhead .lead{font-size:var(--t-md);color:var(--fg-2);max-width:60ch}
+.bullets{margin:0;padding-left:var(--s5);display:flex;flex-direction:column;gap:var(--s2)}
+
+/* aside + modal */
+.scrim{position:fixed;inset:0;background:var(--scrim);z-index:50;display:none}
+.scrim.on{display:block}
+.panel{position:fixed;top:0;right:0;bottom:0;width:min(400px,100%);background:var(--surface);border-left:1px solid var(--line);box-shadow:var(--shadow);z-index:60;display:none;flex-direction:column}
+.panel.on{display:flex}
+.panel header{height:var(--top-h);display:flex;align-items:center;justify-content:space-between;padding:0 var(--s4) 0 var(--s5);border-bottom:1px solid var(--line);flex:none}
+.panel header h3{font-size:var(--t-md);font-weight:600}
+.panel .body{padding:var(--s5);overflow:auto;display:flex;flex-direction:column;gap:var(--s5)}
+.group h4{margin:0 0 var(--s2);font-size:var(--t-xs);font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--fg-3)}
+.kv{display:flex;justify-content:space-between;gap:var(--s4);padding:var(--s2) 0;border-top:1px solid var(--line)}
+.group .kv:first-of-type{border-top:0}
+.kv span:first-child{color:var(--fg-2)}
+.modal{position:fixed;left:50%;top:max(6vh,env(safe-area-inset-top,0px));transform:translateX(-50%);width:min(620px,calc(100% - 32px));max-height:88vh;overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);z-index:70;display:none}
+.modal.on{display:block}
+.modal .mh{padding:var(--s5) var(--s5) 0;display:flex;flex-direction:column;gap:var(--s1)}
+.modal .mh h3{font-size:var(--t-lg);font-weight:600}
+.modal .mb{padding:var(--s5);display:flex;flex-direction:column;gap:var(--s4)}
+.modal .mf{padding:0 var(--s5) var(--s5);display:flex;gap:var(--s3);justify-content:flex-end}
+.steps{display:flex;gap:var(--s2);font-size:var(--t-xs);color:var(--fg-3)}
+.steps b{color:var(--fg);font-weight:600}
+.results .row{padding:var(--s3) var(--s4);cursor:default}
+.results .grp{padding:var(--s3) var(--s4) var(--s1);font-size:var(--t-xs);font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--fg-3);border-top:1px solid var(--line)}
+.results .grp.first{border-top:0}
+.results a.grow{text-decoration:none;display:block;min-width:0}
+.results a.grow:hover .title{text-decoration:underline}
+
+/* map */
+.graphcard{position:relative;overflow:hidden}
+svg.graph{display:block;width:100%;height:auto;max-height:62vh}
+.edge{stroke:var(--line-strong);stroke-width:1.2}
+.node circle{fill:var(--fg);stroke:var(--surface);stroke-width:3}
+.node.project circle{fill:var(--surface);stroke:var(--fg);stroke-width:2.5}
+.node text{fill:var(--fg);font:500 12px var(--font);text-anchor:middle}
+.node{cursor:pointer}
+.node:hover circle,.node[aria-pressed="true"] circle{stroke:var(--fg-3);stroke-width:5}
+.legend{position:absolute;left:var(--s4);bottom:var(--s3);display:flex;gap:var(--s4);font-size:var(--t-xs);color:var(--fg-2);flex-wrap:wrap}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--fg);margin-right:6px;vertical-align:-1px}
+.legend i.p{background:var(--surface);border:2px solid var(--fg)}
+
+@media (max-width:860px){
+  .app,.app[data-sidebar="closed"]{grid-template-columns:minmax(0,1fr)}
+  .side{position:fixed;left:0;top:0;bottom:0;width:260px;transform:translateX(-100%);transition:transform .18s;box-shadow:var(--shadow)}
+  .app[data-sidebar="open"] .side{transform:none}
+  .app[data-sidebar="closed"] .brandname,.app[data-sidebar="closed"] .nav .label{display:inline}
+  .view{padding:var(--s5) var(--s4) var(--s7)}
+  .stats{grid-template-columns:1fr}
+  .searchbtn{min-width:0;width:36px;padding:0;justify-content:center}
+  .searchbtn span.t,.searchbtn kbd{display:none}
+  .row{padding:var(--s3) var(--s4)}
+  .tagopt{display:none}
+  .crumbs li:not(:nth-last-child(-n+3)){display:none}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></symbol>
+    <symbol id="i-memory" viewBox="0 0 24 24"><path d="M12 3 3 8l9 5 9-5-9-5z"/><path d="m3 13 9 5 9-5"/></symbol>
+    <symbol id="i-map" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="8" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="m8.3 7 7.4.7M7.2 8.2l3.6 7.6M16.9 10.3l-3.8 5.6"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M7 3h8l4 4v14H7z"/><path d="M14 3v5h5"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
+    <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h8"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M8 11l4 4 4-4M5 20h14"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 13 4 4 10-10"/></symbol>
+    <symbol id="i-chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-right" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="M19 12H5M11 6l-6 6 6 6"/></symbol>
+    <symbol id="i-note" viewBox="0 0 24 24"><path d="M7 3h8l4 4v14H7z"/><path d="M14 3v5h5"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/></symbol>
+  </defs>
+</svg>
+
+<div class="app" id="app" data-sidebar="open">
+  <aside class="side" id="side" aria-label="Main">
+    <div class="brand"><span class="mark" aria-hidden="true">m</span><span class="brandname">Mind Place</span></div>
+    <nav class="nav" id="nav"></nav>
+    <div class="side-foot" id="sideFoot"></div>
+  </aside>
+  <div class="main">
+    <header class="top">
+      <button class="btn ghost icon" id="toggleSide" aria-label="Toggle sidebar"><svg class="i"><use href="#i-panel"/></svg></button>
+      <nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
+      <button class="searchbtn" id="openSearch" aria-label="Search"><svg class="i"><use href="#i-search"/></svg><span class="t" id="searchLbl"></span><kbd>Ctrl K</kbd></button>
+      <button class="btn ghost langbtn" id="langBtn" aria-label="Language"></button>
+      <button class="btn ghost icon" id="openNotes" aria-label="Draft notes" title="Draft notes"><svg class="i"><use href="#i-note"/></svg></button>
+      <button class="btn ghost icon" id="lockBtn" aria-label="Lock" title="Lock"><svg class="i"><use href="#i-lock"/></svg></button>
+    </header>
+    <main class="view" id="view"></main>
+  </div>
+</div>
+
+<div class="scrim" id="scrim"></div>
+<aside class="panel" id="panel" aria-label="Details"><header><h3 id="panelTitle"></h3><button class="btn ghost icon" data-act="closePanel" aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button></header><div class="body" id="panelBody"></div></aside>
+<div class="modal" id="modal" role="dialog" aria-modal="true"></div>
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+(function(){
+"use strict";
+var ICON=function(n){return '<svg class="i"><use href="#i-'+n+'"/></svg>';};
+var $=function(s,r){return (r||document).querySelector(s);};
+var esc=function(s){return String(s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});};
+
+/* ---------- i18n: every visible string goes through t(); add a language = add one column ---------- */
+var D={en:{},id:{}}; var LANGS=[["en","English","EN"],["id","Bahasa Indonesia","ID"]];
+function L(k,en,id){D.en[k]=en;D.id[k]=id;}
+function t(k,v){var s=(D[S.lang]&&D[S.lang][k]);if(s===undefined)s=D.en[k];if(s===undefined)s=k;if(v)for(var x in v)s=s.split("{"+x+"}").join(v[x]);return s;}
+/* navigation + shell */
+L("nav.home","Home","Beranda");L("nav.memory","Memory","Memori");L("nav.chats","Archive","Arsip");L("nav.sources","Sources","Sumber");L("nav.connections","Connections","Koneksi");L("nav.settings","Settings","Pengaturan");
+L("top.search","Search everything","Cari di semua");L("top.lock","Lock","Kunci");
+L("proto.mem","Prototype: memories exist","Prototipe: memori sudah ada");L("foot.local","Stored on this computer.","Disimpan di komputer ini.");
+/* home */
+L("home.sub","Your tidy memories first, with the raw chats behind them.","Memori yang sudah rapi dulu, lengkap dengan chat mentah di baliknya.");
+L("home.stat.mem","Memories","Memori");L("home.stat.chats","Saved chats","Chat tersimpan");L("home.stat.src","Folders and files shared","Folder dan file dibagikan");
+L("home.latestMem","Latest memories","Memori terbaru");L("home.allMem","See all memories","Lihat semua memori");
+L("home.recent","Recently saved chats","Chat yang baru disimpan");L("home.allChats","Open the archive","Buka arsip");
+L("home.setup","Finish setting up","Selesaikan pengaturan");L("home.setupN","{n} of 4 done","{n} dari 4 selesai");L("home.setupBtn","Set up","Atur");
+L("setup.1","Create your unlock secret","Buat kunci pembuka");L("setup.2","Add the browser extension","Pasang extension browser");L("setup.3","Save your first chat","Simpan chat pertamamu");L("setup.4","Let an AI read your memory (optional)","Izinkan AI membaca memorimu (opsional)");
+L("setup.done","Setup is complete. The guide is now hidden.","Pengaturan selesai. Panduan disembunyikan.");
+/* chats */
+L("chats.sub","Everything you saved or imported, exactly as it was. The tidy version lives in Memory.","Semua yang kamu simpan atau impor, apa adanya. Versi rapinya ada di Memori.");
+L("chats.all","All","Semua");L("chats.showing","Showing {n} of 128 · sample data","Menampilkan {n} dari 128 · data contoh");
+L("chats.none","No chats from {p} yet","Belum ada chat dari {p}");L("chats.noneSub","Save a chat with the browser extension and it will show up here.","Simpan chat lewat extension browser dan chatnya akan muncul di sini.");
+L("imp.btn","Import","Impor");L("imp.title","Import conversations","Impor percakapan");L("imp.step3","3 Import","3 Impor");
+L("imp.k.chatgpt","ChatGPT export","Ekspor ChatGPT");L("imp.k.chatgptV","The .zip you download from ChatGPT settings","File .zip yang kamu unduh dari pengaturan ChatGPT");
+L("imp.k.gemini","Gemini (Google Takeout)","Gemini (Google Takeout)");L("imp.k.geminiV","The .zip from Google Takeout with your Gemini activity","File .zip dari Google Takeout yang memuat aktivitas Gemini-mu");
+L("imp.k.text","A transcript file","Satu file transkrip");L("imp.k.textV","One saved conversation as text or Markdown","Satu percakapan tersimpan dalam teks atau Markdown");
+L("imp.choose","Choose file…","Pilih file…");L("imp.help","A system window opens so you can pick the file. The file itself is never changed.","Jendela sistem akan terbuka untuk memilih file. File aslinya tidak pernah diubah.");
+L("imp.reviewT","Review before importing","Tinjau sebelum impor");L("imp.found","{n} conversations found","{n} percakapan ditemukan");
+L("imp.reviewV","Mind Place keeps the original export exactly as it is and adds the conversations to your archive. Nothing is sent anywhere.","Mind Place menyimpan ekspor aslinya apa adanya dan menambahkan percakapannya ke arsipmu. Tidak ada yang dikirim ke mana pun.");
+L("imp.note","Some exports hold only the active branch of a conversation. Anything missing is marked, never invented.","Sebagian ekspor hanya memuat cabang aktif sebuah percakapan. Yang tidak ada ditandai, tidak pernah dikarang.");
+L("imp.go","Import","Impor");L("imp.done","Imported {n} conversations (sample)","{n} percakapan diimpor (contoh)");
+L("set.mapName","Name of the map page","Nama halaman peta");L("set.mapNameV","Pick the name you like. The map shows your memories and how they connect.","Pilih nama yang kamu suka. Peta ini menampilkan memorimu dan hubungannya.");
+L("chat.saved","saved {d}","disimpan {d}");L("chat.partial","Partial","Parsial");L("chat.info","Info","Info");L("chat.copy","Copy","Salin");L("chat.copied","Copied","Tersalin");L("chat.export","Export","Ekspor");L("chat.back","Back","Kembali");
+L("chat.banner","This copy may be missing some messages.","Salinan ini mungkin kehilangan beberapa pesan.");L("chat.why","Why?","Kenapa?");
+L("info.title","About this chat","Tentang chat ini");L("info.source","Source","Sumber");L("info.app","App","Aplikasi");L("info.saved","Saved","Disimpan");L("info.how","How","Cara");L("info.howV","Saved by you, from the browser","Kamu simpan sendiri dari browser");
+L("info.copies","Saved copies","Salinan tersimpan");L("info.latest","Latest copy","Salinan terbaru");L("info.earlier","Earlier copy","Salinan sebelumnya");L("info.msgs","{n} messages","{n} pesan");L("info.msg1","1 message","1 pesan");
+L("info.copiesNote","Each time the chat changes, a new copy is kept. Older copies are never overwritten.","Setiap kali chat berubah, salinan baru disimpan. Salinan lama tidak pernah ditimpa.");
+L("info.complete","Completeness","Kelengkapan");L("info.completeV","This copy may be missing messages. The page did not show the whole chat when it was saved, and Mind Place never scrolls on its own.","Salinan ini mungkin kehilangan pesan. Halaman tidak menampilkan seluruh chat saat disimpan, dan Mind Place tidak pernah scroll sendiri.");
+L("info.tech","Technical details","Detail teknis");L("info.chatId","Chat ID","ID chat");L("info.copyId","Copy ID","ID salinan");
+L("export.title","Export","Ekspor");L("export.note","Choose a format. (Prototype: nothing is downloaded.)","Pilih format. (Prototipe: tidak ada yang diunduh.)");
+/* memory */
+L("mem.sub","What Mind Place has learned from your chats, in plain words. View only for now.","Yang dipelajari Mind Place dari chatmu, dalam bahasa sederhana. Untuk sekarang hanya bisa dilihat.");
+L("mem.topic","Topics","Topik");L("mem.project","Projects","Proyek");L("mem.person","People","Orang");L("mem.list","List","Daftar");L("mem.cards","Cards","Kartu");
+L("mem.chatsN","{n} chats","{n} chat");L("mem.empty","No memories yet","Belum ada memori");
+L("mem.emptySub","Memories are short, checked summaries Mind Place builds from your saved chats. They will appear here once the first ones are created.","Memori adalah ringkasan singkat yang disusun Mind Place dari chat tersimpan. Memori pertama akan muncul di sini setelah dibuat.");
+L("mem.emptyGo","Go to Archive","Buka Arsip");L("mem.noPeople","No people yet","Belum ada orang");L("mem.noPeopleSub","When your chats mention people who matter to your projects, they will show up here.","Kalau chatmu menyebut orang yang penting untuk proyekmu, mereka akan muncul di sini.");
+L("mem.remembers","What Mind Place remembers","Yang diingat Mind Place");L("mem.behind","Chats behind this","Chat di baliknya");L("mem.related","Related","Terkait");
+L("mem.by","Written by","Ditulis oleh");L("mem.byV","Summarised by AI from the chats above. Open a chat to check the original words.","Diringkas AI dari chat di atas. Buka chatnya untuk memeriksa kata aslinya.");
+L("mem.translated","Translated from English","Diterjemahkan dari bahasa Inggris");L("mem.original","Original text (English)","Teks asli (bahasa Inggris)");L("mem.viewOrig","View original","Lihat versi asli");L("mem.viewTrans","View translation","Lihat terjemahan");
+L("mem.suggest","Suggest a correction (coming later)","Usulkan koreksi (segera hadir)");L("mem.open","Open memory","Buka memori");
+/* map */
+L("map.sub","Select a topic to see what Mind Place remembers and which chats it came from.","Pilih topik untuk melihat yang diingat Mind Place dan dari chat mana asalnya.");
+L("map.empty","The {name} appears once you have memories","{name} muncul setelah kamu punya memori");L("map.emptySub","It is drawn from your memories, so there is nothing to show yet. Nothing to set up here.","Peta ini digambar dari memorimu, jadi belum ada yang ditampilkan. Tidak ada yang perlu diatur di sini.");L("map.emptyGo","See Memory","Lihat Memori");
+L("map.lTopic","Topic","Topik");L("map.lProject","Project","Proyek");L("map.lSize","Bigger = more chats","Lebih besar = lebih banyak chat");
+/* sources */
+L("src.sub","Folders and files Mind Place may read. You can remove access any time.","Folder dan file yang boleh dibaca Mind Place. Akses bisa dicabut kapan saja.");
+L("src.addFolder","Add folder","Tambah folder");L("src.addFiles","Add files","Tambah file");L("src.folders","Folders","Folder");L("src.files","Files","File");
+L("src.ready","Ready · {n} files","Siap · {n} file");L("src.indexing","Indexing {n}%","Mengindeks {n}%");L("src.fileReady","Ready","Siap");L("src.remove","Remove access","Cabut akses");L("src.cancel","Cancel","Batal");
+L("src.note","Removing access stops Mind Place from reading it. Your files are never deleted.","Mencabut akses menghentikan Mind Place membacanya. File aslimu tidak pernah dihapus.");
+L("dlg.step1","1 Choose","1 Pilih");L("dlg.step2","2 Review","2 Tinjau");L("dlg.step3","3 Indexing","3 Mengindeks");
+L("dlg.folderT","Add a folder","Tambah folder");L("dlg.filesT","Add files","Tambah file");L("dlg.chooseFolder","Choose folder…","Pilih folder…");L("dlg.chooseFiles","Choose files…","Pilih file…");L("dlg.change","Change","Ganti");
+L("dlg.folderHelp","A system window opens so you can pick the folder. Only this folder is shared.","Jendela sistem akan terbuka untuk memilih folder. Hanya folder ini yang dibagikan.");L("dlg.filesHelp","Pick one or more files. Only these files are shared.","Pilih satu atau lebih file. Hanya file ini yang dibagikan.");
+L("dlg.paste","Paste a path instead","Tempel path saja");L("dlg.pathLabel","Folder path","Path folder");L("dlg.continue","Continue","Lanjut");L("dlg.back","Back","Kembali");L("dlg.reviewT","Review before reading","Tinjau sebelum dibaca");
+L("dlg.reviewV","Mind Place will read the text in these items and make it searchable. Nothing is read until you approve.","Mind Place akan membaca teks di item ini dan membuatnya bisa dicari. Tidak ada yang dibaca sebelum kamu menyetujui.");L("dlg.reviewNote","You can remove access later. Your files are never changed or deleted.","Aksesnya bisa dicabut nanti. File aslimu tidak pernah diubah atau dihapus.");L("dlg.approve","Approve and start","Setujui dan mulai");L("dlg.cancel","Cancel","Batal");
+/* connections */
+L("con.sub","Choose how chats get in, and which AI apps may read your memory.","Pilih cara chat masuk, dan aplikasi AI mana yang boleh membaca memorimu.");
+L("con.saveH","Save chats from your browser","Simpan chat dari browser");L("con.p.chatgpt","Save chats and let ChatGPT read your memory","Simpan chat dan izinkan ChatGPT membaca memorimu");L("con.p.claude","Save chats from Claude","Simpan chat dari Claude");L("con.p.gemini","Save chats from Gemini","Simpan chat dari Gemini");
+L("con.connected","Connected","Terhubung");L("con.needs","Set up","Atur");
+L("con.optH","Saving options","Opsi penyimpanan");L("con.auto","Automatic save","Simpan otomatis");L("con.autoV","Saves chats you have open as they appear. It never scrolls or loads older messages.","Menyimpan chat yang sedang kamu buka saat muncul. Tidak pernah scroll atau memuat pesan lama.");
+L("con.manual","Manual save","Simpan manual");L("con.manualV","Use the toolbar button any time. You can ask it to load older messages first, and stop whenever you like.","Pakai tombol di toolbar kapan saja. Kamu bisa minta memuat pesan lama dulu, dan berhenti kapan saja.");
+L("con.browsers","Browsers","Browser");L("con.registered","Registered","Terdaftar");L("con.register","Register","Daftarkan");
+L("con.aiH","Let an AI app read your memory","Izinkan aplikasi AI membaca memorimu");L("con.shareOn","Sharing is on","Berbagi aktif");L("con.shareV","Apps you allow can search and read. They can never change anything.","Aplikasi yang kamu izinkan bisa mencari dan membaca. Mereka tidak bisa mengubah apa pun.");
+L("con.appName","Name of the app","Nama aplikasi");L("con.create","Create access","Buat akses");L("con.keyT","Copy your key now","Salin kuncimu sekarang");L("con.keyV","It is shown only once.","Hanya ditampilkan sekali.");L("con.copy","Copy","Salin");
+L("con.apps","Apps with access","Aplikasi dengan akses");L("con.noApps","No apps have access.","Belum ada aplikasi dengan akses.");L("con.readOnly","read only","hanya baca");L("con.revoke","Revoke","Cabut");
+L("con.revoked","Revoked apps ({n})","Aplikasi dicabut ({n})");L("con.revokedV","Access for these apps has been turned off.","Akses aplikasi ini sudah dimatikan.");
+L("con.adv","Advanced: connect hosted ChatGPT","Lanjutan: hubungkan ChatGPT versi web");L("con.advV","Lets ChatGPT on the web reach your memory through OpenAI. Parts of your archive will pass through OpenAI when ChatGPT asks for them.","Memungkinkan ChatGPT di web mengakses memorimu lewat OpenAI. Sebagian arsipmu akan melewati OpenAI saat ChatGPT memintanya.");
+L("con.tid","Tunnel ID","ID tunnel");L("con.tkey","OpenAI API key","API key OpenAI");L("con.tkeyH","A runtime key, not an admin key.","Key runtime, bukan key admin.");L("con.consent","I understand ChatGPT may read my archive while this is on.","Saya paham ChatGPT bisa membaca arsipku selama ini aktif.");L("con.start","Start connection","Mulai koneksi");
+/* settings */
+L("set.appearance","Appearance","Tampilan");L("set.appearanceV","Light, dark or follow your computer","Terang, gelap, atau ikut komputer");L("set.light","Light","Terang");L("set.dark","Dark","Gelap");L("set.system","System","Sistem");
+L("set.language","Language","Bahasa");L("set.languageV","Applies to the whole app","Berlaku untuk seluruh aplikasi");
+L("set.compact","Compact layout","Tata letak ringkas");L("set.compactV","Fit more on screen","Muat lebih banyak di layar");L("set.tech","Show technical details","Tampilkan detail teknis");L("set.techV","Adds IDs and file hashes to the Info panels","Menambah ID dan hash file di panel Info");
+L("set.guide","Setup guide","Panduan pengaturan");L("set.guideV","Show the checklist on Home again","Tampilkan lagi daftar periksa di Beranda");L("set.guideBtn","Show guide","Tampilkan");
+L("set.lock","Lock Mind Place now","Kunci Mind Place sekarang");L("set.lockV","You will need your secret to open it again","Kamu butuh kuncimu untuk membukanya lagi");
+L("set.enc","Encryption","Enkripsi");L("set.encV","Your archive is stored on this computer, not yet encrypted","Arsipmu disimpan di komputer ini, belum dienkripsi");L("set.off","Off","Mati");
+L("set.backup","Backup","Cadangan");L("set.backupV","Available after encryption is turned on","Tersedia setelah enkripsi diaktifkan");L("set.backupBtn","Back up","Cadangkan");
+L("set.health","Search is up to date","Pencarian sudah terbaru");L("set.healthV","Last checked a few minutes ago","Dicek beberapa menit lalu");L("set.healthy","Healthy","Sehat");
+L("set.rebuild","Rebuild search","Bangun ulang pencarian");L("set.rebuildV","Use this if results look wrong. Your saved chats are not touched.","Pakai ini kalau hasil pencarian terlihat salah. Chat tersimpanmu tidak disentuh.");L("set.rebuildBtn","Rebuild","Bangun ulang");
+L("set.recovery","Recovery","Pemulihan");L("set.recoveryV","Reset your secret with your offline recovery code","Atur ulang kuncimu dengan kode pemulihan offline");L("set.recoveryBtn","Start recovery","Mulai pemulihan");
+/* search + lock */
+L("q.placeholder","Search memories, chats and files","Cari memori, chat, dan file");L("q.all","Everything","Semua");L("q.mem","Memory","Memori");L("q.chats","Archive","Arsip");L("q.files","Files","File");
+L("q.hint","Select results to share them with an AI","Pilih hasil untuk dibagikan ke AI");L("q.selected","{n} selected","{n} dipilih");L("q.copyAI","Copy for an AI","Salin untuk AI");L("q.none","Nothing found for “{q}”. Try a shorter word.","Tidak ada hasil untuk “{q}”. Coba kata yang lebih pendek.");L("q.open","Open","Buka");
+L("lock.title","Mind Place is locked","Mind Place terkunci");L("lock.sub","Enter your secret to open your archive.","Masukkan kuncimu untuk membuka arsip.");L("lock.field","PIN or password","PIN atau kata sandi");L("lock.unlock","Unlock","Buka kunci");L("lock.recovery","Use recovery code","Pakai kode pemulihan");
+
+/* ---------- sample data (clearly fake). Chat text is the user's own words, so it is not translated. ---------- */
+var CHATS=[
+ {id:1,t:"Mind-place save testing",p:"Claude",d:"2026-10-24",partial:true,m:[["u","this chat is for mind-place save testing"],["a","Got it, this chat is set aside for your mind-place save testing. I don't have any memory of past chats turned on here, so each conversation starts fresh for me, but I'm happy to help with whatever you want to test.","What would you like to try first? For example, you could send me some sample content to save, or tell me what the feature is supposed to do and I'll help you work out test cases."]]},
+ {id:2,t:"Capture host: Rust or Go?",p:"ChatGPT",d:"2026-11-09",m:[["u","Should the capture host stay in Rust? I care most about safety and memory use."],["a","Stay with Rust. The host runs briefly, handles untrusted input from the browser, and must never corrupt the archive. Rust gives you memory safety without a garbage collector, and the code is already there.","Only revisit this if build times or contributor onboarding become the real bottleneck."]]},
+ {id:3,t:"K-Means clustering study notes",p:"ChatGPT",d:"2026-11-02",m:[["u","Explain K-Means in simple words and when it fails."],["a","K-Means groups points around k centers and keeps moving the centers until the groups stop changing.","It struggles when clusters are not round, when sizes differ a lot, or when you pick k badly. Try several k values and compare."]]},
+ {id:4,t:"Palette ideas for the app",p:"Gemini",d:"2026-10-30",partial:true,m:[["u","Give me a calm monochrome palette for a notes app."],["a","Start from a cool grey ramp, keep one near-black for text and buttons, and use a single soft amber only for warnings."]]},
+ {id:5,t:"EEG preprocessing pipeline",p:"ChatGPT",d:"2026-10-26",m:[["u","What order should I filter and re-reference EEG data?"],["a","Common order: remove bad channels, band-pass filter, re-reference, then run artifact removal such as ICA. Keep a log so every step can be repeated."]]},
+ {id:6,t:"Weekly planning",p:"Claude",d:"2026-10-21",m:[["u","Help me plan this week around classes and the app."],["a","Block two focused sessions for the app, keep class prep to evenings, and leave one buffer afternoon for whatever slips."]]}
+];
+/* memory is AI-written, so it carries both languages in the sample */
+var MEM={
+ mp:{k:"project",t:["Mind Place","Mind Place"],s:["A local archive of your AI chats that you can search and share with AI on your terms.","Arsip lokal chat AI-mu yang bisa dicari dan dibagikan ke AI sesuai aturanmu."],pts:[["Security and privacy come first.","Original saved chats are never replaced.","AI summaries are labelled as AI-made."],["Keamanan dan privasi nomor satu.","Chat asli yang tersimpan tidak pernah diganti.","Ringkasan AI diberi label buatan AI."]],chats:[1,2,4],rel:["sec","cap","ui"],w:3},
+ th:{k:"project",t:["Thesis","Skripsi"],s:["Brain-signal classification study, from preprocessing to results.","Studi klasifikasi sinyal otak, dari pra-pemrosesan sampai hasil."],pts:[["Preprocessing order is agreed.","Clustering is used for exploration."],["Urutan pra-pemrosesan sudah disepakati.","Klaster dipakai untuk eksplorasi."]],chats:[3,5],rel:["eeg","km"],w:2},
+ sec:{k:"topic",t:["Security","Keamanan"],s:["Locked by default, nothing is shared until you allow it.","Terkunci secara bawaan, tidak ada yang dibagikan sampai kamu mengizinkan."],pts:[["Starts locked at every launch.","AI access is read-only and can be revoked."],["Selalu mulai terkunci.","Akses AI hanya baca dan bisa dicabut."]],chats:[1,2],rel:["mp","cap"],w:2},
+ cap:{k:"topic",t:["Saving chats","Menyimpan chat"],s:["How chats get from the browser into the archive.","Cara chat masuk dari browser ke arsip."],pts:[["Manual save and optional automatic save.","Partial copies are marked, never hidden."],["Simpan manual dan simpan otomatis opsional.","Salinan parsial ditandai, tidak disembunyikan."]],chats:[1,2],rel:["mp","sec"],w:2},
+ ui:{k:"topic",t:["App design","Desain aplikasi"],s:["Calm, simple, made for people before machines.","Tenang, sederhana, dibuat untuk manusia dulu sebelum mesin."],pts:[["Monochrome look.","Details stay one click away."],["Tampilan monokrom.","Detail cukup satu klik."]],chats:[4],rel:["mp"],w:1},
+ eeg:{k:"topic",t:["EEG pipeline","Alur EEG"],s:["Order of cleaning steps for brain-signal data.","Urutan langkah membersihkan data sinyal otak."],pts:[["Bad channels, filter, re-reference, ICA.","Kanal buruk, filter, re-referensi, ICA."],["Kanal buruk, filter, re-referensi, ICA."]],chats:[5],rel:["th"],w:1},
+ km:{k:"topic",t:["Clustering","Klaster"],s:["Grouping data without labels.","Mengelompokkan data tanpa label."],pts:[["Pick k by comparing several values."],["Pilih k dengan membandingkan beberapa nilai."]],chats:[3],rel:["th"],w:1},
+ pl:{k:"topic",t:["Planning","Perencanaan"],s:["Weekly rhythm between classes and the app.","Ritme mingguan antara kuliah dan aplikasi."],pts:[["Two focus blocks, one buffer."],["Dua blok fokus, satu cadangan."]],chats:[6],rel:[],w:1}
+};
+MEM.eeg.pts=[["Bad channels, filter, re-reference, ICA."],["Kanal buruk, filter, re-referensi, ICA."]];
+var POS={mp:[360,200],th:[560,320],sec:[200,110],cap:[200,300],ui:[430,70],eeg:[680,250],km:[640,410],pl:[90,215]};
+var EDGES=[["mp","sec"],["mp","cap"],["mp","ui"],["sec","cap"],["th","eeg"],["th","km"],["mp","th"]];
+var FOLDERS=[{n:"Lecture notes",path:"C:\\Users\\you\\Documents\\Kuliah",files:412,st:"ready"},{n:"Project docs",path:"D:\\projects\\notes",files:96,st:"index",pct:62}];
+var FILES=[{n:"thesis-outline.docx",path:"C:\\Users\\you\\Desktop"},{n:"reading-list.pdf",path:"C:\\Users\\you\\Downloads"}];
+var APPS_ACTIVE=[{n:"Local AI client",when:"2026-11-08"},{n:"Codex Lock test",when:"2026-10-29"}];
+var REVOKED=11;
+var MAPNAMES=["Constellation","Atlas","Mindscape","Synapse","Hive"];
+var PICK_FOLDER="C:\\Users\\you\\Documents\\Papers", PICK_FILES=["paper-1.pdf","paper-2.pdf","notes.md"];
+
+var S={memOrig:false,imp:{kind:"chatgpt",file:null},lang:"en",page:"home",chat:null,from:null,memKey:null,mem:true,tab:"topic",view:"list",prov:"All",apps:APPS_ACTIVE.slice(),selected:{},scope:"all",mapName:"Constellation",setup:[1,1,1,0],pick:null,auto:false};
+var tr=function(m,f,lg){var i=((lg||S.lang)==="id")?1:0;var v=m[f];return Array.isArray(v)?v[i]:v;};
+var fmtDate=function(d){return new Date(d+"T12:00:00").toLocaleDateString(S.lang==="id"?"id-ID":"en-US",{month:"short",day:"numeric"});};
+var chatById=function(id){return CHATS.filter(function(x){return x.id===id;})[0];};
+var kindLabel=function(k){return t("mem."+k);};
+
+/* ---------- navigation ---------- */
+function navItems(){return [["home",t("nav.home"),"home"],["memory",t("nav.memory"),"memory"],["archive",t("nav.chats"),"chat"],["map",S.mapName,"map"],["sources",t("nav.sources"),"folder"],["connections",t("nav.connections"),"link"],["preferences",t("nav.settings"),"sliders"]];}
+function renderNav(){
+  var sec=(S.page==="memitem")?"memory":(S.page==="chat"&&S.from?"memory":(S.page==="chat"?"archive":S.page));
+  $("#nav").innerHTML=navItems().map(function(n){
+    var cur=sec===n[0]?' aria-current="page"':'';
+    var count=n[0]==="archive"?'<span class="count">128</span>':(n[0]==="memory"&&S.mem?'<span class="count">8</span>':'');
+    return '<a href="#'+n[0]+'"'+cur+' title="'+esc(n[1])+'">'+ICON(n[2])+'<span class="label">'+esc(n[1])+'</span>'+count+'</a>';
+  }).join("");
+  $("#sideFoot").innerHTML='<div class="proto"><span>'+t("proto.mem")+'</span><button class="switch" id="memSwitch" role="switch" aria-checked="'+S.mem+'" aria-label="'+esc(t("proto.mem"))+'"></button></div><p class="xs faint">'+t("foot.local")+'</p>';
+}
+function crumbsCore(){
+  var home={l:t("nav.home"),h:"home"};
+  if(S.page==="home") return [{l:t("nav.home")}];
+  if(S.page==="memory") return [{l:t("nav.memory")}];
+  if(S.page==="memitem"){ var m=MEM[S.memKey]; return [{l:t("nav.memory"),h:"memory"},{l:kindLabel(m.k),h:"memory",tab:m.k},{l:tr(m,"t")}]; }
+  if(S.page==="archive") return [{l:t("nav.chats")}];
+  if(S.page==="chat"){ var c=chatById(S.chat); if(S.from&&MEM[S.from]){var m2=MEM[S.from]; return [{l:t("nav.memory"),h:"memory"},{l:kindLabel(m2.k),h:"memory",tab:m2.k},{l:tr(m2,"t"),h:"memory-"+S.from},{l:c.t}];} return [{l:t("nav.chats"),h:"archive"},{l:c.t}]; }
+  if(S.page==="map") return [{l:S.mapName}];
+  if(S.page==="sources") return [{l:t("nav.sources")}];
+  if(S.page==="connections") return [{l:t("nav.connections")}];
+  return [{l:t("nav.settings")}];
+}
+function crumbs(){var c=crumbsCore();if(S.page!=="home")c.unshift({l:t("nav.home"),h:"home"});return c;}
+function renderCrumbs(){
+  var c=crumbs();
+  $("#crumbs").innerHTML='<ol>'+c.map(function(x,i){
+    var last=i===c.length-1;
+    var item=last?'<span class="cur" aria-current="page">'+esc(x.l)+'</span>':'<a href="#'+x.h+'"'+(x.tab?' data-tab="'+x.tab+'"':'')+'>'+esc(x.l)+'</a>';
+    return '<li>'+item+(last?'':'<span class="sep" aria-hidden="true">'+ICON("right")+'</span>')+'</li>';
+  }).join("")+'</ol>';
+}
+function go(h){ if(location.hash!=="#"+h){location.hash=h;} else {route();} }
+function route(){
+  var h=(location.hash||"#home").slice(1), m;
+  S.from=null;
+  if((m=/^chat-(\d+)(?:-from-([a-z]+))?$/.exec(h))){S.page="chat";S.chat=+m[1];S.from=m[2]||null;}
+  else if((m=/^memory-([a-z]+)$/.exec(h))&&MEM[m[1]]){S.page="memitem";S.memKey=m[1];S.memOrig=false;}
+  else if(["home","memory","archive","map","sources","connections","preferences"].indexOf(h)>-1){S.page=h;}
+  else {S.page="home";}
+  closePanel(); render();
+  if(innerWidth<=860){$("#app").dataset.sidebar="closed";}
+}
+function render(){
+  document.documentElement.lang=S.lang;
+  renderNav(); renderCrumbs();
+  $("#searchLbl").textContent=t("top.search"); $("#langBtn").textContent=S.lang.toUpperCase(); $("#langBtn").title=t("set.language");
+  $("#lockBtn").title=t("top.lock"); $("#lockBtn").setAttribute("aria-label",t("top.lock"));
+  var v=$("#view");
+  v.innerHTML=({home:vHome,memory:vMemory,memitem:vMemItem,archive:vChats,chat:vChat,map:vMap,sources:vSources,connections:vConnections,preferences:vSettings})[S.page]();
+  v.scrollTop=0;
+  if(S.page==="map") bindMap();
+}
+function toast(msg){var e=$("#toast");e.textContent=msg;e.classList.add("on");clearTimeout(toast._t);toast._t=setTimeout(function(){e.classList.remove("on");},2600);}
+
+/* ---------- views ---------- */
+function chatRow(c,from){
+  return '<button class="row" data-act="nav" data-h="chat-'+c.id+(from?'-from-'+from:'')+'"><div class="grow"><div class="title">'+esc(c.t)+'</div><div class="meta">'+c.p+' &middot; '+t("chat.saved",{d:fmtDate(c.d)})+'</div></div>'+(c.partial?'<span class="tag warn tagopt">'+t("chat.partial")+'</span>':'')+'</button>';
+}
+function memRow(k){var m=MEM[k];return '<button class="row" data-act="nav" data-h="memory-'+k+'"><div class="grow"><div class="title">'+esc(tr(m,"t"))+'</div><div class="meta">'+esc(tr(m,"s"))+'</div></div><span class="small muted tagopt">'+t("mem.chatsN",{n:m.chats.length})+'</span></button>';}
+function vHome(){
+  var done=S.setup.reduce(function(a,b){return a+b;},0);
+  var setup=done<4?'<section><div class="sectionhead"><h3>'+t("home.setup")+'</h3><span class="small muted">'+t("home.setupN",{n:done})+'</span></div><div class="card list">'+
+    [1,2,3,4].map(function(n,i){var d=S.setup[i];return '<div class="row"><div class="check"><span class="dot '+(d?'done':'')+'">'+(d?ICON("check"):'')+'</span></div><div class="grow">'+t("setup."+n)+'</div>'+(d?'':'<button class="btn sm" data-act="finishSetup" data-i="'+i+'">'+t("home.setupBtn")+'</button>')+'</div>';}).join("")+'</div></section>':'';
+  var memBlock=S.mem?'<section><div class="sectionhead"><h3>'+t("home.latestMem")+'</h3><a class="small muted" href="#memory">'+t("home.allMem")+'</a></div><div class="card list">'+["mp","sec","th","cap"].map(memRow).join("")+'</div></section>':
+    '<section><div class="sectionhead"><h3>'+t("home.latestMem")+'</h3></div><div class="card empty"><h3>'+t("mem.empty")+'</h3><p>'+t("mem.emptySub")+'</p></div></section>';
+  return '<div class="wrap"><div class="pagehead"><div><h2>'+t("nav.home")+'</h2><p>'+t("home.sub")+'</p></div></div>'+
+   '<div class="stats"><div class="card stat"><div class="n">'+(S.mem?8:0)+'</div><div class="l">'+t("home.stat.mem")+'</div></div><div class="card stat"><div class="n">128</div><div class="l">'+t("home.stat.chats")+'</div></div><div class="card stat"><div class="n">'+(FOLDERS.length+FILES.length)+'</div><div class="l">'+t("home.stat.src")+'</div></div></div>'+
+   memBlock+
+   '<section><div class="sectionhead"><h3>'+t("home.recent")+'</h3><a class="small muted" href="#archive">'+t("home.allChats")+'</a></div><div class="card list">'+CHATS.slice(0,3).map(function(c){return chatRow(c);}).join("")+'</div></section>'+setup+'</div>';
+}
+function vMemory(){
+  var tabs=["topic","project","person"];
+  var items=Object.keys(MEM).filter(function(k){return MEM[k].k===S.tab;});
+  var body;
+  if(!S.mem){ body='<div class="card empty"><span class="ring">'+ICON("memory")+'</span><h3>'+t("mem.empty")+'</h3><p>'+t("mem.emptySub")+'</p><a class="btn" href="#archive">'+t("mem.emptyGo")+'</a></div>'; }
+  else if(!items.length){ body='<div class="card empty"><span class="ring">'+ICON("memory")+'</span><h3>'+t("mem.noPeople")+'</h3><p>'+t("mem.noPeopleSub")+'</p></div>'; }
+  else if(S.view==="cards"){ body='<div class="cards">'+items.map(function(k){var m=MEM[k];return '<button class="card mcard" data-act="nav" data-h="memory-'+k+'"><div class="title">'+esc(tr(m,"t"))+'</div><div class="meta">'+esc(tr(m,"s"))+'</div><div class="foot">'+t("mem.chatsN",{n:m.chats.length})+'</div></button>';}).join("")+'</div>'; }
+  else { body='<div class="card list">'+items.map(memRow).join("")+'</div>'; }
+  return '<div class="wrap"><div class="pagehead"><div><h2>'+t("nav.memory")+'</h2><p>'+t("mem.sub")+'</p></div></div>'+
+   '<div class="chips" style="justify-content:space-between"><div class="chips" role="tablist">'+tabs.map(function(x){return '<button class="chip" role="tab" data-act="memTab" data-v="'+x+'" aria-pressed="'+(S.tab===x)+'">'+kindLabel(x)+'</button>';}).join("")+'</div>'+
+   '<div class="seg sm" role="group" aria-label="View"><button data-act="memView" data-v="list" aria-pressed="'+(S.view==="list")+'" title="'+t("mem.list")+'">'+ICON("list")+'</button><button data-act="memView" data-v="cards" aria-pressed="'+(S.view==="cards")+'" title="'+t("mem.cards")+'">'+ICON("grid")+'</button></div></div>'+body+'</div>';
+}
+function vMemItem(){
+  var k=S.memKey,m=MEM[k],lg=S.memOrig?"en":S.lang;
+  return '<div class="wrap narrow"><div class="memhead"><span class="tag" style="align-self:flex-start">'+kindLabel(m.k)+'</span><h2>'+esc(tr(m,"t",lg))+'</h2><p class="lead">'+esc(tr(m,"s",lg))+'</p>'+(S.lang!=="en"?'<p class="small muted">'+(S.memOrig?t("mem.original"):t("mem.translated"))+' &middot; <button class="btn ghost sm" data-act="memOrig">'+(S.memOrig?t("mem.viewTrans"):t("mem.viewOrig"))+'</button></p>':'')+'</div>'+
+   '<section><div class="sectionhead"><h3>'+t("mem.remembers")+'</h3></div><div class="card" style="padding:var(--s5)"><ul class="bullets">'+tr(m,"pts",lg).map(function(p){return '<li>'+esc(p)+'</li>';}).join("")+'</ul></div></section>'+
+   '<section><div class="sectionhead"><h3>'+t("mem.behind")+'</h3><span class="small muted">'+t("mem.chatsN",{n:m.chats.length})+'</span></div><div class="card list">'+m.chats.map(function(id){return chatRow(chatById(id),k);}).join("")+'</div></section>'+
+   (m.rel.length?'<section><div class="sectionhead"><h3>'+t("mem.related")+'</h3></div><div class="chips">'+m.rel.map(function(r){return '<button class="chip" data-act="nav" data-h="memory-'+r+'">'+esc(tr(MEM[r],"t"))+'</button>';}).join("")+'</div></section>':'')+
+   '<section><div class="sectionhead"><h3>'+t("mem.by")+'</h3></div><p class="small muted">'+t("mem.byV")+'</p></section><div><button class="btn" disabled>'+t("mem.suggest")+'</button></div></div>';
+}
+function vChats(){
+  var provs=["All","ChatGPT","Claude","Gemini"];
+  var list=CHATS.filter(function(c){return S.prov==="All"||c.p===S.prov;});
+  return '<div class="wrap"><div class="pagehead"><div><h2>'+t("nav.chats")+'</h2><p>'+t("chats.sub")+'</p></div><div class="actions"><button class="btn primary" data-act="importOpen">'+ICON("plus")+t("imp.btn")+'</button></div></div>'+
+   '<div class="chips" role="group">'+provs.map(function(p){return '<button class="chip" data-act="prov" data-v="'+p+'" aria-pressed="'+(S.prov===p)+'">'+(p==="All"?t("chats.all"):p)+'</button>';}).join("")+'</div>'+
+   (list.length?'<div class="card list">'+list.map(function(c){return chatRow(c);}).join("")+'</div>':'<div class="card empty"><h3>'+t("chats.none",{p:S.prov})+'</h3><p>'+t("chats.noneSub")+'</p></div>')+
+   '<p class="small faint" style="text-align:center">'+t("chats.showing",{n:list.length})+'</p></div>';
+}
+function vChat(){
+  var c=chatById(S.chat)||CHATS[0];
+  var th=c.m.map(function(m){
+    if(m[0]==="u") return '<div class="msg user">'+esc(m[1])+'</div>';
+    return '<div class="msg ai"><span class="av" aria-hidden="true">'+c.p[0]+'</span><div>'+m.slice(1).map(function(p){return '<p>'+esc(p)+'</p>';}).join("")+'</div></div>';
+  }).join("");
+  return '<div class="wrap narrow"><div class="readerbar"><button class="btn ghost icon" data-act="up" aria-label="'+t("chat.back")+'">'+ICON("back")+'</button><h2>'+esc(c.t)+'</h2>'+
+   '<button class="btn sm" data-act="chatInfo">'+ICON("info")+t("chat.info")+'</button><button class="btn sm" data-act="copyChat">'+ICON("copy")+'<span id="copyLbl">'+t("chat.copy")+'</span></button><button class="btn sm" data-act="exportChat">'+ICON("download")+t("chat.export")+'</button></div>'+
+   (c.partial?'<div class="banner"><span>'+t("chat.banner")+'</span><button data-act="chatInfo">'+t("chat.why")+'</button></div>':'')+'<div class="thread">'+th+'</div></div>';
+}
+function vMap(){
+  if(!S.mem){
+    return '<div class="wrap"><div class="pagehead"><div><h2>'+esc(S.mapName)+'</h2><p>'+t("map.sub")+'</p></div></div><div class="card empty"><span class="ring">'+ICON("map")+'</span><h3>'+t("map.empty",{name:esc(S.mapName)})+'</h3><p>'+t("map.emptySub")+'</p><a class="btn" href="#memory">'+t("map.emptyGo")+'</a></div></div>';
+  }
+  var edges=EDGES.map(function(e){var a=POS[e[0]],b=POS[e[1]];return '<line class="edge" x1="'+a[0]+'" y1="'+a[1]+'" x2="'+b[0]+'" y2="'+b[1]+'"/>';}).join("");
+  var nodes=Object.keys(MEM).map(function(k){var m=MEM[k],p=POS[k],r=12+m.w*5,n=tr(m,"t");
+    return '<g class="node '+m.k+'" data-k="'+k+'" tabindex="0" role="button" aria-label="'+esc(n)+'" aria-pressed="false"><circle cx="'+p[0]+'" cy="'+p[1]+'" r="'+r+'"/><text x="'+p[0]+'" y="'+(p[1]+r+18)+'">'+esc(n)+'</text></g>';}).join("");
+  return '<div class="wrap"><div class="pagehead"><div><h2>'+esc(S.mapName)+'</h2><p>'+t("map.sub")+'</p></div></div><div class="card graphcard"><svg class="graph" viewBox="0 0 760 470" role="group" aria-label="'+esc(S.mapName)+'">'+edges+nodes+'</svg><div class="legend"><span><i></i>'+t("map.lTopic")+'</span><span><i class="p"></i>'+t("map.lProject")+'</span><span>'+t("map.lSize")+'</span></div></div></div>';
+}
+function bindMap(){
+  document.querySelectorAll(".node").forEach(function(n){
+    var open=function(){document.querySelectorAll(".node").forEach(function(x){x.setAttribute("aria-pressed","false");});n.setAttribute("aria-pressed","true");openNode(n.dataset.k);};
+    n.addEventListener("click",open);
+    n.addEventListener("keydown",function(e){if(e.key==="Enter"||e.key===" "){e.preventDefault();open();}});
+  });
+}
+function vSources(){
+  var fl=FOLDERS.map(function(f,i){return '<div class="row"><span class="faint">'+ICON("folder")+'</span><div class="grow"><div class="title">'+esc(f.n)+'</div><div class="meta">'+esc(f.path)+'</div></div>'+(f.st==="ready"?'<span class="tag ok">'+t("src.ready",{n:f.files})+'</span>':'<span class="tag">'+t("src.indexing",{n:f.pct})+'</span>')+'<button class="btn sm ghost" data-act="askRemove" data-kind="folder" data-i="'+i+'">'+t("src.remove")+'</button></div>';}).join("");
+  var fi=FILES.map(function(f,i){return '<div class="row"><span class="faint">'+ICON("file")+'</span><div class="grow"><div class="title">'+esc(f.n)+'</div><div class="meta">'+esc(f.path)+'</div></div><span class="tag ok">'+t("src.fileReady")+'</span><button class="btn sm ghost" data-act="askRemove" data-kind="file" data-i="'+i+'">'+t("src.remove")+'</button></div>';}).join("");
+  return '<div class="wrap"><div class="pagehead"><div><h2>'+t("nav.sources")+'</h2><p>'+t("src.sub")+'</p></div><div class="actions"><button class="btn" data-act="addFiles">'+ICON("file")+t("src.addFiles")+'</button><button class="btn primary" data-act="addFolder">'+ICON("plus")+t("src.addFolder")+'</button></div></div>'+
+   '<section><div class="sectionhead"><h3>'+t("src.folders")+'</h3></div><div class="card list">'+fl+'</div></section>'+
+   '<section><div class="sectionhead"><h3>'+t("src.files")+'</h3></div><div class="card list">'+fi+'</div></section><p class="small muted">'+t("src.note")+'</p></div>';
+}
+function vConnections(){
+  var provs=[["ChatGPT","con.p.chatgpt",1],["Claude","con.p.claude",1],["Gemini","con.p.gemini",0]];
+  return '<div class="wrap"><div class="pagehead"><div><h2>'+t("nav.connections")+'</h2><p>'+t("con.sub")+'</p></div></div>'+
+   '<section><div class="sectionhead"><h3>'+t("con.saveH")+'</h3></div><div class="card list">'+provs.map(function(p){return '<div class="row"><span class="mark" style="width:32px;height:32px;font-size:var(--t-base)">'+p[0][0]+'</span><div class="grow"><div class="title">'+p[0]+'</div><div class="meta">'+t(p[1])+'</div></div>'+(p[2]?'<span class="tag ok">'+t("con.connected")+'</span>':'<button class="btn sm">'+t("con.needs")+'</button>')+'</div>';}).join("")+'</div></section>'+
+   '<section><div class="sectionhead"><h3>'+t("con.optH")+'</h3></div><div class="card"><div class="row first"><div class="grow"><div class="title">'+t("con.auto")+'</div><div class="meta" style="white-space:normal">'+t("con.autoV")+'</div></div><button class="switch" data-act="autoSave" role="switch" aria-checked="'+S.auto+'" aria-label="'+t("con.auto")+'"></button></div>'+
+   '<div class="row"><div class="grow"><div class="title">'+t("con.manual")+'</div><div class="meta" style="white-space:normal">'+t("con.manualV")+'</div></div></div>'+
+   '<div class="row" style="display:block"><div class="small muted" style="margin-bottom:var(--s2)">'+t("con.browsers")+'</div>'+[["Chrome",1],["Edge",1],["Brave",0]].map(function(b,i){return '<div class="row" style="padding:var(--s3) 0;border-top:'+(i?'1px solid var(--line)':'0')+'"><div class="grow title">'+b[0]+'</div>'+(b[1]?'<span class="tag ok">'+t("con.registered")+'</span>':'<button class="btn sm">'+t("con.register")+'</button>')+'</div>';}).join("")+'</div></div></section>'+
+   '<section><div class="sectionhead"><h3>'+t("con.aiH")+'</h3></div><div class="card"><div class="row first"><div class="grow"><div class="title">'+t("con.shareOn")+'</div><div class="meta" style="white-space:normal">'+t("con.shareV")+'</div></div><button class="switch" data-act="flip" role="switch" aria-checked="true" aria-label="'+t("con.shareOn")+'"></button></div>'+
+   '<div class="row" style="align-items:flex-end"><div class="field grow"><label for="appName">'+t("con.appName")+'</label><input type="text" id="appName" value="My AI app"></div><button class="btn primary" data-act="createKey">'+t("con.create")+'</button></div><div id="keyOut"></div>'+
+   '<div class="row" style="display:block"><div class="small muted" style="margin-bottom:var(--s2)">'+t("con.apps")+'</div><div id="appList">'+appList()+'</div></div>'+
+   '<details class="more"><summary>'+t("con.revoked",{n:REVOKED})+ICON("chev")+'</summary><div class="inner small muted">'+t("con.revokedV")+'</div></details>'+
+   '<details class="more"><summary>'+t("con.adv")+ICON("chev")+'</summary><div class="inner"><p class="small muted">'+t("con.advV")+'</p><div class="field"><label for="tid">'+t("con.tid")+'</label><input type="text" id="tid" placeholder="tunnel_..."></div><div class="field"><label for="tkey">'+t("con.tkey")+'</label><input type="password" id="tkey"><span class="help">'+t("con.tkeyH")+'</span></div><label class="check small"><input type="checkbox"> '+t("con.consent")+'</label><div><button class="btn" disabled>'+t("con.start")+'</button></div></div></details></div></section></div>';
+}
+function appList(){
+  if(!S.apps.length) return '<div class="small faint">'+t("con.noApps")+'</div>';
+  return S.apps.map(function(a,i){return '<div class="row" style="padding:var(--s3) 0;border-top:'+(i?'1px solid var(--line)':'0')+'"><div class="grow"><div class="title">'+esc(a.n)+'</div><div class="meta">'+(a.when==="now"?"–":fmtDate(a.when))+' &middot; '+t("con.readOnly")+'</div></div><button class="btn sm ghost" data-act="askRevoke" data-i="'+i+'">'+t("con.revoke")+'</button></div>';}).join("");
+}
+function vSettings(){
+  var th=document.documentElement.dataset.theme||"system";
+  return '<div class="wrap narrow"><div class="pagehead"><div><h2>'+t("nav.settings")+'</h2></div></div>'+
+   '<div class="card"><div class="row first"><div class="grow"><div class="title">'+t("set.appearance")+'</div><div class="meta">'+t("set.appearanceV")+'</div></div><div class="seg" role="group">'+["light","dark","system"].map(function(x){return '<button data-act="theme" data-v="'+x+'" aria-pressed="'+(th===x)+'">'+t("set."+x)+'</button>';}).join("")+'</div></div>'+
+   '<div class="row"><div class="grow"><div class="title">'+t("set.language")+'</div><div class="meta">'+t("set.languageV")+'</div></div><div class="seg" role="group">'+LANGS.map(function(l){return '<button data-act="lang" data-v="'+l[0]+'" aria-pressed="'+(S.lang===l[0])+'">'+l[1]+'</button>';}).join("")+'</div></div>'+
+   '<div class="row"><div class="grow"><div class="title">'+t("set.mapName")+'</div><div class="meta">'+t("set.mapNameV")+'</div></div><select data-act="mapNameSel" aria-label="'+t("set.mapName")+'" style="width:auto;min-width:170px">'+MAPNAMES.map(function(n){return '<option'+(S.mapName===n?' selected':'')+'>'+n+'</option>';}).join("")+'</select></div>'+
+   '<div class="row"><div class="grow"><div class="title">'+t("set.compact")+'</div><div class="meta">'+t("set.compactV")+'</div></div><button class="switch" role="switch" aria-checked="false" aria-label="'+t("set.compact")+'" data-act="flip"></button></div>'+
+   '<div class="row"><div class="grow"><div class="title">'+t("set.tech")+'</div><div class="meta">'+t("set.techV")+'</div></div><button class="switch" role="switch" aria-checked="false" aria-label="'+t("set.tech")+'" data-act="flip"></button></div>'+
+   '<div class="row"><div class="grow"><div class="title">'+t("set.guide")+'</div><div class="meta">'+t("set.guideV")+'</div></div><button class="btn" data-act="showGuide">'+t("set.guideBtn")+'</button></div></div>'+
+   '<div class="card"><div class="row first"><div class="grow"><div class="title">'+t("set.lock")+'</div><div class="meta">'+t("set.lockV")+'</div></div><button class="btn" data-act="lock">'+ICON("lock")+t("top.lock")+'</button></div>'+
+   '<div class="row"><div class="grow"><div class="title">'+t("set.enc")+'</div><div class="meta">'+t("set.encV")+'</div></div><span class="tag">'+t("set.off")+'</span></div>'+
+   '<div class="row"><div class="grow"><div class="title">'+t("set.backup")+'</div><div class="meta">'+t("set.backupV")+'</div></div><button class="btn" disabled>'+t("set.backupBtn")+'</button></div></div>'+
+   '<div class="card"><div class="row first"><div class="grow"><div class="title">'+t("set.health")+'</div><div class="meta">'+t("set.healthV")+'</div></div><span class="tag ok">'+t("set.healthy")+'</span></div>'+
+   '<div class="row"><div class="grow"><div class="title">'+t("set.rebuild")+'</div><div class="meta">'+t("set.rebuildV")+'</div></div><button class="btn">'+t("set.rebuildBtn")+'</button></div>'+
+   '<div class="row"><div class="grow"><div class="title">'+t("set.recovery")+'</div><div class="meta">'+t("set.recoveryV")+'</div></div><button class="btn">'+t("set.recoveryBtn")+'</button></div></div></div>';
+}
+
+/* ---------- panel / modal ---------- */
+function openPanel(title,html){ $("#panelTitle").textContent=title; $("#panelBody").innerHTML=html; $("#panel").classList.add("on"); }
+function closePanel(){ $("#panel").classList.remove("on"); document.querySelectorAll(".node").forEach(function(x){x.setAttribute("aria-pressed","false");}); }
+function openModal(html){ $("#modal").innerHTML=html; $("#modal").classList.add("on"); $("#scrim").classList.add("on"); var f=$("#modal input,#modal button.primary"); if(f) f.focus(); }
+function closeModal(){ $("#modal").classList.remove("on"); $("#scrim").classList.remove("on"); }
+function openNode(k){
+  var m=MEM[k];
+  openPanel(tr(m,"t"),
+   '<div class="group"><h4>'+t("mem.remembers")+'</h4><p>'+esc(tr(m,"s"))+'</p><ul class="bullets" style="margin-top:var(--s3)">'+tr(m,"pts").map(function(p){return '<li>'+esc(p)+'</li>';}).join("")+'</ul></div>'+
+   '<div class="group"><h4>'+t("mem.behind")+'</h4><div class="card list">'+m.chats.map(function(id){return chatRow(chatById(id),k);}).join("")+'</div></div>'+
+   (m.rel.length?'<div class="group"><h4>'+t("mem.related")+'</h4><div class="chips">'+m.rel.map(function(r){return '<button class="chip" data-act="openNode" data-id="'+r+'">'+esc(tr(MEM[r],"t"))+'</button>';}).join("")+'</div></div>':'')+
+   '<button class="btn primary" data-act="nav" data-h="memory-'+k+'">'+t("mem.open")+'</button>');
+}
+function chatInfo(){
+  var c=chatById(S.chat)||CHATS[0];
+  openPanel(t("info.title"),
+   '<div class="group"><h4>'+t("info.source")+'</h4><div class="kv"><span>'+t("info.app")+'</span><span>'+c.p+'</span></div><div class="kv"><span>'+t("info.saved")+'</span><span>'+fmtDate(c.d)+', 2026</span></div><div class="kv"><span>'+t("info.how")+'</span><span>'+t("info.howV")+'</span></div></div>'+
+   '<div class="group"><h4>'+t("info.copies")+'</h4><div class="kv"><span>'+t("info.latest")+'</span><span>'+t("info.msgs",{n:2})+'</span></div><div class="kv"><span>'+t("info.earlier")+'</span><span>'+t("info.msg1")+'</span></div><p class="small muted" style="margin-top:var(--s2)">'+t("info.copiesNote")+'</p></div>'+
+   (c.partial?'<div class="group"><h4>'+t("info.complete")+'</h4><p class="small">'+t("info.completeV")+'</p></div>':'')+
+   '<details class="group"><summary class="small muted" style="cursor:pointer">'+t("info.tech")+'</summary><div class="kv"><span>'+t("info.chatId")+'</span><span class="code">src:v1:c2292b1a&hellip;</span></div><div class="kv"><span>'+t("info.copyId")+'</span><span class="code">df545395&hellip;</span></div></details>');
+}
+function searchModal(){
+  openModal('<div class="mb" style="padding-bottom:var(--s3)"><div class="field"><input type="search" id="q" placeholder="'+esc(t("q.placeholder"))+'" aria-label="'+esc(t("q.placeholder"))+'"></div><div class="chips" id="sc">'+[["all","q.all"],["mem","q.mem"],["chat","q.chats"],["file","q.files"]].map(function(x){return '<button class="chip" data-act="scope" data-v="'+x[0]+'" aria-pressed="'+(S.scope===x[0])+'">'+t(x[1])+'</button>';}).join("")+'</div></div><div class="results" id="res"></div>'+
+   '<div class="mf" style="justify-content:space-between;align-items:center;padding-top:var(--s3);border-top:1px solid var(--line)"><span class="small muted" id="selInfo"></span><button class="btn primary" id="copyCtx" disabled>'+t("q.copyAI")+'</button></div>');
+  $("#q").addEventListener("input",runSearch); runSearch();
+}
+function runSearch(){
+  var q=($("#q").value||"").trim().toLowerCase(); S.selected={};
+  var mem=[],chat=[],file=[];
+  Object.keys(MEM).forEach(function(k){var m=MEM[k],tt=tr(m,"t"),ss=tr(m,"s"); if(!q||tt.toLowerCase().indexOf(q)>-1||ss.toLowerCase().indexOf(q)>-1) mem.push({id:"m"+k,t:tt,m:kindLabel(m.k),h:"memory-"+k});});
+  CHATS.forEach(function(c){ if(!q||c.t.toLowerCase().indexOf(q)>-1||c.m.join(" ").toLowerCase().indexOf(q)>-1) chat.push({id:"c"+c.id,t:c.t,m:c.p+" · "+fmtDate(c.d),h:"chat-"+c.id}); });
+  FILES.concat(FOLDERS).forEach(function(f,i){ if(!q||f.n.toLowerCase().indexOf(q)>-1) file.push({id:"f"+i,t:f.n,m:f.path,h:"sources"}); });
+  var groups=[]; if(S.scope==="all"||S.scope==="mem")groups.push(["q.mem",mem]); if(S.scope==="all"||S.scope==="chat")groups.push(["q.chats",chat]); if(S.scope==="all"||S.scope==="file")groups.push(["q.files",file]);
+  var any=groups.some(function(g){return g[1].length;}), first=true, out="";
+  groups.forEach(function(g){ if(!g[1].length) return; out+='<div class="grp'+(first?' first':'')+'">'+t(g[0])+'</div>'; first=false;
+    out+=g[1].slice(0,S.scope==="all"?3:8).map(function(h){return '<div class="row"><button class="dot" id="d-'+h.id+'" data-act="pick" data-id="'+h.id+'" aria-label="Select"></button><a class="grow" href="#'+h.h+'" data-act="closeModal"><div class="title">'+esc(h.t)+'</div><div class="meta">'+esc(h.m)+'</div></a></div>';}).join(""); });
+  $("#res").innerHTML=any?out:'<div class="empty"><p>'+t("q.none",{q:esc(q)})+'</p></div>';
+  updSel();
+}
+function updSel(){ var n=Object.keys(S.selected).length; var i=$("#selInfo"),b=$("#copyCtx"); if(!i)return; i.textContent=n?t("q.selected",{n:n}):t("q.hint"); b.disabled=!n; }
+function addDialog(kind,step){
+  var isF=kind==="folder", title=isF?t("dlg.folderT"):t("dlg.filesT");
+  var steps=function(n){return '<div class="steps">'+[1,2,3].map(function(i){var s=t("dlg.step"+i);return i===n?'<b>'+s+'</b>':'<span>'+s+'</span>';}).join("")+'</div>';};
+  if(step===2){
+    var items=isF?[S.pick]:S.pick;
+    openModal('<div class="mh">'+steps(2)+'<h3>'+t("dlg.reviewT")+'</h3></div><div class="mb"><p>'+t("dlg.reviewV")+'</p><div class="picked">'+items.map(function(p){return '<div class="item">'+ICON(isF?"folder":"file")+'<span>'+esc(p)+'</span></div>';}).join("")+'</div><p class="small muted">'+t("dlg.reviewNote")+'</p></div><div class="mf"><button class="btn" data-act="dlgBack" data-kind="'+kind+'">'+t("dlg.back")+'</button><button class="btn primary" data-act="dlgApprove" data-kind="'+kind+'">'+t("dlg.approve")+'</button></div>');
+    return;
+  }
+  var picked=S.pick&&(isF?typeof S.pick==="string":Array.isArray(S.pick));
+  var body=picked?'<div class="picked">'+(isF?[S.pick]:S.pick).map(function(p){return '<div class="item">'+ICON(isF?"folder":"file")+'<span>'+esc(p)+'</span></div>';}).join("")+'</div><div><button class="btn sm" data-act="dlgPick" data-kind="'+kind+'">'+t("dlg.change")+'</button></div>':
+    '<button class="btn wide" data-act="dlgPick" data-kind="'+kind+'">'+ICON(isF?"folder":"file")+(isF?t("dlg.chooseFolder"):t("dlg.chooseFiles"))+'</button><p class="small muted">'+(isF?t("dlg.folderHelp"):t("dlg.filesHelp"))+'</p>';
+  var paste=isF?'<details class="more" style="border:0"><summary style="padding:0">'+t("dlg.paste")+ICON("chev")+'</summary><div class="inner" style="padding:var(--s3) 0 0"><div class="field"><label for="fp">'+t("dlg.pathLabel")+'</label><input type="text" id="fp" placeholder="C:\\Users\\you\\Documents\\Papers"></div></div></details>':'';
+  openModal('<div class="mh">'+steps(1)+'<h3>'+title+'</h3></div><div class="mb">'+body+paste+'</div><div class="mf"><button class="btn" data-act="closeModal">'+t("dlg.cancel")+'</button><button class="btn primary" data-act="dlgNext" data-kind="'+kind+'"'+(picked?'':' disabled')+'>'+t("dlg.continue")+'</button></div>');
+}
+var IMPK={chatgpt:["imp.k.chatgpt","imp.k.chatgptV","chatgpt-export-2026-11-04.zip",1284],gemini:["imp.k.gemini","imp.k.geminiV","takeout-20261105T084441Z-1-001.zip",312],text:["imp.k.text","imp.k.textV","conversation.md",1]};
+function importDialog(step){
+  var K=IMPK[S.imp.kind];
+  var steps=function(n){return '<div class="steps">'+[t("dlg.step1"),t("dlg.step2"),t("imp.step3")].map(function(x,i){return i+1===n?'<b>'+x+'</b>':'<span>'+x+'</span>';}).join("")+'</div>';};
+  if(step===2){
+    openModal('<div class="mh">'+steps(2)+'<h3>'+t("imp.reviewT")+'</h3></div><div class="mb"><div class="picked"><div class="item">'+ICON("file")+'<span>'+esc(S.imp.file)+'</span></div></div><p><b>'+t("imp.found",{n:K[3]})+'</b></p><p>'+t("imp.reviewV")+'</p><p class="small muted">'+t("imp.note")+'</p></div><div class="mf"><button class="btn" data-act="impBack">'+t("dlg.back")+'</button><button class="btn primary" data-act="impRun">'+t("imp.go")+'</button></div>');
+    return;
+  }
+  var opts=Object.keys(IMPK).map(function(x,i){var on=S.imp.kind===x;return '<button class="row'+(i?'':' first')+'" data-act="impKind" data-v="'+x+'"><span class="dot'+(on?' done':'')+'">'+(on?ICON("check"):'')+'</span><div class="grow"><div class="title">'+t(IMPK[x][0])+'</div><div class="meta">'+t(IMPK[x][1])+'</div></div></button>';}).join("");
+  var pick=S.imp.file?'<div class="picked"><div class="item">'+ICON("file")+'<span>'+esc(S.imp.file)+'</span></div></div><div><button class="btn sm" data-act="impPick">'+t("dlg.change")+'</button></div>':'<button class="btn wide" data-act="impPick">'+ICON("file")+t("imp.choose")+'</button><p class="small muted">'+t("imp.help")+'</p>';
+  openModal('<div class="mh">'+steps(1)+'<h3>'+t("imp.title")+'</h3></div><div class="mb"><div class="card list">'+opts+'</div>'+pick+'</div><div class="mf"><button class="btn" data-act="closeModal">'+t("dlg.cancel")+'</button><button class="btn primary" data-act="impNext"'+(S.imp.file?'':' disabled')+'>'+t("dlg.continue")+'</button></div>');
+}
+function lockScreen(){
+  $("#modal").innerHTML='<div class="mh" style="align-items:center;text-align:center;padding-top:var(--s6)"><span class="mark" style="width:44px;height:44px;font-size:var(--t-lg)">m</span><h3 style="margin-top:var(--s3)">'+t("lock.title")+'</h3><p class="muted">'+t("lock.sub")+'</p></div><div class="mb"><div class="field"><label for="pw">'+t("lock.field")+'</label><input type="password" id="pw"></div><button class="btn primary wide" data-act="unlock">'+t("lock.unlock")+'</button><button class="btn ghost wide">'+t("lock.recovery")+'</button></div>';
+  $("#modal").classList.add("on"); $("#scrim").classList.add("on"); $("#scrim").dataset.locked="1"; $("#pw").focus();
+}
+function notes(){
+  var li=function(a){return a.map(function(x){return '<li>'+x+'</li>';}).join("");};
+  openPanel("Draft notes · v2",
+   '<div class="group"><h4>Keputusan yang sudah masuk (11 Nov)</h4><ul class="small bullets">'+li(["<b>Chats</b> diganti nama menjadi <b>Archive / Arsip</b>. Tombol <b>Import</b> (ekspor ChatGPT, Gemini/Takeout, file transkrip) ada di halaman itu.","Breadcrumb dimulai dari <b>Home</b>.","Teks memory mengikuti bahasa aplikasi. Kalau bukan bahasa aslinya, ada label kecil dan tombol 'Lihat versi asli'.","Nama halaman graf bisa kamu pilih sendiri di <b>Settings</b>. Bawaannya Constellation.","Constellation dan Memory boleh kosong sampai ada memory. Empty state-nya sudah dirancang."])+'</ul></div>'+
+   '<div class="group"><h4>Masih terbuka</h4><ol class="small bullets">'+li(["Anggaran performa selain RAM: waktu start, render transkrip panjang, FPS graf (usulan ada di rencana).","Apakah pilihan nama graf perlu juga daftar nama lain atau kolom bebas?","Apakah file ekspor harus bisa di-drag and drop ke halaman Archive, selain lewat tombol Import?"])+'</ol></div>'+
+   '<p class="xs faint">Semua nama, chat, dan angka adalah data contoh. Hasil impor di dialog ini hanya simulasi.</p>');
+}
+
+/* ---------- events ---------- */
+document.addEventListener("click",function(e){
+  var sw=e.target.closest("button.switch#memSwitch"); if(sw){ S.mem=sw.getAttribute("aria-checked")!=="true"; render(); return; }
+  var tg=e.target.closest("[data-act]");
+  if(!tg){ if(e.target.id==="scrim"&&!$("#scrim").dataset.locked) closeModal(); return; }
+  var a=tg.dataset.act, d=tg.dataset;
+  if(a==="nav"){ closeModal(); go(d.h); }
+  else if(a==="up"){ var c=crumbs(); var p=c[c.length-2]; go(p&&p.h?p.h:"archive"); }
+  else if(a==="prov"){ S.prov=d.v; render(); }
+  else if(a==="memTab"){ S.tab=d.v; render(); }
+  else if(a==="memView"){ S.view=d.v; render(); }
+  else if(a==="openNode"){ openNode(d.id); }
+  else if(a==="chatInfo"){ chatInfo(); }
+  else if(a==="closePanel"){ closePanel(); }
+  else if(a==="closeModal"){ closeModal(); }
+  else if(a==="copyChat"){ var l=$("#copyLbl"); l.textContent=t("chat.copied"); setTimeout(function(){l.textContent=t("chat.copy");},1400); }
+  else if(a==="exportChat"){ openPanel(t("export.title"),'<p class="small muted">'+t("export.note")+'</p><button class="btn">Markdown (.md)</button><button class="btn">Plain text (.txt)</button>'); }
+  else if(a==="addFolder"){ S.pick=null; addDialog("folder",1); }
+  else if(a==="addFiles"){ S.pick=null; addDialog("files",1); }
+  else if(a==="dlgPick"){ S.pick=d.kind==="folder"?PICK_FOLDER:PICK_FILES.slice(); addDialog(d.kind,1); }
+  else if(a==="dlgNext"){ addDialog(d.kind,2); }
+  else if(a==="dlgBack"){ addDialog(d.kind,1); }
+  else if(a==="dlgApprove"){ if(d.kind==="folder"){FOLDERS.push({n:"Papers",path:S.pick,files:0,st:"index",pct:0});}else{S.pick.forEach(function(n){FILES.push({n:n,path:"C:\\Users\\you\\Downloads"});});} S.pick=null; closeModal(); if(S.page==="sources")render(); }
+  else if(a==="askRemove"){ tg.outerHTML='<span style="display:flex;gap:var(--s2)"><button class="btn sm" data-act="cancelAsk">'+t("src.cancel")+'</button><button class="btn sm primary" data-act="doRemove" data-kind="'+d.kind+'" data-i="'+d.i+'">'+t("src.remove")+'</button></span>'; }
+  else if(a==="doRemove"){ (d.kind==="folder"?FOLDERS:FILES).splice(+d.i,1); render(); }
+  else if(a==="cancelAsk"||a==="cancelRev"){ render(); }
+  else if(a==="askRevoke"){ tg.outerHTML='<span style="display:flex;gap:var(--s2)"><button class="btn sm" data-act="cancelRev">'+t("src.cancel")+'</button><button class="btn sm primary" data-act="doRevoke" data-i="'+d.i+'">'+t("con.revoke")+'</button></span>'; }
+  else if(a==="doRevoke"){ S.apps.splice(+d.i,1); REVOKED++; render(); }
+  else if(a==="createKey"){ var n=($("#appName").value||"My AI app"); S.apps.unshift({n:n,when:"now"}); $("#keyOut").innerHTML='<div class="row"><div class="grow"><div class="title">'+t("con.keyT")+'</div><div class="meta">'+t("con.keyV")+'</div></div><div class="codebox"><span class="code" style="background:none;padding:0">mp_sample_key_••••••••</span><button class="btn sm">'+t("con.copy")+'</button></div></div>'; $("#appList").innerHTML=appList(); }
+  else if(a==="autoSave"){ S.auto=!S.auto; tg.setAttribute("aria-checked",S.auto); }
+  else if(a==="theme"){ if(d.v==="system") document.documentElement.removeAttribute("data-theme"); else document.documentElement.dataset.theme=d.v; render(); }
+  else if(a==="lang"){ S.lang=d.v; render(); }
+  else if(a==="flip"){ tg.setAttribute("aria-checked",tg.getAttribute("aria-checked")==="true"?"false":"true"); }
+  else if(a==="importOpen"){ S.imp={kind:"chatgpt",file:null}; importDialog(1); }
+  else if(a==="impKind"){ S.imp={kind:d.v,file:null}; importDialog(1); }
+  else if(a==="impPick"){ S.imp.file=IMPK[S.imp.kind][2]; importDialog(1); }
+  else if(a==="impNext"){ importDialog(2); }
+  else if(a==="impBack"){ importDialog(1); }
+  else if(a==="impRun"){ closeModal(); toast(t("imp.done",{n:IMPK[S.imp.kind][3]})); }
+  else if(a==="memOrig"){ S.memOrig=!S.memOrig; render(); }
+  else if(a==="lock"){ lockScreen(); }
+  else if(a==="unlock"){ $("#scrim").dataset.locked=""; closeModal(); }
+  else if(a==="finishSetup"){ S.setup[+d.i]=1; render(); if(S.setup.every(Boolean)) toast(t("setup.done")); }
+  else if(a==="showGuide"){ S.setup[3]=0; go("home"); }
+  else if(a==="mapName"){ S.mapName=d.v; render(); notes(); }
+  else if(a==="scope"){ S.scope=d.v; document.querySelectorAll("#sc .chip").forEach(function(x){x.setAttribute("aria-pressed",x.dataset.v===S.scope);}); runSearch(); }
+  else if(a==="pick"){ var id=d.id; if(S.selected[id]) delete S.selected[id]; else S.selected[id]=1; tg.className="dot"+(S.selected[id]?" done":""); tg.innerHTML=S.selected[id]?ICON("check"):""; updSel(); }
+});
+document.addEventListener("click",function(e){
+  var a=e.target.closest(".crumbs a[data-tab]"); if(a){ S.tab=a.dataset.tab; }
+});
+document.addEventListener("change",function(e){var el=e.target.closest("[data-act=mapNameSel]");if(el){S.mapName=el.value;render();}});
+$("#toggleSide").addEventListener("click",function(){ var a=$("#app"); a.dataset.sidebar=a.dataset.sidebar==="open"?"closed":"open"; });
+$("#openSearch").addEventListener("click",searchModal);
+$("#openNotes").addEventListener("click",notes);
+$("#lockBtn").addEventListener("click",lockScreen);
+$("#langBtn").addEventListener("click",function(){ var i=LANGS.map(function(l){return l[0];}).indexOf(S.lang); S.lang=LANGS[(i+1)%LANGS.length][0]; render(); });
+document.addEventListener("keydown",function(e){
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="k"){ e.preventDefault(); searchModal(); }
+  else if(e.key==="Escape"){ if(!$("#scrim").dataset.locked){ closeModal(); closePanel(); } }
+});
+addEventListener("hashchange",route);
+if(innerWidth<=860) $("#app").dataset.sidebar="closed";
+route();
+})();
+</script>

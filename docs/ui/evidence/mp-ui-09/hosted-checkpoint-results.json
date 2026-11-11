@@ -1,0 +1,159 @@
+{
+  "checkpoint_head": "5a46e7a2f6845e44a6ebc1aa6f88fea1c758b409",
+  "checked_merge_commit": "0b364e51d519519848703a08e17885fa2ced0151",
+  "tree": "370c006c66753ee6e8c2809b19432336d455f0b4",
+  "runs": [
+    {
+      "id": 42159511558,
+      "url": "https://github.com/KaisAbiyyi/mind-place/actions/runs/42159511558",
+      "jobs": [
+        {
+          "id": 127701558703,
+          "name": "Windows Product / candidate result",
+          "conclusion": "success",
+          "url": "https://github.com/KaisAbiyyi/mind-place/actions/runs/42159511558/job/127701558703"
+        },
+        {
+          "id": 127701559858,
+          "name": "Await exact-source authority on Ubuntu",
+          "conclusion": "skipped",
+          "url": "https://github.com/KaisAbiyyi/mind-place/actions/runs/42159511558/job/127701559858"
+        },
+        {
+          "id": 127701559925,
+          "name": "Verify Windows product",
+          "conclusion": "skipped",
+          "url": "https://github.com/KaisAbiyyi/mind-place/actions/runs/42159511558/job/127701559925"
+        },
+        {
+          "id": 127701606338,
+          "name": "Windows source and execution decision",
+          "conclusion": "skipped",
+          "url": "https://github.com/KaisAbiyyi/mind-place/actions/runs/42159511558/job/127701606338"
+        }
+      ],
+      "artifacts": []
+    },
+    {
+      "id": 42159511559,
+      "url": "https://github.com/KaisAbiyyi/mind-place/actions/runs/42159511559",
+      "jobs": [
+        {
+          "id": 127701557771,
+          "name": "visual-smoke",
+          "conclusion": "success",
+          "url": "https://github.com/KaisAbiyyi/mind-place/actions/runs/42159511559/job/127701557771"
+        }
+      ],
+      "artifacts": [
+        {
+          "id": 13476122328,
+          "name": "mp8f-visual-0b364e51d519519848703a08e17885fa2ced0151",
+          "bytes": 38387302,
+          "api_reported_digest": "sha256:4a6302cde42c78ba1341d8cc4eeadafaddffa4d0ee2bc4363a1d4117f75228c2"
+        }
+      ]
+    },
+    {
+      "id": 42159511578,
+      "url": "https://github.com/KaisAbiyyi/mind-place/actions/runs/42159511578",
+      "jobs": [
+        {
+          "id": 127701557756,
+          "name": "Fast developer feedback",
+          "conclusion": "success",
+          "url": "https://github.com/KaisAbiyyi/mind-place/actions/runs/42159511578/job/127701557756"
+        },
+        {
+          "id": 127701557916,
+          "name": "Fast Rust compile and vault feedback",
+          "conclusion": "success",
+          "url": "https://github.com/KaisAbiyyi/mind-place/actions/runs/42159511578/job/127701557916"
+        },
+        {
+          "id": 127702232034,
+          "name": "Native execution evidence",
+          "conclusion": "success",
+          "url": "https://github.com/KaisAbiyyi/mind-place/actions/runs/42159511578/job/127702232034"
+        }
+      ],
+      "artifacts": [
+        {
+          "id": 13476515896,
+          "name": "mp-native-contract-attempt-1",
+          "bytes": 612,
+          "api_reported_digest": "sha256:6af7366a0c9cb0c1c963f59caadc363e5ddf033608ece2a053b771bcf902ea26"
+        }
+      ]
+    },
+    {
+      "id": 42159511524,
+      "url": "https://github.com/KaisAbiyyi/mind-place/actions/runs/42159511524",
+      "jobs": [
+        {
+          "id": 127701557866,
+          "name": "Source fingerprint / acceptance decision (NOT 100K PASS)",
+          "conclusion": "success",
+          "url": "https://github.com/KaisAbiyyi/mind-place/actions/runs/42159511524/job/127701557866"
+        },
+        {
+          "id": 127701640318,
+          "name": "Draft development / qualification PENDING (NOT 100K PASS)",
+          "conclusion": "success",
+          "url": "https://github.com/KaisAbiyyi/mind-place/actions/runs/42159511524/job/127701640318"
+        },
+        {
+          "id": 127701640364,
+          "name": "Windows approved documents / 100 files",
+          "conclusion": "success",
+          "url": "https://github.com/KaisAbiyyi/mind-place/actions/runs/42159511524/job/127701640364"
+        },
+        {
+          "id": 127702361448,
+          "name": "Wait for exact-source native prerequisites (Ubuntu, NOT 100K)",
+          "conclusion": "skipped",
+          "url": "https://github.com/KaisAbiyyi/mind-place/actions/runs/42159511524/job/127702361448"
+        },
+        {
+          "id": 127702362275,
+          "name": "Windows approved documents / 100000 files",
+          "conclusion": "skipped",
+          "url": "https://github.com/KaisAbiyyi/mind-place/actions/runs/42159511524/job/127702362275"
+        },
+        {
+          "id": 127702362804,
+          "name": "Source-bound 100K provenance (no indexing)",
+          "conclusion": "skipped",
+          "url": "https://github.com/KaisAbiyyi/mind-place/actions/runs/42159511524/job/127702362804"
+        },
+        {
+          "id": 127702363003,
+          "name": "100K qualification accepted",
+          "conclusion": "skipped",
+          "url": "https://github.com/KaisAbiyyi/mind-place/actions/runs/42159511524/job/127702363003"
+        }
+      ],
+      "artifacts": [
+        {
+          "id": 13475788812,
+          "name": "mp10c-document-100",
+          "bytes": 607,
+          "api_reported_digest": "sha256:b59c88f4071777935aa1c04698d1d3367f8c258b6b961bc06d7d4ad86c92c4ff"
+        }
+      ]
+    },
+    {
+      "id": 42159511617,
+      "url": "https://github.com/KaisAbiyyi/mind-place/actions/runs/42159511617",
+      "jobs": [
+        {
+          "id": 127701557963,
+          "name": "audit",
+          "conclusion": "success",
+          "url": "https://github.com/KaisAbiyyi/mind-place/actions/runs/42159511617/job/127701557963"
+        }
+      ],
+      "artifacts": []
+    }
+  ]
+}

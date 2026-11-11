@@ -31,12 +31,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           fetch-depth: 0
-          ref: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/merge', github.event.pull_request.number) || (github.event_name == 'workflow_dispatch' && format('refs/pull/{0}/merge', inputs.pr_number)) || github.sha }}
+          ref: ${{ (github.event_name == 'workflow_dispatch' && format('refs/pull/{0}/merge', inputs.pr_number)) || github.sha }}
           persist-credentials: false
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
         with:
           node-version: 24
           cache: npm
@@ -70,16 +70,16 @@ jobs:
       CARGO_INCREMENTAL: 0
       CARGO_BUILD_JOBS: 2
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           fetch-depth: 0
-          ref: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/merge', github.event.pull_request.number) || (github.event_name == 'workflow_dispatch' && format('refs/pull/{0}/merge', inputs.pr_number)) || github.sha }}
+          ref: ${{ (github.event_name == 'workflow_dispatch' && format('refs/pull/{0}/merge', inputs.pr_number)) || github.sha }}
           persist-credentials: false
       - name: Install pinned Rust 1.90
         run: |
           rustup toolchain install 1.90.0 --profile minimal --component rustfmt --no-self-update
           rustup default 1.90.0
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
         with:
           key: mind-place-fast-rust-190
       - name: Rust format
@@ -108,6 +108,8 @@ jobs:
           PY
       - name: Focused security tests
         run: cargo test --locked -p mind-place-security --lib
+      - name: MP-9D parser and MCP adversarial tests
+        run: cargo test --locked -p mind-place-documents -p mind-place-integration --tests
 
   native-evidence:
     name: Native execution evidence
@@ -119,17 +121,17 @@ jobs:
       contents: read
       pull-requests: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           fetch-depth: 0
-          ref: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/merge', github.event.pull_request.number) || (github.event_name == 'workflow_dispatch' && format('refs/pull/{0}/merge', inputs.pr_number)) || github.sha }}
+          ref: ${{ (github.event_name == 'workflow_dispatch' && format('refs/pull/{0}/merge', inputs.pr_number)) || github.sha }}
           persist-credentials: false
       - name: Capture native execution provenance
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/mp10c_native_contract.py attest --output qualification/native-contract.json
       - name: Upload native execution evidence
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: mp-native-contract-attempt-${{ github.run_attempt }}
           path: qualification/native-contract.json

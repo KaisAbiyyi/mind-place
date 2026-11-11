@@ -232,6 +232,12 @@ class DecisionTests(unittest.TestCase):
         self.assertFalse(gate.native_contract.requires_sqlcipher("KaisAbiyyi/mind-place", 9001))
 
 
+class GovernanceIntegratedCandidateTests(unittest.TestCase):
+    def test_integrated_governance_candidate_cannot_omit_vault_or_separated_product(self):
+        self.assertTrue(gate.native_contract.requires_sqlcipher("KaisAbiyyi/mind-place", 141))
+        self.assertTrue(gate.native_contract.requires_separated_product("KaisAbiyyi/mind-place", 141))
+
+
 class AcceptancePrerequisiteTests(unittest.TestCase):
     def test_cached_100k_proof_reuse_requires_current_native_coordination_success(self):
         cached = {"run_id": 77, "artifact_id": 12}
@@ -686,4 +692,3 @@ class PriorProofTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

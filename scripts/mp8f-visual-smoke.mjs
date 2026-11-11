@@ -52,8 +52,42 @@ try {
   const sizes = [[1180, 820], [800, 520], [390, 700], [360, 520]];
   for (const [width, height] of sizes) {
     await page.setViewportSize({ width, height });
+    const navigate = {
+      library: async () => {
+        await page.locator('#knowledge-os-nav [data-route="overview"]').click();
+        const libraryAction = page.locator('#knowledge-os-nav [data-nav-secondary][data-workspace="library"]');
+        try {
+          await libraryAction.click({ timeout: 10000 });
+        } catch (failure) {
+          const hitTest = await page.evaluate(() => {
+            const element = document.querySelector('#knowledge-os-nav [data-nav-secondary][data-workspace="library"]');
+            if (!element) return { missing: true };
+            const rect = element.getBoundingClientRect();
+            const x = rect.left + rect.width / 2, y = rect.top + rect.height / 2;
+            const identity = (node) => ({ tag: node.tagName, id: node.id, className: typeof node.className === "string" ? node.className : "" });
+            const ancestors = [];
+            for (let node = element; node && ancestors.length < 6; node = node.parentElement) {
+              const style = getComputedStyle(node);
+              ancestors.push({ ...identity(node), width: Math.round(node.getBoundingClientRect().width),
+                scrollWidth: node.scrollWidth, clientWidth: node.clientWidth, scrollLeft: node.scrollLeft,
+                overflowX: style.overflowX, flexShrink: style.flexShrink });
+            }
+            return { viewport: window.innerWidth, actionRect: { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom },
+              hitStack: document.elementsFromPoint(x, y).slice(0, 6).map(identity), ancestors };
+          });
+          console.error("MP-8F Library navigation pointer diagnostic: " + JSON.stringify(hitTest));
+          throw failure;
+        }
+      },
+      memories: async () => page.locator('#knowledge-os-nav [data-route="curated-memory"]').click(),
+      graph: async () => page.locator('#knowledge-os-nav [data-route="hive-mind-graph"]').click(),
+      health: async () => {
+        await page.locator('#knowledge-os-nav [data-route="settings"]').click();
+        await page.locator('#knowledge-os-nav [data-nav-secondary][data-workspace="health"]').click();
+      },
+    };
     for (const name of ["library", "memories", "graph", "health"]) {
-      await page.locator('[data-workspace="' + name + '"]').click();
+      await navigate[name]();
       await page.waitForTimeout(60);
       const metrics = await page.evaluate(expected => {
         const view = document.querySelector("#reader-view");
@@ -62,24 +96,44 @@ try {
         const screen = document.documentElement;
         const rect = heading?.getBoundingClientRect();
         return {
-          selected: selected.length === 1 && selected[0].getAttribute("data-workspace") === expected,
+          selected: selected.length === 1 && selected[0].getAttribute("data-route") === ({ library: "overview", memories: "curated-memory", graph: "hive-mind-graph", health: "settings" })[expected],
           heading: Boolean(rect && rect.width > 40 && rect.left >= 0 && rect.right <= window.innerWidth + 1),
           horizontalOverflow: screen.scrollWidth > window.innerWidth + 1,
+          viewportScrollWidth: screen.scrollWidth, viewportWidth: window.innerWidth,
+          horizontalScrollNodes: [...document.querySelectorAll("*")].filter((el) => el.scrollWidth > el.clientWidth + 1)
+            .slice(0, 24).map((el) => {
+              const bounds = el.getBoundingClientRect(), styles = getComputedStyle(el);
+              return { tag: el.tagName, id: el.id, className: typeof el.className === "string" ? el.className : "",
+                left: Math.round(bounds.left), right: Math.round(bounds.right),
+                scrollWidth: el.scrollWidth, clientWidth: el.clientWidth,
+                overflowX: styles.overflowX, minWidth: styles.minWidth };
+            }),
+          overflowNodes: [...document.querySelectorAll("*")].filter((element) => {
+            const bounds = element.getBoundingClientRect();
+            return bounds.right > window.innerWidth + 1 || bounds.left < -1;
+          }).slice(0, 12).map((element) => ({
+            tag: element.tagName, id: element.id, className: typeof element.className === "string" ? element.className : "",
+            left: Math.round(element.getBoundingClientRect().left), right: Math.round(element.getBoundingClientRect().right),
+            width: Math.round(element.getBoundingClientRect().width), scrollWidth: element.scrollWidth, clientWidth: element.clientWidth,
+          })),
           scrollHeight: view.scrollHeight, clientHeight: view.clientHeight,
         };
       }, name);
-      assert.equal(metrics.selected, true, width + "x" + height + " / " + name + " navigation");
-      assert.equal(metrics.heading, true, width + "x" + height + " / " + name + " heading");
-      assert.equal(metrics.horizontalOverflow, false, width + "x" + height + " / " + name + " viewport overflow");
       await page.screenshot({ path: output + "/" + width + "x" + height + "-" + name + ".png" });
+      assert.equal(metrics.selected, true, width + "x" + height + " / " + name + " navigation: " + JSON.stringify(metrics));
+      assert.equal(metrics.heading, true, width + "x" + height + " / " + name + " heading: " + JSON.stringify(metrics));
+      assert.equal(metrics.horizontalOverflow, false, width + "x" + height + " / " + name + " viewport overflow: " + JSON.stringify(metrics));
       receipt.push({ viewport: width + "x" + height, workspace: name, ...metrics });
     }
   }
-  await page.locator('[data-workspace="connections"]').click();
+  await page.locator('#knowledge-os-nav [data-route="ai-providers-mcp"]').click();
+  assert.equal(await page.locator(".providers-workspace h1").textContent(), "AI Providers & MCP Authorization");
+  assert.equal(await page.locator("#setup-dialog").getAttribute("open"), null);
+  await page.locator('.providers-workspace [data-action="open-setup"]').click();
   assert.equal(await page.locator("#setup-dialog").getAttribute("open"), "");
   await page.keyboard.press("Escape");
   assert.equal(await page.locator("#setup-dialog").getAttribute("open"), null);
-  assert.equal(await page.locator('#knowledge-os-nav [aria-current="page"]').getAttribute("data-workspace"), "health");
+  assert.equal(await page.locator('#knowledge-os-nav [aria-current="page"]').getAttribute("data-route"), "ai-providers-mcp");
   assert.deepEqual(faults, [], "unexpected client JS errors");
   await writeFile(output + "/receipt.json", JSON.stringify({
     status: "PASS", platform: "cloud Chromium (NOT installed Windows WebView2)",

@@ -56,7 +56,9 @@ jobs:
       native-contract-fingerprint: ${{ steps.decision.outputs.native-contract-fingerprint }}
       native-checkout-sha: ${{ steps.decision.outputs.native-checkout-sha }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
       - name: Python gate decision and receipt regression tests
         run: python3 -m unittest discover -s scripts/tests -p 'test_mp10c_*.py' -v
       - name: Decide from verified same-PR prior receipt
@@ -77,8 +79,9 @@ jobs:
       MP_10C_FILES: '100'
       MP_10C_RECEIPT: ${{ github.workspace }}/qualification/mp10c-100.json
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
+          persist-credentials: false
           ref: ${{ needs.effective-input-gate.outputs.checkout-sha }}
       - name: Pinned Rust 1.90
         shell: pwsh
@@ -109,7 +112,7 @@ jobs:
           Write-Output "MP-10C exact-tier receipt validated: $expected files, $($receipt.extracted_chunks) chunks"
       - name: Upload smoke receipt
         if: success()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: mp10c-document-100
           path: qualification/mp10c-100.json
@@ -143,8 +146,9 @@ jobs:
       NATIVE_CONTRACT_FINGERPRINT: ${{ needs.effective-input-gate.outputs.native-contract-fingerprint }}
       EXPECTED_FINGERPRINT: ${{ needs.effective-input-gate.outputs.fingerprint }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
+          persist-credentials: false
           ref: ${{ needs.effective-input-gate.outputs.checkout-sha }}
       - name: Bounded native prerequisite coordination
         run: python3 scripts/mp10c_prerequisite_wait.py --timeout-seconds 4800
@@ -182,8 +186,9 @@ jobs:
       NATIVE_CONTRACT_POLICY: ${{ needs.effective-input-gate.outputs.native-contract-policy }}
       NATIVE_CONTRACT_FINGERPRINT: ${{ needs.effective-input-gate.outputs.native-contract-fingerprint }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
+          persist-credentials: false
           ref: ${{ needs.effective-input-gate.outputs.checkout-sha }}
       # A newer unrelated push may have queued while the previous full tier ran.
       # Re-evaluate after acquiring the only full-test slot, not hours before.
@@ -235,7 +240,7 @@ jobs:
           "scale-attempt=$env:GITHUB_RUN_ATTEMPT" >> $env:GITHUB_OUTPUT
       - name: Upload validated raw 100K receipt
         if: success() && steps.full-receipt.outputs.tier-passed == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: mp10c-raw-100000-attempt-${{ github.run_attempt }}
           path: qualification/mp10c-100000.json
@@ -265,18 +270,19 @@ jobs:
       NATIVE_CONTRACT_POLICY: ${{ needs.effective-input-gate.outputs.native-contract-policy }}
       NATIVE_CONTRACT_FINGERPRINT: ${{ needs.effective-input-gate.outputs.native-contract-fingerprint }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
+          persist-credentials: false
           ref: ${{ needs.effective-input-gate.outputs.checkout-sha }}
       - name: Download validated raw 100K receipt
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: mp10c-raw-100000-attempt-${{ needs.document-scale.outputs.scale-attempt }}
           path: qualification
       - name: Mint source-bound 100K provenance
         run: python3 scripts/mp10c_ci_gate.py attest --receipt qualification/mp10c-100000.json --output qualification/mp10c-provenance.json
       - name: Upload qualified receipt and provenance
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: mp10c-qualified-100000-attempt-${{ github.run_attempt }}
           path: |
@@ -314,8 +320,9 @@ jobs:
           SMOKE_RESULT: ${{ needs.document-smoke.result }}
           PREREQUISITE_RESULT: ${{ needs.prerequisite-coordination.result }}
         run: test "$SOURCE_GATE_RESULT" = success && test "$SMOKE_RESULT" = success && test "$PREREQUISITE_RESULT" = success
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
+          persist-credentials: false
           ref: ${{ needs.effective-input-gate.outputs.checkout-sha }}
       - name: Require verified fresh or matching prior full-scale evidence
         run: python3 scripts/mp10c_ci_gate.py accept

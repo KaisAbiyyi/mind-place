@@ -82,6 +82,21 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(set(fast["jobs"]), {"fast", "rust-fast", "native-evidence"})
         self.assertNotIn("windows-latest", str(fast))
 
+    def test_ci_pr_checkouts_freeze_event_merge_instead_of_moving_pull_ref(self):
+        # Reopening/retargeting can regenerate refs/pull/N/merge after the event.
+        # Every job must test the same event SHA that provenance attests, while
+        # explicit manual dispatch still checks the operator's PR merge.
+        fast = yaml.safe_load(self.workflow_ci)
+        for name, job in fast["jobs"].items():
+            with self.subTest(job=name):
+                checkout = next(step for step in job["steps"]
+                                if step.get("uses", "").startswith("actions/checkout@"))
+                ref = checkout["with"]["ref"]
+                self.assertNotIn("github.event.pull_request.number", ref)
+                self.assertIn("github.event_name == 'workflow_dispatch'", ref)
+                self.assertIn("format('refs/pull/{0}/merge', inputs.pr_number)", ref)
+                self.assertTrue(ref.endswith("|| github.sha }}"))
+
     def test_authority_template_never_checks_out_target_or_exposes_app_to_it(self):
         policy = yaml.safe_load((ROOT / ".github/windows-policy/verifier.yml").read_text())
         steps = policy["jobs"]["verify"]["steps"]
