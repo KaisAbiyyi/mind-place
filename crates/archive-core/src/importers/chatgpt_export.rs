@@ -3,11 +3,69 @@ use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::io::Read;
 
-use crate::importers::{stream_top_level_array, RawEvidenceEnvelope, ReconciledItem};
+use crate::importers::{
+    stream_bounded_top_level_array, BoundedArrayLimits, RawEvidenceEnvelope, ReconciledItem,
+};
 use crate::{Attachment, Capture, Message};
 
-const MAX_CHATGPT_RECORD_BYTES: usize = 64 * 1024 * 1024; // 64 MiB
-const MAX_ITEMS_IN_MEMORY: usize = 50_000;
+/// Largest accepted `conversations.json` record. Enforced while the stream is read, before
+/// the record is buffered or parsed.
+pub const MAX_CHATGPT_RECORD_BYTES: usize = 64 * 1024 * 1024; // 64 MiB
+/// Longest run of whitespace tolerated between records of the export array.
+pub const MAX_CHATGPT_SEPARATOR_BYTES: usize = 1024 * 1024; // 1 MiB
+/// Most distinct conversation IDs tracked for duplicate disambiguation in one stream.
+/// Reaching it aborts the stream: uniqueness can no longer be guaranteed.
+pub const MAX_TRACKED_CONVERSATION_IDS: usize = 250_000;
+/// Longest conversation ID that is tracked and projected; longer IDs stay raw-only.
+pub const MAX_CONVERSATION_ID_BYTES: usize = 256;
+/// Most records `parse_conversations_json` will collect in memory.
+pub const MAX_ITEMS_IN_MEMORY: usize = 50_000;
+/// Most raw evidence bytes `parse_conversations_json` will hold in memory at once.
+pub const MAX_COLLECTED_RAW_BYTES: usize = 256 * 1024 * 1024; // 256 MiB
+/// Most distinct completeness warnings recorded for one conversation.
+const MAX_COMPLETENESS_WARNINGS: usize = 4;
+
+const STREAM_LIMITS: BoundedArrayLimits = BoundedArrayLimits {
+    max_record_bytes: MAX_CHATGPT_RECORD_BYTES,
+    max_separator_bytes: MAX_CHATGPT_SEPARATOR_BYTES,
+};
+
+/// Tracks how many times each conversation ID occurred, with a hard bound on memory.
+struct ConversationIdTracker {
+    seen: HashMap<String, usize>,
+    limit: usize,
+}
+
+impl Default for ConversationIdTracker {
+    fn default() -> Self {
+        Self::with_limit(MAX_TRACKED_CONVERSATION_IDS)
+    }
+}
+
+impl ConversationIdTracker {
+    fn with_limit(limit: usize) -> Self {
+        Self {
+            seen: HashMap::new(),
+            limit,
+        }
+    }
+
+    fn observe(&mut self, id: &str) -> Result<usize, Box<dyn std::error::Error>> {
+        if let Some(count) = self.seen.get_mut(id) {
+            *count += 1;
+            return Ok(*count);
+        }
+        if self.seen.len() >= self.limit {
+            return Err(format!(
+                "ChatGPT export exceeds {} distinct conversation IDs",
+                self.limit
+            )
+            .into());
+        }
+        self.seen.insert(id.to_owned(), 1);
+        Ok(1)
+    }
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ChatGptExportConversation {
@@ -67,13 +125,9 @@ impl ChatGptExportParser {
         reader: R,
         mut callback: F,
     ) -> Result<usize, Box<dyn std::error::Error>> {
-        let mut seen_ids = HashMap::new();
-        stream_top_level_array(reader, |raw_val: Box<serde_json::value::RawValue>| {
-            let raw_bytes = raw_val.get().as_bytes().to_vec();
-            if raw_bytes.len() > MAX_CHATGPT_RECORD_BYTES {
-                return Err("ChatGPT export record exceeds maximum allowed 64 MiB limit".into());
-            }
-            let item = Self::reconcile_conversation_raw(raw_bytes, &mut seen_ids)?;
+        let mut seen_ids = ConversationIdTracker::default();
+        stream_bounded_top_level_array(reader, STREAM_LIMITS, |record| {
+            let item = Self::reconcile_conversation_raw(record.to_vec(), &mut seen_ids)?;
             callback(item)
         })
     }
@@ -82,8 +136,16 @@ impl ChatGptExportParser {
         reader: R,
     ) -> Result<Vec<ReconciledItem>, Box<dyn std::error::Error>> {
         let mut items = Vec::new();
+        let mut collected_bytes = 0usize;
         Self::stream_conversations_json(reader, |item| {
-            if items.len() >= MAX_ITEMS_IN_MEMORY {
+            let raw_len = match &item {
+                ReconciledItem::Conversation { raw_evidence, .. } => {
+                    raw_evidence.payload_bytes.len()
+                }
+                ReconciledItem::PreservedRawOnly { evidence, .. } => evidence.payload_bytes.len(),
+            };
+            collected_bytes = collected_bytes.saturating_add(raw_len);
+            if items.len() >= MAX_ITEMS_IN_MEMORY || collected_bytes > MAX_COLLECTED_RAW_BYTES {
                 return Err(
                     "ChatGPT export exceeds in-memory collection limit; use stream_conversations_json".into(),
                 );
@@ -98,13 +160,18 @@ impl ChatGptExportParser {
         conv: ChatGptExportConversation,
     ) -> Result<ReconciledItem, Box<dyn std::error::Error>> {
         let raw_bytes = serde_json::to_vec(&conv)?;
-        let mut seen_ids = HashMap::new();
+        if raw_bytes.len() > MAX_CHATGPT_RECORD_BYTES {
+            return Err(
+                format!("Import record exceeds the {MAX_CHATGPT_RECORD_BYTES} byte limit").into(),
+            );
+        }
+        let mut seen_ids = ConversationIdTracker::default();
         Self::reconcile_conversation_raw(raw_bytes, &mut seen_ids)
     }
 
     fn reconcile_conversation_raw(
         raw_bytes: Vec<u8>,
-        seen_ids: &mut HashMap<String, usize>,
+        seen_ids: &mut ConversationIdTracker,
     ) -> Result<ReconciledItem, Box<dyn std::error::Error>> {
         let raw_sha256 = format!("{:x}", Sha256::digest(&raw_bytes));
         let conv: ChatGptExportConversation = serde_json::from_slice(&raw_bytes)?;
@@ -121,6 +188,17 @@ impl ChatGptExportParser {
             })
             .to_string(),
         };
+
+        // An unbounded or empty identity is never tracked or projected; the raw record stays.
+        if conv.id.is_empty() || conv.id.len() > MAX_CONVERSATION_ID_BYTES {
+            return Ok(ReconciledItem::PreservedRawOnly {
+                evidence: raw_evidence,
+                disposition_reason: format!(
+                    "ChatGPT conversation id is empty or longer than {MAX_CONVERSATION_ID_BYTES} bytes; raw record preserved"
+                ),
+                assets: vec![],
+            });
+        }
 
         let mut warnings = Vec::new();
 
@@ -173,16 +251,15 @@ impl ChatGptExportParser {
         };
 
         // 3. Collision-resistant duplicate conversation ID handling
-        let count = seen_ids.entry(conv.id.clone()).or_insert(0);
-        *count += 1;
-        let (conversation_id, source_url) = if *count == 1 {
+        let count = seen_ids.observe(&conv.id)?;
+        let (conversation_id, source_url) = if count == 1 {
             (
                 conv.id.to_ascii_lowercase(),
                 format!("https://chatgpt.com/c/{}", conv.id),
             )
         } else {
             // Generate deterministic UUIDv4 for duplicate occurrence to prevent collision
-            let hash = Sha256::digest(format!("{}:dup:{}", conv.id, *count).as_bytes());
+            let hash = Sha256::digest(format!("{}:dup:{}", conv.id, count).as_bytes());
             let mut uuid_bytes = [0u8; 16];
             uuid_bytes.copy_from_slice(&hash[..16]);
             uuid_bytes[6] = (uuid_bytes[6] & 0x0f) | 0x40; // Version 4
@@ -281,9 +358,11 @@ impl ChatGptExportParser {
                 if !cyclic && !orphaned && !path_nodes.is_empty() {
                     path_nodes.reverse(); // Chronological root -> leaf
                     let mut ordered_messages = Vec::new();
+                    let mut gaps = Vec::new();
                     for msg in path_nodes {
-                        if let Some(converted) = Self::convert_message(msg) {
+                        if let Some((converted, gap)) = Self::convert_message(msg) {
                             ordered_messages.push(converted);
+                            gaps.extend(gap);
                         }
                     }
 
@@ -294,7 +373,13 @@ impl ChatGptExportParser {
                         );
                     }
 
-                    return BranchProjection::CompleteActiveBranch(ordered_messages);
+                    // Complete only when every content part of every message on the active
+                    // branch is represented in the projection; otherwise stay partial.
+                    if gaps.is_empty() {
+                        return BranchProjection::CompleteActiveBranch(ordered_messages);
+                    }
+                    record_completeness_gaps(warnings, gaps);
+                    return BranchProjection::PartialUnverified(ordered_messages);
                 }
             }
         }
@@ -314,14 +399,16 @@ impl ChatGptExportParser {
             let mut curr = Some(roots[0]);
             let mut visited = HashSet::new();
             let mut ordered_messages = Vec::new();
+            let mut gaps = Vec::new();
 
             while let Some(node) = curr {
                 if !visited.insert(node.id.clone()) {
                     break;
                 }
                 if let Some(msg) = &node.message {
-                    if let Some(converted) = Self::convert_message(msg) {
+                    if let Some((converted, gap)) = Self::convert_message(msg) {
                         ordered_messages.push(converted);
+                        gaps.extend(gap);
                     }
                 }
                 curr = node
@@ -335,6 +422,7 @@ impl ChatGptExportParser {
             }
 
             warnings.push("current_node pointer missing from export; projection unverified".into());
+            record_completeness_gaps(warnings, gaps);
             return BranchProjection::PartialUnverified(ordered_messages);
         }
 
@@ -390,19 +478,44 @@ impl ChatGptExportParser {
         visited.len() == conv.mapping.len()
     }
 
-    fn convert_message(raw: &ChatGptMessage) -> Option<Message> {
+    /// Projects one export message. The second element names why the projection is not a
+    /// faithful representation of every content part (`None` when it is). The raw record
+    /// always stays authoritative; this only decides whether the capture may be `complete`.
+    fn convert_message(raw: &ChatGptMessage) -> Option<(Message, Option<String>)> {
+        let mut gap: Option<String> = None;
         let role = match raw.author.role.as_str() {
             "user" => "user",
             "assistant" => "assistant",
             "system" => "system",
             "tool" => "tool",
-            _ => "tool",
+            other => {
+                gap.get_or_insert_with(|| {
+                    format!(
+                        "Author role '{}' is not a known role and was shown as tool",
+                        clip(other)
+                    )
+                });
+                "tool"
+            }
         };
 
         let mut text = String::new();
         let mut attachments = Vec::new();
 
         if let Some(content) = &raw.content {
+            if !matches!(content.content_type.as_str(), "text" | "multimodal_text") {
+                gap.get_or_insert_with(|| {
+                    format!(
+                        "Content type '{}' is not fully represented in the projection",
+                        clip(&content.content_type)
+                    )
+                });
+            }
+            if content.parts.is_some() && content.text.is_some() {
+                gap.get_or_insert_with(|| {
+                    "Message has both parts and text; only parts are projected".to_string()
+                });
+            }
             if let Some(parts) = &content.parts {
                 for part in parts {
                     match part {
@@ -415,10 +528,13 @@ impl ChatGptExportParser {
                                 == Some(&serde_json::json!("image_asset_pointer"))
                                 || map.contains_key("asset_pointer")
                             {
-                                let pointer = map
-                                    .get("asset_pointer")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("unknown-asset");
+                                let pointer = map.get("asset_pointer").and_then(|v| v.as_str());
+                                if pointer.is_none() {
+                                    gap.get_or_insert_with(|| {
+                                        "Asset part has no readable asset pointer".to_string()
+                                    });
+                                }
+                                let pointer = pointer.unwrap_or("unknown-asset");
                                 attachments.push(Attachment {
                                     id: pointer.to_string(),
                                     name: "image_asset".into(),
@@ -432,12 +548,22 @@ impl ChatGptExportParser {
                                     ),
                                 });
                             } else if let Some(serde_json::Value::String(s)) = map.get("text") {
+                                gap.get_or_insert_with(|| {
+                                    "A structured content part was reduced to its text".to_string()
+                                });
                                 text.push_str(s);
                             } else {
+                                gap.get_or_insert_with(|| {
+                                    "A structured content part was projected as raw JSON text"
+                                        .to_string()
+                                });
                                 text.push_str(&part.to_string());
                             }
                         }
                         _ => {
+                            gap.get_or_insert_with(|| {
+                                "A non-text content part was projected as raw JSON text".to_string()
+                            });
                             text.push_str(&part.to_string());
                         }
                     }
@@ -457,20 +583,47 @@ impl ChatGptExportParser {
             "plain".to_string()
         };
 
-        Some(Message {
-            id: raw.id.clone(),
-            role: role.to_string(),
-            text,
-            format,
-            authored_at: raw.create_time.and_then(timestamp_to_rfc3339),
-            model: raw
-                .metadata
-                .as_ref()
-                .and_then(|m| m.get("model_slug"))
-                .and_then(|s| s.as_str())
-                .map(|s| s.to_string()),
-            attachments,
-        })
+        Some((
+            Message {
+                id: raw.id.clone(),
+                role: role.to_string(),
+                text,
+                format,
+                authored_at: raw.create_time.and_then(timestamp_to_rfc3339),
+                model: raw
+                    .metadata
+                    .as_ref()
+                    .and_then(|m| m.get("model_slug"))
+                    .and_then(|s| s.as_str())
+                    .map(|s| s.to_string()),
+                attachments,
+            },
+            gap,
+        ))
+    }
+}
+
+fn clip(value: &str) -> String {
+    value.chars().take(48).collect()
+}
+
+/// Records why a projection is partial, without letting a hostile export flood the warnings.
+fn record_completeness_gaps(warnings: &mut Vec<String>, gaps: Vec<String>) {
+    let mut distinct: Vec<String> = Vec::new();
+    for gap in gaps {
+        if !distinct.contains(&gap) {
+            distinct.push(gap);
+        }
+    }
+    let total = distinct.len();
+    for gap in distinct.into_iter().take(MAX_COMPLETENESS_WARNINGS) {
+        warnings.push(format!("Completeness not proved: {gap}"));
+    }
+    if total > MAX_COMPLETENESS_WARNINGS {
+        warnings.push(format!(
+            "Completeness not proved: {} further distinct gaps omitted",
+            total - MAX_COMPLETENESS_WARNINGS
+        ));
     }
 }
 
@@ -823,5 +976,273 @@ mod tests {
             }
             _ => panic!("Expected Conversation variant"),
         }
+    }
+
+    fn two_node_conversation(id: &str, role: &str, content: serde_json::Value) -> Vec<u8> {
+        serde_json::to_vec(&serde_json::json!([{
+            "id": id,
+            "title": "Synthetic",
+            "create_time": 1700000000.0,
+            "current_node": "n2",
+            "mapping": {
+                "n1": {"id":"n1","parent":null,"children":["n2"],"message":{
+                    "id":"m1","author":{"role":"user"},"create_time":1700000001.0,
+                    "content":{"content_type":"text","parts":["question"]}}},
+                "n2": {"id":"n2","parent":"n1","children":[],"message":{
+                    "id":"m2","author":{"role":role},"create_time":1700000002.0,
+                    "content":content}}
+            }
+        }]))
+        .unwrap()
+    }
+
+    fn projected(bytes: &[u8]) -> Capture {
+        match ChatGptExportParser::parse_conversations_json(bytes)
+            .unwrap()
+            .remove(0)
+        {
+            ReconciledItem::Conversation { capture, .. } => capture,
+            other => panic!("expected a conversation, got {other:?}"),
+        }
+    }
+
+    const ID: &str = "12345678-1234-4123-8123-123456789abc";
+
+    #[test]
+    fn fully_represented_text_and_image_parts_stay_complete() {
+        let text = projected(&two_node_conversation(
+            ID,
+            "assistant",
+            serde_json::json!({"content_type":"text","parts":["answer"]}),
+        ));
+        assert_eq!(text.completeness, "complete");
+        let multimodal = projected(&two_node_conversation(
+            ID,
+            "assistant",
+            serde_json::json!({"content_type":"multimodal_text","parts":[
+                "see", {"content_type":"image_asset_pointer","asset_pointer":"file-service://file-1"}]}),
+        ));
+        assert_eq!(multimodal.completeness, "complete");
+        assert_eq!(multimodal.messages[1].attachments.len(), 1);
+    }
+
+    #[test]
+    fn any_unrepresented_content_part_downgrades_the_whole_conversation_to_partial() {
+        let cases = [
+            (
+                "unknown content type",
+                "assistant",
+                serde_json::json!({"content_type":"thoughts","parts":["hidden"]}),
+            ),
+            (
+                "code content",
+                "assistant",
+                serde_json::json!({"content_type":"code","text":"print(1)","language":"python"}),
+            ),
+            (
+                "non-text object part",
+                "assistant",
+                serde_json::json!({"content_type":"multimodal_text","parts":[{"content_type":"audio_transcription","text":"hi","direction":"in"}]}),
+            ),
+            (
+                "numeric part",
+                "assistant",
+                serde_json::json!({"content_type":"text","parts":["a", 42]}),
+            ),
+            (
+                "opaque object part",
+                "assistant",
+                serde_json::json!({"content_type":"multimodal_text","parts":[{"kind":"table","rows":[1]}]}),
+            ),
+            (
+                "parts and text both present",
+                "assistant",
+                serde_json::json!({"content_type":"text","parts":["a"],"text":"b"}),
+            ),
+            (
+                "asset without a pointer",
+                "assistant",
+                serde_json::json!({"content_type":"multimodal_text","parts":[{"content_type":"image_asset_pointer"}]}),
+            ),
+            (
+                "unknown author role",
+                "browser",
+                serde_json::json!({"content_type":"text","parts":["a"]}),
+            ),
+        ];
+        for (label, role, content) in cases {
+            let capture = projected(&two_node_conversation(ID, role, content));
+            assert_eq!(capture.completeness, "partial", "{label}");
+            assert!(
+                capture
+                    .warnings
+                    .iter()
+                    .any(|w| w.starts_with("Completeness not proved:")),
+                "{label}: {:?}",
+                capture.warnings
+            );
+            let mut copy = capture.clone();
+            assert!(
+                validate_historical_capture(&mut copy, "chatgpt").is_ok(),
+                "{label}"
+            );
+        }
+    }
+
+    #[test]
+    fn completeness_warnings_stay_bounded_under_hostile_part_variety() {
+        let parts: Vec<serde_json::Value> = (0..200)
+            .map(|index| serde_json::json!({ format!("k{index}"): index }))
+            .collect();
+        let capture = projected(&two_node_conversation(
+            ID,
+            "assistant",
+            serde_json::json!({"content_type":"multimodal_text","parts":parts}),
+        ));
+        assert_eq!(capture.completeness, "partial");
+        assert!(capture.warnings.len() <= 8, "{:?}", capture.warnings);
+    }
+
+    #[test]
+    fn message_times_are_the_messages_own_times_only() {
+        let capture = projected(&two_node_conversation(
+            ID,
+            "assistant",
+            serde_json::json!({"content_type":"text","parts":["answer"]}),
+        ));
+        assert_eq!(
+            capture.messages[0].authored_at.as_deref(),
+            Some("2023-11-14T22:13:21+00:00")
+        );
+        assert_eq!(
+            capture.messages[1].authored_at.as_deref(),
+            Some("2023-11-14T22:13:22+00:00")
+        );
+    }
+
+    #[test]
+    fn oversized_record_is_rejected_while_streaming_without_draining_the_source() {
+        struct Endless {
+            served: usize,
+        }
+        impl Read for Endless {
+            fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+                let prefix: &[u8] = if self.served == 0 {
+                    b"[{\"id\":\""
+                } else {
+                    b""
+                };
+                let mut written = 0;
+                for byte in prefix.iter().copied().chain(std::iter::repeat(b'a')) {
+                    if written == out.len() {
+                        break;
+                    }
+                    out[written] = byte;
+                    written += 1;
+                }
+                self.served += written;
+                Ok(written)
+            }
+        }
+        let mut source = Endless { served: 0 };
+        let result = ChatGptExportParser::stream_conversations_json(&mut source, |_| Ok(()));
+        assert!(result.unwrap_err().to_string().contains("byte limit"));
+        assert!(
+            source.served <= MAX_CHATGPT_RECORD_BYTES + 64 * 1024 + 16,
+            "stream was read for {} bytes",
+            source.served
+        );
+    }
+
+    #[test]
+    fn oversized_whitespace_stream_between_records_is_rejected() {
+        struct Spaces {
+            served: usize,
+        }
+        impl Read for Spaces {
+            fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+                let prefix: &[u8] = if self.served == 0 { b"[" } else { b"" };
+                let mut written = 0;
+                for byte in prefix.iter().copied().chain(std::iter::repeat(b' ')) {
+                    if written == out.len() {
+                        break;
+                    }
+                    out[written] = byte;
+                    written += 1;
+                }
+                self.served += written;
+                Ok(written)
+            }
+        }
+        let mut source = Spaces { served: 0 };
+        let result = ChatGptExportParser::stream_conversations_json(&mut source, |_| Ok(()));
+        assert!(result.is_err());
+        assert!(source.served <= MAX_CHATGPT_SEPARATOR_BYTES + 64 * 1024 + 16);
+    }
+
+    #[test]
+    fn conversation_id_tracking_is_bounded() {
+        let mut tracker = ConversationIdTracker::with_limit(3);
+        assert_eq!(tracker.observe("a").unwrap(), 1);
+        assert_eq!(tracker.observe("b").unwrap(), 1);
+        assert_eq!(tracker.observe("a").unwrap(), 2);
+        assert_eq!(tracker.observe("c").unwrap(), 1);
+        // The limit counts distinct IDs; repeats of known IDs stay allowed, new IDs fail.
+        assert_eq!(tracker.observe("c").unwrap(), 2);
+        assert!(tracker.observe("d").is_err());
+        assert_eq!(tracker.seen.len(), 3);
+        assert_eq!(MAX_TRACKED_CONVERSATION_IDS, 250_000);
+    }
+
+    #[test]
+    fn exceeding_the_tracked_id_bound_aborts_projection_of_a_new_conversation() {
+        let mut tracker = ConversationIdTracker::with_limit(1);
+        let first = two_node_conversation(
+            ID,
+            "assistant",
+            serde_json::json!({"content_type":"text","parts":["a"]}),
+        );
+        let second = two_node_conversation(
+            "87654321-1234-4123-8123-123456789abc",
+            "assistant",
+            serde_json::json!({"content_type":"text","parts":["a"]}),
+        );
+        let mut one = |bytes: &[u8]| {
+            let record = &bytes[1..bytes.len() - 1];
+            ChatGptExportParser::reconcile_conversation_raw(record.to_vec(), &mut tracker)
+        };
+        assert!(one(&first).is_ok());
+        assert!(one(&second)
+            .unwrap_err()
+            .to_string()
+            .contains("distinct conversation IDs"));
+    }
+
+    #[test]
+    fn overlong_or_empty_conversation_ids_are_preserved_raw_only_and_never_tracked() {
+        for id in [String::new(), "x".repeat(MAX_CONVERSATION_ID_BYTES + 1)] {
+            let items = ChatGptExportParser::parse_conversations_json(
+                &two_node_conversation(
+                    &id,
+                    "assistant",
+                    serde_json::json!({"content_type":"text","parts":["a"]}),
+                )[..],
+            )
+            .unwrap();
+            match &items[0] {
+                ReconciledItem::PreservedRawOnly {
+                    disposition_reason, ..
+                } => {
+                    assert!(disposition_reason.contains("conversation id"));
+                }
+                other => panic!("expected raw-only, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn in_memory_collection_is_bounded_by_bytes_as_well_as_count() {
+        assert!(MAX_COLLECTED_RAW_BYTES >= MAX_CHATGPT_RECORD_BYTES);
+        assert!(MAX_ITEMS_IN_MEMORY > 0);
     }
 }

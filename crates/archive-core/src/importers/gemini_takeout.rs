@@ -418,6 +418,9 @@ impl GeminiTakeoutParser {
             }
         }
 
+        // The card time is an activity-log event. It is kept as separate source metadata and
+        // is never promoted to a message or conversation timestamp.
+        let event_time = timestamp.clone();
         let mut warnings = Vec::new();
         let captured_at = if let Some(ref ts) = timestamp {
             ts.clone()
@@ -430,12 +433,8 @@ impl GeminiTakeoutParser {
         };
 
         // 4. Structure-aware turn extraction
-        let (messages, completeness, title) = Self::extract_turns(
-            card_html,
-            &conversation_id,
-            timestamp.as_deref(),
-            &mut warnings,
-        );
+        let (messages, completeness, title) =
+            Self::extract_turns(card_html, &conversation_id, &mut warnings);
 
         if messages.is_empty() {
             let raw_evidence = RawEvidenceEnvelope {
@@ -446,6 +445,7 @@ impl GeminiTakeoutParser {
                 payload_sha256: raw_sha256,
                 metadata_json: serde_json::json!({
                     "occurrence_index": occurrence_index,
+                    "provider_event_time": event_time,
                 })
                 .to_string(),
             };
@@ -463,7 +463,8 @@ impl GeminiTakeoutParser {
             conversation_id: conversation_id.clone(),
             source_url,
             title,
-            conversation_created_at: timestamp,
+            // The activity time is not evidence of when the conversation was created.
+            conversation_created_at: None,
             conversation_updated_at: None,
             captured_at,
             capture_method: "takeout-import".into(),
@@ -480,6 +481,7 @@ impl GeminiTakeoutParser {
             payload_sha256: raw_sha256,
             metadata_json: serde_json::json!({
                 "occurrence_index": occurrence_index,
+                "provider_event_time": event_time,
             })
             .to_string(),
         };
@@ -555,7 +557,6 @@ impl GeminiTakeoutParser {
     fn extract_turns(
         card_html: &str,
         conversation_id: &str,
-        timestamp: Option<&str>,
         warnings: &mut Vec<String>,
     ) -> (Vec<Message>, String, String) {
         let mut messages = Vec::new();
@@ -582,7 +583,8 @@ impl GeminiTakeoutParser {
                         role: "user".into(),
                         text: prompt_text,
                         format: "plain".into(),
-                        authored_at: timestamp.map(ToOwned::to_owned),
+                        // The card time is one activity-log event, not when this message was written.
+                        authored_at: None,
                         model: None,
                         attachments: vec![],
                     });
@@ -597,7 +599,8 @@ impl GeminiTakeoutParser {
                         role: "assistant".into(),
                         text: paragraphs.join("\n\n"),
                         format: "markdown".into(),
-                        authored_at: timestamp.map(ToOwned::to_owned),
+                        // The card time is one activity-log event, not when this message was written.
+                        authored_at: None,
                         model: Some("gemini-takeout".into()),
                         attachments: vec![],
                     });
@@ -613,7 +616,8 @@ impl GeminiTakeoutParser {
                     role: "assistant".into(),
                     text: paragraphs.join("\n\n"),
                     format: "markdown".into(),
-                    authored_at: timestamp.map(ToOwned::to_owned),
+                    // The card time is one activity-log event, not when this message was written.
+                    authored_at: None,
                     model: Some("gemini-takeout".into()),
                     attachments: vec![],
                 });
@@ -621,22 +625,19 @@ impl GeminiTakeoutParser {
             }
         }
 
-        // Determine completeness
+        // A Takeout activity card is an excerpt of the provider's activity log. Matching
+        // user/assistant counts do not prove the conversation is whole, so the projection
+        // is never reported as complete.
         let user_count = messages.iter().filter(|m| m.role == "user").count();
         let assistant_count = messages.iter().filter(|m| m.role == "assistant").count();
-
-        let completeness = if !ambiguous_prompt_container
-            && user_count > 0
-            && assistant_count > 0
-            && user_count == assistant_count
-        {
-            "complete".to_string()
-        } else {
-            if user_count > 0 && assistant_count == 0 {
-                warnings.push("Assistant response omitted in Takeout activity log".into());
-            }
-            "partial".to_string()
-        };
+        if user_count > 0 && assistant_count == 0 {
+            warnings.push("Assistant response omitted in Takeout activity log".into());
+        }
+        warnings.push(
+            "Takeout activity cards cannot prove the full conversation; completeness is partial"
+                .into(),
+        );
+        let completeness = "partial".to_string();
 
         // Derive title
         let first_text = messages
@@ -713,7 +714,8 @@ mod tests {
                     "https://gemini.google.com/app/c_takeout123456"
                 );
                 assert_eq!(capture.capture_method, "takeout-import");
-                assert_eq!(capture.completeness, "complete");
+                // Equal user/assistant counts are not proof of a whole conversation.
+                assert_eq!(capture.completeness, "partial");
                 assert_eq!(capture.messages.len(), 2);
                 assert_eq!(capture.messages[0].role, "user");
                 assert!(capture.messages[0].text.contains("rekomendasi film sci-fi"));
@@ -749,7 +751,8 @@ mod tests {
                 assert_eq!(capture.messages[2].text, "two");
                 assert_eq!(capture.messages[3].role, "assistant");
                 assert_eq!(capture.messages[3].text, "reply two");
-                assert_eq!(capture.completeness, "complete");
+                // Equal user/assistant counts are not proof of a whole conversation.
+                assert_eq!(capture.completeness, "partial");
             }
             _ => panic!("Expected Conversation variant"),
         }
@@ -877,7 +880,8 @@ mod tests {
                 assert!(capture.messages[1]
                     .text
                     .contains("Second response paragraph"));
-                assert_eq!(capture.completeness, "complete");
+                // Equal user/assistant counts are not proof of a whole conversation.
+                assert_eq!(capture.completeness, "partial");
             }
             _ => panic!("Expected Conversation variant"),
         }
@@ -931,5 +935,79 @@ mod tests {
             }
             _ => panic!("Expected PreservedRawOnly variant"),
         }
+    }
+
+    const TIMED_CARD: &str = "<div class=\"outer-cell\"><div class=\"content-cell\">Prompted First question<br>\n4 Nov 2026, 21:15:40 WIB<br>\n<p>First answer.</p></div></div>";
+
+    #[test]
+    fn card_event_time_is_never_copied_into_message_or_conversation_times() {
+        let items = GeminiTakeoutParser::parse_cards_html(TIMED_CARD.as_bytes()).unwrap();
+        let ReconciledItem::Conversation {
+            capture,
+            raw_evidence,
+            ..
+        } = &items[0]
+        else {
+            panic!("expected a conversation")
+        };
+        assert_eq!(capture.messages.len(), 2);
+        assert!(capture.messages.iter().all(|m| m.authored_at.is_none()));
+        assert!(capture.conversation_created_at.is_none());
+        assert!(capture.conversation_updated_at.is_none());
+        let metadata: serde_json::Value =
+            serde_json::from_str(&raw_evidence.metadata_json).unwrap();
+        assert_eq!(metadata["provider_event_time"], "2026-11-04T21:15:40+07:00");
+        // The projection must not manufacture a message-level provenance for the date.
+        let mut copy = capture.clone();
+        assert!(validate_historical_capture(&mut copy, "gemini").is_ok());
+    }
+
+    #[test]
+    fn card_without_event_time_keeps_null_event_metadata_and_warns() {
+        let html = r#"<div class="outer-cell"><div class="content-cell">Prompted Q<br><p>A</p></div></div>"#;
+        let items = GeminiTakeoutParser::parse_cards_html(html.as_bytes()).unwrap();
+        let ReconciledItem::Conversation {
+            capture,
+            raw_evidence,
+            ..
+        } = &items[0]
+        else {
+            panic!("expected a conversation")
+        };
+        assert!(capture.messages.iter().all(|m| m.authored_at.is_none()));
+        let metadata: serde_json::Value =
+            serde_json::from_str(&raw_evidence.metadata_json).unwrap();
+        assert!(metadata["provider_event_time"].is_null());
+        assert!(capture
+            .warnings
+            .iter()
+            .any(|w| w.contains("timestamp unavailable")));
+    }
+
+    #[test]
+    fn balanced_turn_counts_never_prove_completeness() {
+        // Two prompt/response pairs in peer content cells: user count == assistant count.
+        let html = r#"<div class="outer-cell"><div class="content-cell">Prompted One<br><p>Answer one</p></div><div class="content-cell">Prompted Two<br><p>Answer two</p></div></div>"#;
+        let items = GeminiTakeoutParser::parse_cards_html(html.as_bytes()).unwrap();
+        let ReconciledItem::Conversation { capture, .. } = &items[0] else {
+            panic!("expected a conversation")
+        };
+        assert_eq!(
+            capture.messages.iter().filter(|m| m.role == "user").count(),
+            2
+        );
+        assert_eq!(
+            capture
+                .messages
+                .iter()
+                .filter(|m| m.role == "assistant")
+                .count(),
+            2
+        );
+        assert_eq!(capture.completeness, "partial");
+        assert!(capture
+            .warnings
+            .iter()
+            .any(|w| w.contains("cannot prove the full conversation")));
     }
 }
