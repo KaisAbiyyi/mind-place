@@ -357,13 +357,9 @@ impl ChatGptExportParser {
 
                 if !cyclic && !orphaned && !path_nodes.is_empty() {
                     path_nodes.reverse(); // Chronological root -> leaf
-                    let mut ordered_messages = Vec::new();
-                    let mut gaps = Vec::new();
+                    let mut projected = ProjectedBranch::default();
                     for msg in path_nodes {
-                        if let Some((converted, gap)) = Self::convert_message(msg) {
-                            ordered_messages.push(converted);
-                            gaps.extend(gap);
-                        }
+                        projected.push(Self::convert_message(msg));
                     }
 
                     if visited.len() < conv.mapping.len() {
@@ -373,8 +369,14 @@ impl ChatGptExportParser {
                         );
                     }
 
-                    // Complete only when every content part of every message on the active
-                    // branch is represented in the projection; otherwise stay partial.
+                    // Complete only when every node on the active branch is either represented or
+                    // provably empty, and every content part is represented; otherwise partial.
+                    let ProjectedBranch {
+                        messages: ordered_messages,
+                        gaps,
+                        omitted_empty,
+                    } = projected;
+                    note_omitted_empty(warnings, omitted_empty);
                     if gaps.is_empty() {
                         return BranchProjection::CompleteActiveBranch(ordered_messages);
                     }
@@ -398,18 +400,14 @@ impl ChatGptExportParser {
         if is_strictly_linear {
             let mut curr = Some(roots[0]);
             let mut visited = HashSet::new();
-            let mut ordered_messages = Vec::new();
-            let mut gaps = Vec::new();
+            let mut projected = ProjectedBranch::default();
 
             while let Some(node) = curr {
                 if !visited.insert(node.id.clone()) {
                     break;
                 }
                 if let Some(msg) = &node.message {
-                    if let Some((converted, gap)) = Self::convert_message(msg) {
-                        ordered_messages.push(converted);
-                        gaps.extend(gap);
-                    }
+                    projected.push(Self::convert_message(msg));
                 }
                 curr = node
                     .children
@@ -417,11 +415,17 @@ impl ChatGptExportParser {
                     .and_then(|c_id| conv.mapping.get(c_id));
             }
 
+            let ProjectedBranch {
+                messages: ordered_messages,
+                gaps,
+                omitted_empty,
+            } = projected;
             if ordered_messages.is_empty() {
                 return BranchProjection::Empty;
             }
 
             warnings.push("current_node pointer missing from export; projection unverified".into());
+            note_omitted_empty(warnings, omitted_empty);
             record_completeness_gaps(warnings, gaps);
             return BranchProjection::PartialUnverified(ordered_messages);
         }
@@ -478,10 +482,12 @@ impl ChatGptExportParser {
         visited.len() == conv.mapping.len()
     }
 
-    /// Projects one export message. The second element names why the projection is not a
-    /// faithful representation of every content part (`None` when it is). The raw record
-    /// always stays authoritative; this only decides whether the capture may be `complete`.
-    fn convert_message(raw: &ChatGptMessage) -> Option<(Message, Option<String>)> {
+    /// Projects one export message. A represented message carries the reason, if any, why the
+    /// projection is not a faithful representation of every content part. A node that is not
+    /// represented is never silent: it is either provably empty (counted and noted) or a
+    /// completeness gap. The raw record always stays authoritative; this only decides whether
+    /// the capture may be `complete`.
+    fn convert_message(raw: &ChatGptMessage) -> Converted {
         let mut gap: Option<String> = None;
         let role = match raw.author.role.as_str() {
             "user" => "user",
@@ -571,10 +577,21 @@ impl ChatGptExportParser {
             } else if let Some(t) = &content.text {
                 text.push_str(t);
             }
+        } else {
+            // Absent content cannot be told apart from content the export dropped.
+            gap.get_or_insert_with(|| {
+                "A message has no content; its absence is not proved to be genuine emptiness"
+                    .to_string()
+            });
         }
 
         if text.trim().is_empty() && attachments.is_empty() && role == "system" {
-            return None;
+            // Not represented. With a known content shape and nothing in it the node carries
+            // no content (provably empty); anything else is an explicit completeness gap.
+            return match gap {
+                None => Converted::OmittedEmpty,
+                Some(reason) => Converted::Omitted(reason),
+            };
         }
 
         let format = if text.contains("```") || text.contains("**") || text.contains('#') {
@@ -583,7 +600,7 @@ impl ChatGptExportParser {
             "plain".to_string()
         };
 
-        Some((
+        Converted::Represented(
             Message {
                 id: raw.id.clone(),
                 role: role.to_string(),
@@ -599,7 +616,47 @@ impl ChatGptExportParser {
                 attachments,
             },
             gap,
-        ))
+        )
+    }
+}
+
+/// Outcome of projecting one export message.
+enum Converted {
+    /// Shown in the projection; the reason (if any) the projection is not faithful.
+    Represented(Message, Option<String>),
+    /// Not shown, and provably empty: known content shape, no text, no parts, no assets.
+    OmittedEmpty,
+    /// Not shown, and not provably empty: a completeness gap.
+    Omitted(String),
+}
+
+/// Messages of the active branch plus everything that stopped a node from being faithfully shown.
+#[derive(Default)]
+struct ProjectedBranch {
+    messages: Vec<Message>,
+    gaps: Vec<String>,
+    omitted_empty: usize,
+}
+
+impl ProjectedBranch {
+    fn push(&mut self, converted: Converted) {
+        match converted {
+            Converted::Represented(message, gap) => {
+                self.messages.push(message);
+                self.gaps.extend(gap);
+            }
+            Converted::OmittedEmpty => self.omitted_empty += 1,
+            Converted::Omitted(reason) => self.gaps.push(reason),
+        }
+    }
+}
+
+/// Provably empty nodes do not lower completeness, but they are never dropped silently.
+fn note_omitted_empty(warnings: &mut Vec<String>, count: usize) {
+    if count > 0 {
+        warnings.push(format!(
+            "{count} provably empty system message node(s) with no text, parts or assets were omitted from the projection"
+        ));
     }
 }
 
@@ -1244,5 +1301,132 @@ mod tests {
     fn in_memory_collection_is_bounded_by_bytes_as_well_as_count() {
         assert!(MAX_COLLECTED_RAW_BYTES >= MAX_CHATGPT_RECORD_BYTES);
         assert!(MAX_ITEMS_IN_MEMORY > 0);
+    }
+
+    /// system node (given content) -> user -> assistant, current_node on the assistant.
+    fn with_system_node(system_content: serde_json::Value, current: bool) -> Vec<u8> {
+        let mut conversation = serde_json::json!({
+            "id": ID, "title": "Synthetic", "create_time": 1700000000.0,
+            "mapping": {
+                "s": {"id":"s","parent":null,"children":["u"],"message":{
+                    "id":"ms","author":{"role":"system"},"content": system_content}},
+                "u": {"id":"u","parent":"s","children":["a"],"message":{
+                    "id":"mu","author":{"role":"user"},"content":{"content_type":"text","parts":["q"]}}},
+                "a": {"id":"a","parent":"u","children":[],"message":{
+                    "id":"ma","author":{"role":"assistant"},"content":{"content_type":"text","parts":["r"]}}}
+            }
+        });
+        if current {
+            conversation["current_node"] = "a".into();
+        }
+        serde_json::to_vec(&serde_json::json!([conversation])).unwrap()
+    }
+
+    fn warned(capture: &Capture, needle: &str) -> bool {
+        capture.warnings.iter().any(|w| w.contains(needle))
+    }
+
+    #[test]
+    fn provably_empty_system_nodes_are_omitted_with_a_note_and_stay_complete() {
+        for content in [
+            serde_json::json!({"content_type":"text","parts":[""]}),
+            serde_json::json!({"content_type":"text","parts":[]}),
+            serde_json::json!({"content_type":"multimodal_text","parts":["", "  "]}),
+        ] {
+            let capture = projected(&with_system_node(content.clone(), true));
+            assert_eq!(capture.completeness, "complete", "{content}");
+            assert_eq!(
+                capture
+                    .messages
+                    .iter()
+                    .map(|m| m.role.as_str())
+                    .collect::<Vec<_>>(),
+                ["user", "assistant"]
+            );
+            assert!(
+                warned(&capture, "1 provably empty system message node(s)"),
+                "never silent: {:?}",
+                capture.warnings
+            );
+            assert!(!warned(&capture, "Completeness not proved"));
+        }
+    }
+
+    #[test]
+    fn a_system_node_with_null_or_unrepresentable_content_is_a_completeness_gap() {
+        // `content: null` is absence, not proven emptiness.
+        let null = projected(&with_system_node(serde_json::Value::Null, true));
+        assert_eq!(null.completeness, "partial");
+        assert!(
+            warned(&null, "Completeness not proved: A message has no content"),
+            "{:?}",
+            null.warnings
+        );
+        assert_eq!(
+            null.messages.len(),
+            2,
+            "the node is still not shown, but it is accounted for"
+        );
+        // A content type the projection cannot represent, even with no text, is a gap too.
+        let thoughts = projected(&with_system_node(
+            serde_json::json!({"content_type":"thoughts","thoughts":[]}),
+            true,
+        ));
+        assert_eq!(thoughts.completeness, "partial");
+        assert!(warned(&thoughts, "Content type 'thoughts'"));
+        // Text that is present is represented (not omitted) and stays complete.
+        let present = projected(&with_system_node(
+            serde_json::json!({"content_type":"text","parts":["be brief"]}),
+            true,
+        ));
+        assert_eq!(present.completeness, "complete");
+        assert_eq!(present.messages.len(), 3);
+        assert!(!warned(&present, "provably empty"));
+    }
+
+    #[test]
+    fn a_non_system_message_without_content_is_a_gap_not_silent_emptiness() {
+        let mut conversation: serde_json::Value = serde_json::from_slice(&with_system_node(
+            serde_json::json!({"content_type":"text","parts":["x"]}),
+            true,
+        ))
+        .unwrap();
+        conversation[0]["mapping"]["a"]["message"]["content"] = serde_json::Value::Null;
+        let capture = projected(&serde_json::to_vec(&conversation).unwrap());
+        assert_eq!(capture.completeness, "partial");
+        assert!(warned(&capture, "A message has no content"));
+    }
+
+    #[test]
+    fn omitted_empty_nodes_are_also_noted_when_current_node_is_missing() {
+        let capture = projected(&with_system_node(
+            serde_json::json!({"content_type":"text","parts":[""]}),
+            false,
+        ));
+        // Without current_node the projection is unverified regardless, and the omission is noted.
+        assert_eq!(capture.completeness, "partial");
+        assert!(warned(&capture, "provably empty system message node(s)"));
+        assert!(warned(&capture, "current_node pointer missing"));
+    }
+
+    #[test]
+    fn several_omitted_empty_nodes_are_counted_once() {
+        let mut conversation: serde_json::Value = serde_json::from_slice(&with_system_node(
+            serde_json::json!({"content_type":"text","parts":[""]}),
+            true,
+        ))
+        .unwrap();
+        // Insert a second empty system node between the first and the user message.
+        conversation[0]["mapping"]["s2"] = serde_json::json!({"id":"s2","parent":"s","children":["u"],"message":{
+            "id":"ms2","author":{"role":"system"},"content":{"content_type":"text","parts":[""]}}});
+        conversation[0]["mapping"]["s"]["children"] = serde_json::json!(["s2"]);
+        conversation[0]["mapping"]["u"]["parent"] = "s2".into();
+        let capture = projected(&serde_json::to_vec(&conversation).unwrap());
+        assert_eq!(capture.completeness, "complete");
+        assert!(
+            warned(&capture, "2 provably empty system message node(s)"),
+            "{:?}",
+            capture.warnings
+        );
     }
 }

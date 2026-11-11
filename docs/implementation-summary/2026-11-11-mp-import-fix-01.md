@@ -85,13 +85,34 @@ PR text was not edited from this branch because #166's head is `feat/mp-import-c
 
 > This PR provides parsing and capture-only primitives. It does not include raw-evidence persistence, independent source-manifest measurement, zip handling, Tauri commands or UI. Not every historical write requires `HistoricalImportAuthorization`: takeout/export captures persist only through `save_authorized_historical_import`; the legacy-import and generic-import migration paths are documented exceptions (see `docs/implementation-summary/2026-11-11-mp-import-fix-01.md`). Gemini Takeout projections are always `partial`; ChatGPT projections are `complete` only when every content part is represented.
 
+## Re-review round 1 — FIX-F01 (skipped system node could still be `complete`)
+
+Finding ([comment](https://github.com/KaisAbiyyi/mind-place/pull/166#issuecomment-6802602951)): `convert_message()` returned `None` for a system message with no text or assets, so the projection loops collected no gap for it and the branch could be `complete` while a node was silently skipped.
+
+Correction (`chatgpt_export.rs`): `convert_message()` now returns `Represented | OmittedEmpty | Omitted(reason)`, and the two projection loops share one accumulator, so a node that is not shown is always accounted for.
+
+| Node on the active branch | Shown? | Completeness | Always recorded as |
+| --- | --- | --- | --- |
+| Any message with text, parts or assets | yes | per the content-part rules above | nothing extra |
+| System message, known content shape (`text` / `multimodal_text`), no text, parts empty or `""`, no assets | no | **unchanged** (provably empty: nothing is lost) | warning `N provably empty system message node(s) ... were omitted` |
+| System message with `content: null` | no | `partial` | gap `A message has no content; its absence is not proved to be genuine emptiness` |
+| System message with an unrepresentable content type (e.g. `thoughts`) and no text | no | `partial` | gap `Content type '...' is not fully represented` |
+| Non-system message with `content: null` | yes, empty text | `partial` | the same no-content gap |
+| `current_node` missing (linear graph) | as above | `partial` | the existing unverified-projection warning plus the omission note |
+
+Policy choice for the reviewer: only **provably empty** nodes keep `complete`. Real exports usually begin with one empty hidden system node, so treating every omission as a gap would make nearly every real conversation `partial` and the flag meaningless; the omission is still never silent. If you prefer the stricter reading, the single place to change is the `OmittedEmpty` arm of `ProjectedBranch::push`.
+
+Regression tests (`chatgpt_export.rs`): `provably_empty_system_nodes_are_omitted_with_a_note_and_stay_complete` (`[""]`, `[]`, whitespace parts), `a_system_node_with_null_or_unrepresentable_content_is_a_completeness_gap` (`content: null`, `thoughts`, and a present-text control), `a_non_system_message_without_content_is_a_gap_not_silent_emptiness`, `omitted_empty_nodes_are_also_noted_when_current_node_is_missing`, `several_omitted_empty_nodes_are_counted_once`.
+
+Other re-review items: PR #166's head is refreshed to this branch's FIX-01 commits (fast-forward, no history rewrite). `verify:distribution-license` against a real release package remains **PARTIAL / NOT_RUN** (this environment cannot produce the packaged Windows release). Windows native/SQLCipher and real exports remain **NOT_RUN**. Acceptance scope stays parser and capture-only primitives; independent manifest verification and durable raw-evidence publication are MP-IMPORT-RAW-01.
+
 ## Verification
 
 Environment: Linux x86_64, Cargo `1.97.0` locally (hosted CI pins Rust 1.90.0 and has not yet run this branch), Node 22. Synthetic fixtures only.
 
 | Command | Result |
 | --- | --- |
-| `cargo test --locked -p mind-place-archive --tests` | PASS: 116 passed, 0 failed, 0 ignored (48 unit, 19 archive, 5 generic, 8 historical-write authority, 18 second-correction, 7 legacy, 2 registration, 9 validation-boundary) |
+| `cargo test --locked -p mind-place-archive --tests` | PASS: 121 passed, 0 failed, 0 ignored (53 unit, 19 archive, 5 generic, 8 historical-write authority, 18 second-correction, 7 legacy, 2 registration, 9 validation-boundary). Was 116 before the FIX-F01 regression tests. |
 | `cargo test --locked -p mind-place-index --features sqlcipher-preview --test vault_capture_encrypted` | PASS: 5 passed (local only; not run by hosted CI) |
 | `cargo fmt --all -- --check` | PASS |
 | `npm run verify:repo` | PASS |
