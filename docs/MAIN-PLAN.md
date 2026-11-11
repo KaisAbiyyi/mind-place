@@ -50,9 +50,10 @@ gates, evidence rules and the owner-controlled merge policy in `AGENTS.md` still
 10. **v1.0 is a selection of what is proper, not everything.** Mind Place is a long-term,
     continuously developed project; later work is scheduled on the release train in §3.
 11. **Provider parity (2026-11-11).** Claude, ChatGPT and Gemini get the same capabilities:
-    all can read and all can write, except that ChatGPT hosted write is deferred to a December 2026
-    owner decision (the capability stays in the contract; no ChatGPT credential gets write
-    until then). Parity is a property of Mind Place's contract (one tool
+    all can read and all can write, except that hosted write is enabled for Claude only. ChatGPT and
+    Gemini hosted write are deferred to a December 2026 owner decision (the capability stays in
+    the contract; no ChatGPT or Gemini credential gets hosted-write grants until then; local
+    agents of all three vendors, including Gemini CLI, still write). Parity is a property of Mind Place's contract (one tool
     catalog, one conformance suite, no engine branch on provider name), not a promise about
     each vendor's client. Authorization is always enforced server-side. See §6.
 
@@ -132,10 +133,10 @@ Existing IDs keep their Notion pages and history; changed scope is marked **(re-
 | `MP-7MCP-03` **(re-scoped)** | Local-tier write for all local clients (Claude Code, Codex, Gemini CLI, Cowork local): Rust write engine, bulk and curation operations, per-client conformance checklist | MP-7MCP-01, MP-7MCP-02, MP-SEC-11, MP-PAR-01 | `mcp-write-local` | C + L, IR |
 | `MP-7MCP-04` | ChatGPT read qualification under the cloud-tier (curated-only) policy | as recorded | `chatgpt-mcp-client` | C |
 | `MP-PAR-01` | Provider-parity contract: one tool catalog with read-only/destructive annotations, one error model and limit set; Streamable HTTP that works without SSE; tool-schema subset rules; Parity Matrix schema; shared executable conformance suite extending the MP-7MCP-01 test vectors, run against the Rust engine and the JS reference model | MP-7MCP-01 | `mcp-parity-contract` | C, IR |
-| `MP-7MCP-05` **(re-scoped, moved to v1.0)** | Cloud-tier write engine for hosted clients, provider-neutral (v1.0 qualification covers Claude, and Gemini through MP-7MCP-07; ChatGPT write is deferred to a December 2026 owner decision): staged proposals into per-client quarantine collections through the remote gateway, same operation set as the local tier | MP-7MCP-01, MP-PAR-01, MP-SEC-11, MP-NET-01 | `mcp-write-cloud` | C, IR |
+| `MP-7MCP-05` **(re-scoped, moved to v1.0)** | Cloud-tier write engine for hosted clients, provider-neutral (v1.0 qualification covers Claude only; ChatGPT and Gemini hosted write are deferred to a December 2026 owner decision, MP-7MCP-07): staged proposals into per-client quarantine collections through the remote gateway, same operation set as the local tier | MP-7MCP-01, MP-PAR-01, MP-SEC-11, MP-NET-01 | `mcp-write-cloud` | C, IR |
 | `MP-7MCP-06` **(promoted from optional)** | Gemini read adaptation: Gemini CLI against the local-tier engine (stdio or local HTTP, per-server `trust` off); setup guides for Gemini CLI, the Gemini app and Gemini Business; tool-schema compatibility findings feed MP-PAR-01 | MP-7E, MP-7IX, MP-7L2, MP-7U2 (accepted) | `gemini-mcp-client` | C + L |
-| `MP-7MCP-07` **(promoted from optional)** | Gemini write adaptation: write tools through Gemini CLI (local tier) and through the Gemini app or Gemini Business (cloud tier) where the owner's account is eligible | MP-7MCP-03, MP-7MCP-05, MP-7MCP-06 | `gemini-mcp-write` | C + L |
-| `MP-PAR-02` | Parity qualification: real Claude, ChatGPT and Gemini clients × local and hosted surface × read and write, run with the shared suite on one exact SHA; records the Parity Matrix (§6). A client's hosted write is enabled only after its hosted read cell is PASS. The ChatGPT hosted-write cell is `DEFERRED` until the owner's December 2026 decision | MP-7MCP-02, MP-7MCP-04, MP-7MCP-06, MP-7MCP-03, MP-7MCP-05, MP-7MCP-07, MP-NET-03 | `parity-qualification` | L + O |
+| `MP-7MCP-07` **(re-scoped, DEFERRED)** | Hosted write enablement for ChatGPT and Gemini: per-client write grants, adaptation and qualification on the real clients, after the owner's December 2026 decision. Gemini CLI write is not part of this task; it belongs to MP-7MCP-03 | MP-7MCP-05, MP-7MCP-04, MP-7MCP-06 and the owner decision | `hosted-write-enablement` | C + L |
+| `MP-PAR-02` | Parity qualification: real Claude, ChatGPT and Gemini clients × local and hosted surface × read and write, run with the shared suite on one exact SHA; records the Parity Matrix (§6). A client's hosted write is enabled only after its hosted read cell is PASS. The ChatGPT and Gemini hosted-write cells are `DEFERRED` until the owner's December 2026 decision | MP-7MCP-02, MP-7MCP-04, MP-7MCP-06, MP-7MCP-03, MP-7MCP-05, MP-NET-03 | `parity-qualification` | L + O |
 | `MP-NET-01` | Remote gateway ADR and implementation: separate listener serving the cloud tier only, OAuth 2.1 with PKCE (S256) and discovery metadata (RFC 8414, RFC 9728), clients pre-registered by the owner by default and Dynamic Client Registration only behind owner approval, owner approval of each client in the local UI, rate limits and per-client egress circuit breaker; active only while unlocked with explicit consent | MP-7MCP-01, MP-SEC-10 | `remote-gateway` | C, IR |
 | `MP-NET-02` | Tunnel adapters: Tailscale Funnel (installed CLI, not bundled), OpenAI Secure MCP Tunnel (existing), none | MP-NET-01 | `remote-gateway` | C + L |
 | `MP-NET-03` | Real qualification: Claude custom connector and ChatGPT through the universal URL; revoke and lock tests | MP-NET-02, MP-CUR-03 | `hosted-account` | L + O |
@@ -197,7 +198,7 @@ Existing IDs keep their Notion pages and history; changed scope is marked **(re-
 | `MP-11K` | Rebuild claims and graph with a newer model while keeping old generations for audit | MP-CUR-04 | v2.x |
 | `MP-MOD-01` | New modalities: local transcription, screenshot OCR (low priority) | MP-JOB-01 | v3 |
 
-`MP-10S2` remains optional and unscheduled. `MP-7MCP-06` and `MP-7MCP-07` (Gemini) are scheduled in §4.2 since 2026-11-11.
+`MP-10S2` remains optional and unscheduled. `MP-7MCP-06` (Gemini read) is scheduled in §4.2 since 2026-11-11; `MP-7MCP-07` (hosted write for ChatGPT and Gemini) is deferred to a December 2026 owner decision.
 
 ## 5. Invariants that need an explicit ADR before the work starts
 
@@ -216,9 +217,11 @@ Until its ADR is accepted, the current rule stays in force.
 ## 6. Provider parity (owner decision 2026-11-11)
 
 Owner direction: Claude, ChatGPT and Gemini have the same capabilities; all can read and all can write.
-Revised the same day: ChatGPT hosted write is deferred. The owner decides in December 2026 whether
-it is needed (the extension already captures conversations and local agents do the curation). The
-capability stays in the contract, but no ChatGPT credential receives write grants until then.
+Revised the same day: hosted write goes ahead for Claude only. ChatGPT and Gemini hosted write are
+deferred, and the owner decides in December 2026 whether they are needed (the extension already
+captures conversations and local agents do the curation). The capability stays in the contract,
+but no ChatGPT or Gemini credential receives hosted-write grants until then. Local agents of all
+three vendors (Claude Code, Codex, Gemini CLI) write as before.
 
 **What parity means.**
 
@@ -283,10 +286,10 @@ a failure to hide.
 10. The gateway publishes OAuth discovery at the domain root with `200` responses, accepts clients the owner pre-registers (client ID and secret shown once in the local UI, pasted into the vendor's dialog), enables Dynamic Client Registration only behind an owner toggle with each new client pending until approved, and allowlists redirect URIs per client class. Refresh tokens are revocable instantly and bound to the client; where a vendor expects non-rotating refresh tokens, access tokens stay short.
 
 **Tasks.** `MP-PAR-01` contract and suite; `MP-7MCP-02/04/06` read adaptation per provider;
-`MP-7MCP-03/05` write engines per tier; `MP-7MCP-07` Gemini write adaptation; `MP-PAR-02`
+`MP-7MCP-03/05` write engines per tier; `MP-7MCP-07` hosted write enablement for ChatGPT and Gemini (deferred); `MP-PAR-02`
 qualification and Parity Matrix; `MP-PAR-03` capture parity (v1.1, needs an ADR).
 
-**Cost.** Moving cloud-tier write from v1.2 to v1.0 widens v1.0. It is sequenced last, after the
+**Cost.** Moving cloud-tier write from v1.2 to v1.0 widens v1.0, but only for Claude: ChatGPT and Gemini hosted write are deferred. It is sequenced last, after the
 hosted read cell is qualified, and stays default-deny per client.
 
 ## 7. Still open
@@ -294,5 +297,5 @@ hosted read cell is qualified, and stays default-deny per client.
 - Where Workspace metadata that GitHub lacks (prerequisites, locks, evidence) is stored.
   Recommendation: files in the repository, so GitHub stays the only source.
 - Each new task receives its GitHub issue when it is claimed, not before.
-- **ChatGPT hosted write (decide in December 2026).** Until then no ChatGPT credential receives write grants and the Parity Matrix cell is `DEFERRED`. Inputs for the decision: how the Claude hosted-write experience turns out, whether extension capture plus local-agent curation already covers the need (see `MP-PAR-03`, since only ChatGPT has automatic capture today), whether the owner's plan allows custom-MCP writes (the Chat On Steroids Core write test in §6), and the cost of qualifying one more client.
-- **Gemini hosted write** stays scheduled with `MP-7MCP-07` unless the owner defers it the same way.
+- **ChatGPT and Gemini hosted write (decide in December 2026).** Until then no ChatGPT or Gemini credential receives hosted-write grants and the Parity Matrix cells are `DEFERRED`. Inputs for the decision: how the Claude hosted-write experience turns out, whether extension capture plus local-agent curation already covers the need (see `MP-PAR-03`, since only ChatGPT has automatic capture today), whether the owner's plan allows custom-MCP writes (the Chat On Steroids Core write test in §6), and the cost of qualifying one more client.
+- Gemini CLI write is not affected: it is local tier and belongs to `MP-7MCP-03`.
