@@ -50,7 +50,9 @@ gates, evidence rules and the owner-controlled merge policy in `AGENTS.md` still
 10. **v1.0 is a selection of what is proper, not everything.** Mind Place is a long-term,
     continuously developed project; later work is scheduled on the release train in §3.
 11. **Provider parity (2026-11-11).** Claude, ChatGPT and Gemini get the same capabilities:
-    all can read and all can write. Parity is a property of Mind Place's contract (one tool
+    all can read and all can write, except that ChatGPT hosted write is deferred to a December 2026
+    owner decision (the capability stays in the contract; no ChatGPT credential gets write
+    until then). Parity is a property of Mind Place's contract (one tool
     catalog, one conformance suite, no engine branch on provider name), not a promise about
     each vendor's client. Authorization is always enforced server-side. See §6.
 
@@ -130,10 +132,10 @@ Existing IDs keep their Notion pages and history; changed scope is marked **(re-
 | `MP-7MCP-03` **(re-scoped)** | Local-tier write for all local clients (Claude Code, Codex, Gemini CLI, Cowork local): Rust write engine, bulk and curation operations, per-client conformance checklist | MP-7MCP-01, MP-7MCP-02, MP-SEC-11, MP-PAR-01 | `mcp-write-local` | C + L, IR |
 | `MP-7MCP-04` | ChatGPT read qualification under the cloud-tier (curated-only) policy | as recorded | `chatgpt-mcp-client` | C |
 | `MP-PAR-01` | Provider-parity contract: one tool catalog with read-only/destructive annotations, one error model and limit set; Streamable HTTP that works without SSE; tool-schema subset rules; Parity Matrix schema; shared executable conformance suite extending the MP-7MCP-01 test vectors, run against the Rust engine and the JS reference model | MP-7MCP-01 | `mcp-parity-contract` | C, IR |
-| `MP-7MCP-05` **(re-scoped, moved to v1.0)** | Cloud-tier write for all hosted clients (Claude, ChatGPT, Gemini): staged proposals into per-client quarantine collections through the remote gateway, same operation set as the local tier | MP-7MCP-01, MP-PAR-01, MP-SEC-11, MP-NET-01 | `mcp-write-cloud` | C, IR |
+| `MP-7MCP-05` **(re-scoped, moved to v1.0)** | Cloud-tier write engine for hosted clients, provider-neutral (v1.0 qualification covers Claude, and Gemini through MP-7MCP-07; ChatGPT write is deferred to a December 2026 owner decision): staged proposals into per-client quarantine collections through the remote gateway, same operation set as the local tier | MP-7MCP-01, MP-PAR-01, MP-SEC-11, MP-NET-01 | `mcp-write-cloud` | C, IR |
 | `MP-7MCP-06` **(promoted from optional)** | Gemini read adaptation: Gemini CLI against the local-tier engine (stdio or local HTTP, per-server `trust` off); setup guides for Gemini CLI, the Gemini app and Gemini Business; tool-schema compatibility findings feed MP-PAR-01 | MP-7E, MP-7IX, MP-7L2, MP-7U2 (accepted) | `gemini-mcp-client` | C + L |
 | `MP-7MCP-07` **(promoted from optional)** | Gemini write adaptation: write tools through Gemini CLI (local tier) and through the Gemini app or Gemini Business (cloud tier) where the owner's account is eligible | MP-7MCP-03, MP-7MCP-05, MP-7MCP-06 | `gemini-mcp-write` | C + L |
-| `MP-PAR-02` | Parity qualification: real Claude, ChatGPT and Gemini clients × local and hosted surface × read and write, run with the shared suite on one exact SHA; records the Parity Matrix (§6). A client's hosted write is enabled only after its hosted read cell is PASS | MP-7MCP-02, MP-7MCP-04, MP-7MCP-06, MP-7MCP-03, MP-7MCP-05, MP-7MCP-07, MP-NET-03 | `parity-qualification` | L + O |
+| `MP-PAR-02` | Parity qualification: real Claude, ChatGPT and Gemini clients × local and hosted surface × read and write, run with the shared suite on one exact SHA; records the Parity Matrix (§6). A client's hosted write is enabled only after its hosted read cell is PASS. The ChatGPT hosted-write cell is `DEFERRED` until the owner's December 2026 decision | MP-7MCP-02, MP-7MCP-04, MP-7MCP-06, MP-7MCP-03, MP-7MCP-05, MP-7MCP-07, MP-NET-03 | `parity-qualification` | L + O |
 | `MP-NET-01` | Remote gateway ADR and implementation: separate listener serving the cloud tier only, OAuth 2.1 with PKCE (S256) and discovery metadata (RFC 8414, RFC 9728), clients pre-registered by the owner by default and Dynamic Client Registration only behind owner approval, owner approval of each client in the local UI, rate limits and per-client egress circuit breaker; active only while unlocked with explicit consent | MP-7MCP-01, MP-SEC-10 | `remote-gateway` | C, IR |
 | `MP-NET-02` | Tunnel adapters: Tailscale Funnel (installed CLI, not bundled), OpenAI Secure MCP Tunnel (existing), none | MP-NET-01 | `remote-gateway` | C + L |
 | `MP-NET-03` | Real qualification: Claude custom connector and ChatGPT through the universal URL; revoke and lock tests | MP-NET-02, MP-CUR-03 | `hosted-account` | L + O |
@@ -214,6 +216,9 @@ Until its ADR is accepted, the current rule stays in force.
 ## 6. Provider parity (owner decision 2026-11-11)
 
 Owner direction: Claude, ChatGPT and Gemini have the same capabilities; all can read and all can write.
+Revised the same day: ChatGPT hosted write is deferred. The owner decides in December 2026 whether
+it is needed (the extension already captures conversations and local agents do the curation). The
+capability stays in the contract, but no ChatGPT credential receives write grants until then.
 
 **What parity means.**
 
@@ -232,7 +237,8 @@ Owner direction: Claude, ChatGPT and Gemini have the same capabilities; all can 
 **What parity does not mean.** Whether a vendor client can connect, or call write tools, depends
 on that vendor's plan, region and settings. The Parity Matrix (qualified by MP-PAR-02) records
 each cell as `PASS` (real client, exact SHA), `PROVIDER_BLOCKED` (evidence of the vendor
-restriction, plus the fallback surface) or `NOT_RUN`. A blocked cell is a finding to report, not
+restriction, plus the fallback surface), `DEFERRED` (the owner chose not to enable it yet, with the
+review date) or `NOT_RUN`. A blocked cell is a finding to report, not
 a failure to hide.
 
 **What the research found (web search 2026-11-11; mostly third-party, verify against the vendors' own documentation).**
@@ -256,7 +262,7 @@ a failure to hide.
 
 **ChatGPT and Chat On Steroids Core (observed, third-party).** Chat On Steroids is a community project (MIT, not affiliated with OpenAI): a desktop app that runs a loopback MCP server exposing `read`, `find`, `apply_patch`, `exec_command` and related tools, which ChatGPT reaches through developer-mode custom MCP apps and the OpenAI Secure MCP Tunnel, the same path Mind Place already uses (Phase 3D). It does not bypass OpenAI's plan rules: its README repeats that full MCP write support is a Business/Enterprise/Edu beta and that Pro is read/fetch only. Consequences for this plan:
 
-- If Core's write tools work on the owner's ChatGPT, that account already allows custom-MCP writes, and Mind Place's write path needs no workaround. The cheapest test is to ask Core to write a harmless file and check that it appears.
+- If Core's write tools work on the owner's ChatGPT, that account already allows custom-MCP writes, and Mind Place's write path needs no workaround. The cheapest test is to ask Core to write a harmless file and check that it appears. Use it in the December 2026 evaluation of ChatGPT hosted write.
 - Mind Place does not build on browser-side injection into the ChatGPT page. It is brittle, the project's own README warns it may fall under OpenAI's terms on automated access, and it conflicts with the minimal-permission extension rule. If the plan blocks writes, the ChatGPT hosted-write cell is recorded `PROVIDER_BLOCKED`, with Codex as the fallback surface.
 - Do not let a hosted model drive a local Mind Place command line to reach local-tier data. A tool such as Core's `exec_command` runs as the Windows user with no OS sandbox, so a hosted model would be using a local-tier credential and the tier boundary would be gone.
 - Owner note: with Core installed, ChatGPT, and anything injected into its context, can run commands as the owner. Keep the Mind Place data directory out of any approved folder and keep the vault locked when not in use. This is the same-user threat that the password-bound vault key (MP-SEC-13) addresses.
@@ -288,3 +294,5 @@ hosted read cell is qualified, and stays default-deny per client.
 - Where Workspace metadata that GitHub lacks (prerequisites, locks, evidence) is stored.
   Recommendation: files in the repository, so GitHub stays the only source.
 - Each new task receives its GitHub issue when it is claimed, not before.
+- **ChatGPT hosted write (decide in December 2026).** Until then no ChatGPT credential receives write grants and the Parity Matrix cell is `DEFERRED`. Inputs for the decision: how the Claude hosted-write experience turns out, whether extension capture plus local-agent curation already covers the need (see `MP-PAR-03`, since only ChatGPT has automatic capture today), whether the owner's plan allows custom-MCP writes (the Chat On Steroids Core write test in §6), and the cost of qualifying one more client.
+- **Gemini hosted write** stays scheduled with `MP-7MCP-07` unless the owner defers it the same way.
