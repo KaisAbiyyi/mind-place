@@ -284,21 +284,31 @@ var D={en:{},id:{}}; var LANGS=[["en","English","EN"],["id","Bahasa Indonesia","
 function L(k,en,id){D.en[k]=en;D.id[k]=id;}
 function t(k,v){var s=(D[S.lang]&&D[S.lang][k]);if(s===undefined)s=D.en[k];if(s===undefined)s=k;if(v)for(var x in v)s=s.split("{"+x+"}").join(v[x]);return s;}
 /* navigation + shell */
-L("nav.home","Home","Beranda");L("nav.memory","Memory","Memori");L("nav.chats","Chats","Chat");L("nav.sources","Sources","Sumber");L("nav.connections","Connections","Koneksi");L("nav.settings","Settings","Pengaturan");
+L("nav.home","Home","Beranda");L("nav.memory","Memory","Memori");L("nav.chats","Archive","Arsip");L("nav.sources","Sources","Sumber");L("nav.connections","Connections","Koneksi");L("nav.settings","Settings","Pengaturan");
 L("top.search","Search everything","Cari di semua");L("top.lock","Lock","Kunci");
 L("proto.mem","Prototype: memories exist","Prototipe: memori sudah ada");L("foot.local","Stored on this computer.","Disimpan di komputer ini.");
 /* home */
 L("home.sub","Your tidy memories first, with the raw chats behind them.","Memori yang sudah rapi dulu, lengkap dengan chat mentah di baliknya.");
 L("home.stat.mem","Memories","Memori");L("home.stat.chats","Saved chats","Chat tersimpan");L("home.stat.src","Folders and files shared","Folder dan file dibagikan");
 L("home.latestMem","Latest memories","Memori terbaru");L("home.allMem","See all memories","Lihat semua memori");
-L("home.recent","Recently saved chats","Chat yang baru disimpan");L("home.allChats","See all chats","Lihat semua chat");
+L("home.recent","Recently saved chats","Chat yang baru disimpan");L("home.allChats","Open the archive","Buka arsip");
 L("home.setup","Finish setting up","Selesaikan pengaturan");L("home.setupN","{n} of 4 done","{n} dari 4 selesai");L("home.setupBtn","Set up","Atur");
 L("setup.1","Create your unlock secret","Buat kunci pembuka");L("setup.2","Add the browser extension","Pasang extension browser");L("setup.3","Save your first chat","Simpan chat pertamamu");L("setup.4","Let an AI read your memory (optional)","Izinkan AI membaca memorimu (opsional)");
 L("setup.done","Setup is complete. The guide is now hidden.","Pengaturan selesai. Panduan disembunyikan.");
 /* chats */
-L("chats.sub","Everything you saved, exactly as it was. The tidy version lives in Memory.","Semua yang kamu simpan, apa adanya. Versi rapinya ada di Memori.");
+L("chats.sub","Everything you saved or imported, exactly as it was. The tidy version lives in Memory.","Semua yang kamu simpan atau impor, apa adanya. Versi rapinya ada di Memori.");
 L("chats.all","All","Semua");L("chats.showing","Showing {n} of 128 · sample data","Menampilkan {n} dari 128 · data contoh");
 L("chats.none","No chats from {p} yet","Belum ada chat dari {p}");L("chats.noneSub","Save a chat with the browser extension and it will show up here.","Simpan chat lewat extension browser dan chatnya akan muncul di sini.");
+L("imp.btn","Import","Impor");L("imp.title","Import conversations","Impor percakapan");L("imp.step3","3 Import","3 Impor");
+L("imp.k.chatgpt","ChatGPT export","Ekspor ChatGPT");L("imp.k.chatgptV","The .zip you download from ChatGPT settings","File .zip yang kamu unduh dari pengaturan ChatGPT");
+L("imp.k.gemini","Gemini (Google Takeout)","Gemini (Google Takeout)");L("imp.k.geminiV","The .zip from Google Takeout with your Gemini activity","File .zip dari Google Takeout yang memuat aktivitas Gemini-mu");
+L("imp.k.text","A transcript file","Satu file transkrip");L("imp.k.textV","One saved conversation as text or Markdown","Satu percakapan tersimpan dalam teks atau Markdown");
+L("imp.choose","Choose file…","Pilih file…");L("imp.help","A system window opens so you can pick the file. The file itself is never changed.","Jendela sistem akan terbuka untuk memilih file. File aslinya tidak pernah diubah.");
+L("imp.reviewT","Review before importing","Tinjau sebelum impor");L("imp.found","{n} conversations found","{n} percakapan ditemukan");
+L("imp.reviewV","Mind Place keeps the original export exactly as it is and adds the conversations to your archive. Nothing is sent anywhere.","Mind Place menyimpan ekspor aslinya apa adanya dan menambahkan percakapannya ke arsipmu. Tidak ada yang dikirim ke mana pun.");
+L("imp.note","Some exports hold only the active branch of a conversation. Anything missing is marked, never invented.","Sebagian ekspor hanya memuat cabang aktif sebuah percakapan. Yang tidak ada ditandai, tidak pernah dikarang.");
+L("imp.go","Import","Impor");L("imp.done","Imported {n} conversations (sample)","{n} percakapan diimpor (contoh)");
+L("set.mapName","Name of the map page","Nama halaman peta");L("set.mapNameV","Pick the name you like. The map shows your memories and how they connect.","Pilih nama yang kamu suka. Peta ini menampilkan memorimu dan hubungannya.");
 L("chat.saved","saved {d}","disimpan {d}");L("chat.partial","Partial","Parsial");L("chat.info","Info","Info");L("chat.copy","Copy","Salin");L("chat.copied","Copied","Tersalin");L("chat.export","Export","Ekspor");L("chat.back","Back","Kembali");
 L("chat.banner","This copy may be missing some messages.","Salinan ini mungkin kehilangan beberapa pesan.");L("chat.why","Why?","Kenapa?");
 L("info.title","About this chat","Tentang chat ini");L("info.source","Source","Sumber");L("info.app","App","Aplikasi");L("info.saved","Saved","Disimpan");L("info.how","How","Cara");L("info.howV","Saved by you, from the browser","Kamu simpan sendiri dari browser");
@@ -312,9 +322,10 @@ L("mem.sub","What Mind Place has learned from your chats, in plain words. View o
 L("mem.topic","Topics","Topik");L("mem.project","Projects","Proyek");L("mem.person","People","Orang");L("mem.list","List","Daftar");L("mem.cards","Cards","Kartu");
 L("mem.chatsN","{n} chats","{n} chat");L("mem.empty","No memories yet","Belum ada memori");
 L("mem.emptySub","Memories are short, checked summaries Mind Place builds from your saved chats. They will appear here once the first ones are created.","Memori adalah ringkasan singkat yang disusun Mind Place dari chat tersimpan. Memori pertama akan muncul di sini setelah dibuat.");
-L("mem.emptyGo","Go to Chats","Buka Chat");L("mem.noPeople","No people yet","Belum ada orang");L("mem.noPeopleSub","When your chats mention people who matter to your projects, they will show up here.","Kalau chatmu menyebut orang yang penting untuk proyekmu, mereka akan muncul di sini.");
+L("mem.emptyGo","Go to Archive","Buka Arsip");L("mem.noPeople","No people yet","Belum ada orang");L("mem.noPeopleSub","When your chats mention people who matter to your projects, they will show up here.","Kalau chatmu menyebut orang yang penting untuk proyekmu, mereka akan muncul di sini.");
 L("mem.remembers","What Mind Place remembers","Yang diingat Mind Place");L("mem.behind","Chats behind this","Chat di baliknya");L("mem.related","Related","Terkait");
 L("mem.by","Written by","Ditulis oleh");L("mem.byV","Summarised by AI from the chats above. Open a chat to check the original words.","Diringkas AI dari chat di atas. Buka chatnya untuk memeriksa kata aslinya.");
+L("mem.translated","Translated from English","Diterjemahkan dari bahasa Inggris");L("mem.original","Original text (English)","Teks asli (bahasa Inggris)");L("mem.viewOrig","View original","Lihat versi asli");L("mem.viewTrans","View translation","Lihat terjemahan");
 L("mem.suggest","Suggest a correction (coming later)","Usulkan koreksi (segera hadir)");L("mem.open","Open memory","Buka memori");
 /* map */
 L("map.sub","Select a topic to see what Mind Place remembers and which chats it came from.","Pilih topik untuk melihat yang diingat Mind Place dan dari chat mana asalnya.");
@@ -355,7 +366,7 @@ L("set.health","Search is up to date","Pencarian sudah terbaru");L("set.healthV"
 L("set.rebuild","Rebuild search","Bangun ulang pencarian");L("set.rebuildV","Use this if results look wrong. Your saved chats are not touched.","Pakai ini kalau hasil pencarian terlihat salah. Chat tersimpanmu tidak disentuh.");L("set.rebuildBtn","Rebuild","Bangun ulang");
 L("set.recovery","Recovery","Pemulihan");L("set.recoveryV","Reset your secret with your offline recovery code","Atur ulang kuncimu dengan kode pemulihan offline");L("set.recoveryBtn","Start recovery","Mulai pemulihan");
 /* search + lock */
-L("q.placeholder","Search memories, chats and files","Cari memori, chat, dan file");L("q.all","Everything","Semua");L("q.mem","Memory","Memori");L("q.chats","Chats","Chat");L("q.files","Files","File");
+L("q.placeholder","Search memories, chats and files","Cari memori, chat, dan file");L("q.all","Everything","Semua");L("q.mem","Memory","Memori");L("q.chats","Archive","Arsip");L("q.files","Files","File");
 L("q.hint","Select results to share them with an AI","Pilih hasil untuk dibagikan ke AI");L("q.selected","{n} selected","{n} dipilih");L("q.copyAI","Copy for an AI","Salin untuk AI");L("q.none","Nothing found for “{q}”. Try a shorter word.","Tidak ada hasil untuk “{q}”. Coba kata yang lebih pendek.");L("q.open","Open","Buka");
 L("lock.title","Mind Place is locked","Mind Place terkunci");L("lock.sub","Enter your secret to open your archive.","Masukkan kuncimu untuk membuka arsip.");L("lock.field","PIN or password","PIN atau kata sandi");L("lock.unlock","Unlock","Buka kunci");L("lock.recovery","Use recovery code","Pakai kode pemulihan");
 
@@ -389,35 +400,36 @@ var REVOKED=11;
 var MAPNAMES=["Constellation","Atlas","Mindscape","Synapse","Hive"];
 var PICK_FOLDER="C:\\Users\\you\\Documents\\Papers", PICK_FILES=["paper-1.pdf","paper-2.pdf","notes.md"];
 
-var S={lang:"en",page:"home",chat:null,from:null,memKey:null,mem:true,tab:"topic",view:"list",prov:"All",apps:APPS_ACTIVE.slice(),selected:{},scope:"all",mapName:"Constellation",setup:[1,1,1,0],pick:null,auto:false};
-var tr=function(m,f){var v=m[f];return Array.isArray(v)&&v.length===2&&typeof v[0]==="string"&&!Array.isArray(v[0])?v[S.lang==="id"?1:0]:(Array.isArray(v)?v[S.lang==="id"?1:0]:v);};
+var S={memOrig:false,imp:{kind:"chatgpt",file:null},lang:"en",page:"home",chat:null,from:null,memKey:null,mem:true,tab:"topic",view:"list",prov:"All",apps:APPS_ACTIVE.slice(),selected:{},scope:"all",mapName:"Constellation",setup:[1,1,1,0],pick:null,auto:false};
+var tr=function(m,f,lg){var i=((lg||S.lang)==="id")?1:0;var v=m[f];return Array.isArray(v)?v[i]:v;};
 var fmtDate=function(d){return new Date(d+"T12:00:00").toLocaleDateString(S.lang==="id"?"id-ID":"en-US",{month:"short",day:"numeric"});};
 var chatById=function(id){return CHATS.filter(function(x){return x.id===id;})[0];};
 var kindLabel=function(k){return t("mem."+k);};
 
 /* ---------- navigation ---------- */
-function navItems(){return [["home",t("nav.home"),"home"],["memory",t("nav.memory"),"memory"],["chats",t("nav.chats"),"chat"],["map",S.mapName,"map"],["sources",t("nav.sources"),"folder"],["connections",t("nav.connections"),"link"],["preferences",t("nav.settings"),"sliders"]];}
+function navItems(){return [["home",t("nav.home"),"home"],["memory",t("nav.memory"),"memory"],["archive",t("nav.chats"),"chat"],["map",S.mapName,"map"],["sources",t("nav.sources"),"folder"],["connections",t("nav.connections"),"link"],["preferences",t("nav.settings"),"sliders"]];}
 function renderNav(){
-  var sec=(S.page==="memitem")?"memory":(S.page==="chat"&&S.from?"memory":(S.page==="chat"?"chats":S.page));
+  var sec=(S.page==="memitem")?"memory":(S.page==="chat"&&S.from?"memory":(S.page==="chat"?"archive":S.page));
   $("#nav").innerHTML=navItems().map(function(n){
     var cur=sec===n[0]?' aria-current="page"':'';
-    var count=n[0]==="chats"?'<span class="count">128</span>':(n[0]==="memory"&&S.mem?'<span class="count">8</span>':'');
+    var count=n[0]==="archive"?'<span class="count">128</span>':(n[0]==="memory"&&S.mem?'<span class="count">8</span>':'');
     return '<a href="#'+n[0]+'"'+cur+' title="'+esc(n[1])+'">'+ICON(n[2])+'<span class="label">'+esc(n[1])+'</span>'+count+'</a>';
   }).join("");
   $("#sideFoot").innerHTML='<div class="proto"><span>'+t("proto.mem")+'</span><button class="switch" id="memSwitch" role="switch" aria-checked="'+S.mem+'" aria-label="'+esc(t("proto.mem"))+'"></button></div><p class="xs faint">'+t("foot.local")+'</p>';
 }
-function crumbs(){
+function crumbsCore(){
   var home={l:t("nav.home"),h:"home"};
   if(S.page==="home") return [{l:t("nav.home")}];
   if(S.page==="memory") return [{l:t("nav.memory")}];
   if(S.page==="memitem"){ var m=MEM[S.memKey]; return [{l:t("nav.memory"),h:"memory"},{l:kindLabel(m.k),h:"memory",tab:m.k},{l:tr(m,"t")}]; }
-  if(S.page==="chats") return [{l:t("nav.chats")}];
-  if(S.page==="chat"){ var c=chatById(S.chat); if(S.from&&MEM[S.from]){var m2=MEM[S.from]; return [{l:t("nav.memory"),h:"memory"},{l:kindLabel(m2.k),h:"memory",tab:m2.k},{l:tr(m2,"t"),h:"memory-"+S.from},{l:c.t}];} return [{l:t("nav.chats"),h:"chats"},{l:c.t}]; }
+  if(S.page==="archive") return [{l:t("nav.chats")}];
+  if(S.page==="chat"){ var c=chatById(S.chat); if(S.from&&MEM[S.from]){var m2=MEM[S.from]; return [{l:t("nav.memory"),h:"memory"},{l:kindLabel(m2.k),h:"memory",tab:m2.k},{l:tr(m2,"t"),h:"memory-"+S.from},{l:c.t}];} return [{l:t("nav.chats"),h:"archive"},{l:c.t}]; }
   if(S.page==="map") return [{l:S.mapName}];
   if(S.page==="sources") return [{l:t("nav.sources")}];
   if(S.page==="connections") return [{l:t("nav.connections")}];
   return [{l:t("nav.settings")}];
 }
+function crumbs(){var c=crumbsCore();if(S.page!=="home")c.unshift({l:t("nav.home"),h:"home"});return c;}
 function renderCrumbs(){
   var c=crumbs();
   $("#crumbs").innerHTML='<ol>'+c.map(function(x,i){
@@ -431,8 +443,8 @@ function route(){
   var h=(location.hash||"#home").slice(1), m;
   S.from=null;
   if((m=/^chat-(\d+)(?:-from-([a-z]+))?$/.exec(h))){S.page="chat";S.chat=+m[1];S.from=m[2]||null;}
-  else if((m=/^memory-([a-z]+)$/.exec(h))&&MEM[m[1]]){S.page="memitem";S.memKey=m[1];}
-  else if(["home","memory","chats","map","sources","connections","preferences"].indexOf(h)>-1){S.page=h;}
+  else if((m=/^memory-([a-z]+)$/.exec(h))&&MEM[m[1]]){S.page="memitem";S.memKey=m[1];S.memOrig=false;}
+  else if(["home","memory","archive","map","sources","connections","preferences"].indexOf(h)>-1){S.page=h;}
   else {S.page="home";}
   closePanel(); render();
   if(innerWidth<=860){$("#app").dataset.sidebar="closed";}
@@ -443,7 +455,7 @@ function render(){
   $("#searchLbl").textContent=t("top.search"); $("#langBtn").textContent=S.lang.toUpperCase(); $("#langBtn").title=t("set.language");
   $("#lockBtn").title=t("top.lock"); $("#lockBtn").setAttribute("aria-label",t("top.lock"));
   var v=$("#view");
-  v.innerHTML=({home:vHome,memory:vMemory,memitem:vMemItem,chats:vChats,chat:vChat,map:vMap,sources:vSources,connections:vConnections,preferences:vSettings})[S.page]();
+  v.innerHTML=({home:vHome,memory:vMemory,memitem:vMemItem,archive:vChats,chat:vChat,map:vMap,sources:vSources,connections:vConnections,preferences:vSettings})[S.page]();
   v.scrollTop=0;
   if(S.page==="map") bindMap();
 }
@@ -463,13 +475,13 @@ function vHome(){
   return '<div class="wrap"><div class="pagehead"><div><h2>'+t("nav.home")+'</h2><p>'+t("home.sub")+'</p></div></div>'+
    '<div class="stats"><div class="card stat"><div class="n">'+(S.mem?8:0)+'</div><div class="l">'+t("home.stat.mem")+'</div></div><div class="card stat"><div class="n">128</div><div class="l">'+t("home.stat.chats")+'</div></div><div class="card stat"><div class="n">'+(FOLDERS.length+FILES.length)+'</div><div class="l">'+t("home.stat.src")+'</div></div></div>'+
    memBlock+
-   '<section><div class="sectionhead"><h3>'+t("home.recent")+'</h3><a class="small muted" href="#chats">'+t("home.allChats")+'</a></div><div class="card list">'+CHATS.slice(0,3).map(function(c){return chatRow(c);}).join("")+'</div></section>'+setup+'</div>';
+   '<section><div class="sectionhead"><h3>'+t("home.recent")+'</h3><a class="small muted" href="#archive">'+t("home.allChats")+'</a></div><div class="card list">'+CHATS.slice(0,3).map(function(c){return chatRow(c);}).join("")+'</div></section>'+setup+'</div>';
 }
 function vMemory(){
   var tabs=["topic","project","person"];
   var items=Object.keys(MEM).filter(function(k){return MEM[k].k===S.tab;});
   var body;
-  if(!S.mem){ body='<div class="card empty"><span class="ring">'+ICON("memory")+'</span><h3>'+t("mem.empty")+'</h3><p>'+t("mem.emptySub")+'</p><a class="btn" href="#chats">'+t("mem.emptyGo")+'</a></div>'; }
+  if(!S.mem){ body='<div class="card empty"><span class="ring">'+ICON("memory")+'</span><h3>'+t("mem.empty")+'</h3><p>'+t("mem.emptySub")+'</p><a class="btn" href="#archive">'+t("mem.emptyGo")+'</a></div>'; }
   else if(!items.length){ body='<div class="card empty"><span class="ring">'+ICON("memory")+'</span><h3>'+t("mem.noPeople")+'</h3><p>'+t("mem.noPeopleSub")+'</p></div>'; }
   else if(S.view==="cards"){ body='<div class="cards">'+items.map(function(k){var m=MEM[k];return '<button class="card mcard" data-act="nav" data-h="memory-'+k+'"><div class="title">'+esc(tr(m,"t"))+'</div><div class="meta">'+esc(tr(m,"s"))+'</div><div class="foot">'+t("mem.chatsN",{n:m.chats.length})+'</div></button>';}).join("")+'</div>'; }
   else { body='<div class="card list">'+items.map(memRow).join("")+'</div>'; }
@@ -478,9 +490,9 @@ function vMemory(){
    '<div class="seg sm" role="group" aria-label="View"><button data-act="memView" data-v="list" aria-pressed="'+(S.view==="list")+'" title="'+t("mem.list")+'">'+ICON("list")+'</button><button data-act="memView" data-v="cards" aria-pressed="'+(S.view==="cards")+'" title="'+t("mem.cards")+'">'+ICON("grid")+'</button></div></div>'+body+'</div>';
 }
 function vMemItem(){
-  var k=S.memKey,m=MEM[k];
-  return '<div class="wrap narrow"><div class="memhead"><span class="tag" style="align-self:flex-start">'+kindLabel(m.k)+'</span><h2>'+esc(tr(m,"t"))+'</h2><p class="lead">'+esc(tr(m,"s"))+'</p></div>'+
-   '<section><div class="sectionhead"><h3>'+t("mem.remembers")+'</h3></div><div class="card" style="padding:var(--s5)"><ul class="bullets">'+tr(m,"pts").map(function(p){return '<li>'+esc(p)+'</li>';}).join("")+'</ul></div></section>'+
+  var k=S.memKey,m=MEM[k],lg=S.memOrig?"en":S.lang;
+  return '<div class="wrap narrow"><div class="memhead"><span class="tag" style="align-self:flex-start">'+kindLabel(m.k)+'</span><h2>'+esc(tr(m,"t",lg))+'</h2><p class="lead">'+esc(tr(m,"s",lg))+'</p>'+(S.lang!=="en"?'<p class="small muted">'+(S.memOrig?t("mem.original"):t("mem.translated"))+' &middot; <button class="btn ghost sm" data-act="memOrig">'+(S.memOrig?t("mem.viewTrans"):t("mem.viewOrig"))+'</button></p>':'')+'</div>'+
+   '<section><div class="sectionhead"><h3>'+t("mem.remembers")+'</h3></div><div class="card" style="padding:var(--s5)"><ul class="bullets">'+tr(m,"pts",lg).map(function(p){return '<li>'+esc(p)+'</li>';}).join("")+'</ul></div></section>'+
    '<section><div class="sectionhead"><h3>'+t("mem.behind")+'</h3><span class="small muted">'+t("mem.chatsN",{n:m.chats.length})+'</span></div><div class="card list">'+m.chats.map(function(id){return chatRow(chatById(id),k);}).join("")+'</div></section>'+
    (m.rel.length?'<section><div class="sectionhead"><h3>'+t("mem.related")+'</h3></div><div class="chips">'+m.rel.map(function(r){return '<button class="chip" data-act="nav" data-h="memory-'+r+'">'+esc(tr(MEM[r],"t"))+'</button>';}).join("")+'</div></section>':'')+
    '<section><div class="sectionhead"><h3>'+t("mem.by")+'</h3></div><p class="small muted">'+t("mem.byV")+'</p></section><div><button class="btn" disabled>'+t("mem.suggest")+'</button></div></div>';
@@ -488,7 +500,7 @@ function vMemItem(){
 function vChats(){
   var provs=["All","ChatGPT","Claude","Gemini"];
   var list=CHATS.filter(function(c){return S.prov==="All"||c.p===S.prov;});
-  return '<div class="wrap"><div class="pagehead"><div><h2>'+t("nav.chats")+'</h2><p>'+t("chats.sub")+'</p></div></div>'+
+  return '<div class="wrap"><div class="pagehead"><div><h2>'+t("nav.chats")+'</h2><p>'+t("chats.sub")+'</p></div><div class="actions"><button class="btn primary" data-act="importOpen">'+ICON("plus")+t("imp.btn")+'</button></div></div>'+
    '<div class="chips" role="group">'+provs.map(function(p){return '<button class="chip" data-act="prov" data-v="'+p+'" aria-pressed="'+(S.prov===p)+'">'+(p==="All"?t("chats.all"):p)+'</button>';}).join("")+'</div>'+
    (list.length?'<div class="card list">'+list.map(function(c){return chatRow(c);}).join("")+'</div>':'<div class="card empty"><h3>'+t("chats.none",{p:S.prov})+'</h3><p>'+t("chats.noneSub")+'</p></div>')+
    '<p class="small faint" style="text-align:center">'+t("chats.showing",{n:list.length})+'</p></div>';
@@ -548,6 +560,7 @@ function vSettings(){
   return '<div class="wrap narrow"><div class="pagehead"><div><h2>'+t("nav.settings")+'</h2></div></div>'+
    '<div class="card"><div class="row first"><div class="grow"><div class="title">'+t("set.appearance")+'</div><div class="meta">'+t("set.appearanceV")+'</div></div><div class="seg" role="group">'+["light","dark","system"].map(function(x){return '<button data-act="theme" data-v="'+x+'" aria-pressed="'+(th===x)+'">'+t("set."+x)+'</button>';}).join("")+'</div></div>'+
    '<div class="row"><div class="grow"><div class="title">'+t("set.language")+'</div><div class="meta">'+t("set.languageV")+'</div></div><div class="seg" role="group">'+LANGS.map(function(l){return '<button data-act="lang" data-v="'+l[0]+'" aria-pressed="'+(S.lang===l[0])+'">'+l[1]+'</button>';}).join("")+'</div></div>'+
+   '<div class="row"><div class="grow"><div class="title">'+t("set.mapName")+'</div><div class="meta">'+t("set.mapNameV")+'</div></div><select data-act="mapNameSel" aria-label="'+t("set.mapName")+'" style="width:auto;min-width:170px">'+MAPNAMES.map(function(n){return '<option'+(S.mapName===n?' selected':'')+'>'+n+'</option>';}).join("")+'</select></div>'+
    '<div class="row"><div class="grow"><div class="title">'+t("set.compact")+'</div><div class="meta">'+t("set.compactV")+'</div></div><button class="switch" role="switch" aria-checked="false" aria-label="'+t("set.compact")+'" data-act="flip"></button></div>'+
    '<div class="row"><div class="grow"><div class="title">'+t("set.tech")+'</div><div class="meta">'+t("set.techV")+'</div></div><button class="switch" role="switch" aria-checked="false" aria-label="'+t("set.tech")+'" data-act="flip"></button></div>'+
    '<div class="row"><div class="grow"><div class="title">'+t("set.guide")+'</div><div class="meta">'+t("set.guideV")+'</div></div><button class="btn" data-act="showGuide">'+t("set.guideBtn")+'</button></div></div>'+
@@ -613,18 +626,28 @@ function addDialog(kind,step){
   var paste=isF?'<details class="more" style="border:0"><summary style="padding:0">'+t("dlg.paste")+ICON("chev")+'</summary><div class="inner" style="padding:var(--s3) 0 0"><div class="field"><label for="fp">'+t("dlg.pathLabel")+'</label><input type="text" id="fp" placeholder="C:\\Users\\you\\Documents\\Papers"></div></div></details>':'';
   openModal('<div class="mh">'+steps(1)+'<h3>'+title+'</h3></div><div class="mb">'+body+paste+'</div><div class="mf"><button class="btn" data-act="closeModal">'+t("dlg.cancel")+'</button><button class="btn primary" data-act="dlgNext" data-kind="'+kind+'"'+(picked?'':' disabled')+'>'+t("dlg.continue")+'</button></div>');
 }
+var IMPK={chatgpt:["imp.k.chatgpt","imp.k.chatgptV","chatgpt-export-2026-11-04.zip",1284],gemini:["imp.k.gemini","imp.k.geminiV","takeout-20261105T084441Z-1-001.zip",312],text:["imp.k.text","imp.k.textV","conversation.md",1]};
+function importDialog(step){
+  var K=IMPK[S.imp.kind];
+  var steps=function(n){return '<div class="steps">'+[t("dlg.step1"),t("dlg.step2"),t("imp.step3")].map(function(x,i){return i+1===n?'<b>'+x+'</b>':'<span>'+x+'</span>';}).join("")+'</div>';};
+  if(step===2){
+    openModal('<div class="mh">'+steps(2)+'<h3>'+t("imp.reviewT")+'</h3></div><div class="mb"><div class="picked"><div class="item">'+ICON("file")+'<span>'+esc(S.imp.file)+'</span></div></div><p><b>'+t("imp.found",{n:K[3]})+'</b></p><p>'+t("imp.reviewV")+'</p><p class="small muted">'+t("imp.note")+'</p></div><div class="mf"><button class="btn" data-act="impBack">'+t("dlg.back")+'</button><button class="btn primary" data-act="impRun">'+t("imp.go")+'</button></div>');
+    return;
+  }
+  var opts=Object.keys(IMPK).map(function(x,i){var on=S.imp.kind===x;return '<button class="row'+(i?'':' first')+'" data-act="impKind" data-v="'+x+'"><span class="dot'+(on?' done':'')+'">'+(on?ICON("check"):'')+'</span><div class="grow"><div class="title">'+t(IMPK[x][0])+'</div><div class="meta">'+t(IMPK[x][1])+'</div></div></button>';}).join("");
+  var pick=S.imp.file?'<div class="picked"><div class="item">'+ICON("file")+'<span>'+esc(S.imp.file)+'</span></div></div><div><button class="btn sm" data-act="impPick">'+t("dlg.change")+'</button></div>':'<button class="btn wide" data-act="impPick">'+ICON("file")+t("imp.choose")+'</button><p class="small muted">'+t("imp.help")+'</p>';
+  openModal('<div class="mh">'+steps(1)+'<h3>'+t("imp.title")+'</h3></div><div class="mb"><div class="card list">'+opts+'</div>'+pick+'</div><div class="mf"><button class="btn" data-act="closeModal">'+t("dlg.cancel")+'</button><button class="btn primary" data-act="impNext"'+(S.imp.file?'':' disabled')+'>'+t("dlg.continue")+'</button></div>');
+}
 function lockScreen(){
   $("#modal").innerHTML='<div class="mh" style="align-items:center;text-align:center;padding-top:var(--s6)"><span class="mark" style="width:44px;height:44px;font-size:var(--t-lg)">m</span><h3 style="margin-top:var(--s3)">'+t("lock.title")+'</h3><p class="muted">'+t("lock.sub")+'</p></div><div class="mb"><div class="field"><label for="pw">'+t("lock.field")+'</label><input type="password" id="pw"></div><button class="btn primary wide" data-act="unlock">'+t("lock.unlock")+'</button><button class="btn ghost wide">'+t("lock.recovery")+'</button></div>';
   $("#modal").classList.add("on"); $("#scrim").classList.add("on"); $("#scrim").dataset.locked="1"; $("#pw").focus();
 }
 function notes(){
   var li=function(a){return a.map(function(x){return '<li>'+x+'</li>';}).join("");};
-  var opts=MAPNAMES.map(function(n){return '<button class="chip" data-act="mapName" data-v="'+n+'" aria-pressed="'+(S.mapName===n)+'">'+n+'</button>';}).join("");
-  openPanel("Draft notes · v1",
-   '<div class="group"><h4>Nama untuk halaman graf</h4><div class="chips">'+opts+'</div><p class="small muted" style="margin-top:var(--s2)">Klik untuk melihat nama di sidebar dan breadcrumb. Saranku: Constellation (topik = bintang, hubungannya = garis) atau Atlas (lebih pendek).</p></div>'+
-   '<div class="group"><h4>Sudah diterapkan dari jawabanmu</h4><ul class="small bullets">'+li(["Setup digabung ke Home dan otomatis hilang kalau 4 langkah selesai. Bisa dimunculkan lagi di Settings.","Search bisa memilih Semua, Memory, Chats, atau Files. Memory selalu di atas.","Dua bahasa (EN/ID) lewat tombol di navbar atau Settings. Menambah bahasa = menambah satu kolom teks.","Opsi simpan otomatis dan daftar browser ada di Connections.","Memory bisa tampil sebagai daftar atau kartu.","Urutan sidebar: Home, Memory, Chats. Chat disebut tempat mentah, Memory versi rapinya.","Sources punya pemilih folder dan pemilih file (di sini disimulasikan). Tempel path jadi opsi cadangan.","Breadcrumb di navbar: Memory / Projects / Mind Place / judul chat. Setiap bagian bisa diklik."])+'</ul></div>'+
-   '<div class="group"><h4>Pertanyaan baru</h4><ol class="small bullets">'+li(["Teks memory (ditulis AI) mengikuti bahasa aplikasi, atau bahasa chat aslinya?","Import transkrip dari file: taruh di Chats (tombol di header) atau di Sources?","Breadcrumb mulai dari bagian (Memory) tanpa kata Home. Cukup, atau mau Home di depan?","Nama aplikasi AI (ChatGPT, Claude, Gemini) tidak diterjemahkan. Setuju?"])+'</ol></div>'+
-   '<p class="xs faint">Semua nama, chat, dan angka adalah data contoh.</p>');
+  openPanel("Draft notes · v2",
+   '<div class="group"><h4>Keputusan yang sudah masuk (11 Nov)</h4><ul class="small bullets">'+li(["<b>Chats</b> diganti nama menjadi <b>Archive / Arsip</b>. Tombol <b>Import</b> (ekspor ChatGPT, Gemini/Takeout, file transkrip) ada di halaman itu.","Breadcrumb dimulai dari <b>Home</b>.","Teks memory mengikuti bahasa aplikasi. Kalau bukan bahasa aslinya, ada label kecil dan tombol 'Lihat versi asli'.","Nama halaman graf bisa kamu pilih sendiri di <b>Settings</b>. Bawaannya Constellation.","Constellation dan Memory boleh kosong sampai ada memory. Empty state-nya sudah dirancang."])+'</ul></div>'+
+   '<div class="group"><h4>Masih terbuka</h4><ol class="small bullets">'+li(["Anggaran performa selain RAM: waktu start, render transkrip panjang, FPS graf (usulan ada di rencana).","Apakah pilihan nama graf perlu juga daftar nama lain atau kolom bebas?","Apakah file ekspor harus bisa di-drag and drop ke halaman Archive, selain lewat tombol Import?"])+'</ol></div>'+
+   '<p class="xs faint">Semua nama, chat, dan angka adalah data contoh. Hasil impor di dialog ini hanya simulasi.</p>');
 }
 
 /* ---------- events ---------- */
@@ -634,7 +657,7 @@ document.addEventListener("click",function(e){
   if(!tg){ if(e.target.id==="scrim"&&!$("#scrim").dataset.locked) closeModal(); return; }
   var a=tg.dataset.act, d=tg.dataset;
   if(a==="nav"){ closeModal(); go(d.h); }
-  else if(a==="up"){ var c=crumbs(); var p=c[c.length-2]; go(p&&p.h?p.h:"chats"); }
+  else if(a==="up"){ var c=crumbs(); var p=c[c.length-2]; go(p&&p.h?p.h:"archive"); }
   else if(a==="prov"){ S.prov=d.v; render(); }
   else if(a==="memTab"){ S.tab=d.v; render(); }
   else if(a==="memView"){ S.view=d.v; render(); }
@@ -660,6 +683,13 @@ document.addEventListener("click",function(e){
   else if(a==="theme"){ if(d.v==="system") document.documentElement.removeAttribute("data-theme"); else document.documentElement.dataset.theme=d.v; render(); }
   else if(a==="lang"){ S.lang=d.v; render(); }
   else if(a==="flip"){ tg.setAttribute("aria-checked",tg.getAttribute("aria-checked")==="true"?"false":"true"); }
+  else if(a==="importOpen"){ S.imp={kind:"chatgpt",file:null}; importDialog(1); }
+  else if(a==="impKind"){ S.imp={kind:d.v,file:null}; importDialog(1); }
+  else if(a==="impPick"){ S.imp.file=IMPK[S.imp.kind][2]; importDialog(1); }
+  else if(a==="impNext"){ importDialog(2); }
+  else if(a==="impBack"){ importDialog(1); }
+  else if(a==="impRun"){ closeModal(); toast(t("imp.done",{n:IMPK[S.imp.kind][3]})); }
+  else if(a==="memOrig"){ S.memOrig=!S.memOrig; render(); }
   else if(a==="lock"){ lockScreen(); }
   else if(a==="unlock"){ $("#scrim").dataset.locked=""; closeModal(); }
   else if(a==="finishSetup"){ S.setup[+d.i]=1; render(); if(S.setup.every(Boolean)) toast(t("setup.done")); }
@@ -671,6 +701,7 @@ document.addEventListener("click",function(e){
 document.addEventListener("click",function(e){
   var a=e.target.closest(".crumbs a[data-tab]"); if(a){ S.tab=a.dataset.tab; }
 });
+document.addEventListener("change",function(e){var el=e.target.closest("[data-act=mapNameSel]");if(el){S.mapName=el.value;render();}});
 $("#toggleSide").addEventListener("click",function(){ var a=$("#app"); a.dataset.sidebar=a.dataset.sidebar==="open"?"closed":"open"; });
 $("#openSearch").addEventListener("click",searchModal);
 $("#openNotes").addEventListener("click",notes);

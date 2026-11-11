@@ -4,25 +4,29 @@ Status: **draft, not claimed, no task created, no code changed.** Written 2026-1
 
 Inputs: owner feedback (`MP-UI-U1-owner-feedback.md`), the clickable wireframe (published as an artifact, v1 with the owner's answers), the UI-09 feature coverage matrix, and a read-only look at the frozen source `77abfa45`.
 
-Binding companion: [UI-PRINCIPLES.md](UI-PRINCIPLES.md) (the "UI soul", pattern catalog and gap protocol for capabilities the guide does not show). In-repo ground truth: `evidence/mp-ui2/wireframe-v1.html` with `manifest.json`.
+Binding companion: [UI-PRINCIPLES.md](UI-PRINCIPLES.md) (the "UI soul", pattern catalog and gap protocol for capabilities the guide does not show). In-repo ground truth: `evidence/mp-ui2/wireframe-v1.html` (revision 2, 2026-11-11, see `manifest.json`). Feature mapping: [MP-UI2-placement-matrix.md](MP-UI2-placement-matrix.md).
 
 Scope: redesign and re-implement the presentation layer **on the current stack (Tauri + TypeScript, WebView2)**. A native-UI port (GPUI) is explicitly **out of scope** and deferred; see "Deferred decision" at the end.
 
 ## 1. Decisions already made by the owner
 
 1. Setup merges into Home and **hides itself when finished**.
-2. The graph page gets a new, evocative name (working name **Constellation**; alternatives in the wireframe: Atlas, Mindscape, Synapse, Hive).
+2. The graph page is called **Constellation** by default, and **the user can choose another name in Settings** (Atlas, Mindscape, Synapse, Hive offered in the prototype).
 3. Search must reach **memory and chats** (and files). Memory results come first.
 4. **EN + ID from the start**, architecture for more languages.
 5. Saving options (automatic save, browser registration) live in **Connections**.
 6. Memory offers **both list and cards**.
-7. Navigation order is **memory first, then chats** (chats are the messy raw place).
+7. Navigation order is **memory first, then the archive**. "Chats" is renamed **Archive** (ID: Arsip): the raw, messy place that holds browser-saved chats **and imports**. Import (ChatGPT export, Gemini/Google Takeout, transcript file) lives in the Archive.
 8. Sources gets a **native folder picker and file picker**.
 9. A **breadcrumb** appears in the top bar because of nested links.
 10. Sidebar toggle lives in the **top bar**; the sidebar header slot is the logo only.
 11. Chat detail looks like ChatGPT/Claude; metadata sits behind an **Info** button (aside/dialog), grouped.
 12. Technical text is hidden by default (Details / technical mode). One type scale and one spacing scale across all pages.
 13. The graph is derived **only from curated memory**, renders immediately, has **no seed input**, and shows nothing (an empty state) when no memory exists. Clicking a node shows the curated memory and the raw chats behind it.
+14. The breadcrumb **starts at Home**.
+15. Curated memory text follows the app language and can be translated (with a "translated from" note and View original).
+16. **Memory may be empty for now.** Memory is created by importing exports first and then asking Codex/Claude Code to curate; empty Constellation and Memory states are acceptable until then.
+17. Performance budget given by the owner: Task Manager memory of the whole app (main plus WebView2 processes) above **1 GB is a warning**, above **2 GB is a failure**, even with a large curated memory. Other budgets are proposed in section 6a.
 
 ## 2. What the plan must not break (carry-over constraints)
 
@@ -51,7 +55,7 @@ Scope: redesign and re-implement the presentation layer **on the current stack (
 | G2 | **Memory to source chats** resolution (opaque evidence ID to archive conversation/snapshot). | Memory detail "Chats behind this", Constellation node panel | If it cannot be built now, the UI shows that section only where a mapping exists and hides it otherwise. It must never guess. |
 | G3 | **Native folder and file picker** command + minimal capability. | Sources | Returns paths only; selection still goes through Stage, Approve, Index; revoke semantics unchanged. Needs a security review task. |
 | G4 | **Language preference** storage. | i18n | Small; frontend storage is probably enough, audit confirms. |
-| G5 | **Memory creation path** (product): who creates memories and when. | Whole redesign feels empty without it | Not a UI task. Options: enable MCP write for a trusted local client, or an in-app "curate from chats" flow. Owner decision. |
+| G5 | **Memory creation path** (product). **Owner decision 2026-11-11:** import ChatGPT/Gemini exports first, then Codex/Claude Code create curated memory; empty states are fine meanwhile. | Whole redesign feels empty without it | Chain: (1) import core, which exists on branch `feat/mp-import-core-01` (lossless ChatGPT export streaming, Gemini Takeout parser; 10 commits ahead of `main`, no PR when checked on 2026-11-11); (2) scoped MCP write authority (MP-7MCP-01, PR #153, Review/HOLD on the board). Neither is a UI task, both gate real memory. |
 
 ## 5. Strategy
 
@@ -73,7 +77,7 @@ Sizes are relative (S/M/L), not time estimates. "Locks" are exclusive logical re
 | UI2-03 | **Design system v2**: tokens (one type scale, one spacing scale), light/dark, density; primitives (button, chip, tag, switch, segmented, list row, card, empty state, banner, dialog, aside, breadcrumb, toast); gallery page for visual regression; **UI rules lint** (tokens only, no raw strings, type and spacing scales only, no technical identifiers outside Details) wired into `verify:repo` | Cloud | UI2-00 | `src/ui2/ui-kit`, `scripts/verify-ui-rules.mjs` | M | Gallery renders in light/dark, EN/ID, three widths; axe checks pass; the rules lint fails on a seeded violation |
 | UI2-04 | **Shell v2**: top bar (toggle, breadcrumb, search trigger, language, lock), logo-only sidebar slot, 7 destinations, nested router and breadcrumb model, responsive behaviour, focus management; reuses security gate and lock fences | Cloud | UI2-02, UI2-03 | `src/ui2/shell`, route table | L | Navigation, breadcrumbs, lock/unlock, collapse, small windows tested; v2 flag works |
 | UI2-05 | **Memory** (list and cards, detail page, tabs Topics/Projects/People, empty states) | Cloud | UI2-04 | `src/ui2/memory` | M | Real data via existing inspection commands; read-only; coverage matrix rows updated |
-| UI2-06 | **Chats and chat reader**: chat-style thread, Info aside (grouped), copy/export, partial-capture notice, provider filter, long-transcript behaviour kept; reuses the sanitizer unchanged | Cloud | UI2-04 | `src/ui2/chats` (touches reader logic, high risk) | L | Existing reader tests still pass; new visual and keyboard tests |
+| UI2-06 | **Archive and chat reader** (formerly Chats), with the **Import** entry: chat-style thread, Info aside (grouped), copy/export, partial-capture notice, provider filter, long-transcript behaviour kept; reuses the sanitizer unchanged | Cloud | UI2-04 | `src/ui2/archive` (touches reader logic, high risk) | L | Existing reader tests still pass; new visual and keyboard tests |
 | UI2-07 | **Constellation**: memory-only graph, immediate render, empty state, node aside, accessible node list, bounded | Cloud | UI2-04, G1 (and G2 for the chat list) | `src/ui2/constellation` | M | Works on real data or documented empty state; no seed input |
 | UI2-08 | **Sources**: add folder / add files via picker, review step, status, remove access | Cloud | UI2-04, G3 | `src/ui2/sources` | M | Stage, Approve, Index flow unchanged; picker cannot grant access on its own |
 | UI2-09 | **Connections**: provider capture setup, automatic save, browser registration, AI-access flow, client list grouped (active / revoked), advanced hosted connection collapsed | Cloud | UI2-04 | `src/ui2/connections` | M | Consent and revoke semantics identical to today; no secrets persisted |
@@ -87,6 +91,21 @@ Sizes are relative (S/M/L), not time estimates. "Locks" are exclusive logical re
 Backend tasks from the audit (G1 to G4) are separate cards with their own review and tests; G5 is a product decision.
 
 Dependency picture: `00 -> 01`; `00 -> 02, 03 -> 04 -> (05, 06, 07, 08, 09, 10) -> 11 -> 12 -> L0 -> L1 -> U1`. After the shell lands, pages 05 to 10 are parallelizable (separate modules); 07 waits on G1, 08 waits on G3. The shell, the route table and the i18n/ui-kit folders are single-writer.
+
+### 6a. Performance budgets (owner-given and proposed; measured in UI2-L1)
+
+Measured as the **Memory** shown in Task Manager for the whole app (the Mind Place process plus its WebView2 child processes). Reference from the owner's earlier experiment: WebView2 idle about 392 MB across 6 processes, about 525 MB peak in a 1,000-node graph test.
+
+| Budget | Value | Source |
+| --- | --- | --- |
+| Idle (unlocked, Home) | target at most 500 MB | proposed, from the reference above |
+| Warning | above 1 GB: investigate | **owner** ("more than 1 GB is already crazy") |
+| Failure | above 2 GB, even in the largest scenario (large synthetic corpus, many memories, a very long transcript open) | **owner** |
+| Cold start | lock screen visible within 2 seconds | proposed, owner to confirm |
+| Long transcript | a 10,000-message chat shows its first screen within 1 second and scrolls smoothly | proposed, owner to confirm |
+| Constellation | at least 60 FPS pan/zoom at 120 nodes (the current bound) | proposed, owner to confirm |
+
+If a budget is missed on the WebView2 build, the native-UI (GPUI) question reopens with that evidence.
 
 ## 7. Verification baseline for every UI2 task
 
@@ -117,6 +136,6 @@ Not part of this plan. The owner has an existing GPUI experiment (`gemini-rust-g
 
 ## 10. Immediate next steps
 
-1. Owner finishes wireframe corrections and answers the open questions (R7, G5, Constellation name).
+1. Owner approves the placement matrix, confirms the remaining budgets (section 6a) and merges this PR. Decided on 2026-11-11: Constellation (user-selectable), Archive, Import in the Archive, Home in the breadcrumb, memory text translatable, empty memory acceptable.
 2. Record UI2-00 as the design-lock gate; then create UI2-01..U1 cards on the execution board following the Now / Up Next rules (only direct successors of Now are shown).
 3. Cloud agents claim UI2-01 first (read-only audit), then UI2-02 and UI2-03 in parallel.

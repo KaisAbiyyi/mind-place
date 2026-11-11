@@ -53,17 +53,17 @@ Do these in order. If a step fails, **stop and mark the task `BLOCKED-DESIGN`** 
 | Empty | Ring icon, title, one or two sentences, **one** action. | Says what will appear and why it is empty. Never a blank area. |
 | Warning / partial | Single-sentence banner with a "Why?" link that opens the Info aside. | One banner per view. |
 | Progress / long running | Inline tag with percentage, and Stop where stopping is safe. | Never block the whole screen. |
-| Search | Command-palette dialog, scope chips (Everything, Memory, Chats, Files), results grouped with **Memory first**, select-to-share bar. | Advanced retrieval options sit behind a disclosure. |
+| Search | Command-palette dialog, scope chips (Everything, Memory, Archive, Files), results grouped with **Memory first**, select-to-share bar. | Advanced retrieval options sit behind a disclosure. |
 
 Anything not in this table is not allowed until the table is extended by the owner.
 
 ## 6. Destination map (where things live)
 
-Seven destinations, in this order: **Home, Memory, Chats, Constellation (working name), Sources, Connections, Settings.**
+Seven destinations, in this order: **Home, Memory, Archive, Constellation, Sources, Connections, Settings.** (Indonesian: Beranda, Memori, Arsip, Constellation, Sumber, Koneksi, Pengaturan.) The graph page name defaults to Constellation and the user can pick another name in Settings; it is a proper noun and is not translated.
 
 - **Home**: latest memories first, recent chats, and the setup checklist **only until it is complete** (then it disappears; Settings can bring it back).
 - **Memory**: the tidy, curated knowledge. Topics, Projects, People. Read-first.
-- **Chats**: the raw saved conversations (the "messy place"). Reader, copies, export, import of transcripts (placement pending owner decision).
+- **Archive** (formerly "Chats"): the raw, untouched conversations: saved from the browser or imported from ChatGPT/Gemini exports and transcript files. Reader, saved copies, export. The **Import** button lives here. It is the "messy place" that Memory tidies.
 - **Constellation**: graph of curated memory only; empty state when there is no memory; no seed input.
 - **Sources**: folders and files Mind Place may read; add via native pickers.
 - **Connections**: how chats get in (browser capture, automatic save, registration) and which AI apps may read memory. Advanced hosted connection is collapsed here.
@@ -78,7 +78,7 @@ When a new capability fits two places, choose the one where a person would look 
 - **Spacing scale** (px): 4, 8, 12, 16, 24, 32, 48. Use layout `gap`, not ad-hoc margins.
 - **Radius**: 7 (controls), 10 (cards), 14 (dialogs). **Shadow** only on floating layers (aside, dialog, toast).
 - **Page width**: 880 for lists and dashboards, 720 for reading and settings. Aside 400. Dialog 620. Sidebar 232 (64 collapsed). Top bar 56.
-- **Shell**: sidebar header holds only the logo; the toggle lives in the top bar; the top bar also holds the breadcrumb, search, language, lock. Breadcrumb shows the nested path and every part is a link.
+- **Shell**: sidebar header holds only the logo; the toggle lives in the top bar; the top bar also holds the breadcrumb, search, language, lock. The breadcrumb **always starts at Home** and shows the nested path (for example `Home > Memory > Projects > Mind Place > chat title`); every part except the last is a link.
 - **Density**: one primary action per page head or dialog. No more than one row of controls above a list. Prefer fewer, larger targets over many small ones. If a screen needs a toolbar of more than four controls, it is doing too much.
 - **Motion**: minimal; respect reduced motion.
 - **Forbidden**: new hex colors, new font sizes, gradients, nested cards, cards inside cards inside cards, icons-as-decoration, emoji, tiny inputs, helper text beside inputs, text-only walls longer than about 60 characters per line.
@@ -87,6 +87,7 @@ When a new capability fits two places, choose the one where a person would look 
 
 - Every user-visible string goes through the i18n layer. **English and Indonesian ship together**; adding a language means adding a catalog, not touching components. Plurals and dates use `Intl`. Never build sentences by concatenation.
 - Product names (ChatGPT, Claude, Gemini, Mind Place) are not translated. The owner's own chat text is never translated.
+- **Curated memory text follows the app language.** It is AI-written, derived text, so it may be shown translated: the curating agent writes per-language versions or a translation is produced at display time. When the shown language differs from the stored original, the page says so ("Translated from English") and offers **View original**. Provenance and the original text are never replaced.
 - Write from the person's side: what they recognise, not how the system is built. Active voice. A button says exactly what happens. Errors say what went wrong and what to do next, without apology.
 - Translate technical vocabulary into human words (glossary):
 
