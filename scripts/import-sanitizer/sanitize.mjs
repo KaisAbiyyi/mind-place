@@ -182,13 +182,17 @@ class FileSink {
   constructor(output) { this.output = output; this.partial = `${output}.partial`; }
   async add(name, spool) { await fs.promises.copyFile(spool, this.partial, fs.constants.COPYFILE_EXCL); }
   async finish() { return { entries: 1 }; }
-  async publish() { await fs.promises.rename(this.partial, this.output); }
+  async publish(force) { await publishAtomically(this.partial, this.output, force); }
   async discard() { await fs.promises.rm(this.partial, { force: true }); }
 }
 
 class DirSink {
   constructor(output) { this.output = output; this.partial = `${output}.partial`; }
-  async init() { await fs.promises.mkdir(this.partial, { mode: 0o700 }); }
+  async init() {
+    await fs.promises.mkdir(this.partial, { mode: 0o700 });
+    // Lets a later --force recognize this directory as sanitizer output it may replace.
+    await fs.promises.writeFile(path.join(this.partial, OUTPUT_MARKER), 'mind-place-import-sanitizer output\n', { mode: 0o600 });
+  }
   async add(name, spool) {
     const target = path.join(this.partial, ...name.split('/'));
     if (!target.startsWith(this.partial + path.sep)) throw new SanitizerError('E_UNSAFE_NAME', 'Unsafe output name');
@@ -196,7 +200,7 @@ class DirSink {
     await fs.promises.copyFile(spool, target, fs.constants.COPYFILE_EXCL);
   }
   async finish() { return {}; }
-  async publish() { await fs.promises.rename(this.partial, this.output); }
+  async publish(force) { await publishAtomically(this.partial, this.output, force); }
   async discard() { await fs.promises.rm(this.partial, { recursive: true, force: true }); }
 }
 
@@ -208,35 +212,98 @@ class ZipSink {
   }
   async addDirectory(name) { await this.writer.addDirectory(name); }
   async finish() { return this.writer.finish(); }
-  async publish() { await fs.promises.rename(this.partial, this.output); }
+  async publish(force) { await publishAtomically(this.partial, this.output, force); }
   async discard() { this.writer.abort(); await fs.promises.rm(this.partial, { force: true }); }
 }
 
 // ---------------------------------------------------------------- run
 
-function assertPaths(input, output) {
-  const resolvedIn = path.resolve(input);
-  const resolvedOut = path.resolve(output);
-  if (resolvedIn === resolvedOut || resolvedOut.startsWith(resolvedIn + path.sep)) {
-    throw new SanitizerError('E_OUTPUT_INSIDE_INPUT', 'Output must not be the input or inside it');
+const OUTPUT_MARKER = '.mp-sanitizer-output';
+const fold = value => (process.platform === 'win32' || process.platform === 'darwin' ? value.toLowerCase() : value);
+
+/** Canonical path of something that may not exist yet: real path of the nearest existing ancestor + the rest. */
+async function resolveReal(target) {
+  const absolute = path.resolve(target);
+  try {
+    return await fs.promises.realpath(absolute);
+  } catch (error) {
+    if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') throw error;
+    const parent = path.dirname(absolute);
+    if (parent === absolute) throw error;
+    return path.join(await resolveReal(parent), path.basename(absolute));
   }
 }
 
+/**
+ * Refuses a write target that is the input, inside it, or an ANCESTOR of it, after resolving
+ * symbolic links (and, on Windows, junctions) in every existing component.
+ */
+export async function assertOutputDoesNotOverlap(input, target, what = 'Output') {
+  const realIn = fold(await resolveReal(input));
+  const realTarget = fold(await resolveReal(target));
+  const within = (child, parent) => child === parent || child.startsWith(parent.endsWith(path.sep) ? parent : parent + path.sep);
+  if (within(realTarget, realIn) || within(realIn, realTarget)) {
+    throw new SanitizerError('E_OUTPUT_OVERLAPS_INPUT', `${what} must not be the input, inside it, or a directory that contains it`);
+  }
+}
+
+/** A report path must not clobber the input, and must not be the sanitized output. */
+export async function assertReportPath(input, output, report) {
+  await assertOutputDoesNotOverlap(input, report, 'Report');
+  if (output && fold(await resolveReal(output)) === fold(await resolveReal(report))) {
+    throw new SanitizerError('E_REPORT_IS_OUTPUT', 'The report path must differ from the output path');
+  }
+}
+
+async function assertReplaceable(output, stat) {
+  if (stat.isSymbolicLink()) throw new SanitizerError('E_OUTPUT_SYMLINK', 'Refusing to replace a symbolic link');
+  if (stat.isDirectory()) {
+    const marked = await fs.promises.lstat(path.join(output, OUTPUT_MARKER)).then(m => m.isFile(), () => false);
+    if (!marked) throw new SanitizerError('E_OUTPUT_NOT_REPLACEABLE', 'Refusing to replace a directory that was not created by this tool');
+  } else if (!stat.isFile()) {
+    throw new SanitizerError('E_OUTPUT_NOT_REPLACEABLE', 'Refusing to replace something that is not a regular file');
+  }
+}
+
+/**
+ * Publishes a fully written and verified output. An existing output is moved aside first and
+ * removed only after the replacement is in place, so a failure never destroys it.
+ */
+async function publishAtomically(partial, output, force) {
+  const existing = await fs.promises.lstat(output).catch(() => null);
+  if (!existing) { await fs.promises.rename(partial, output); return; }
+  if (!force) throw new SanitizerError('E_OUTPUT_EXISTS', 'Output already exists; pass --force to replace it');
+  await assertReplaceable(output, existing);
+  const aside = `${output}.replaced-${process.pid}-${Date.now()}`;
+  await fs.promises.rename(output, aside);
+  try {
+    await fs.promises.rename(partial, output);
+  } catch (error) {
+    await fs.promises.rename(aside, output);
+    throw error;
+  }
+  await fs.promises.rm(aside, { recursive: true, force: true }).catch(() => {});
+}
+
 export async function sanitize({
-  input, output, provider = 'auto', salt, timestamps = 'day', keepLabels = [], keepKeys = [],
-  dryRun = false, force = false, ownerHints = false,
+  input, output, provider = 'auto', salt, timestamps = 'day', keepLabels = [], keepEnums = [], keepClasses = [],
+  dryRun = false, force = false, ownerHints = false, leakLimit,
 }) {
   if (!input) throw new SanitizerError('E_USAGE', 'An input path is required');
   const workRoot = dryRun ? os.tmpdir() : path.dirname(path.resolve(output ?? '.'));
   if (!dryRun) {
     if (!output) throw new SanitizerError('E_USAGE', 'An output path is required');
-    assertPaths(input, output);
-    if (fs.existsSync(output) && !force) throw new SanitizerError('E_OUTPUT_EXISTS', 'Output already exists; pass --force to replace it');
-    if (fs.existsSync(output) && force) await fs.promises.rm(output, { recursive: true, force: true });
-    if (fs.existsSync(`${output}.partial`)) await fs.promises.rm(`${output}.partial`, { recursive: true, force: true });
+    // All checks happen before anything is created, moved or deleted.
+    await assertOutputDoesNotOverlap(input, output);
+    const existing = await fs.promises.lstat(output).catch(() => null);
+    if (existing && !force) throw new SanitizerError('E_OUTPUT_EXISTS', 'Output already exists; pass --force to replace it');
+    if (existing) await assertReplaceable(output, existing);
+    if (await fs.promises.lstat(`${output}.partial`).catch(() => null)) {
+      throw new SanitizerError('E_OUTPUT_EXISTS', 'A leftover .partial output exists; remove it first');
+    }
   }
-  const leak = new LeakRegistry();
-  const rules = new Rules({ salt, timestamps, keepLabels, keepKeys, leak });
+  const leak = new LeakRegistry({ maxHashes: leakLimit });
+  const rules = new Rules({ salt, timestamps, keepLabels, keepEnums, keepClasses, leak });
   const source = await openSource(input);
   const outputPath = dryRun ? path.join(await fs.promises.mkdtemp(path.join(workRoot, 'mp-sanitize-dry-')), 'out') : output;
   const sink = source.kind === 'zip' ? new ZipSink(outputPath) : source.kind === 'dir' ? new DirSink(outputPath) : new FileSink(outputPath);
@@ -306,14 +373,19 @@ export async function sanitize({
       checks.leak = 'FAIL';
       throw Object.assign(new LeakError(checks.leakCount), { exitCode: 3, checks });
     }
+    if (leak.partial) {
+      // Tracking overflowed: part of the input was never checked, so this is not a pass.
+      checks.leak = 'INCOMPLETE';
+      throw Object.assign(new SanitizerError('E_LEAK_COVERAGE', 'Leak tracking overflowed; verification is incomplete and the output was not published', 3), { checks });
+    }
     if (checks.structure === 'FAIL') {
       throw Object.assign(new SanitizerError('E_STRUCTURE', 'Sanitized output does not have the structure of the input', 4), { checks });
     }
-    if (!dryRun) await sink.publish();
+    if (!dryRun) await sink.publish(force);
     ok = true;
 
     const failed = members.filter(member => member.status.startsWith('failed'));
-    const report = buildReport({ rules, leak, members, checks, source, provider, written, dryRun, timestamps, salt });
+    const report = buildReport({ rules, leak, members, checks, source, provider, written, dryRun, timestamps });
     return {
       exitCode: failed.length ? 2 : 0,
       report,
@@ -330,7 +402,7 @@ export async function sanitize({
   }
 }
 
-function buildReport({ rules, leak, members, checks, source, provider, written, dryRun, timestamps, salt }) {
+function buildReport({ rules, leak, members, checks, source, provider, written, dryRun, timestamps }) {
   const unknown = {};
   const out = members.map(member => {
     const summary = member.output ?? null;
@@ -359,7 +431,7 @@ function buildReport({ rules, leak, members, checks, source, provider, written, 
     inputKind: source.kind,
     outputKind: source.kind,
     skippedSymbolicLinks: source.skipped.symlinks,
-    options: { timestamps, salt: salt ? 'custom' : 'default', keepLabels: rules.keepLabels.length - 1 },
+    options: { timestamps, pseudonymKey: rules.saltSource, keepLabels: rules.keepLabels.length - 1, keepEnums: [...rules.extraEnums].reduce((n, [, values]) => n + values.size, 0) },
     totals: {
       members: members.length,
       jsonMembers: members.filter(m => m.kind === 'json').length,
@@ -370,7 +442,15 @@ function buildReport({ rules, leak, members, checks, source, provider, written, 
       zip64: Boolean(written.zip64),
     },
     counters: rules.counters,
-    keptValues: rules.keptEnumReport(),
+    // Structure fidelity is not a privacy qualification. PASS below means "nothing outside the
+    // allow-lists survived"; whatever the allow-lists keep is listed here for the owner to judge.
+    qualification: {
+      structureFidelity: checks.structure,
+      leakCheck: checks.leak,
+      contentFreeAssertion: 'NOT_ASSERTED',
+      meaning: 'PASS means no input string of 8+ characters outside the allow-lists survived and the structure is unchanged. It is not a guarantee of anonymity: the residual metadata below stays in the output.',
+    },
+    residualMetadata: rules.residualReport(),
     checks: {
       structure: checks.structure,
       leak: checks.leak,

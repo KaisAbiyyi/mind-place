@@ -83,7 +83,8 @@ export class LeakError extends Error {
 }
 
 export class LeakRegistry {
-  constructor() {
+  constructor({ maxHashes = MAX_TRACKED_HASHES } = {}) {
+    this.maxHashes = maxHashes;
     this.protectedSet = new HashSet64();
     this.keptSet = new HashSet64();
     this.partial = false;
@@ -92,7 +93,7 @@ export class LeakRegistry {
 
   #add(set, text) {
     const [hi, lo] = hash64(text);
-    if (set === this.protectedSet && set.size >= MAX_TRACKED_HASHES) {
+    if (set === this.protectedSet && set.size >= this.maxHashes) {
       this.partial = true;
       return;
     }

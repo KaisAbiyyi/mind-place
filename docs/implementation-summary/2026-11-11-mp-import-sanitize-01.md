@@ -30,7 +30,7 @@ Status: **READY FOR REVIEW**. Neither acceptance nor a merge request. Only the r
 | 3 | Usage documented; running on a real export recorded as NOT_RUN | README, CLI epilogue ("record it as NOT_RUN until done") and this document: **real export run: NOT_RUN** |
 | 4 | Repository baseline passes | see Verification |
 
-Other requirements from the card: deterministic output (byte-identical zips across runs, `output is deterministic…`); no network (`the sanitizer tree is offline…` forbids network, process, eval and `console.*` APIs); no content logging (CLI test asserts stdout, stderr and the report contain none of the planted strings); a leak check that **fails the run** (fault-injection test: a rule that passes a title through makes the run exit 3 and leave no output, `.partial` file or spool); structure check that fails the run (fault-injection test, exit 4); stripped media (tiny valid stand-ins of the same type, media never read).
+Other requirements from the card: reproducible output (byte-identical zips across runs **with an owner-supplied key**; the default is a random key per run, see SAN-F03); no network (`the sanitizer tree is offline…` forbids network, process, eval and `console.*` APIs); no content logging (CLI test asserts stdout, stderr and the report contain none of the planted strings); a leak check that **fails the run** (fault-injection test: a rule that passes a title through makes the run exit 3 and leave no output, `.partial` file or spool); structure check that fails the run (fault-injection test, exit 4); stripped media (tiny valid stand-ins of the same type, media never read).
 
 ## Review findings that shaped the tool
 
@@ -40,16 +40,32 @@ Other requirements from the card: deterministic output (byte-identical zips acro
 4. **Fidelity.** End-tag case was normalized while start-tag case was kept; both are now preserved. Placeholder length classes round **down**, so the sanitized copy is never larger than the original (measured 151 MB in, 109 MB out).
 5. **Transparency.** Enum-like values and known hosts are kept by design and exempt from the leak check, so the report now lists every kept enum value by key for the owner to review.
 
+## Re-review round 1 — SAN-F01 … SAN-F05
+
+Independent security review ([comment](https://github.com/KaisAbiyyi/mind-place/pull/166#issuecomment-6802603764)) found three P1 and two P2 issues in `bda9ad8`. All five are fixed with regression tests; the review's recommendation of a **separate sanitizer PR** is followed (PR #166 received only the FIX-01 commits).
+
+| Finding | Correction | Regression test |
+| --- | --- | --- |
+| **SAN-F01 (P1)** `--force` could delete the original: `--input /exports/original.zip --output /exports --force` removed the output directory, which contained the input. | Overlap is checked on **canonical** paths (symlinks resolved in every existing component, case-folded on Windows/macOS) and refuses the input, anything inside it **and any ancestor of it**, before anything is created or deleted. Nothing is removed up front: the old output is moved aside, the verified replacement swapped in, and the old one removed last (restored if the swap fails). A directory is replaced only if this tool created it (marker file); symlinks and unrelated directories are refused. `--report` is checked the same way before the run. | `SAN-F01: an output that contains the input is refused…` (file under output dir, trailing slash, `..`, grandparent, symlinked output and symlinked input), `…--force never destroys the existing output unless the replacement is complete and verified` (leak failure keeps the old output; no `.partial` or aside copy), `…only replaces sanitizer output, never an unrelated directory or a symlink`, `…the report path cannot clobber the input or the output` |
+| **SAN-F02 (P1)** Broad allow-lists: any regex-shaped `author.name`, enum-key value, class or attribute survived and was exempt from the leak check. | Default-deny vocabularies: enum values are kept only from a built-in provider vocabulary (roles, content types, statuses, known tool names, model-slug families, MIME types, …); `author.name` only for known tool names; HTML class tokens only from the Takeout/Material Design Lite vocabulary (others get a same-shape pseudonym); `lang`/`dir`/`charset`/`type`/`role`/`target`/`rel` only with known values. Replaced enum-shaped values are counted, never listed. Explicit, reviewed opt-in via `--keep-enum key=value` and `--keep-class`. | `SAN-F02: private author names, unknown enum values, custom classes and attributes are replaced, not kept` (private author name, `x-acme-secret-type`, custom `recipient`/`channel`/`language`/`mime_type`/model slug, custom classes, `lang="xx-Private"`, custom `role`, `title`, `data-*`, `id`), plus the opt-in path |
+| **SAN-F03 (P1)** Public default HMAC key made low-entropy identifiers enumerable offline. | The default key is a fresh random 256-bit secret per run, never written, logged or reported. Reproducibility is an explicit owner opt-in (`--salt-file` / environment). The report records only `pseudonymKey: random-per-run` or `owner-supplied`. | `SAN-F03: the default pseudonym key is a fresh random secret…` (40 sequential identifiers; two runs differ; an attacker using the former public key finds zero matches; no original identifier, key or mapping in the output or report) |
+| **SAN-F04 (P2)** A leak-tracking overflow was reported as `partial` coverage but still published. | Fail closed: `E_LEAK_COVERAGE`, exit 3, `checks.leak = INCOMPLETE`, no output. | `SAN-F04: if leak tracking overflows the run fails closed and publishes nothing` (via an internal `leakLimit` option) |
+| **SAN-F05 (P2)** Structure fidelity was conflated with a privacy qualification; kept metadata was not reported as residual. | The report has `qualification` (`contentFreeAssertion: NOT_ASSERTED`, with an explicit meaning of PASS) and `residualMetadata` (member names, enum values, HTML class tokens and attribute values, link hosts, timestamp precision, structural labels). The CLI prints a **RESIDUAL METADATA** block and its help and the README say PASS is not an anonymity guarantee. | `SAN-F05: the report separates structure fidelity from privacy and lists the residual metadata` |
+
+Also fixed while doing this: a class attribute made only of known tokens survived as a whole string that was not registered as kept (found by the leak check itself); the parser-compatibility fixtures were regenerated with a fixed test key and the Rust cross-check still passes.
+
+Still **NOT_RUN** and still required by the review: running the CLI **on Windows** (directory, symlink/reparse-point and `--force` failure paths, zip fixtures; path handling is covered here only on Linux, with Windows-reserved-character and backslash-separator unit tests), the owner-local trial on a **real** export, and exact-head hosted CI. A reviewer should also decide whether the built-in vocabularies are the right size: a smaller vocabulary is safer and keeps less parser-relevant structure (for example a real class that the Gemini parser treats specially is replaced unless you pass `--keep-class`).
+
 ## Verification
 
 Environment: Linux x86_64, Node 22.23, Cargo 1.97. Synthetic data only.
 
 | Command | Result |
 | --- | --- |
-| `node --import tsx --test test/import-sanitizer.test.mjs` | PASS: 29 passed, 0 failed |
-| `cargo test --locked -p mind-place-archive --tests` | PASS: 119 passed, 0 failed, 0 ignored (includes the 3 new parser cross-check tests) |
-| `npm run test:web` | PASS: 300 tests, 298 passed, 0 failed, 2 skipped (Windows-only) |
-| `npm run test:rust` | PASS: 350 passed, 0 failed, 1 ignored (existing qualification-ignored test) |
+| `node --import tsx --test test/import-sanitizer.test.mjs` | PASS: 37 passed, 0 failed (29 before re-review round 1) |
+| `cargo test --locked -p mind-place-archive --tests` | PASS: 124 passed, 0 failed, 0 ignored (includes the 3 parser cross-check tests and the 5 FIX-F01 tests) |
+| `npm run test:web` | PASS: 308 tests, 306 passed, 0 failed, 2 skipped (Windows-only) |
+| `npm run test:rust` | PASS: 355 passed, 0 failed, 1 ignored (existing qualification-ignored test) |
 | `cargo fmt --all -- --check`, `npm run verify:repo`, `npm run typecheck`, `node scripts/verify-workflow-security.mjs`, `git diff --check` | PASS |
 | Run on a **real** ChatGPT/Gemini export | **NOT_RUN** (owner-local step) |
 | The tool on Windows | **NOT_RUN** (verified on Linux only; member names are hardened for Windows-reserved characters and backslash separators by a unit test) |

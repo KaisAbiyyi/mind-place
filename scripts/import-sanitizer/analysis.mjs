@@ -6,7 +6,7 @@
 //
 // The inventory describes the *sanitized output only*, so it is safe to share by construction.
 import { DistinctCounter } from './leak-check.mjs';
-import { CLOCK_NODE, isDataKey, isIdContainerKey, isIdKey, isIdValue } from './rules.mjs';
+import { CLOCK_NODE, isDataKey, isIdContainerKey, isIdKey, isIdValue, isKnownClassToken } from './rules.mjs';
 import { jsonStrings, rewriteJson } from './json-stream.mjs';
 import { htmlStrings, rewriteHtml } from './html-stream.mjs';
 
@@ -83,6 +83,7 @@ export class HtmlStructure {
     this.tags = new Map();
     this.attributes = new Map();
     this.classes = new Map();
+    this.unknownClassTokens = new DistinctCounter(); // pseudonymized in the output, so only their number is comparable
     this.hosts = new Map();
     this.counts = { textNodes: 0, clockNodes: 0, labelNodes: 0, comments: 0, rawText: 0, declarations: 0, endTags: 0 };
   }
@@ -93,7 +94,12 @@ export class HtmlStructure {
       end: () => { this.counts.endTags++; },
       attr: (_tag, name, value) => {
         bump(this.attributes, name);
-        if (name === 'class') for (const token of value.split(/\s+/).filter(Boolean)) bump(this.classes, token);
+        if (name === 'class') {
+          for (const token of value.split(/\s+/).filter(Boolean)) {
+            if (isKnownClassToken(token)) bump(this.classes, token);
+            else { bump(this.classes, '*'); this.unknownClassTokens.add(token); }
+          }
+        }
         if (name === 'href' || name === 'src') {
           const host = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)/i.exec(value)?.[1];
           if (host) bump(this.hosts, host.toLowerCase());
@@ -118,6 +124,7 @@ export class HtmlStructure {
       tags: sorted(this.tags),
       attributes: sorted(this.attributes),
       classTokens: sorted(this.classes),
+      distinctUnknownClassTokens: this.unknownClassTokens.size,
       linkHosts: sorted(this.hosts),
       ...this.counts,
       truncated: [this.tags, this.attributes, this.classes, this.hosts].some(map => map.overflow === true),

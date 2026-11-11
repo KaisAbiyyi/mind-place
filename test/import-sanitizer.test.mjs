@@ -111,9 +111,10 @@ test('timestamps keep their representation and lose the time of day', () => {
 
 test('JSON rewriting is independent of how the input is chunked and keeps layout byte-for-byte', async () => {
   const source = '[ { "id" : "12345678-1234-4a23-b123-123456789abc",\n  "title":"Private \\"quoted\\" caf\\u00e9 title", "n": [1, 2.50, -3e2, true, null, {}] } ,\n\n 7 ]';
-  const whole = await collect(rewriteJson(bytesIn(source, 1 << 20), new Rules(), { multiRoot: false }));
+  const key = () => new Rules({ salt: 'chunking-test-key' });
+  const whole = await collect(rewriteJson(bytesIn(source, 1 << 20), key(), { multiRoot: false }));
   for (const size of [1, 2, 3, 7, 64]) {
-    assert.equal(await collect(rewriteJson(bytesIn(source, size), new Rules())), whole, `chunk size ${size}`);
+    assert.equal(await collect(rewriteJson(bytesIn(source, size), key())), whole, `chunk size ${size}`);
   }
   JSON.parse(whole);
   assert.ok(whole.includes('"n": [1, 2.50, -3e2, true, null, {}] }'), 'numbers, spacing and literals are untouched');
@@ -132,10 +133,12 @@ test('malformed JSON fails with a code and never quotes the input', async () => 
 });
 
 test('HTML scanning is independent of chunking and preserves tags, quoting and comments', async () => {
-  const html = '<!doctype html><DIV class=\'a b\' data-x=unquoted hidden><p>1 < 2 and a&amp;b</p><!-- note: Zanzibar --><br/><script>if (a<b) {document.write("<div>")}</script><a href="https://example.org/private">go</a></DIV>';
-  const whole = await collect(rewriteHtml(bytesIn(html, 1 << 20), new Rules()));
-  for (const size of [1, 2, 5, 11]) assert.equal(await collect(rewriteHtml(bytesIn(html, size), new Rules())), whole, `chunk size ${size}`);
-  assert.ok(whole.includes("<DIV class='a b' data-x=") && whole.includes(' hidden>'), 'attribute quoting and valueless attributes are kept');
+  const html = '<!doctype html><DIV class=\'outer-cell secret-class\' data-x=unquoted hidden><p>1 < 2 and a&amp;b</p><!-- note: Zanzibar --><br/><script>if (a<b) {document.write("<div>")}</script><a href="https://example.org/private">go</a></DIV>';
+  const key = () => new Rules({ salt: 'chunking-test-key' });
+  const whole = await collect(rewriteHtml(bytesIn(html, 1 << 20), key()));
+  for (const size of [1, 2, 5, 11]) assert.equal(await collect(rewriteHtml(bytesIn(html, size), key())), whole, `chunk size ${size}`);
+  assert.ok(whole.includes("<DIV class='outer-cell ") && whole.includes("' data-x=") && whole.includes(' hidden>'), 'attribute quoting and valueless attributes are kept');
+  assert.doesNotMatch(whole, /secret-class/, 'an unknown class name is private by default');
   assert.ok(whole.includes('<!--') && whole.includes('<br/>') && whole.endsWith('</DIV>'));
   assert.doesNotMatch(whole, /Zanzibar|private|document\.write|a&amp;b/);
   const segments = [];
@@ -330,18 +333,18 @@ test('Gemini Takeout zip round-trips as a zip', async () => {
 
 // ------------------------------------------------------------------ determinism and fault injection
 
-test('output is deterministic: two runs give byte-identical zips and reports', async () => {
+test('output is reproducible with an owner-supplied key: two runs give byte-identical zips and reports', async () => {
   const t = scratch('determinism');
   try {
     writeChatGptExport(path.join(t.dir, 'in'), { seed: 9 });
     await zipDirectory(path.join(t.dir, 'in'), path.join(t.dir, 'e.zip'));
-    const a = await sanitize({ input: path.join(t.dir, 'e.zip'), output: path.join(t.dir, 'a.zip') });
-    const b = await sanitize({ input: path.join(t.dir, 'e.zip'), output: path.join(t.dir, 'b.zip') });
+    const a = await sanitize({ input: path.join(t.dir, 'e.zip'), output: path.join(t.dir, 'a.zip'), salt: 'reproducible-owner-key' });
+    const b = await sanitize({ input: path.join(t.dir, 'e.zip'), output: path.join(t.dir, 'b.zip'), salt: 'reproducible-owner-key' });
     assert.ok(fs.readFileSync(path.join(t.dir, 'a.zip')).equals(fs.readFileSync(path.join(t.dir, 'b.zip'))));
     assert.deepEqual(a.report, b.report);
     const salted = await sanitize({ input: path.join(t.dir, 'e.zip'), output: path.join(t.dir, 'c.zip'), salt: 'another-key' });
     assert.ok(!fs.readFileSync(path.join(t.dir, 'a.zip')).equals(fs.readFileSync(path.join(t.dir, 'c.zip'))), 'a different key gives different pseudonyms');
-    assert.equal(salted.report.options.salt, 'custom');
+    assert.equal(salted.report.options.pseudonymKey, 'owner-supplied');
   } finally { t.done(); }
 });
 
@@ -434,7 +437,7 @@ test('output path safety: no overwrite, not inside the input, no symlinked input
   const t = scratch('paths');
   try {
     writeChatGptExport(path.join(t.dir, 'in'), { seed: 1, multi: false, conversations: 2 });
-    await assert.rejects(sanitize({ input: path.join(t.dir, 'in'), output: path.join(t.dir, 'in', 'out') }), { code: 'E_OUTPUT_INSIDE_INPUT' });
+    await assert.rejects(sanitize({ input: path.join(t.dir, 'in'), output: path.join(t.dir, 'in', 'out') }), { code: 'E_OUTPUT_OVERLAPS_INPUT' });
     fs.mkdirSync(path.join(t.dir, 'exists'));
     await assert.rejects(sanitize({ input: path.join(t.dir, 'in'), output: path.join(t.dir, 'exists') }), { code: 'E_OUTPUT_EXISTS' });
     fs.symlinkSync(path.join(t.dir, 'in'), path.join(t.dir, 'link'));
@@ -498,7 +501,8 @@ test('CLI: exit codes, report file and terminal output contain structure and no 
     const run = runCli(['--input', path.join(t.dir, 'e.zip'), '--output', path.join(t.dir, 'o.zip'), '--report', report]);
     assert.equal(run.status, 0, run.stderr);
     assert.match(run.stdout, /Structure check: PASS/);
-    assert.match(run.stdout, /Leak check: PASS/);
+    assert.match(run.stdout, /Leak check \(nothing outside the allow-lists survived\): PASS/);
+    assert.match(run.stdout, /RESIDUAL METADATA/);
     assert.match(run.stdout, /NOT_RUN/, 'running on a real export is recorded as an owner-local NOT_RUN step');
     const shared = `${run.stdout}\n${run.stderr}\n${fs.readFileSync(report, 'utf8')}`;
     for (const secret of secrets) assert.ok(!shared.includes(secret), 'terminal/report text must not include input content');
@@ -552,7 +556,7 @@ test('the report lists exactly which enum-like values were kept so the owner can
       mapping: { n1: { id: 'n1', parent: null, children: [], message: { author: { role: 'user', name: 'browser' }, content: { content_type: 'text', parts: ['x'.repeat(40)] }, status: 'finished_successfully', metadata: { source: 'private.example.com extra words here' } } } },
     }]));
     const result = await sanitize({ input: path.join(t.dir, 'in', 'conversations.json'), output: path.join(t.dir, 'out.json') });
-    const kept = result.report.keptValues.byKey;
+    const kept = result.report.residualMetadata.enumValues.byKey;
     assert.deepEqual(Object.keys(kept.role), ['user']);
     assert.deepEqual(Object.keys(kept.content_type), ['text']);
     assert.deepEqual(Object.keys(kept.status), ['finished_successfully']);
@@ -573,4 +577,240 @@ test('member names are portable: backslash separators and Windows-reserved chara
   assert.ok(!rules.memberName('../../etc/passwd').split('/').includes('..'));
   assert.ok(!rules.memberName('/abs/path.txt').startsWith('/'));
   assert.equal(rules.memberName('trailing.dot. ').endsWith('.'), false);
+});
+
+// ------------------------------------------------------------------ re-review round 1 (SAN-F01..F05)
+
+test('SAN-F01: an output that contains the input is refused before anything is touched, even with --force', async () => {
+  const t = scratch('san-f01-ancestor');
+  try {
+    writeChatGptExport(path.join(t.dir, 'src'), { seed: 1, multi: false, conversations: 2 });
+    fs.mkdirSync(path.join(t.dir, 'exports'));
+    const original = path.join(t.dir, 'exports', 'original.zip');
+    await zipDirectory(path.join(t.dir, 'src'), original);
+    const before = fs.readFileSync(original);
+    const survives = () => assert.ok(fs.readFileSync(original).equals(before), 'the original export must survive');
+
+    for (const output of [path.join(t.dir, 'exports'), `${path.join(t.dir, 'exports')}${path.sep}`, t.dir, path.join(t.dir, 'exports', '..', 'exports')]) {
+      await assert.rejects(sanitize({ input: original, output, force: true }), { code: 'E_OUTPUT_OVERLAPS_INPUT' }, output);
+      survives();
+    }
+    // The input itself and a location inside an input directory are refused as before.
+    await assert.rejects(sanitize({ input: original, output: original, force: true }), { code: 'E_OUTPUT_OVERLAPS_INPUT' });
+    await assert.rejects(sanitize({ input: path.join(t.dir, 'src'), output: path.join(t.dir, 'src', 'nested'), force: true }), { code: 'E_OUTPUT_OVERLAPS_INPUT' });
+    survives();
+
+    // Symbolic-link aliases resolve to the same real paths.
+    fs.symlinkSync(path.join(t.dir, 'exports'), path.join(t.dir, 'alias'));
+    await assert.rejects(sanitize({ input: original, output: path.join(t.dir, 'alias'), force: true }), { code: 'E_OUTPUT_OVERLAPS_INPUT' });
+    await assert.rejects(sanitize({ input: path.join(t.dir, 'alias', 'original.zip'), output: path.join(t.dir, 'exports'), force: true }), { code: 'E_OUTPUT_OVERLAPS_INPUT' });
+    fs.symlinkSync(path.join(t.dir, 'src'), path.join(t.dir, 'src-alias'));
+    await assert.rejects(sanitize({ input: path.join(t.dir, 'src'), output: path.join(t.dir, 'src-alias', 'nested') }), { code: 'E_OUTPUT_OVERLAPS_INPUT' });
+    survives();
+    assert.deepEqual(fs.readdirSync(path.join(t.dir, 'exports')), ['original.zip'], 'nothing was created next to the input either');
+  } finally { t.done(); }
+});
+
+test('SAN-F01: --force never destroys the existing output unless the replacement is complete and verified', async () => {
+  const t = scratch('san-f01-replace');
+  const original = Rules.prototype.jsonString;
+  try {
+    writeChatGptExport(path.join(t.dir, 'in'), { seed: 8, multi: false, conversations: 2 });
+    const output = path.join(t.dir, 'out.json');
+    fs.writeFileSync(output, 'PREVIOUS OUTPUT');
+    const input = path.join(t.dir, 'in', 'conversations.json');
+
+    // Replacement fails its leak check: the previous output is untouched and nothing is left over.
+    Rules.prototype.jsonString = function leaky(value, ctx) { return ctx.key === 'title' ? value : original.call(this, value, ctx); };
+    await assert.rejects(sanitize({ input, output, force: true }), { code: 'E_LEAK' });
+    Rules.prototype.jsonString = original;
+    assert.equal(fs.readFileSync(output, 'utf8'), 'PREVIOUS OUTPUT');
+    assert.deepEqual(fs.readdirSync(t.dir).sort(), ['in', 'out.json']);
+
+    // Without --force an existing output is never replaced.
+    await assert.rejects(sanitize({ input, output }), { code: 'E_OUTPUT_EXISTS' });
+    assert.equal(fs.readFileSync(output, 'utf8'), 'PREVIOUS OUTPUT');
+
+    // A verified replacement swaps in and leaves no aside copy or partial file behind.
+    const result = await sanitize({ input, output, force: true });
+    assert.equal(result.exitCode, 0);
+    assert.equal(JSON.parse(fs.readFileSync(output, 'utf8')).length, 2);
+    assert.deepEqual(fs.readdirSync(t.dir).sort(), ['in', 'out.json']);
+  } finally { Rules.prototype.jsonString = original; t.done(); }
+});
+
+test('SAN-F01: --force only replaces sanitizer output, never an unrelated directory or a symlink', async () => {
+  const t = scratch('san-f01-targets');
+  try {
+    writeChatGptExport(path.join(t.dir, 'in'), { seed: 3, conversations: 2 });
+    fs.mkdirSync(path.join(t.dir, 'precious'));
+    fs.writeFileSync(path.join(t.dir, 'precious', 'thesis.txt'), 'irreplaceable');
+    await assert.rejects(sanitize({ input: path.join(t.dir, 'in'), output: path.join(t.dir, 'precious'), force: true }), { code: 'E_OUTPUT_NOT_REPLACEABLE' });
+    assert.equal(fs.readFileSync(path.join(t.dir, 'precious', 'thesis.txt'), 'utf8'), 'irreplaceable');
+
+    // A directory this tool wrote earlier is recognized and can be replaced.
+    const out = path.join(t.dir, 'sanitized');
+    assert.equal((await sanitize({ input: path.join(t.dir, 'in'), output: out })).exitCode, 0);
+    assert.equal((await sanitize({ input: path.join(t.dir, 'in'), output: out, force: true })).exitCode, 0);
+    assert.deepEqual(fs.readdirSync(t.dir).sort(), ['in', 'precious', 'sanitized']);
+
+    fs.mkdirSync(path.join(t.dir, 'target-dir'));
+    fs.symlinkSync(path.join(t.dir, 'target-dir'), path.join(t.dir, 'link-out'));
+    await assert.rejects(sanitize({ input: path.join(t.dir, 'in'), output: path.join(t.dir, 'link-out'), force: true }), { code: 'E_OUTPUT_SYMLINK' });
+    assert.ok(fs.existsSync(path.join(t.dir, 'target-dir')));
+  } finally { t.done(); }
+});
+
+test('SAN-F01: the report path cannot clobber the input or the output', async () => {
+  const t = scratch('san-f01-report');
+  try {
+    writeChatGptExport(path.join(t.dir, 'in'), { seed: 3, multi: false, conversations: 2 });
+    const input = path.join(t.dir, 'in', 'conversations.json');
+    const before = fs.readFileSync(input);
+    const run = report => runCli(['--input', input, '--output', path.join(t.dir, 'o.json'), '--report', report, '--force']);
+    assert.equal(run(input).status, 1);
+    assert.equal(run(path.join(t.dir, 'in')).status, 1);
+    assert.equal(run(path.join(t.dir, 'o.json')).status, 1);
+    assert.ok(fs.readFileSync(input).equals(before));
+    assert.equal(fs.existsSync(path.join(t.dir, 'o.json')), false, 'a refused report path stops the run before any work');
+    assert.equal(run(path.join(t.dir, 'report.json')).status, 0);
+  } finally { t.done(); }
+});
+
+test('SAN-F02: private author names, unknown enum values, custom classes and attributes are replaced, not kept', async () => {
+  const t = scratch('san-f02');
+  try {
+    fs.mkdirSync(path.join(t.dir, 'in'));
+    fs.writeFileSync(path.join(t.dir, 'in', 'conversations.json'), JSON.stringify([{
+      id: 'a'.repeat(36), title: 't', current_node: 'n1', default_model_slug: 'acme-secret-model',
+      mapping: { n1: { id: 'n1', parent: null, children: [], message: {
+        author: { role: 'user', name: 'Alice-Johnson-Private' },
+        content: { content_type: 'x-acme-secret-type', parts: ['x'.repeat(40)] },
+        status: 'queued-for-acme-corp', recipient: 'acme.internal.tool', channel: 'secret-channel-name',
+        metadata: { model_slug: 'gpt-4o', type: 'acme-private-kind', language: 'cobol-for-acme', mime_type: 'application/x-acme-secret' },
+      } } },
+    }]));
+    const result = await sanitize({ input: path.join(t.dir, 'in', 'conversations.json'), output: path.join(t.dir, 'out.json') });
+    const written = fs.readFileSync(path.join(t.dir, 'out.json'), 'utf8');
+    for (const secret of ['Alice-Johnson-Private', 'x-acme-secret-type', 'queued-for-acme-corp', 'acme.internal.tool', 'secret-channel-name', 'acme-secret-model', 'acme-private-kind', 'cobol-for-acme', 'application/x-acme-secret']) {
+      assert.ok(!written.includes(secret), `${secret} survived`);
+    }
+    assert.ok(result.report.counters.enumValuesReplaced >= 8);
+    const kept = result.report.residualMetadata.enumValues.byKey;
+    assert.deepEqual(Object.keys(kept.role), ['user']);
+    assert.deepEqual(Object.keys(kept.model_slug), ['gpt-4o'], 'only independently known provider vocabulary is kept');
+    assert.equal(kept['author.name'], undefined);
+    assert.equal(kept.status, undefined);
+
+    fs.writeFileSync(path.join(t.dir, 'in', 'page.html'), '<div class="acme-internal-banner outer-cell" lang="xx-Private" dir="ltr" role="acme-role" title="Alice private" data-user="alice" id="user-alice-1"><p class="acme-text">hello there friend</p></div>');
+    const html = await sanitize({ input: path.join(t.dir, 'in', 'page.html'), output: path.join(t.dir, 'out.html') });
+    const out = fs.readFileSync(path.join(t.dir, 'out.html'), 'utf8');
+    for (const secret of ['acme-internal-banner', 'acme-text', 'xx-Private', 'acme-role', 'Alice private', 'alice', 'hello there']) assert.ok(!out.includes(secret), `${secret} survived`);
+    assert.ok(out.includes('outer-cell') && out.includes('dir="ltr"'), 'known vocabulary is kept');
+    assert.deepEqual(html.report.residualMetadata.htmlClassTokens, ['outer-cell']);
+    assert.deepEqual(html.report.residualMetadata.htmlAttributeValues, ['dir=ltr']);
+
+    // Explicit, reviewed opt-in keeps a value and lists it as residual.
+    const optIn = await sanitize({ input: path.join(t.dir, 'in', 'page.html'), output: path.join(t.dir, 'out2.html'), keepClasses: ['acme-text'] });
+    assert.ok(fs.readFileSync(path.join(t.dir, 'out2.html'), 'utf8').includes('acme-text'));
+    assert.ok(optIn.report.residualMetadata.htmlClassTokens.includes('acme-text'));
+    const kept2 = await sanitize({ input: path.join(t.dir, 'in', 'conversations.json'), output: path.join(t.dir, 'out3.json'), keepEnums: ['status=queued-for-acme-corp'] });
+    assert.deepEqual(Object.keys(kept2.report.residualMetadata.enumValues.byKey.status), ['queued-for-acme-corp']);
+    assert.equal(kept2.report.options.keepEnums, 1);
+    await assert.rejects(sanitize({ input: path.join(t.dir, 'in', 'page.html'), output: path.join(t.dir, 'x.html'), keepEnums: ['no-equals-sign'] }), /E_OPTION/);
+  } finally { t.done(); }
+});
+
+test('SAN-F03: the default pseudonym key is a fresh random secret, so identifiers cannot be enumerated offline', async () => {
+  const t = scratch('san-f03');
+  try {
+    fs.mkdirSync(path.join(t.dir, 'in'));
+    // Low-entropy, sequential identifiers: exactly what a public key would let an attacker confirm.
+    const nodes = Array.from({ length: 40 }, (_, i) => `conv-${String(i + 1).padStart(9, '0')}`);
+    fs.writeFileSync(path.join(t.dir, 'in', 'conversations.json'), JSON.stringify([{
+      id: nodes[0], title: 't', current_node: nodes[39],
+      mapping: Object.fromEntries(nodes.map((id, i) => [id, { id, parent: i ? nodes[i - 1] : null, children: i < 39 ? [nodes[i + 1]] : [], message: null }])),
+    }]));
+    const input = path.join(t.dir, 'in', 'conversations.json');
+    const a = await sanitize({ input, output: path.join(t.dir, 'a.json') });
+    const b = await sanitize({ input, output: path.join(t.dir, 'b.json') });
+    const idsOf = file => Object.keys(JSON.parse(fs.readFileSync(file, 'utf8'))[0].mapping);
+    assert.notDeepEqual(idsOf(path.join(t.dir, 'a.json')), idsOf(path.join(t.dir, 'b.json')), 'every run uses its own key');
+    assert.equal(a.report.options.pseudonymKey, 'random-per-run');
+    // Structure is intact: links resolve and identifiers stay distinct.
+    const mapping = JSON.parse(fs.readFileSync(path.join(t.dir, 'a.json'), 'utf8'))[0].mapping;
+    assert.equal(new Set(Object.keys(mapping)).size, 40);
+    for (const node of Object.values(mapping)) if (node.parent !== null) assert.ok(node.parent in mapping);
+
+    // An attacker who knows the tool and the former public default key, and enumerates the
+    // candidate identifiers, cannot reproduce any pseudonym.
+    const attacker = new Rules({ salt: 'mind-place-import-sanitizer-v1' });
+    const candidates = new Set(nodes.map(id => attacker.pseudonymize(id)));
+    assert.equal(idsOf(path.join(t.dir, 'a.json')).filter(id => candidates.has(id)).length, 0);
+    // Nothing that would let someone recover the mapping is written anywhere.
+    const everything = `${JSON.stringify(a.report)}\n${fs.readFileSync(path.join(t.dir, 'a.json'), 'utf8')}`;
+    assert.ok(!nodes.some(id => everything.includes(id)), 'no original identifier appears in the output or report');
+    assert.doesNotMatch(everything, /mind-place-import-sanitizer-v1|"salt"/);
+    // Reproducibility is an explicit owner opt-in.
+    const keyA = await sanitize({ input, output: path.join(t.dir, 'c.json'), salt: 'owner-key' });
+    const keyB = await sanitize({ input, output: path.join(t.dir, 'd.json'), salt: 'owner-key' });
+    assert.ok(fs.readFileSync(path.join(t.dir, 'c.json')).equals(fs.readFileSync(path.join(t.dir, 'd.json'))));
+    assert.equal(keyA.report.options.pseudonymKey, 'owner-supplied');
+    assert.notEqual(new Rules().pseudonymize('conv-000000001'), new Rules().pseudonymize('conv-000000001'));
+    assert.equal(keyB.exitCode, 0);
+  } finally { t.done(); }
+});
+
+test('SAN-F04: if leak tracking overflows the run fails closed and publishes nothing', async () => {
+  const t = scratch('san-f04');
+  try {
+    writeChatGptExport(path.join(t.dir, 'in'), { seed: 14, conversations: 3, multi: false });
+    const input = path.join(t.dir, 'in', 'conversations.json');
+    const output = path.join(t.dir, 'out.json');
+    await assert.rejects(sanitize({ input, output, leakLimit: 5 }), error => {
+      assert.equal(error.code, 'E_LEAK_COVERAGE');
+      assert.equal(error.exitCode, 3);
+      assert.equal(error.checks.leak, 'INCOMPLETE');
+      return true;
+    });
+    assert.equal(fs.existsSync(output), false);
+    assert.equal(fs.existsSync(`${output}.partial`), false);
+    const full = await sanitize({ input, output });
+    assert.equal(full.report.checks.leakRegistry.coverage, 'full');
+    assert.equal(full.report.checks.leak, 'PASS');
+  } finally { t.done(); }
+});
+
+test('SAN-F05: the report separates structure fidelity from privacy and lists the residual metadata', async () => {
+  const t = scratch('san-f05');
+  try {
+    writeChatGptExport(path.join(t.dir, 'chatgpt'), { seed: 2 });
+    writeGeminiTakeout(path.join(t.dir, 'gemini'), { seed: 2, cards: 4 });
+    const chat = await sanitize({ input: path.join(t.dir, 'chatgpt'), output: path.join(t.dir, 'o1') });
+    assert.equal(chat.report.qualification.structureFidelity, 'PASS');
+    assert.equal(chat.report.qualification.leakCheck, 'PASS');
+    assert.equal(chat.report.qualification.contentFreeAssertion, 'NOT_ASSERTED');
+    assert.match(chat.report.qualification.meaning, /not a guarantee of anonymity/);
+    const residual = chat.report.residualMetadata;
+    assert.ok(residual.memberNames.includes('conversations-000.json') && residual.memberNames.includes('user.json'));
+    assert.ok(residual.enumValues.byKey.role && residual.enumValues.byKey.content_type);
+    assert.match(residual.timestampPrecision, /time of day removed/);
+    assert.ok(residual.structuralLabels.includes('Prompted'));
+    assert.equal(chat.report.keptValues, undefined);
+
+    const gemini = await sanitize({ input: path.join(t.dir, 'gemini'), output: path.join(t.dir, 'o2') });
+    assert.ok(gemini.report.residualMetadata.linkHosts.includes('gemini.google.com'));
+    assert.ok(gemini.report.residualMetadata.htmlClassTokens.includes('outer-cell'));
+    assert.ok(gemini.report.residualMetadata.memberNames.includes('MyActivity.html'));
+
+    const run = runCli(['--input', path.join(t.dir, 'gemini'), '--dry-run']);
+    assert.equal(run.status, 0, run.stderr);
+    assert.match(run.stdout, /RESIDUAL METADATA that stays in the output/);
+    assert.match(run.stdout, /link hosts: gemini\.google\.com/);
+    assert.match(run.stdout, /HTML class tokens: .*outer-cell/);
+    assert.match(runCli(['--help']).stdout, /NOT an anonymity guarantee/);
+
+    const keep = await sanitize({ input: path.join(t.dir, 'chatgpt'), output: path.join(t.dir, 'o3'), timestamps: 'keep' });
+    assert.match(keep.report.residualMetadata.timestampPrecision, /full precision/);
+  } finally { t.done(); }
 });

@@ -3,12 +3,12 @@
 // Design principle: DEFAULT-DENY. A string survives only when an explicit allow-list rule
 // keeps it (structural enums, class names, known labels, known hosts). Everything else is
 // replaced by a placeholder whose length class matches, or by a keyed pseudonym whose shape
-// matches (identifiers). The pseudonym key never leaves the process and no low-entropy value
-// (names, e-mail addresses, text) is ever hashed, so a pseudonym cannot be dictionary-checked.
-import { createHmac } from 'node:crypto';
+// matches (identifiers). The pseudonym key is a fresh random secret per run unless the owner
+// supplies one; it is never written, logged or reported, so even short or guessable identifiers
+// cannot be confirmed offline by enumerating candidates. No name, e-mail address or text is hashed.
+import { createHmac, randomBytes } from 'node:crypto';
 import { LeakRegistry } from './leak-check.mjs';
 
-export const DEFAULT_SALT = 'mind-place-import-sanitizer-v1';
 
 const VOCAB = ['lorem', 'ipsum', 'dolor', 'sit', 'amet', 'elit', 'sed', 'do', 'tempor', 'ut', 'enim', 'ad',
   'minim', 'veniam', 'quis', 'nisi', 'aliquip', 'ex', 'ea', 'duis', 'aute', 'irure', 'in', 'esse', 'cillum',
@@ -55,13 +55,45 @@ const KEEP_SCHEMES = new Set(['http', 'https', 'file-service', 'sediment', 'mind
 const KEEP_PATH_SEGMENTS = new Set(['app', 'c', 'share', 'g', 'gem', 'gems', 'chat', 'files', 'download', 'u', 'backend-api',
   'conversation', 'gemini', 'activity', 'myactivity', 'canvas', 'gemini-takeout', 'gemini-canvas', 'chatgpt-export']);
 
-// Enumerated structural values (role, content type, ...). Kept only when the VALUE also looks
-// like an enum, so free text stored under such a key is still replaced.
-export const ENUM_KEYS = new Set(['role', 'content_type', 'status', 'recipient', 'channel', 'default_model_slug',
-  'model_slug', 'conversation_origin', 'memory_scope', 'gizmo_type', 'type', 'language', 'format', 'mime_type',
-  'mimetype', 'kind', 'source', 'command', 'message_type', 'finish_type', 'async_status', 'resolved_model_slug',
-  'parent_model_slug']);
-const ENUM_VALUE = /^[A-Za-z0-9_.:\-/+]{0,48}$/;
+// Enumerated structural values. DEFAULT-DENY: a value is kept only when it is in the provider
+// vocabulary below, never merely because it looks like an enum. Anything else (including a private
+// author name or a custom plugin id) is replaced. The owner can extend the vocabulary explicitly
+// with --keep-enum key=value after reviewing the report.
+const TOOL_NAMES = ['browser', 'python', 'dalle.text2im', 'bio', 'web', 'web.run', 'file_search', 'api_tool',
+  'container.exec', 'canmore.create_textdoc', 'canmore.update_textdoc', 'myfiles_browser'];
+const ENUM_VOCABULARY = new Map(Object.entries({
+  role: ['user', 'assistant', 'system', 'tool'],
+  content_type: ['text', 'multimodal_text', 'code', 'execution_output', 'tether_browsing_display', 'tether_quote',
+    'thoughts', 'reasoning_recap', 'user_editable_context', 'system_error', 'computer_output'],
+  status: ['finished_successfully', 'in_progress', 'finished', 'failed', 'finished_partial_completion', 'incomplete',
+    'done', 'success', 'error', 'cancelled'],
+  recipient: ['all', ...TOOL_NAMES],
+  channel: ['final', 'analysis', 'commentary'],
+  type: ['stop', 'max_tokens', 'interrupted', 'unknown', 'text', 'image', 'file'],
+  language: ['python', 'javascript', 'typescript', 'json', 'html', 'css', 'bash', 'shell', 'sql', 'java', 'c', 'cpp',
+    'csharp', 'go', 'rust', 'ruby', 'php', 'swift', 'kotlin', 'markdown', 'yaml', 'xml', 'text', 'unknown'],
+  mime_type: ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml', 'application/pdf', 'application/json',
+    'application/zip', 'text/plain', 'text/markdown', 'text/csv', 'text/html'],
+  'author.name': TOOL_NAMES,
+}).map(([key, values]) => [key, new Set(values)]));
+const MODEL_KEYS = new Set(['model_slug', 'default_model_slug', 'resolved_model_slug']);
+const MODEL_SLUG = /^(?:gpt-[0-9][0-9a-z.-]{0,23}|o[0-9][0-9a-z-]{0,15}|text-[a-z0-9-]{1,32}|auto|research)$/;
+
+// HTML vocabulary (Google Takeout / Material Design Lite and structural cells). Unknown class
+// tokens and attribute values are treated as private and replaced.
+export const KNOWN_CLASS_TOKEN = /^(?:outer-cell|content-cell|header-cell|mdl-grid|mdl-cell|mdl-cell--(?:[1-9]|1[0-2])-col(?:-(?:phone|tablet|desktop))?|mdl-cell--(?:top|middle|bottom|stretch|hide-(?:phone|tablet|desktop))|mdl-shadow--(?:2|3|4|6|8|16)dp|mdl-typography--(?:title|headline|display-[1-4]|subhead|body-[12]|caption|button|menu|body-1-force-preferred-font|text-(?:left|center|right|justify|nowrap|lowercase|uppercase|capitalize)|font-(?:thin|light|regular|medium|bold|black)))$/;
+export const isKnownClassToken = token => KNOWN_CLASS_TOKEN.test(token);
+const HTML_ATTR_VOCABULARY = new Map([
+  ['lang', value => /^[a-z]{2,3}(?:-(?:[A-Z]{2}|[A-Z][a-z]{3}|\d{3}))?$/.test(value)], // language + optional region/script only
+  ['dir', value => ['ltr', 'rtl', 'auto'].includes(value)],
+  ['charset', value => ['utf-8', 'utf8', 'iso-8859-1', 'us-ascii', 'windows-1252'].includes(value.toLowerCase())],
+  ['type', value => ['text/css', 'text/javascript', 'application/javascript', 'application/json', 'button', 'submit', 'text', 'hidden', 'checkbox', 'radio'].includes(value)],
+  ['role', value => ['presentation', 'button', 'link', 'list', 'listitem', 'heading', 'img', 'main', 'navigation', 'none'].includes(value)],
+  ['target', value => ['_blank', '_self', '_parent', '_top'].includes(value)],
+  ['rel', value => value.split(/\s+/).every(token => ['stylesheet', 'noopener', 'noreferrer', 'nofollow', 'icon', 'alternate'].includes(token))],
+  ['colspan', value => /^\d{1,3}$/.test(value)],
+  ['rowspan', value => /^\d{1,3}$/.test(value)],
+]);
 const ID_KEYS = new Set(['id', 'parent', 'children', 'current_node', 'conversation_id', 'message_id', 'parent_id',
   'root', 'async_task_id', 'request_id', 'turn_exchange_id', 'file_id', 'asset_pointer', 'gizmo_id',
   'conversation_template_id', 'plugin_ids', 'sugar_item_id', 'pointer', 'parent_message_id', 'msg_id', 'share_id',
@@ -121,18 +153,35 @@ export function isDataKey(key) {
 export const CLOCK_NODE = /^(\s*)(\d{1,2} \p{L}{3,10} \d{4}, )(\d{1,2}):(\d{2}):(\d{2})( [A-Za-z]{1,6}|\s?[+-]\d{2}:?\d{2})?(\s*)$/u;
 
 export class Rules {
-  constructor({ salt = DEFAULT_SALT, timestamps = 'day', keepLabels = [], keepKeys = [], leak = new LeakRegistry() } = {}) {
+  constructor({ salt, timestamps = 'day', keepLabels = [], keepEnums = [], keepClasses = [], leak = new LeakRegistry() } = {}) {
     if (!['day', 'keep'].includes(timestamps)) throw new Error('E_OPTION timestamps must be day or keep');
-    this.salt = salt;
+    // A fresh random key per run unless the owner opts into reproducibility. It is never emitted.
+    this.salt = salt ?? randomBytes(32).toString('hex');
+    this.saltSource = salt === undefined ? 'random-per-run' : 'owner-supplied';
     this.timestamps = timestamps;
     this.keepLabels = ['Prompted', ...keepLabels];
-    this.keepKeys = new Set(keepKeys);
+    this.extraClasses = new Set(keepClasses);
+    this.extraEnums = new Map();
+    for (const entry of keepEnums) {
+      const at = entry.indexOf('=');
+      if (at < 1) throw new Error('E_OPTION keep-enum must look like key=value');
+      const key = entry.slice(0, at);
+      if (!this.extraEnums.has(key)) this.extraEnums.set(key, new Set());
+      this.extraEnums.get(key).add(entry.slice(at + 1));
+    }
     this.leak = leak;
     this.shortIds = new Map(); // original -> pseudonym, only for short IDs, to keep the mapping injective
     this.shortIdTaken = new Map(); // pseudonym -> original
-    this.counters = { stringsReplaced: 0, idsPseudonymized: 0, mediaStandIns: 0, timestampsCoarsened: 0 };
+    this.counters = { stringsReplaced: 0, idsPseudonymized: 0, mediaStandIns: 0, timestampsCoarsened: 0, enumValuesReplaced: 0 };
     this.keptEnums = new Map(); // key -> Map(value -> count): exactly which enum-like values were preserved
     this.keptEnumOverflow = false;
+    // Everything an allow-list preserves verbatim, for the residual-metadata report.
+    this.residual = { memberNames: new Set(), classTokens: new Set(), linkHosts: new Set(), attributeValues: new Set(), overflow: false };
+  }
+
+  #note(set, value) {
+    if (set.size < 200 || set.has(value)) set.add(value);
+    else this.residual.overflow = true;
   }
 
   /** Records a string as intentionally preserved by an allow-list rule. */
@@ -220,7 +269,7 @@ export class Rules {
     let out = `${this.kept(scheme.toLowerCase())}:`;
     if (authority !== undefined) {
       const host = authority.toLowerCase();
-      if (KEEP_HOSTS.has(host)) out += `//${this.kept(host)}`;
+      if (KEEP_HOSTS.has(host)) { this.#note(this.residual.linkHosts, host); out += `//${this.kept(host)}`; }
       else if (/^(file-service|sediment)$/i.test(scheme)) out += `//${this.pseudonymize(authority, 'file-host')}`;
       else out += `//${this.#hostPlaceholder(authority)}.invalid`;
     }
@@ -298,9 +347,15 @@ export class Rules {
 
   jsonString(value, ctx) {
     const key = ctx.key ?? '';
-    if (this.keepKeys.has(key) && ENUM_VALUE.test(value)) return this.#keepEnum(key, value);
-    if ((ENUM_KEYS.has(key) || (key === 'name' && ctx.parentKey === 'author')) && ENUM_VALUE.test(value)) {
-      return this.#keepEnum(key === 'name' ? 'author.name' : key, value);
+    const vocabularyKey = key === 'name' && ctx.parentKey === 'author' ? 'author.name' : key;
+    const governed = ENUM_VOCABULARY.has(vocabularyKey) || MODEL_KEYS.has(key) || this.extraEnums.has(vocabularyKey);
+    if (governed) {
+      const known = ENUM_VOCABULARY.get(vocabularyKey)?.has(value)
+        || (MODEL_KEYS.has(key) && MODEL_SLUG.test(value))
+        || this.extraEnums.get(vocabularyKey)?.has(value);
+      if (known) return this.#keepEnum(vocabularyKey, value);
+      if (value !== '') this.counters.enumValuesReplaced++; // counted, never listed: it may be private
+      return this.replaceText(value);
     }
     if (KEEP_ID_LITERALS.has(value) && (this.isIdKey(key) || ctx.inIdContext)) return this.kept(value);
     const url = this.neutralizeUrl(value);
@@ -375,15 +430,41 @@ export class Rules {
 
   htmlAttr(tag, name, value) {
     const lower = name.toLowerCase();
-    if (lower === 'class' || lower === 'lang' || lower === 'dir' || lower === 'charset' || lower === 'type'
-      || lower === 'role' || lower === 'target' || lower === 'colspan' || lower === 'rowspan' || lower === 'rel') {
-      return /^[A-Za-z0-9_\-:. ]{0,200}$/.test(value) ? this.kept(value) : this.replaceText(value);
+    if (lower === 'class') {
+      // Class names are kept only from the known template vocabulary; any other token is private.
+      const result = value.split(/(\s+)/).map(token => {
+        if (!token || /^\s+$/.test(token)) return token;
+        if (isKnownClassToken(token) || this.extraClasses.has(token)) { this.#note(this.residual.classTokens, token); return this.kept(token); }
+        return this.pseudonymize(token, 'class');
+      }).join('');
+      // Fully known value: it survives as a whole string, so register the whole string too.
+      return result === value ? this.kept(value) : result;
+    }
+    const vocabulary = HTML_ATTR_VOCABULARY.get(lower);
+    if (vocabulary) {
+      if (vocabulary(value)) { this.#note(this.residual.attributeValues, `${lower}=${value}`); return this.kept(value); }
+      return this.replaceText(value);
     }
     if (['href', 'src', 'srcset', 'action', 'poster', 'cite', 'data'].includes(lower)) {
       return this.neutralizeUrl(value.trim()) ?? this.replaceText(value);
     }
     if (lower === 'id' || lower === 'for' || lower === 'name') return value ? this.pseudonymize(value, 'attr-id') : value;
     return value ? this.replaceText(value) : value;
+  }
+
+  /** Everything an allow-list preserved verbatim in the output (for review; not an anonymity claim). */
+  residualReport() {
+    const list = set => [...set].sort();
+    return {
+      memberNames: list(this.residual.memberNames),
+      enumValues: this.keptEnumReport(),
+      htmlClassTokens: list(this.residual.classTokens),
+      htmlAttributeValues: list(this.residual.attributeValues),
+      linkHosts: list(this.residual.linkHosts),
+      timestampPrecision: this.timestamps === 'day' ? 'date kept, time of day removed' : 'full precision kept',
+      structuralLabels: [...this.keepLabels],
+      truncated: this.residual.overflow || this.keptEnumOverflow,
+    };
   }
 
   // ---- members ----
@@ -398,7 +479,10 @@ export class Rules {
 
   #segmentName(segment, isFile) {
     if (!segment || segment === '.' || segment === '..') return 'x';
-    if (STRUCTURAL_NAMES.has(segment) || STRUCTURAL_NAME_PATTERN.test(segment)) return this.kept(segment);
+    if (STRUCTURAL_NAMES.has(segment) || STRUCTURAL_NAME_PATTERN.test(segment)) {
+      this.#note(this.residual.memberNames, segment);
+      return this.kept(segment);
+    }
     this.leak.protect(segment);
     const dot = isFile ? segment.lastIndexOf('.') : -1;
     const ext = dot > 0 && /^\.[A-Za-z0-9]{1,8}$/.test(segment.slice(dot)) ? segment.slice(dot) : '';

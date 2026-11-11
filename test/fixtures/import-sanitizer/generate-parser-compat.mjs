@@ -24,7 +24,8 @@ export async function buildParserCompatFixtures(targetDir) {
     for (const [name, source] of Object.entries(files)) fs.copyFileSync(source, path.join(targetDir, name));
     for (const [from, to] of [['chatgpt-synthetic.json', 'chatgpt-sanitized.json'], ['gemini-synthetic.html', 'gemini-sanitized.html']]) {
       const output = path.join(work, to);
-      await sanitize({ input: path.join(targetDir, from), output, force: true });
+      // A fixed key keeps the committed fixtures reproducible; real runs default to a random key.
+      await sanitize({ input: path.join(targetDir, from), output, force: true, salt: 'parser-compat-fixture-key' });
       fs.copyFileSync(output, path.join(targetDir, to));
     }
   } finally {

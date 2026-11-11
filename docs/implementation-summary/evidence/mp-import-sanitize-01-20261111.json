@@ -1,19 +1,85 @@
 {
   "task": "MP-IMPORT-SANITIZE-01",
   "date": "2026-11-11",
-  "environment": {"os": "linux-x86_64", "cargo": "1.97.0", "node": "22.23.4"},
+  "environment": {
+    "os": "linux-x86_64",
+    "cargo": "1.97.0",
+    "node": "22.23.4"
+  },
   "synthetic_data_only": true,
   "real_export_run": "NOT_RUN",
   "commands": [
-    {"command": "node --import tsx --test test/import-sanitizer.test.mjs", "passed": 29, "failed": 0},
-    {"command": "cargo test --locked -p mind-place-archive --tests", "passed": 119, "failed": 0, "ignored": 0, "new_tests": ["sanitized_chatgpt_export_parses_with_the_same_shape_as_the_original", "sanitized_gemini_takeout_parses_with_the_same_shape_as_the_original", "sanitized_exports_do_not_contain_the_synthetic_private_strings"]},
-    {"command": "npm run test:web", "tests": 300, "passed": 298, "failed": 0, "skipped": 2, "note": "2 skipped are Windows-only"},
-    {"command": "npm run test:rust", "passed": 350, "failed": 0, "ignored": 1},
-    {"command": "cargo fmt --all -- --check", "result": "PASS"},
-    {"command": "npm run verify:repo", "result": "PASS"},
-    {"command": "npm run typecheck", "result": "PASS"},
-    {"command": "node scripts/verify-workflow-security.mjs", "result": "PASS"}
+    {
+      "command": "node --import tsx --test test/import-sanitizer.test.mjs",
+      "passed": 37,
+      "failed": 0,
+      "note": "29 before re-review round 1; +8 regression tests for SAN-F01..F05"
+    },
+    {
+      "command": "cargo test --locked -p mind-place-archive --tests",
+      "passed": 124,
+      "failed": 0,
+      "ignored": 0,
+      "new_tests": [
+        "sanitized_chatgpt_export_parses_with_the_same_shape_as_the_original",
+        "sanitized_gemini_takeout_parses_with_the_same_shape_as_the_original",
+        "sanitized_exports_do_not_contain_the_synthetic_private_strings"
+      ]
+    },
+    {
+      "command": "npm run test:web",
+      "tests": 308,
+      "passed": 306,
+      "failed": 0,
+      "skipped": 2,
+      "note": "2 skipped are Windows-only"
+    },
+    {
+      "command": "npm run test:rust",
+      "passed": 355,
+      "failed": 0,
+      "ignored": 1
+    },
+    {
+      "command": "cargo fmt --all -- --check",
+      "result": "PASS"
+    },
+    {
+      "command": "npm run verify:repo",
+      "result": "PASS"
+    },
+    {
+      "command": "npm run typecheck",
+      "result": "PASS"
+    },
+    {
+      "command": "node scripts/verify-workflow-security.mjs",
+      "result": "PASS"
+    }
   ],
-  "performance_local_observation": {"input_mb": 151, "elapsed_s": 13, "rss_mb": 140, "output_mb": 109, "note": "synthetic conversations.json, includes the full verification pass; not measured in CI"},
-  "not_run": ["real ChatGPT/Gemini export", "Windows execution of the tool", "hosted CI on this branch"]
+  "performance_local_observation": {
+    "input_mb": 151,
+    "elapsed_s": 13,
+    "rss_mb": 140,
+    "output_mb": 109,
+    "note": "synthetic conversations.json, includes the full verification pass; not measured in CI"
+  },
+  "not_run": [
+    "real ChatGPT/Gemini export",
+    "Windows execution of the tool",
+    "hosted CI on this branch"
+  ],
+  "re_review_round_1": {
+    "findings": [
+      "SAN-F01",
+      "SAN-F02",
+      "SAN-F03",
+      "SAN-F04",
+      "SAN-F05"
+    ],
+    "fixed": true,
+    "windows_run": "NOT_RUN",
+    "hosted_ci": "NOT_RUN",
+    "real_export": "NOT_RUN"
+  }
 }
