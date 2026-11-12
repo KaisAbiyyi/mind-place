@@ -11,9 +11,9 @@
   "commands": [
     {
       "command": "node --import tsx --test test/import-sanitizer.test.mjs",
-      "passed": 53,
+      "passed": 55,
       "failed": 0,
-      "note": "29 initially; 37, 44, 49 after rounds 1-3; 53 after round 4 (SAN-F08)"
+      "note": "29 initially; 37, 44, 49, 53 after rounds 1-4; 55 after round 5 (SAN-F09)"
     },
     {
       "command": "cargo test --locked -p mind-place-archive --tests",
@@ -28,8 +28,8 @@
     },
     {
       "command": "npm run test:web",
-      "tests": 324,
-      "passed": 322,
+      "tests": 326,
+      "passed": 324,
       "failed": 0,
       "skipped": 2,
       "note": "2 skipped are Windows-only"
@@ -123,5 +123,14 @@
     "windows_run": "NOT_RUN",
     "real_export": "NOT_RUN",
     "hosted_ci_for_new_head": "see PR"
+  },
+  "re_review_round_5": {
+    "finding": "SAN-F09",
+    "fixed": true,
+    "mutation_checked": true,
+    "saf_f08_resolved_by_reviewer": true,
+    "hosted_ci_at_reviewed_head_cfc30ad": "SUCCESS (reviewer-confirmed run 43134420438)",
+    "windows_run": "NOT_RUN",
+    "real_export": "NOT_RUN"
   }
 }

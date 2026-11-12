@@ -1276,3 +1276,148 @@ test('SAN-F08: a report that cannot be staged, or a run that fails verification,
     assert.equal(fs.existsSync(out), false);
   } finally { Rules.prototype.jsonString = original; t.done(); }
 });
+
+// ------------------------------------------------------------------ SAN-F09 (report staging fault injection)
+
+/** A preload module that injects a filesystem fault into the CLI child process. */
+function writeFaultPreload(dir) {
+  const file = path.join(dir, 'fault-preload.mjs');
+  fs.writeFileSync(file, `
+import fs from 'node:fs';
+const real = { writeFile: fs.promises.writeFile, rm: fs.promises.rm };
+const mode = process.env.MP_TEST_FAULT;
+if (mode === 'stage-write') {
+  // Create the staged report, write some bytes, then fail (ENOSPC / EIO mid-write).
+  fs.promises.writeFile = async (file, data, options) => {
+    if (String(file).includes('.partial-')) {
+      await real.writeFile(file, String(data).slice(0, 10), options);
+      throw Object.assign(new Error('disk full'), { code: 'ENOSPC' });
+    }
+    return real.writeFile(file, data, options);
+  };
+}
+if (mode === 'unlink-after-link') {
+  // The first plain rm of the staged name is the one right after a successful link.
+  let failed = false;
+  fs.promises.rm = async (file, options) => {
+    if (!failed && String(file).includes('.partial-') && !options?.force) { failed = true; throw Object.assign(new Error('io error'), { code: 'EIO' }); }
+    return real.rm(file, options);
+  };
+}
+`);
+  return file;
+}
+
+test('SAN-F09-A: a report that fails mid-write leaves no staged file and no output, and never touches a foreign file', async () => {
+  const { t, out, input } = reportFixture('san-f09-a');
+  const { writeFile } = fs.promises;
+  try {
+    const report = path.join(t.dir, 'report.json');
+    const rootBefore = fs.readdirSync(t.dir).sort();
+    const staged = `${report}.partial-${process.pid}`;
+    const failMidWrite = () => {
+      fs.promises.writeFile = async (file, data, options) => {
+        if (file === staged) { await writeFile(file, String(data).slice(0, 10), options); throw Object.assign(new Error('disk full'), { code: 'ENOSPC' }); }
+        return writeFile(file, data, options);
+      };
+    };
+    const restore = () => { fs.promises.writeFile = writeFile; };
+
+    // API, no previous output: nothing published, nothing left, error carries only the code.
+    failMidWrite();
+    await assert.rejects(sanitize({ input, output: out, report }), error => {
+      assert.equal(error.code, 'E_REPORT_WRITE');
+      assert.match(error.message, /ENOSPC/);
+      assert.doesNotMatch(error.message, /Notes about|privatemail|conversations|quartz/i, 'no input in diagnostics');
+      assert.ok(!error.message.includes(input));
+      return true;
+    });
+    restore();
+    assert.equal(fs.existsSync(staged), false, 'the partially written staged report was removed');
+    assert.equal(fs.existsSync(report), false);
+    assert.equal(fs.existsSync(out), false);
+    assert.deepEqual(fs.readdirSync(t.dir).sort(), rootBefore);
+    assert.deepEqual(fs.readdirSync(path.dirname(out)), [], 'no output, partial or spool left');
+
+    // API, previous output and previous report with --force: both intact, byte for byte.
+    assert.equal((await sanitize({ input, output: out, report })).exitCode, 0);
+    const outBefore = snapshot(out);
+    const reportBefore = fs.readFileSync(report);
+    const rootWithReport = fs.readdirSync(t.dir).sort();
+    failMidWrite();
+    await assert.rejects(sanitize({ input, output: out, report, force: true }), { code: 'E_REPORT_WRITE' });
+    restore();
+    assert.deepEqual(snapshot(out), outBefore);
+    assert.ok(fs.readFileSync(report).equals(reportBefore));
+    assert.deepEqual(fs.readdirSync(t.dir).sort(), rootWithReport);
+    assert.deepEqual(fs.readdirSync(path.dirname(out)), ['out']);
+    fs.rmSync(out, { recursive: true });
+    fs.rmSync(report);
+
+    // A file that already has the staging name is not ours: it is refused and left untouched.
+    fs.writeFileSync(staged, 'OWNER FILE');
+    await assert.rejects(sanitize({ input, output: out, report }), { code: 'E_REPORT_WRITE' });
+    assert.equal(fs.readFileSync(staged, 'utf8'), 'OWNER FILE');
+    assert.equal(fs.existsSync(out), false);
+    fs.rmSync(staged);
+
+    // CLI (separate process with an injected fault): exit 1, exact code, nothing left behind.
+    const preload = writeFaultPreload(t.dir);
+    const cliRoot = fs.readdirSync(t.dir).sort();
+    const run = spawnSync(process.execPath, ['--import', preload, cli, '--input', input, '--output', out, '--report', report], { encoding: 'utf8', env: { ...process.env, MP_TEST_FAULT: 'stage-write' } });
+    assert.equal(run.status, 1, run.stdout + run.stderr);
+    assert.match(run.stderr, /E_REPORT_WRITE/);
+    assert.doesNotMatch(`${run.stdout}${run.stderr}`, /Notes about|privatemail|quartz/i);
+    assert.equal(fs.existsSync(out), false);
+    assert.equal(fs.existsSync(report), false);
+    assert.deepEqual(fs.readdirSync(t.dir).sort(), cliRoot, 'no staged report in the CLI run either');
+    assert.deepEqual(fs.readdirSync(path.dirname(out)), []);
+  } finally { fs.promises.writeFile = writeFile; t.done(); }
+});
+
+test('SAN-F09-B: if cleaning the staged name fails after the report was linked, the commit is taken back', async () => {
+  const { t, out, input } = reportFixture('san-f09-b');
+  const { rm } = fs.promises;
+  try {
+    const report = path.join(t.dir, 'report.json');
+    const staged = `${report}.partial-${process.pid}`;
+    const rootBefore = fs.readdirSync(t.dir).sort();
+
+    // API: link succeeds, then the first plain rm of the staged name fails once.
+    let failed = false;
+    fs.promises.rm = async (file, options) => {
+      if (!failed && file === staged && !options?.force) { failed = true; throw Object.assign(new Error('io error'), { code: 'EIO' }); }
+      return rm(file, options);
+    };
+    await assert.rejects(sanitize({ input, output: out, report }), error => {
+      assert.equal(error.code, 'E_REPORT_WRITE');
+      assert.ok(!error.message.includes(input));
+      return true;
+    });
+    fs.promises.rm = rm;
+    assert.equal(failed, true, 'the injected fault was reached');
+    assert.equal(fs.existsSync(report), false, 'the report that was linked is taken back');
+    assert.equal(fs.existsSync(staged), false, 'the staged name is cleaned by the retry in discard()');
+    assert.equal(fs.existsSync(out), false, 'the output publication is rolled back');
+    assert.deepEqual(fs.readdirSync(t.dir).sort(), rootBefore);
+    assert.deepEqual(fs.readdirSync(path.dirname(out)), []);
+
+    // The same run without the fault commits normally: one report, no staged name.
+    assert.equal((await sanitize({ input, output: out, report })).exitCode, 0);
+    assert.deepEqual(fs.readdirSync(t.dir).sort(), [...rootBefore, 'report.json'].sort());
+    fs.rmSync(out, { recursive: true });
+    fs.rmSync(report);
+
+    // CLI with an injected fault in the child process.
+    const preload = writeFaultPreload(t.dir);
+    const cliRoot = fs.readdirSync(t.dir).sort();
+    const run = spawnSync(process.execPath, ['--import', preload, cli, '--input', input, '--output', out, '--report', report], { encoding: 'utf8', env: { ...process.env, MP_TEST_FAULT: 'unlink-after-link' } });
+    assert.equal(run.status, 1, run.stdout + run.stderr);
+    assert.match(run.stderr, /E_REPORT_WRITE/);
+    assert.doesNotMatch(`${run.stdout}${run.stderr}`, /Notes about|privatemail|quartz/i);
+    assert.equal(fs.existsSync(report), false, 'no orphaned report');
+    assert.equal(fs.existsSync(out), false);
+    assert.deepEqual(fs.readdirSync(t.dir).sort(), cliRoot);
+    assert.deepEqual(fs.readdirSync(path.dirname(out)), []);
+  } finally { fs.promises.rm = rm; t.done(); }
+});

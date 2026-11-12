@@ -337,16 +337,29 @@ async function stageReport(reportPath, json, force) {
   try {
     await fs.promises.writeFile(staged, json, { flag: 'wx', mode: 0o600 });
   } catch (error) {
+    // The exclusive create may have succeeded and written some bytes before failing (ENOSPC, EIO):
+    // remove what THIS call created. EEXIST means the name was already taken by something that is
+    // not ours (the create did not happen), and that file is never touched.
+    if (error?.code !== 'EEXIST') await fs.promises.rm(staged, { force: true }).catch(() => {});
     throw new SanitizerError('E_REPORT_WRITE', `The report could not be staged (${error?.code ?? 'error'}); nothing was published`);
   }
   let done = false;
   return {
     async commit() {
-      if (force) await fs.promises.rename(staged, reportPath);
-      else {
-        // no-clobber: link fails if something appeared in the meantime
+      if (force) {
+        await fs.promises.rename(staged, reportPath);
+      } else {
+        // no-clobber: link fails if something appeared in the meantime, so after a successful link
+        // reportPath is a file this call created.
         await fs.promises.link(staged, reportPath);
-        await fs.promises.rm(staged, { force: true });
+        try {
+          await fs.promises.rm(staged);
+        } catch (error) {
+          // The commit must not be half done: take back the link we just made (discard() retries the
+          // staged name) and report failure, so a failed run never leaves a committed report behind.
+          await fs.promises.rm(reportPath, { force: true }).catch(() => {});
+          throw error;
+        }
       }
       done = true;
     },

@@ -132,15 +132,34 @@ Regression tests (CLI level for the isolation matrix, API level for failure inje
 
 Still **NOT_RUN**: Windows execution of the CLI (the report/output overlap checks rely on `realpath`; junction behaviour is in the owner runbook), the owner-local real-export trial, and the hosted CI run on the new head.
 
+## Re-review round 5 — SAN-F09 (P2): report staging error paths could leave an artifact
+
+Finding ([comment](https://github.com/KaisAbiyyi/mind-place/pull/167#issuecomment-6814412069), reviewed head `cfc30ad`): SAN-F08's overlap and rollback corrections were confirmed (hosted CI at that head SUCCESS). Two error paths in `stageReport()` still broke the no-artifact-on-failure contract:
+
+| Path | Defect | Correction |
+| --- | --- | --- |
+| **A** partial staged write | `writeFile(staged, json, { flag: 'wx' })` can create the file and write some bytes before failing (`ENOSPC`, `EIO`). The catch threw `E_REPORT_WRITE` without removing it, and the caller's `stagedReport` was still `null`, so `discard()` could never clean it: a `report.json.partial-<pid>` with residual metadata was left behind | The catch removes the staged file before rethrowing. It does **not** remove it when the error is `EEXIST`: the exclusive create did not happen, so that name belongs to something that is not ours and is never touched. The original error code is kept in the message |
+| **B** link succeeded, staged cleanup failed | Without `--force` the commit is `link(staged, report)` then `rm(staged)`. If the `rm` failed, the caller rolled the output back, but the final report created by the `link` stayed, so a failed run left a committed report with no published output | The commit is transactional: if `rm(staged)` fails after the link, the newly linked report is removed (a successful `link` proves the path was free, so it is ours) and the error is rethrown; `discard()` retries the staged name. The `--force` path is a single atomic `rename` and was not affected |
+
+Regression tests (both at API level with in-process fault injection, and through the **real CLI** in a child process via a `--import` preload that injects the fault):
+
+- `SAN-F09-A`: a write that creates the staged file, writes 10 bytes, then throws `ENOSPC`. With no previous output: `E_REPORT_WRITE`, exit 1, no staged file, no report, no output, directory listings unchanged, the message carries only the code and no input text or path. With a previous output and report plus `--force`: both byte-identical afterwards. A file that already has the staging name is refused and left untouched (`OWNER FILE`).
+- `SAN-F09-B`: `link` succeeds, then the first plain `rm` of the staged name fails with `EIO`. `E_REPORT_WRITE`, exit 1, **no orphaned report**, no staged leftover (the retry in `discard()` removes it), output rolled back, listings unchanged; the same run without the fault commits one report and no staged name.
+- **Checked by mutation:** keeping the partial staged file, leaving the linked report behind, and also removing a foreign file on `EEXIST` each made the matching test fail. All restored.
+
+The output/report overlap protections, `--force` rollback and budgets are unchanged and their tests still pass.
+
+Still **NOT_RUN**: Windows execution of the CLI, the owner-local real-export trial, and hosted CI for the new head until the run completes.
+
 ## Verification
 
 Environment: Linux x86_64, Node 22.23, Cargo 1.97. Synthetic data only.
 
 | Command | Result |
 | --- | --- |
-| `node --import tsx --test test/import-sanitizer.test.mjs` | PASS: 53 passed, 0 failed (29 initially; 37, 44 and 49 after rounds 1 to 3; stable over repeated runs) |
+| `node --import tsx --test test/import-sanitizer.test.mjs` | PASS: 55 passed, 0 failed (29 initially; 37, 44, 49 and 53 after rounds 1 to 4; stable over repeated runs) |
 | `cargo test --locked -p mind-place-archive --tests` | PASS: 124 passed, 0 failed, 0 ignored (includes the 3 parser cross-check tests and the 5 FIX-F01 tests) |
-| `npm run test:web` | PASS: 324 tests, 322 passed, 0 failed, 2 skipped (Windows-only) |
+| `npm run test:web` | PASS: 326 tests, 324 passed, 0 failed, 2 skipped (Windows-only) |
 | `npm run test:rust` | PASS: 355 passed, 0 failed, 1 ignored (existing qualification-ignored test) |
 | `cargo fmt --all -- --check`, `npm run verify:repo`, `npm run typecheck`, `node scripts/verify-workflow-security.mjs`, `git diff --check` | PASS |
 | Run on a **real** ChatGPT/Gemini export | **NOT_RUN** (owner-local step) |
