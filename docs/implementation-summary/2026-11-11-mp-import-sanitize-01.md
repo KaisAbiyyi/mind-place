@@ -151,6 +151,27 @@ The output/report overlap protections, `--force` rollback and budgets are unchan
 
 Still **NOT_RUN**: Windows execution of the CLI, the owner-local real-export trial, and hosted CI for the new head until the run completes.
 
+## Windows qualification review — WIN-SAN-F01 (P2), WIN-SAN-F02 (P2), WIN-SAN-F03 (P3)
+
+Source: the independent Windows qualification review of `e56bff7` on PR #167 (owner-run synthetic Windows 11 report: suite 48 pass / 7 fail / 0 skipped of 55; 75 manual scenarios mostly PASS; one long-output-path FAIL; locked input + `--force` PARTIAL; true symlinks BLOCKED). SAN-F09 was closed at source level by that review; this round addresses what it asked for.
+
+**WIN-SAN-F01 — a read failure silently downgraded a good `--force` output.** `sanitizeMember()` caught *every* error and replaced the member with an empty stand-in, so a locked file (`EBUSY`), `EACCES`, `EIO`, a corrupt zip entry or a failed spool write ended as exit 2 and replaced the previous complete output.
+- A member is now a recoverable failure **only for a parse error** (`JsonError`/`HtmlError`: the bytes were read and are not valid JSON/HTML). Everything else throws `E_MEMBER_IO` (exit 1, message = content-free error code only): nothing is published, the previous output and report are untouched, no staging leftovers. This includes a corrupt zip entry, so the earlier test that expected a stand-in for tampered zip data now expects the run to fail closed.
+- Exit 2 is documented (README and `--help`) as a **partial successful publication**. A partial output that would **replace an existing output** is refused (`E_PARTIAL_WOULD_REPLACE`, exit 1) unless the owner passes the new explicit `--allow-partial`; a first-time output with parse failures is published as before.
+- Tests: injected read failures (`EBUSY`/`EACCES`/`EIO`, at the first bytes and at the middle of a **non-first** member, so earlier members are already staged) with `--force` assert code, exit code, no path/content in the message, **hash snapshots of the output equal, previous report byte-equal, directory listing unchanged**; a single-file source; the same through the real CLI with a `file://` preload (asserting the injected code appears); parse failure + `--force` refused, first-time output exit 2, `--allow-partial` replaces. Each guard was removed in turn and the matching test failed.
+
+**WIN-SAN-F02 — test portability, not product defects.**
+- `SAN-F09-A/B` CLI halves passed a `C:\…` path to `node --import`; they now pass `pathToFileURL(preload).href` and also assert the injected fault ran (`ENOSPC` / `EBUSY` in stderr), not just a non-zero exit.
+- `member names never collide` wrote `a.json…z.json` and `A.json…Z.json` into one directory (26 files on NTFS). It now uses 52 case-insensitively distinct names for directory and zip, asserts the fixture itself has 52, and keeps a separate zip-only case-variant run (all 52 output names distinct).
+- Symlink tests now go through `linkTest()`: each runs once per link kind. `[symlink]` is **SKIPPED with a `BLOCKED:` reason** when the runner cannot create symbolic links (Windows without Developer Mode/elevation) and still runs in Linux CI and on privileged machines; on Windows `[junction]` variants (no privilege) run the same assertions. Nothing was relaxed.
+- Local result on an unprivileged Windows 11 account (Node v24.21.0, no Developer Mode, not elevated), five consecutive runs: **62 tests, 58 pass, 0 fail, 4 skipped** (the four `[symlink]` variants, reported as BLOCKED). The `[junction]` variants pass. Self-reported, not exact-head hosted CI and not an owner requalification.
+
+**WIN-SAN-F03 — long output path.** `fs.mkdtemp` for the staging folder next to the output fails with `ENOENT` once the output path exceeds the Windows path limit (about 260 characters; input paths and zip member names of that length work). The raw error is now `E_SPOOL_INIT` (exit 1, message has only an error code, no path), a missing parent folder maps to the same code, the dry-run work folder is removed if the second staging folder fails, and the source is closed. Long output paths are **documented as not supported**; the tool does not create parent folders. A Windows-only test accepts either success or `E_SPOOL_INIT`, never a raw error; cross-platform tests inject the OS error.
+
+**Documented, not changed (review "other findings").** `--force` over an existing *file* replaces it (no marker is possible); a file input reached through a *parent* junction is accepted (only the final component is checked; output/report overlap rules still use real paths). Both are in README "Known limits and design notes".
+
+**Still NOT_RUN / not claimed.** True-symlink variants on Windows (BLOCKED here, covered by CI and junction variants), Explorer GUI, CLI exits 3/4/5 on Windows, hosted Windows Product job (skipped), and the owner real-export trial.
+
 ## Verification
 
 Environment: Linux x86_64, Node 22.23, Cargo 1.97. Synthetic data only.

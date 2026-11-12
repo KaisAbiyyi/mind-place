@@ -26,10 +26,13 @@ Usage:
   --owner-hints         Print frequent leading words of HTML text nodes to the terminal ONLY (never to the report)
   --force               Replace an existing output, only after the new one is fully written and verified; refuses
                         directories not created by this tool, symlinks, and anything that contains or is the input
+  --allow-partial       With --force: allow replacing an existing output with a PARTIAL one (some members could not be
+                        parsed and became empty stand-ins, exit 2). Without it such a run publishes nothing and keeps the
+                        existing output. A first-time output with parse failures is still published (exit 2)
   --help
 
 Environment: MIND_PLACE_SANITIZER_SALT supplies the pseudonym key instead of --salt-file.
-Exit codes: 0 PASS | 1 usage/IO error | 2 PARTIAL (some members replaced by stand-ins) | 3 leak check FAILED or INCOMPLETE | 4 structure check FAILED | 5 resource budget exceeded
+Exit codes: 0 PASS | 1 usage/IO error (nothing published, an existing output is kept; includes unreadable or corrupt source members, E_MEMBER_IO) | 2 PARTIAL (published: some members could not be PARSED and became stand-ins) | 3 leak check FAILED or INCOMPLETE | 4 structure check FAILED | 5 resource budget exceeded
 
 PASS is structure fidelity plus "nothing outside the allow-lists survived". It is NOT an anonymity guarantee: read the
 residual metadata the tool prints before sharing anything.
@@ -47,7 +50,7 @@ try {
       input: { type: 'string' }, output: { type: 'string' }, 'dry-run': { type: 'boolean' },
       provider: { type: 'string' }, timestamps: { type: 'string' }, 'keep-label': { type: 'string', multiple: true },
       'keep-enum': { type: 'string', multiple: true }, 'keep-class': { type: 'string', multiple: true }, 'salt-file': { type: 'string' }, report: { type: 'string' },
-      'owner-hints': { type: 'boolean' }, force: { type: 'boolean' }, help: { type: 'boolean' },
+      'owner-hints': { type: 'boolean' }, force: { type: 'boolean' }, 'allow-partial': { type: 'boolean' }, help: { type: 'boolean' },
     },
     allowPositionals: false,
   }).values;
@@ -79,6 +82,7 @@ try {
     keepClasses: args['keep-class'] ?? [],
     dryRun: Boolean(args['dry-run']),
     force: Boolean(args.force),
+    allowPartial: Boolean(args['allow-partial']),
     ownerHints: Boolean(args['owner-hints']),
     report: args.report,
   });
@@ -119,7 +123,7 @@ try {
     for (const [word, count] of result.hints) out.push(`  ${count}x ${word}`);
   }
   out.push('', result.outputPath ? `Sanitized output: ${result.outputPath}` : 'Dry run: no output was kept.');
-  if (result.exitCode === 2) out.push('PARTIAL: some members could not be parsed and were replaced by empty stand-ins (see STATUS).');
+  if (result.exitCode === 2) out.push('PARTIAL (published): some members could not be parsed and were replaced by empty stand-ins (see STATUS).');
   out.push('Running this on a real export is an owner-local step; record it as NOT_RUN until done.');
   process.stdout.write(`${out.join('\n')}\n`);
   process.exit(result.exitCode);

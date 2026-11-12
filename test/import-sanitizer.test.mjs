@@ -7,7 +7,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { Readable } from 'node:stream';
 import { test } from 'node:test';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { sanitize } from '../scripts/import-sanitizer/sanitize.mjs';
 import { DEFAULT_BUDGETS, totalStructureEstimateBytes } from '../scripts/import-sanitizer/budgets.mjs';
 import { DistinctCounter, LeakRegistry } from '../scripts/import-sanitizer/leak-check.mjs';
@@ -37,6 +37,31 @@ const bytesIn = (text, size = 1 << 16) => Readable.from((function* () {
   const buffer = Buffer.from(text);
   for (let i = 0; i < buffer.length; i += size) yield buffer.subarray(i, i + size);
 })());
+
+// Directory links. A symbolic link needs a privilege on Windows (Developer Mode or an elevated shell); a
+// junction (Windows only) needs none. A kind the runner cannot create is reported as SKIPPED with the
+// reason (never as a pass), so an unprivileged Windows run shows exactly what stayed unverified, while a
+// privileged run and Linux CI still execute the real symlink defenses. Nothing is relaxed to make counts green.
+function canLink(kind) {
+  const t = scratch('probe');
+  try {
+    fs.mkdirSync(path.join(t.dir, 'target'));
+    fs.symlinkSync(path.join(t.dir, 'target'), path.join(t.dir, 'link'), kind === 'junction' ? 'junction' : 'dir');
+    return true;
+  } catch { return false; } finally { t.done(); }
+}
+const LINK_KINDS = [
+  { kind: 'symlink', usable: canLink('symlink') },
+  ...(process.platform === 'win32' ? [{ kind: 'junction', usable: canLink('junction') }] : []),
+];
+const dirLink = (kind, target, link) => fs.symlinkSync(target, link, kind === 'junction' ? 'junction' : 'dir');
+/** Registers `fn(kind, link)` once per link kind; `link(target, linkPath)` creates a directory link of that kind. */
+function linkTest(name, fn) {
+  for (const { kind, usable } of LINK_KINDS) {
+    const options = usable ? {} : { skip: `BLOCKED: this runner cannot create a ${kind} (privilege); run it where that is permitted` };
+    test(`${name} [${kind}]`, options, () => fn(kind, (target, linkPath) => dirLink(kind, target, linkPath)));
+  }
+}
 
 function outputText(dir) {
   return [...readTree(dir)].map(([name, bytes]) => `${name}\n${bytes.toString('latin1')}`).join('\n');
@@ -417,7 +442,7 @@ test('a member that is not valid JSON is replaced by an empty stand-in and repor
   } finally { t.done(); }
 });
 
-test('zip safety: tampered data and lying headers fail the member, not the process', async () => {
+test('zip safety: tampered data and lying headers fail the run closed, with nothing published', async () => {
   const t = scratch('zip-tamper');
   try {
     const writer = new ZipWriter(path.join(t.dir, 'good.zip'));
@@ -428,9 +453,10 @@ test('zip safety: tampered data and lying headers fail the member, not the proce
     const bad = Buffer.from(bytes);
     bad[30 + 'conversations.json'.length + 4] ^= 0xff;
     fs.writeFileSync(path.join(t.dir, 'bad.zip'), bad);
-    const result = await sanitize({ input: path.join(t.dir, 'bad.zip'), output: path.join(t.dir, 'out.zip') });
-    assert.equal(result.exitCode, 2);
-    assert.match(result.report.members[0].status, /^failed:/);
+    // A corrupt entry means the source was not read completely: fail closed, publish nothing (WIN-SAN-F01).
+    await assert.rejects(sanitize({ input: path.join(t.dir, 'bad.zip'), output: path.join(t.dir, 'out.zip') }), error => error.code === 'E_MEMBER_IO' && !error.message.includes(t.dir));
+    assert.equal(fs.existsSync(path.join(t.dir, 'out.zip')), false);
+    assert.deepEqual(fs.readdirSync(t.dir).filter(name => /partial|spool|replaced/.test(name)), [], 'no staging leftovers');
     // Truncated file: not a zip, and not silently treated as a JSON file either.
     fs.writeFileSync(path.join(t.dir, 'trunc.zip'), bytes.subarray(0, bytes.length - 10));
     await assert.rejects(sanitize({ input: path.join(t.dir, 'trunc.zip'), output: path.join(t.dir, 'o2.zip') }), error => /^E_ZIP_/.test(error.code));
@@ -438,18 +464,24 @@ test('zip safety: tampered data and lying headers fail the member, not the proce
   } finally { t.done(); }
 });
 
-test('output path safety: no overwrite, not inside the input, no symlinked input', async () => {
+linkTest('output path safety: no overwrite, not inside the input, no symlinked input', async (kind, link) => {
   const t = scratch('paths');
   try {
     writeChatGptExport(path.join(t.dir, 'in'), { seed: 1, multi: false, conversations: 2 });
     await assert.rejects(sanitize({ input: path.join(t.dir, 'in'), output: path.join(t.dir, 'in', 'out') }), { code: 'E_OUTPUT_OVERLAPS_INPUT' });
     fs.mkdirSync(path.join(t.dir, 'exists'));
     await assert.rejects(sanitize({ input: path.join(t.dir, 'in'), output: path.join(t.dir, 'exists') }), { code: 'E_OUTPUT_EXISTS' });
-    fs.symlinkSync(path.join(t.dir, 'in'), path.join(t.dir, 'link'));
+    link(path.join(t.dir, 'in'), path.join(t.dir, 'link'));
     await assert.rejects(sanitize({ input: path.join(t.dir, 'link'), output: path.join(t.dir, 'o') }), { code: 'E_INPUT_SYMLINK' });
-    // A symlink inside the input tree is skipped, never followed.
-    fs.writeFileSync(path.join(t.dir, 'outside-secret.json'), '{"id":"outside"}');
-    fs.symlinkSync(path.join(t.dir, 'outside-secret.json'), path.join(t.dir, 'in', 'escape.json'));
+    // A link inside the input tree is skipped, never followed (a file symlink; a junction is directory-only).
+    if (kind === 'junction') {
+      fs.mkdirSync(path.join(t.dir, 'outside-dir'));
+      fs.writeFileSync(path.join(t.dir, 'outside-dir', 'secret.json'), '{"id":"outside"}');
+      link(path.join(t.dir, 'outside-dir'), path.join(t.dir, 'in', 'escape'));
+    } else {
+      fs.writeFileSync(path.join(t.dir, 'outside-secret.json'), '{"id":"outside"}');
+      fs.symlinkSync(path.join(t.dir, 'outside-secret.json'), path.join(t.dir, 'in', 'escape.json'));
+    }
     const result = await sanitize({ input: path.join(t.dir, 'in'), output: path.join(t.dir, 'safe-out') });
     assert.equal(result.report.skippedSymbolicLinks, 1);
     assert.ok(![...readTree(path.join(t.dir, 'safe-out')).keys()].some(name => /escape/.test(name)));
@@ -586,7 +618,7 @@ test('member names are portable: backslash separators and Windows-reserved chara
 
 // ------------------------------------------------------------------ re-review round 1 (SAN-F01..F05)
 
-test('SAN-F01: an output that contains the input is refused before anything is touched, even with --force', async () => {
+linkTest('SAN-F01: an output that contains the input is refused before anything is touched, even with --force', async (kind, link) => {
   const t = scratch('san-f01-ancestor');
   try {
     writeChatGptExport(path.join(t.dir, 'src'), { seed: 1, multi: false, conversations: 2 });
@@ -606,10 +638,10 @@ test('SAN-F01: an output that contains the input is refused before anything is t
     survives();
 
     // Symbolic-link aliases resolve to the same real paths.
-    fs.symlinkSync(path.join(t.dir, 'exports'), path.join(t.dir, 'alias'));
+    link(path.join(t.dir, 'exports'), path.join(t.dir, 'alias'));
     await assert.rejects(sanitize({ input: original, output: path.join(t.dir, 'alias'), force: true }), { code: 'E_OUTPUT_OVERLAPS_INPUT' });
     await assert.rejects(sanitize({ input: path.join(t.dir, 'alias', 'original.zip'), output: path.join(t.dir, 'exports'), force: true }), { code: 'E_OUTPUT_OVERLAPS_INPUT' });
-    fs.symlinkSync(path.join(t.dir, 'src'), path.join(t.dir, 'src-alias'));
+    link(path.join(t.dir, 'src'), path.join(t.dir, 'src-alias'));
     await assert.rejects(sanitize({ input: path.join(t.dir, 'src'), output: path.join(t.dir, 'src-alias', 'nested') }), { code: 'E_OUTPUT_OVERLAPS_INPUT' });
     survives();
     assert.deepEqual(fs.readdirSync(path.join(t.dir, 'exports')), ['original.zip'], 'nothing was created next to the input either');
@@ -644,7 +676,7 @@ test('SAN-F01: --force never destroys the existing output unless the replacement
   } finally { Rules.prototype.jsonString = original; t.done(); }
 });
 
-test('SAN-F01: --force only replaces sanitizer output, never an unrelated directory or a symlink', async () => {
+linkTest('SAN-F01: --force only replaces sanitizer output, never an unrelated directory or a symlink', async (kind, link) => {
   const t = scratch('san-f01-targets');
   try {
     writeChatGptExport(path.join(t.dir, 'in'), { seed: 3, conversations: 2 });
@@ -660,7 +692,7 @@ test('SAN-F01: --force only replaces sanitizer output, never an unrelated direct
     assert.deepEqual(fs.readdirSync(t.dir).sort(), ['in', 'precious', 'sanitized']);
 
     fs.mkdirSync(path.join(t.dir, 'target-dir'));
-    fs.symlinkSync(path.join(t.dir, 'target-dir'), path.join(t.dir, 'link-out'));
+    link(path.join(t.dir, 'target-dir'), path.join(t.dir, 'link-out'));
     await assert.rejects(sanitize({ input: path.join(t.dir, 'in'), output: path.join(t.dir, 'link-out'), force: true }), { code: 'E_OUTPUT_SYMLINK' });
     assert.ok(fs.existsSync(path.join(t.dir, 'target-dir')));
   } finally { t.done(); }
@@ -1087,13 +1119,22 @@ test('member names never collide: different input names stay different files und
   const t = scratch('names');
   try {
     fs.mkdirSync(path.join(t.dir, 'in'));
-    // 52 one-letter names: under a random per-run key the shaped names collide with near certainty,
-    // so this exercises the deterministic re-keying on every run (and does not depend on luck).
-    const letters = [...'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'];
+    // 52 short names that are distinct ALSO when compared case-insensitively (a.json and A.json would be one
+    // file on NTFS/APFS, which is how this fixture once lost half of its members on Windows). Under a random
+    // per-run key the shaped names collide with near certainty, so this exercises the deterministic
+    // re-keying on every run (and does not depend on luck).
+    const letters = [...'abcdefghijklmnopqrstuvwxyz', ...Array.from({ length: 26 }, (_, i) => String(i + 10))];
     for (const letter of letters) fs.writeFileSync(path.join(t.dir, 'in', `${letter}.json`), JSON.stringify({ [`field_${letter}_name`]: 1 }));
-    for (const mode of ['dir', 'zip']) {
-      const input = mode === 'dir' ? path.join(t.dir, 'in') : path.join(t.dir, 'names.zip');
+    assert.equal(new Set(fs.readdirSync(path.join(t.dir, 'in')).map(name => name.toLowerCase())).size, 52, 'the fixture itself has 52 case-insensitively distinct files');
+    for (const mode of ['dir', 'zip', 'case-variant-zip']) {
+      const input = mode === 'dir' ? path.join(t.dir, 'in') : path.join(t.dir, `names-${mode}.zip`);
       if (mode === 'zip') await zipDirectory(path.join(t.dir, 'in'), input);
+      if (mode === 'case-variant-zip') {
+        // A zip can hold names that differ only by case (they cannot coexist in one NTFS directory).
+        const writer = new ZipWriter(input);
+        for (const letter of [...'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ']) await writer.addFile(`${letter}.json`, Buffer.from(JSON.stringify({ [`field_${letter}_name`]: 1 })));
+        await writer.finish();
+      }
       const result = await sanitize({ input, output: path.join(t.dir, `out-${mode}`) });
       assert.equal(result.exitCode, 0, mode);
       assert.equal(result.report.totals.failedMembers, 0);
@@ -1137,7 +1178,7 @@ function reportFixture(name) {
   return { t, out, input: path.join(t.dir, 'in'), work: path.join(t.dir, 'work') };
 }
 
-test('SAN-F08: a report inside, at, above or aliasing the output is refused before anything is read or written', async () => {
+linkTest('SAN-F08: a report inside, at, above or aliasing the output is refused before anything is read or written', async (kind, link) => {
   const { t, out, input, work } = reportFixture('san-f08-overlap');
   try {
     // A previous verified output, produced by a normal run (report kept outside of it).
@@ -1147,7 +1188,7 @@ test('SAN-F08: a report inside, at, above or aliasing the output is refused befo
     const inBefore = snapshot(input);
     const workBefore = fs.readdirSync(work).sort();
     assert.ok(outBefore['user.json'], 'the previous output has a user.json member');
-    fs.symlinkSync(out, path.join(t.dir, 'alias'));
+    link(out, path.join(t.dir, 'alias'));
     const rootBefore = fs.readdirSync(t.dir).sort();
 
     const refused = [
@@ -1284,6 +1325,7 @@ function writeFaultPreload(dir) {
   const file = path.join(dir, 'fault-preload.mjs');
   fs.writeFileSync(file, `
 import fs from 'node:fs';
+import { Readable } from 'node:stream';
 const real = { writeFile: fs.promises.writeFile, rm: fs.promises.rm };
 const mode = process.env.MP_TEST_FAULT;
 if (mode === 'stage-write') {
@@ -1294,6 +1336,18 @@ if (mode === 'stage-write') {
       throw Object.assign(new Error('disk full'), { code: 'ENOSPC' });
     }
     return real.writeFile(file, data, options);
+  };
+}
+if (mode === 'read-fail') {
+  // Fail reads of conversations-001.json after the first few bytes (the shape of a file locked or failing mid-read).
+  const realCreate = fs.createReadStream;
+  const code = process.env.MP_TEST_READ_CODE ?? 'EBUSY';
+  fs.createReadStream = (file, options) => {
+    const source = realCreate(file, options);
+    if (!String(file).endsWith('conversations-001.json')) return source;
+    return Readable.from((async function* () {
+      for await (const chunk of source) { yield chunk.subarray(0, 8); throw Object.assign(new Error('injected'), { code }); }
+    })());
   };
 }
 if (mode === 'unlink-after-link') {
@@ -1364,9 +1418,10 @@ test('SAN-F09-A: a report that fails mid-write leaves no staged file and no outp
     // CLI (separate process with an injected fault): exit 1, exact code, nothing left behind.
     const preload = writeFaultPreload(t.dir);
     const cliRoot = fs.readdirSync(t.dir).sort();
-    const run = spawnSync(process.execPath, ['--import', preload, cli, '--input', input, '--output', out, '--report', report], { encoding: 'utf8', env: { ...process.env, MP_TEST_FAULT: 'stage-write' } });
+    const run = spawnSync(process.execPath, ['--import', pathToFileURL(preload).href, cli, '--input', input, '--output', out, '--report', report], { encoding: 'utf8', env: { ...process.env, MP_TEST_FAULT: 'stage-write' } });
     assert.equal(run.status, 1, run.stdout + run.stderr);
     assert.match(run.stderr, /E_REPORT_WRITE/);
+    assert.match(run.stderr, /ENOSPC/, 'the injected fault ran (not just any failure)');
     assert.doesNotMatch(`${run.stdout}${run.stderr}`, /Notes about|privatemail|quartz/i);
     assert.equal(fs.existsSync(out), false);
     assert.equal(fs.existsSync(report), false);
@@ -1411,7 +1466,7 @@ test('SAN-F09-B: if cleaning the staged name fails after the report was linked, 
     // CLI with an injected fault in the child process.
     const preload = writeFaultPreload(t.dir);
     const cliRoot = fs.readdirSync(t.dir).sort();
-    const run = spawnSync(process.execPath, ['--import', preload, cli, '--input', input, '--output', out, '--report', report], { encoding: 'utf8', env: { ...process.env, MP_TEST_FAULT: 'unlink-after-link' } });
+    const run = spawnSync(process.execPath, ['--import', pathToFileURL(preload).href, cli, '--input', input, '--output', out, '--report', report], { encoding: 'utf8', env: { ...process.env, MP_TEST_FAULT: 'unlink-after-link' } });
     assert.equal(run.status, 1, run.stdout + run.stderr);
     assert.match(run.stderr, /E_REPORT_WRITE/);
     assert.doesNotMatch(`${run.stdout}${run.stderr}`, /Notes about|privatemail|quartz/i);
@@ -1420,4 +1475,179 @@ test('SAN-F09-B: if cleaning the staged name fails after the report was linked, 
     assert.deepEqual(fs.readdirSync(t.dir).sort(), cliRoot);
     assert.deepEqual(fs.readdirSync(path.dirname(out)), []);
   } finally { fs.promises.rm = rm; t.done(); }
+});
+
+// ------------------------------------------------------------------ Windows qualification review (WIN-SAN-F01, WIN-SAN-F03)
+
+/**
+ * Makes reads of `target` fail the way an OS read failure does: the first `afterBytes` bytes arrive, then the
+ * stream errors with `code` (EBUSY for a locked file, EACCES, EIO). Returns the function that undoes it.
+ */
+function failReads(target, { afterBytes, code }) {
+  const real = fs.createReadStream;
+  fs.createReadStream = (file, options) => {
+    const source = real(file, options);
+    if (path.resolve(String(file)) !== path.resolve(target)) return source;
+    return Readable.from((async function* () {
+      let seen = 0;
+      for await (const chunk of source) {
+        const room = Math.max(0, afterBytes - seen);
+        if (chunk.length > room) { if (room) yield chunk.subarray(0, room); throw Object.assign(new Error(`${code}: injected`), { code }); }
+        seen += chunk.length;
+        yield chunk;
+      }
+      throw Object.assign(new Error(`${code}: injected`), { code }); // failure exactly at the end of the data
+    })());
+  };
+  return () => { fs.createReadStream = real; };
+}
+
+function leftoverNames(dir) {
+  return fs.readdirSync(dir).filter(name => /\.partial|\.replaced-|\.mp-sanitize-spool-/.test(name));
+}
+
+test('WIN-SAN-F01: a source read failure (EBUSY/EACCES/EIO, first or middle bytes) fails closed and keeps the previous output and report', async () => {
+  const t = scratch('win-san-f01-io');
+  let restore = () => {};
+  try {
+    writeChatGptExport(path.join(t.dir, 'in'), { seed: 21, conversations: 4 });
+    const output = path.join(t.dir, 'out');
+    const report = path.join(t.dir, 'report.json');
+    assert.equal((await sanitize({ input: path.join(t.dir, 'in'), output, report })).exitCode, 0);
+    const outBefore = snapshot(output);
+    const reportBefore = fs.readFileSync(report);
+    const rootBefore = fs.readdirSync(t.dir).sort();
+    const victim = path.join(t.dir, 'in', 'conversations-001.json'); // not the first member: earlier ones are already staged
+    const size = fs.statSync(victim).size;
+    assert.ok(size > 64);
+
+    for (const code of ['EBUSY', 'EACCES', 'EIO']) {
+      for (const [where, afterBytes] of [['first bytes', 0], ['middle', Math.floor(size / 2)]]) {
+        restore = failReads(victim, { afterBytes, code });
+        const label = `${code} ${where}`;
+        await assert.rejects(sanitize({ input: path.join(t.dir, 'in'), output, report, force: true }), error => {
+          assert.equal(error.code, 'E_MEMBER_IO', label);
+          assert.equal(error.exitCode, 1, label);
+          assert.ok(error.message.includes(code), `${label}: the OS error code is reported`);
+          assert.ok(!error.message.includes(t.dir) && !/conversations/.test(error.message), `${label}: no path or content in the message`);
+          return true;
+        });
+        restore();
+        assert.deepEqual(snapshot(output), outBefore, `${label}: the previous complete output is untouched`);
+        assert.ok(fs.readFileSync(report).equals(reportBefore), `${label}: the previous report is untouched`);
+        assert.deepEqual(fs.readdirSync(t.dir).sort(), rootBefore, `${label}: nothing left beside the output`);
+        assert.deepEqual(leftoverNames(t.dir), []);
+      }
+    }
+
+    // A single-file source behaves the same, and a fresh output is simply not created.
+    const single = path.join(t.dir, 'in', 'conversations-000.json');
+    restore = failReads(single, { afterBytes: 5, code: 'EIO' });
+    await assert.rejects(sanitize({ input: single, output: path.join(t.dir, 'fresh.json') }), { code: 'E_MEMBER_IO' });
+    restore();
+    assert.equal(fs.existsSync(path.join(t.dir, 'fresh.json')), false);
+    assert.deepEqual(leftoverNames(t.dir), []);
+
+    // Through the real CLI (a child process): exit 1, stable code, previous output intact, no leftovers.
+    const preload = writeFaultPreload(t.dir);
+    const rootWithPreload = fs.readdirSync(t.dir).sort();
+    const run = spawnSync(process.execPath, ['--import', pathToFileURL(preload).href, cli, '--input', path.join(t.dir, 'in'), '--output', output, '--report', report, '--force'], { encoding: 'utf8', env: { ...process.env, MP_TEST_FAULT: 'read-fail', MP_TEST_READ_CODE: 'EBUSY' } });
+    assert.equal(run.status, 1, run.stdout + run.stderr);
+    assert.match(run.stderr, /E_MEMBER_IO/);
+    assert.match(run.stderr, /EBUSY/, 'the injected fault ran');
+    assert.doesNotMatch(`${run.stdout}${run.stderr}`, /Notes about|privatemail|quartz/i);
+    assert.deepEqual(snapshot(output), outBefore);
+    assert.ok(fs.readFileSync(report).equals(reportBefore));
+    assert.deepEqual(fs.readdirSync(t.dir).sort(), rootWithPreload);
+  } finally { restore(); t.done(); }
+});
+
+test('WIN-SAN-F01: a PARSE failure is PARTIAL (exit 2) and never silently replaces an existing output', async () => {
+  const t = scratch('win-san-f01-partial');
+  try {
+    writeChatGptExport(path.join(t.dir, 'in'), { seed: 22, conversations: 3 });
+    const output = path.join(t.dir, 'out');
+    const report = path.join(t.dir, 'report.json');
+    assert.equal((await sanitize({ input: path.join(t.dir, 'in'), output, report })).exitCode, 0);
+    const outBefore = snapshot(output);
+    const reportBefore = fs.readFileSync(report);
+    const rootBefore = fs.readdirSync(t.dir).sort();
+    // The source now holds a member that is read fine but is not valid JSON.
+    fs.writeFileSync(path.join(t.dir, 'in', 'conversations-001.json'), '[{"id":"x","title":"private-title-xyz" "oops": 1}');
+
+    await assert.rejects(sanitize({ input: path.join(t.dir, 'in'), output, report, force: true }), error => error.code === 'E_PARTIAL_WOULD_REPLACE' && !/private-title/.test(error.message));
+    assert.deepEqual(snapshot(output), outBefore, 'the complete output was kept');
+    assert.ok(fs.readFileSync(report).equals(reportBefore));
+    assert.deepEqual(fs.readdirSync(t.dir).sort(), rootBefore);
+    const refused = runCli(['--input', path.join(t.dir, 'in'), '--output', output, '--report', report, '--force']);
+    assert.equal(refused.status, 1);
+    assert.match(refused.stderr, /E_PARTIAL_WOULD_REPLACE/);
+    assert.deepEqual(snapshot(output), outBefore);
+
+    // A first-time output with a parse failure is still published as PARTIAL (nothing is being degraded).
+    const fresh = runCli(['--input', path.join(t.dir, 'in'), '--output', path.join(t.dir, 'fresh')]);
+    assert.equal(fresh.status, 2, fresh.stdout + fresh.stderr);
+    assert.match(fresh.stdout, /PARTIAL \(published\)/);
+    // The explicit opt-in replaces the previous output with the partial one.
+    const allowed = runCli(['--input', path.join(t.dir, 'in'), '--output', output, '--report', report, '--force', '--allow-partial']);
+    assert.equal(allowed.status, 2, allowed.stdout + allowed.stderr);
+    assert.notDeepEqual(snapshot(output), outBefore);
+    assert.deepEqual(leftoverNames(t.dir), []);
+  } finally { t.done(); }
+});
+
+test('WIN-SAN-F03: a staging directory that cannot be created is a stable, content-safe error and leaves nothing behind', async () => {
+  const t = scratch('win-san-f03');
+  const realMkdtemp = fs.promises.mkdtemp;
+  try {
+    writeChatGptExport(path.join(t.dir, 'in'), { seed: 23, conversations: 2 });
+    const input = path.join(t.dir, 'in');
+    const rootBefore = fs.readdirSync(t.dir).sort();
+
+    // A missing parent folder: the tool never creates parents.
+    await assert.rejects(sanitize({ input, output: path.join(t.dir, 'no-such-parent', 'out') }), error => {
+      assert.equal(error.code, 'E_SPOOL_INIT');
+      assert.ok(!error.message.includes(t.dir) && !error.message.includes('no-such-parent'), 'no path in the message');
+      return true;
+    });
+    assert.equal(fs.existsSync(path.join(t.dir, 'no-such-parent')), false);
+    const cliRun = runCli(['--input', input, '--output', path.join(t.dir, 'no-such-parent', 'out')]);
+    assert.equal(cliRun.status, 1);
+    assert.match(cliRun.stderr, /E_SPOOL_INIT/);
+    assert.deepEqual(fs.readdirSync(t.dir).sort(), rootBefore);
+
+    // The OS refuses the staging directory (what Windows does for a path that is too long: ENOENT).
+    let dryDir = null;
+    fs.promises.mkdtemp = async prefix => {
+      if (String(prefix).includes('.mp-sanitize-spool-')) throw Object.assign(new Error(`ENOENT: no such file or directory, mkdtemp '${prefix}'`), { code: 'ENOENT' });
+      const made = await realMkdtemp(prefix);
+      if (String(prefix).includes('mp-sanitize-dry-')) dryDir = made;
+      return made;
+    };
+    const refusedStaging = error => error.code === 'E_SPOOL_INIT' && error.exitCode === 1 && /ENOENT/.test(error.message) && !error.message.includes(t.dir);
+    await assert.rejects(sanitize({ input, output: path.join(t.dir, 'out') }), refusedStaging);
+    assert.deepEqual(fs.readdirSync(t.dir).sort(), rootBefore);
+    await assert.rejects(sanitize({ input, dryRun: true }), refusedStaging);
+    assert.ok(dryDir, 'the dry-run work directory had been created before the failure');
+    assert.equal(fs.existsSync(dryDir), false, 'and was removed again');
+    fs.promises.mkdtemp = realMkdtemp;
+
+    // Windows: a path past MAX_PATH either works or fails with the stable code, never with a raw error.
+    if (process.platform === 'win32') {
+      let longParent = t.dir;
+      for (let i = 0; longParent.length < 280; i++) longParent = path.join(longParent, `long-segment-${String(i).padStart(2, '0')}-${'x'.repeat(24)}`);
+      fs.mkdirSync(longParent, { recursive: true });
+      const target = path.join(longParent, 'out');
+      assert.ok(target.length > 260);
+      let outcome;
+      try { outcome = { result: await sanitize({ input, output: target }) }; } catch (error) { outcome = { error }; }
+      if (outcome.error) {
+        assert.equal(outcome.error.code, 'E_SPOOL_INIT', outcome.error.message);
+        assert.equal(fs.existsSync(target), false);
+        assert.deepEqual(leftoverNames(longParent), []);
+      } else {
+        assert.equal(outcome.result.exitCode, 0);
+      }
+    }
+  } finally { fs.promises.mkdtemp = realMkdtemp; t.done(); }
 });

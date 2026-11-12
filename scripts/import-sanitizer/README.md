@@ -39,11 +39,18 @@ report, after reading the inventory printed on screen.
 | `--keep-class <name>` | Also keep this HTML class token (repeatable). Unknown class names are private by default. |
 | `--owner-hints` | Prints frequent leading words of HTML text nodes **to the terminal only**, to help you choose `--keep-label`. Never written to the report. |
 | `--salt-file <path>` / `MIND_PLACE_SANITIZER_SALT` | Pseudonym key, **opt-in** for reproducible output. By default every run uses a fresh random 256-bit key that is never written, logged or reported, so identifiers (even short, sequential ones) cannot be confirmed offline by enumerating candidates. There is deliberately no command-line salt option. |
+| `--allow-partial` | Only with `--force`: allow replacing an existing output with a **partial** one (see exit `2`). Without it a run whose members include parse failures publishes nothing and keeps the existing output (`E_PARTIAL_WOULD_REPLACE`, exit 1). A first-time output is not affected. |
 | `--force` | Replace an existing output (and an existing report file), but **only after the new one is fully written and verified** (the old one is moved aside and removed last, and restored if the swap fails). Refuses a directory that this tool did not create, a symbolic link, and any output that is the input, inside it, or a directory that contains it (checked on canonical paths, after resolving links). |
 
-Exit codes: `0` PASS · `1` usage or I/O error · `2` PARTIAL (some members could not be parsed and were
-replaced by empty stand-ins; see STATUS) · `3` leak check FAILED **or INCOMPLETE** (tracking overflowed, so part of
-the input was never checked) · `4` structure check FAILED · `5` resource budget exceeded. On `3`, `4` and `5` no output is left behind and an existing output is untouched.
+Exit codes: `0` PASS · `1` usage or I/O error · `2` PARTIAL · `3` leak check FAILED **or INCOMPLETE** (tracking overflowed, so part of
+the input was never checked) · `4` structure check FAILED · `5` resource budget exceeded. On `1`, `3`, `4` and `5` **nothing is published** and an
+existing output and report are untouched.
+
+**Exit `2` is a partial successful publication**, not a failure: the output *was* published, but some members were read fine and are not
+valid JSON/HTML (**parse failures**), so they became empty stand-ins and are listed as `failed:` in the inventory. It is never used for a member
+that could not be *read*: an OS read error (`EBUSY` for a locked file, `EACCES`, `EIO`, ...), a truncated or corrupt zip entry (CRC, size or
+inflate error) or a failure to stage a member means the source was not read completely, so the run **fails closed** (`E_MEMBER_IO`, exit `1`,
+nothing published, existing output kept). A partial output also never replaces an existing output unless you pass `--allow-partial`.
 
 ## What PASS does and does not mean
 
@@ -149,6 +156,11 @@ output to GitHub or to an agent as part of recording a result; record counts, ex
 
 ### 1. Windows qualification (synthetic data only)
 
+Record the run **exactly** as the runner reports it: `tests`, `pass`, `fail`, `skipped`. On a Windows account without Developer Mode or elevation
+the four true-symlink variants (`[symlink]`) are reported as **SKIPPED with a `BLOCKED:` reason**, never as a pass, and the same defenses are
+exercised with directory **junctions** (`[junction]` variants, no privilege needed). The symlink variants run in Linux CI and on a Windows
+machine that can create symbolic links; do not turn the test count green by weakening them.
+
 Use a checkout of the exact commit under review, on Windows x64, in a scratch directory outside the repository.
 
 ```powershell
@@ -170,7 +182,8 @@ you create (for example by running the test fixture builders), and confirm every
 | `--force` onto a folder that this tool did not create | refused (`E_OUTPUT_NOT_REPLACEABLE`), folder untouched |
 | ZIP in, ZIP out, then open the result with Explorer and `tar -tf` | valid archive, same member layout |
 | Member names that Windows rejects (`:`, `?`, `*`, trailing dot) inside a ZIP | sanitized names are valid on NTFS |
-| Paths longer than 260 characters | record the behaviour (PASS or a clear error); do not assume |
+| Paths longer than 260 characters | input paths and zip member names of that length work (observed). An **output** path that long fails in `mkdtemp` for the staging folder: stable `E_SPOOL_INIT`, exit 1, nothing created or left. Long output paths are **not supported yet**; use a shorter output folder. Record what you see; do not assume |
+| `--force` with a source member that cannot be read (for example a file another program holds open) | `E_MEMBER_IO`, exit 1, previous output and report intact, nothing left behind |
 | Run twice in a row | no leftovers; second run needs `--force` |
 
 ### 2. First trial on a real export
@@ -186,6 +199,21 @@ you create (for example by running the test fixture builders), and confirm every
 5. Only then decide whether to share the sanitized output, and with whom. The tool never decides that for you.
 6. Record: commit SHA, OS, input kind and rough size, exit code, counts from the report, which options you used, and your
    residual-metadata decision. A localized label, unknown fields or `failed:` members are exactly what MP-IMPORT-APP-01 needs.
+
+## Known limits and design notes
+
+- **Output parent folder:** it must already exist; the tool never creates parents. If the staging folder next to the output cannot be created
+  (missing or read-only parent, a Windows path longer than about 260 characters) the run stops with `E_SPOOL_INIT` (exit 1) and a message that
+  contains only an error code, never a path.
+- **`--force` onto an existing *file*** (file-to-file and zip-to-zip output) replaces that file once the new output is verified. Unlike a
+  directory, a file carries no "made by this tool" marker, so any existing file at that path is replaced: point `--output` at a path you are
+  willing to lose, or omit `--force`.
+- **Links:** the input path itself may not be a symbolic link or junction (`E_INPUT_SYMLINK`), links *inside* an input tree are skipped and
+  counted (`skippedSymbolicLinks`), and an output or report that resolves through a link into the input or the output is refused. An input *file*
+  whose **parent folder** is reached through a junction is accepted (only the final path component is checked); the output and report overlap
+  rules still use canonical (real) paths.
+- **Case-insensitive file systems:** output member names are distinct byte for byte. A zip that holds names differing only by case (which cannot
+  coexist in one NTFS/APFS folder) keeps them distinct in a zip output, but extracting that zip on such a file system may merge some of them.
 
 ## Development
 

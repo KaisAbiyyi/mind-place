@@ -15,8 +15,8 @@ import {
 import { BudgetError, structureEstimateBytes, resolveBudgets, totalStructureEstimateBytes } from './budgets.mjs';
 import { LeakError, LeakRegistry } from './leak-check.mjs';
 import { boundedLines } from './text-stream.mjs';
-import { rewriteHtml } from './html-stream.mjs';
-import { rewriteJson } from './json-stream.mjs';
+import { HtmlError, rewriteHtml } from './html-stream.mjs';
+import { JsonError, rewriteJson } from './json-stream.mjs';
 import { HTML_MEMBER, JSON_MEMBER, neutralizeText, Rules, TEXT_MEMBER } from './rules.mjs';
 import { openZip, READER_LIMITS, ZipError, ZipWriter } from './zip.mjs';
 
@@ -130,7 +130,12 @@ async function* neutralizeTextStream(readable, rules, budgets) {
   }
 }
 
-const EMPTY_STAND_IN = { json: '{}\n', html: '<!doctype html><html></html>\n', text: '' };
+/** An error code that is safe to print: a short upper-case identifier, never a message that could quote a path or content. */
+function safeCode(error) {
+  return typeof error?.code === 'string' && /^[A-Z][A-Z0-9_]{1,40}$/.test(error.code) ? error.code : 'error';
+}
+
+const EMPTY_STAND_IN ={ json: '{}\n', html: '<!doctype html><html></html>\n', text: '' };
 
 async function sanitizeMember(entry, kind, outName, rules, spool, options) {
   const { budgets } = options;
@@ -169,6 +174,14 @@ async function sanitizeMember(entry, kind, outName, rules, spool, options) {
     if (error instanceof BudgetError) throw error; // a resource limit stops the whole run, never a quiet stand-in
     const exceeded = { E_JSON_TOO_DEEP: 'maxJsonDepth', E_JSON_TOKEN_TOO_LARGE: 'maxTokenChars', E_HTML_TOKEN_TOO_LARGE: 'maxTokenChars' }[error?.code];
     if (exceeded) throw new BudgetError(exceeded, budgets[exceeded]);
+    // Only a *parse* failure (the bytes were read but are not valid JSON/HTML) is a recoverable member
+    // failure. Everything else - OS read errors (EBUSY, EACCES, EIO, ...), a truncated or corrupt zip
+    // entry (CRC/size/inflate errors), a failure to stage the member - means the source was not read
+    // completely, so the whole run fails closed: nothing is published and an existing output is kept
+    // (WIN-SAN-F01). The message carries a content-free code only.
+    if (!(error instanceof JsonError || error instanceof HtmlError)) {
+      throw new SanitizerError('E_MEMBER_IO', `A member could not be read or staged completely (${safeCode(error)}); nothing was published and any existing output was kept`);
+    }
     // Content-free reason only: parser messages can quote the input.
     record.status = `failed:${error?.code ?? 'E_PROCESSING'}`;
     record.structure = null;
@@ -369,17 +382,18 @@ async function stageReport(reportPath, json, force) {
 
 export async function sanitize({
   input, output, provider = 'auto', salt, timestamps = 'day', keepLabels = [], keepEnums = [], keepClasses = [],
-  dryRun = false, force = false, ownerHints = false, budgets: budgetOverrides, report: reportPath,
+  dryRun = false, force = false, allowPartial = false, ownerHints = false, budgets: budgetOverrides, report: reportPath,
 }) {
   const budgets = resolveBudgets(budgetOverrides);
   if (!input) throw new SanitizerError('E_USAGE', 'An input path is required');
   const workRoot = dryRun ? os.tmpdir() : path.dirname(path.resolve(output ?? '.'));
+  let existing = null; // the output this run would replace (only with --force)
   if (!dryRun) {
     if (!output) throw new SanitizerError('E_USAGE', 'An output path is required');
     // All checks happen before anything is created, moved or deleted.
     await assertOutputDoesNotOverlap(input, output);
     if (reportPath) await assertReportPath(input, output, reportPath);
-    const existing = await fs.promises.lstat(output).catch(() => null);
+    existing = await fs.promises.lstat(output).catch(() => null);
     if (existing && !force) throw new SanitizerError('E_OUTPUT_EXISTS', 'Output already exists; pass --force to replace it');
     if (existing) await assertReplaceable(output, existing);
     if (await fs.promises.lstat(`${output}.partial`).catch(() => null)) {
@@ -390,9 +404,28 @@ export async function sanitize({
   const leak = new LeakRegistry({ maxHashes: budgets.maxProtectedPieces, maxKept: budgets.maxKeptPieces });
   const rules = new Rules({ salt, timestamps, keepLabels, keepEnums, keepClasses, budgets, leak });
   const source = await openSource(input, budgets);
-  const outputPath = dryRun ? path.join(await fs.promises.mkdtemp(path.join(workRoot, 'mp-sanitize-dry-')), 'out') : output;
+  // Staging directories are created next to the output (or in the temp dir for a dry run). The parent
+  // must already exist; the tool never creates parent directories. A failure here (missing or read-only
+  // parent, or a path that Windows cannot create at this length, see README) is a stable, content-safe
+  // error and leaves nothing behind (WIN-SAN-F03).
+  const makeStaging = async (parent, prefix) => {
+    try {
+      return await fs.promises.mkdtemp(path.join(parent, prefix));
+    } catch (error) {
+      await source.close().catch(() => {});
+      throw new SanitizerError('E_SPOOL_INIT', `The staging directory could not be created next to the output (${safeCode(error)}). The output's parent folder must exist and be writable; on Windows the path must also be shorter than 260 characters`);
+    }
+  };
+  const dryRoot = dryRun ? await makeStaging(workRoot, 'mp-sanitize-dry-') : null;
+  const outputPath = dryRun ? path.join(dryRoot, 'out') : output;
   const sink = source.kind === 'zip' ? new ZipSink(outputPath) : source.kind === 'dir' ? new DirSink(outputPath) : new FileSink(outputPath);
-  const spoolDir = await fs.promises.mkdtemp(path.join(dryRun ? workRoot : path.dirname(path.resolve(output)), '.mp-sanitize-spool-'));
+  let spoolDir;
+  try {
+    spoolDir = await makeStaging(dryRun ? workRoot : path.dirname(path.resolve(output)), '.mp-sanitize-spool-');
+  } catch (error) {
+    if (dryRoot) await fs.promises.rm(dryRoot, { recursive: true, force: true });
+    throw error;
+  }
   const hints = ownerHints ? new LeadingWordHints() : null;
   const members = [];
   const used = new Set();
@@ -488,6 +521,12 @@ export async function sanitize({
       throw Object.assign(new SanitizerError('E_STRUCTURE', 'Sanitized output does not have the structure of the input', 4), { checks });
     }
     const failed = members.filter(member => member.status.startsWith('failed'));
+    // Exit 2 means "partial output published": some members were *parsed* unsuccessfully and became empty
+    // stand-ins. That never silently replaces a previous output that may be complete (WIN-SAN-F01): it
+    // needs the explicit --allow-partial opt-in, and without it nothing is published.
+    if (failed.length && existing && !allowPartial) {
+      throw new SanitizerError('E_PARTIAL_WOULD_REPLACE', `${failed.length} member(s) could not be parsed, so the new output is partial. Replacing the existing output with a partial one needs --allow-partial; nothing was published and the existing output was kept`);
+    }
     const report = buildReport({ rules, leak, members, checks, source, provider, written, dryRun, timestamps, budgets });
     // Transaction: stage the report, publish the verified output, commit the report. If the report
     // cannot be committed the output publication is rolled back (a previous output is restored), so a
