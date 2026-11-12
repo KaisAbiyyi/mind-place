@@ -118,14 +118,19 @@ recorded in the report (`resourceBudgets`).
 | `maxDistinctIdentifiers` | 4,000,000 | per JSON member, for the input-side and the output-side structure analysis |
 | `maxUnknownClassTokens` | 1,000,000 | per HTML member: distinct unknown class names |
 | `maxShortIdentifiers` / `maxShortIdentifierBytes` | 100,000 / 8 MiB | injectivity table for short identifiers |
-| `maxMembers` | 100,000 | files or zip entries (also caps the zip central directory that is read into memory) |
+| `maxMembers` | 100,000 | names enumerated in a directory tree (files, directories, links; counted while listing, before sorting) or zip entries (also caps the zip central directory read into memory) |
 | `maxSummaryEntries` | 500,000 | path/tag entries held across all members' summaries |
 | `maxJsonDepth` | 256 | JSON nesting (a file of `[[[[…` can no longer grow a stack) |
-| `maxTokenChars` | 32 Mi chars | one JSON string or scalar, one HTML text node, one tag |
+| `maxTokenChars` | 32 Mi chars | one JSON string or scalar, one HTML text node, tag, comment or declaration, one plain-text line |
 
-Worst case if **every** budget were reached at the same time: below 1 GiB for the input-dependent structures
-(`totalUpperBoundBytes()` in `budgets.mjs`, asserted in the tests; hash tables are typed arrays at 8 bytes per slot and
-briefly hold old and new tables while growing). The typical figure is far lower. Measured locally (Linux, Node 22):
+Estimate: if **every** budget were reached at the same time, the enumerated structures would hold roughly 0.7 to 0.9 GiB
+(`totalStructureEstimateBytes()` in `budgets.mjs`; hash tables are typed arrays at 8 bytes per slot and briefly hold old
+and new tables while growing). **This is an estimate of those structures, not a guaranteed upper bound on the process's
+peak memory**: Node's heap and garbage collector, read and parse buffers, zlib state and the spool are outside it, so
+peak RSS can be higher. Every input path that accumulates text is covered by `maxTokenChars` (JSON strings and scalars,
+HTML text, tags, comments and `<!`/`<?` declarations, and plain-text lines in `.txt`/`.md` members, checked before the
+buffer grows), and directory listings are enumerated incrementally and refused beyond `maxMembers` names before anything is
+sorted. Observed peaks, measured locally (Linux, Node 22), were:
 
 | Input | Result | Peak RSS |
 | --- | --- | ---: |
@@ -135,6 +140,52 @@ briefly hold old and new tables while growing). The typical figure is far lower.
 
 These are one-off local observations, not CI measurements. There is no command-line option to raise a budget; the
 `budgets` option of the programmatic `sanitize()` exists for tests and for owners who knowingly need more.
+
+## Owner qualification runbook (Windows, then a real export)
+
+These two steps are **owner-local** and remain `NOT_RUN` until you do them. Record each as `PASS`, `FAIL`,
+`PARTIAL` or `BLOCKED` with the exact commit SHA. Do not paste, upload or attach any real export or sanitized
+output to GitHub or to an agent as part of recording a result; record counts, exit codes and your own review notes only.
+
+### 1. Windows qualification (synthetic data only)
+
+Use a checkout of the exact commit under review, on Windows x64, in a scratch directory outside the repository.
+
+```powershell
+npm ci
+node --import tsx --test test/import-sanitizer.test.mjs            # whole suite; expect 0 failures
+node test/fixtures/import-sanitizer/generate-parser-compat.mjs      # then: git status must show no change
+```
+
+The suite creates symbolic links. On Windows that needs Developer Mode or an elevated shell; if the symlink-based tests
+cannot run, record `BLOCKED` for them rather than `PASS`. Then exercise the failure paths by hand, with a synthetic export
+you create (for example by running the test fixture builders), and confirm every one of these:
+
+| Check | Expected |
+| --- | --- |
+| `--output` is the folder that **contains** the input file, with and without `--force` | refused, exit 1 (`E_OUTPUT_OVERLAPS_INPUT`); the input file is untouched |
+| `--output` is a directory **junction** (`mklink /J`) or symlink that points at the input's folder | refused, exit 1; input untouched |
+| `--input` is a junction or symlink | refused, exit 1 (`E_INPUT_SYMLINK`) |
+| `--force` over an existing output after a deliberately failing run | previous output intact, no `.partial`, `.replaced-*` or `.mp-sanitize-spool-*` left |
+| `--force` onto a folder that this tool did not create | refused (`E_OUTPUT_NOT_REPLACEABLE`), folder untouched |
+| ZIP in, ZIP out, then open the result with Explorer and `tar -tf` | valid archive, same member layout |
+| Member names that Windows rejects (`:`, `?`, `*`, trailing dot) inside a ZIP | sanitized names are valid on NTFS |
+| Paths longer than 260 characters | record the behaviour (PASS or a clear error); do not assume |
+| Run twice in a row | no leftovers; second run needs `--force` |
+
+### 2. First trial on a real export
+
+1. Work on your own machine only. First run `--dry-run` and read the whole terminal output: structure check, leak check,
+   members with `failed:` status, unknown field names and the **RESIDUAL METADATA** block.
+2. If `Prompted` is localized, rerun with `--owner-hints` (terminal only) and then `--keep-label <word>`. If a class name the
+   Gemini parser needs was replaced, add it with `--keep-class` only after reviewing it.
+3. Run for real into a new output path. Treat exit `2` (some members replaced by empty stand-ins), `3`, `4` and `5` as
+   findings to report as counts, not as a reason to loosen a budget or an allow-list.
+4. Open the sanitized output yourself and the JSON report. Decide whether the residual metadata (member names, enum values,
+   class names, hosts, dates, field names, counts) is acceptable to disclose. `PASS` is not an anonymity guarantee.
+5. Only then decide whether to share the sanitized output, and with whom. The tool never decides that for you.
+6. Record: commit SHA, OS, input kind and rough size, exit code, counts from the report, which options you used, and your
+   residual-metadata decision. A localized label, unknown fields or `failed:` members are exactly what MP-IMPORT-APP-01 needs.
 
 ## Development
 

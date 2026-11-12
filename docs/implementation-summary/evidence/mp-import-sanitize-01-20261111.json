@@ -11,9 +11,9 @@
   "commands": [
     {
       "command": "node --import tsx --test test/import-sanitizer.test.mjs",
-      "passed": 44,
+      "passed": 49,
       "failed": 0,
-      "note": "29 initially; 37 after round 1; 44 after round 2 (SAN-F06)"
+      "note": "29 initially; 37 after round 1; 44 after round 2; 49 after round 3 (SAN-F07 + name-collision fix); repeated 8x without a flake"
     },
     {
       "command": "cargo test --locked -p mind-place-archive --tests",
@@ -28,8 +28,8 @@
     },
     {
       "command": "npm run test:web",
-      "tests": 315,
-      "passed": 313,
+      "tests": 320,
+      "passed": 318,
       "failed": 0,
       "skipped": 2,
       "note": "2 skipped are Windows-only"
@@ -95,5 +95,23 @@
     "windows_run": "NOT_RUN",
     "hosted_ci_for_new_head": "NOT_RUN",
     "real_export": "NOT_RUN"
+  },
+  "re_review_round_3": {
+    "finding": "SAN-F07",
+    "parts": [
+      "F07-A text lines",
+      "F07-B unfinished html declarations",
+      "F07-C directory enumeration",
+      "docs: estimate not guarantee"
+    ],
+    "fixed": true,
+    "mutation_checked": true,
+    "also_found": [
+      "member-name collisions under a random key (fixed)",
+      "flaky Gemini test regex (fixed)"
+    ],
+    "windows_run": "NOT_RUN",
+    "real_export": "NOT_RUN",
+    "hosted_ci_for_new_head": "NOT_RUN"
   }
 }

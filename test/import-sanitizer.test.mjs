@@ -9,9 +9,11 @@ import { Readable } from 'node:stream';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { sanitize } from '../scripts/import-sanitizer/sanitize.mjs';
-import { DEFAULT_BUDGETS, totalUpperBoundBytes } from '../scripts/import-sanitizer/budgets.mjs';
+import { DEFAULT_BUDGETS, totalStructureEstimateBytes } from '../scripts/import-sanitizer/budgets.mjs';
 import { DistinctCounter, LeakRegistry } from '../scripts/import-sanitizer/leak-check.mjs';
 import { rewriteHtml, scanHtml } from '../scripts/import-sanitizer/html-stream.mjs';
+import { scanForLeaks } from '../scripts/import-sanitizer/analysis.mjs';
+import { boundedLines } from '../scripts/import-sanitizer/text-stream.mjs';
 import { rewriteJson } from '../scripts/import-sanitizer/json-stream.mjs';
 import { lengthClass, neutralizeText, Rules } from '../scripts/import-sanitizer/rules.mjs';
 import { openZip, ZipWriter } from '../scripts/import-sanitizer/zip.mjs';
@@ -311,7 +313,9 @@ test('Gemini Takeout folder: cards, quoting quirks, labels and duplicates surviv
     }
     assert.equal(count(out, /\d{1,2} Nov 2026, 00:00:00 WIB/g), count(html, /\d{1,2} Nov 2026, \d\d:\d\d:40 WIB/g), 'activity times keep their format, minus time of day');
     for (const secret of secrets) assert.ok(!out.includes(secret), 'a planted private string survived');
-    assert.doesNotMatch(out, /privatemail|example\.net|gemini\.google\.com\/app\/c_/);
+    // (identifiers are same-shape pseudonyms under a random key, so a prefix such as "c_" can reappear by chance;
+    // the planted identifiers themselves are asserted absent above)
+    assert.doesNotMatch(out, /privatemail|example\.net/);
     assert.ok(result.hints.some(([word]) => word === 'Prompted'), 'owner-only hints list frequent leading words');
     assert.ok(!JSON.stringify(result.report).includes('Prompted '), 'hints never enter the report');
     assert.equal(result.report.members.find(m => m.name.endsWith('MyActivity.html')).structure.textNodes > 0, true);
@@ -841,12 +845,14 @@ test('SAN-F06: every input-dependent structure has a named budget and the worst 
     assert.ok(names.includes(name), name);
     assert.ok(Number.isInteger(DEFAULT_BUDGETS[name]) && DEFAULT_BUDGETS[name] > 0, name);
   }
-  assert.ok(totalUpperBoundBytes() < 1024 ** 3, 'if every budget were reached at once the structures still stay below 1 GiB');
-  assert.ok(totalUpperBoundBytes({ ...DEFAULT_BUDGETS, maxProtectedPieces: 1000 }) < totalUpperBoundBytes());
+  assert.ok(totalStructureEstimateBytes() < 1024 ** 3, 'the estimate for the enumerated structures stays below 1 GiB (an estimate, not an RSS guarantee)');
+  assert.ok(totalStructureEstimateBytes({ ...DEFAULT_BUDGETS, maxProtectedPieces: 1000 }) < totalStructureEstimateBytes());
   await assert.rejects(sanitize({ input: 'x', output: 'y', budgets: { nope: 1 } }), /E_OPTION/);
   const readme = fs.readFileSync(path.join(root, 'scripts', 'import-sanitizer', 'README.md'), 'utf8');
   for (const name of names) assert.ok(readme.includes(name), `README documents ${name}`);
   assert.doesNotMatch(readme, /memory bounded by the largest single string/);
+  assert.match(readme, /not a guaranteed upper bound on the process's\s+peak memory/, 'the estimate must not be presented as an absolute memory guarantee');
+  assert.doesNotMatch(readme, /Worst case if \*\*every\*\* budget/);
 });
 
 test('SAN-F06: the hash tables never grow past their budget, however many distinct values arrive', () => {
@@ -943,7 +949,162 @@ test('SAN-F06: a high-cardinality export within the budgets completes and report
     assert.equal(result.exitCode, 0);
     assert.equal(result.report.members[0].structure.distinctIdentifiers, 20_001 - 1 + 1 - 0 === 20_001 ? 20_000 : 0);
     assert.deepEqual(result.report.resourceBudgets.limits, DEFAULT_BUDGETS);
-    assert.ok(result.report.resourceBudgets.worstCaseBytesIfAllReached < 1024 ** 3);
+    assert.ok(result.report.resourceBudgets.enumeratedStructuresEstimateBytes < 1024 ** 3);
+    assert.match(result.report.resourceBudgets.note, /estimate/i);
     assert.equal(runCli(['--help']).stdout.includes('5 resource budget exceeded'), true);
+  } finally { t.done(); }
+});
+
+// ------------------------------------------------------------------ SAN-F07 (remaining ingest buffers)
+
+/** A reader that serves `chunk` bytes of `fill` forever and counts how much was consumed. */
+function endlessReader(prefix, fill, chunk) {
+  const state = { served: 0 };
+  state.stream = Readable.from((async function* generate() {
+    if (prefix) { state.served += prefix.length; yield Buffer.from(prefix); }
+    for (;;) {
+      // Fail fast (instead of hanging CI) if a scanner keeps draining a source it should have refused.
+      if (state.served > 4_000_000) throw new Error('SOURCE_DRAINED: no size bound was enforced');
+      state.served += chunk;
+      yield Buffer.alloc(chunk, fill);
+    }
+  })());
+  return state;
+}
+const SMALL = { ...DEFAULT_BUDGETS, maxTokenChars: 1000 };
+
+test('SAN-F07-A: a text member without newlines is bounded before the buffer grows (neutralizer and leak scan)', async () => {
+  // Lines and UTF-8 survive any chunking, and the limit is on the line, not the file.
+  const text = 'héllo wörld\nsecond line ✓\n\nlast without newline';
+  const expected = [];
+  for await (const item of boundedLines(bytesIn(text, 1 << 16), SMALL)) expected.push(item);
+  assert.deepEqual(expected.map(item => item.line), ['héllo wörld', 'second line ✓', '', 'last without newline']);
+  assert.deepEqual(expected.map(item => item.newline), [true, true, true, false]);
+  for (const size of [1, 2, 3, 5]) {
+    const lines = [];
+    for await (const item of boundedLines(bytesIn(text, size), SMALL)) lines.push(item);
+    assert.deepEqual(lines, expected, `chunk size ${size}`);
+  }
+  const many = Array.from({ length: 5000 }, (_, i) => `line ${i}`).join('\n'); // long file, short lines
+  let count = 0;
+  for await (const item of boundedLines(bytesIn(many, 13), SMALL)) count += item.line ? 1 : 0;
+  assert.equal(count, 5000);
+  // Exactly at the limit passes; one more character is refused.
+  for await (const item of boundedLines(bytesIn('x'.repeat(1000), 7), SMALL)) assert.equal(item.line.length, 1000);
+  await assert.rejects(collect(boundedLines(bytesIn('x'.repeat(1001), 7), SMALL)), { code: 'E_BUDGET', budget: 'maxTokenChars' });
+
+  // An endless single line is refused after about one budget of input, not after draining the source.
+  const source = endlessReader('', 'a', 512);
+  await assert.rejects(collect(boundedLines(source.stream, SMALL)), { code: 'E_BUDGET', budget: 'maxTokenChars', limit: 1000 });
+  assert.ok(source.served <= 1000 + 70_000, `consumed ${source.served} bytes`);
+  // ... and so is a long line that follows ordinary lines, and the leak scan of an output.
+  const mixed = endlessReader('ok\nfine\n', 'b', 512);
+  await assert.rejects(collect(boundedLines(mixed.stream, SMALL)), { code: 'E_BUDGET' });
+  const scan = endlessReader('', 'c', 512);
+  await assert.rejects(scanForLeaks('text', scan.stream, new LeakRegistry(), SMALL), { code: 'E_BUDGET', budget: 'maxTokenChars' });
+  assert.ok(scan.served <= 1000 + 70_000, `consumed ${scan.served} bytes`);
+  assert.equal(await scanForLeaks('text', bytesIn(many, 13), new LeakRegistry(), SMALL), 0);
+});
+
+test('SAN-F07-A: .txt and .md members without newlines stop the run safely (file, directory and zip)', async () => {
+  const t = scratch('san-f07-a');
+  try {
+    fs.mkdirSync(path.join(t.dir, 'in'));
+    for (const name of ['note.txt', 'README.md']) {
+      fs.writeFileSync(path.join(t.dir, 'in', name), `secret ${'x'.repeat(5000)}`);
+      await assertBudgetStops(t, path.join(t.dir, 'in', name), { maxTokenChars: 1000 }, 'maxTokenChars');
+    }
+    await assertBudgetStops(t, path.join(t.dir, 'in'), { maxTokenChars: 1000 }, 'maxTokenChars');
+    await zipDirectory(path.join(t.dir, 'in'), path.join(t.dir, 'text.zip'));
+    await assertBudgetStops(t, path.join(t.dir, 'text.zip'), { maxTokenChars: 1000 }, 'maxTokenChars');
+    // Ordinary multi-line text is still neutralized.
+    fs.writeFileSync(path.join(t.dir, 'plain.txt'), Array.from({ length: 50 }, (_, i) => `private sentence number ${i}`).join('\n'));
+    const ok = await sanitize({ input: path.join(t.dir, 'plain.txt'), output: path.join(t.dir, 'plain.out.txt'), budgets: { maxTokenChars: 1000 } });
+    assert.equal(ok.exitCode, 0);
+    assert.doesNotMatch(fs.readFileSync(path.join(t.dir, 'plain.out.txt'), 'utf8'), /private sentence/);
+  } finally { t.done(); }
+});
+
+test('SAN-F07-B: unfinished or oversized HTML declarations are bounded before the buffer grows', async () => {
+  for (const [label, prefix] of [['<! declaration', '<!DOCTYPE '], ['<? instruction', '<?xml '], ['<!-- comment', '<!-- '], ['tag', '<div class="']]) {
+    for (const entry of [html => rewriteHtml(html, new Rules({ salt: 'k' }), { budgets: SMALL }), html => scanHtml(html, SMALL)]) {
+      const source = endlessReader(prefix, 'a', 512);
+      await assert.rejects(collect(entry(source.stream)), { code: 'E_HTML_TOKEN_TOO_LARGE' }, label);
+      assert.ok(source.served <= 1000 + 70_000, `${label}: consumed ${source.served} bytes`);
+    }
+  }
+  // A declaration that is completed but oversized is refused too, across many chunks.
+  for (const closed of [`<!${'a'.repeat(5000)}>`, `<?${'a'.repeat(5000)}?>`]) {
+    await assert.rejects(collect(rewriteHtml(bytesIn(closed, 7), new Rules({ salt: 'k' }), { budgets: SMALL })), { code: 'E_HTML_TOKEN_TOO_LARGE' });
+  }
+  // Within the limit a declaration still works, however it is chunked.
+  const fine = '<!DOCTYPE html><?xml version="1.0"?><p>x</p>';
+  const whole = await collect(rewriteHtml(bytesIn(fine, 1 << 16), new Rules({ salt: 'k' }), { budgets: SMALL }));
+  assert.equal(await collect(rewriteHtml(bytesIn(fine, 3), new Rules({ salt: 'k' }), { budgets: SMALL })), whole);
+
+  const t = scratch('san-f07-b');
+  try {
+    fs.mkdirSync(path.join(t.dir, 'in'));
+    fs.writeFileSync(path.join(t.dir, 'in', 'bad.html'), `<html><!${'secret'.repeat(1000)}`);
+    await assertBudgetStops(t, path.join(t.dir, 'in', 'bad.html'), { maxTokenChars: 1000 }, 'maxTokenChars');
+    fs.writeFileSync(path.join(t.dir, 'in', 'bad2.html'), `<?${'secret'.repeat(1000)}>`);
+    await assertBudgetStops(t, path.join(t.dir, 'in', 'bad2.html'), { maxTokenChars: 1000 }, 'maxTokenChars');
+  } finally { t.done(); }
+});
+
+test('SAN-F07-C: directories are enumerated incrementally with a cap, never materialized or sorted whole', async () => {
+  const t = scratch('san-f07-c');
+  const { opendir, readdir } = fs.promises;
+  try {
+    fs.mkdirSync(path.join(t.dir, 'in'));
+    for (let i = 0; i < 2000; i++) fs.writeFileSync(path.join(t.dir, 'in', `f${String(i).padStart(4, '0')}.json`), '{}');
+
+    // A single huge directory is refused after about maxMembers names; readdir (which builds the
+    // whole array) is never used, and the number of entries pulled from the directory is bounded.
+    let pulled = 0;
+    fs.promises.readdir = async () => { throw new Error('readdir must not be used to enumerate input'); };
+    fs.promises.opendir = async (...args) => {
+      const handle = await opendir(...args);
+      return { close: () => handle.close(), async *[Symbol.asyncIterator]() { for await (const entry of handle) { pulled++; yield entry; } } };
+    };
+    await assertBudgetStops(t, path.join(t.dir, 'in'), { maxMembers: 10 }, 'maxMembers');
+    assert.ok(pulled <= 11, `entries pulled from the directory: ${pulled}`);
+
+    // Within the budget a directory is sorted deterministically and processed normally.
+    fs.mkdirSync(path.join(t.dir, 'small'));
+    for (const name of ['b.json', 'a.json', 'c.json']) fs.writeFileSync(path.join(t.dir, 'small', name), '{}');
+    const result = await sanitize({ input: path.join(t.dir, 'small'), output: path.join(t.dir, 'small-out'), budgets: { maxMembers: 10 } });
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.report.members.length, 3);
+    // Names of subdirectories and links count against the budget too.
+    fs.mkdirSync(path.join(t.dir, 'nest'));
+    for (let i = 0; i < 20; i++) fs.mkdirSync(path.join(t.dir, 'nest', `d${i}`));
+    await assertBudgetStops(t, path.join(t.dir, 'nest'), { maxMembers: 10 }, 'maxMembers');
+  } finally { fs.promises.readdir = readdir; fs.promises.opendir = opendir; t.done(); }
+});
+
+test('member names never collide: different input names stay different files under a random key', async () => {
+  const t = scratch('names');
+  try {
+    fs.mkdirSync(path.join(t.dir, 'in'));
+    // 52 one-letter names: under a random per-run key the shaped names collide with near certainty,
+    // so this exercises the deterministic re-keying on every run (and does not depend on luck).
+    const letters = [...'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'];
+    for (const letter of letters) fs.writeFileSync(path.join(t.dir, 'in', `${letter}.json`), JSON.stringify({ [`field_${letter}_name`]: 1 }));
+    for (const mode of ['dir', 'zip']) {
+      const input = mode === 'dir' ? path.join(t.dir, 'in') : path.join(t.dir, 'names.zip');
+      if (mode === 'zip') await zipDirectory(path.join(t.dir, 'in'), input);
+      const result = await sanitize({ input, output: path.join(t.dir, `out-${mode}`) });
+      assert.equal(result.exitCode, 0, mode);
+      assert.equal(result.report.totals.failedMembers, 0);
+      assert.equal(result.report.members.length, 52, 'no member is dropped');
+      assert.equal(new Set(result.report.members.map(m => m.name)).size, 52, 'every output name is distinct');
+      assert.ok(result.report.members.every(m => m.name.endsWith('.json')));
+    }
+    // A genuine duplicate of a kept structural name is still reported, not silently renamed.
+    const writer = new ZipWriter(path.join(t.dir, 'dup.zip'));
+    await writer.addFile('user.json', Buffer.from('{}'));
+    await writer.addFile('dir/../user.json'.replace('dir/../', ''), Buffer.from('{"a":1}')).catch(error => assert.equal(error.code, 'E_ZIP_DUPLICATE_NAME'));
+    await writer.finish();
   } finally { t.done(); }
 });

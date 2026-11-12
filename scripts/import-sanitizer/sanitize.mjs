@@ -9,12 +9,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
-import { StringDecoder } from 'node:string_decoder';
 import {
   analyzeHtml, analyzeJson, HtmlStructure, JsonStructure, scanForLeaks, structureDifferences, structuresEqual, summaryEntries,
 } from './analysis.mjs';
-import { BudgetError, memoryUpperBoundBytes, resolveBudgets, totalUpperBoundBytes } from './budgets.mjs';
+import { BudgetError, structureEstimateBytes, resolveBudgets, totalStructureEstimateBytes } from './budgets.mjs';
 import { LeakError, LeakRegistry } from './leak-check.mjs';
+import { boundedLines } from './text-stream.mjs';
 import { rewriteHtml } from './html-stream.mjs';
 import { rewriteJson } from './json-stream.mjs';
 import { HTML_MEMBER, JSON_MEMBER, neutralizeText, Rules, TEXT_MEMBER } from './rules.mjs';
@@ -58,9 +58,22 @@ const sizeClass = bytes => (bytes <= 0 ? 0 : 2 ** Math.ceil(Math.log2(bytes)));
 async function walk(root, maxMembers) {
   const out = [];
   const skipped = { symlinks: 0 };
+  let enumerated = 0; // every name seen (files, directories, links) counts against the member budget
   async function visit(dir, depth) {
     if (depth > 64) throw new SanitizerError('E_DEPTH', 'Directory nesting is too deep');
-    const names = (await fs.promises.readdir(dir)).sort();
+    // Enumerate incrementally with a hard cap BEFORE sorting: a directory with millions of entries
+    // is refused after maxMembers names, never materialized (readdir would build the whole array).
+    const names = [];
+    const handle = await fs.promises.opendir(dir);
+    try {
+      for await (const dirent of handle) {
+        if (++enumerated > maxMembers) throw new BudgetError('maxMembers', maxMembers);
+        names.push(dirent.name);
+      }
+    } finally {
+      await handle.close().catch(() => {});
+    }
+    names.sort();
     for (const name of names) {
       const file = path.join(dir, name);
       const stat = await fs.promises.lstat(file);
@@ -110,17 +123,11 @@ export async function openSource(input, budgets = resolveBudgets()) {
 
 // ---------------------------------------------------------------- member processing
 
-async function* neutralizeTextStream(readable, rules) {
-  let carry = '';
-  const decoder = new StringDecoder('utf8');
-  for await (const chunk of readable) {
-    const lines = (carry + decoder.write(chunk)).split('\n');
-    carry = lines.pop();
-    for (const line of lines) yield `${neutralizeText(line)}\n`;
-    for (const line of lines) rules.leak.protect(line);
+async function* neutralizeTextStream(readable, rules, budgets) {
+  for await (const { line, newline } of boundedLines(readable, budgets)) {
+    rules.leak.protect(line);
+    yield `${neutralizeText(line)}${newline ? '\n' : ''}`;
   }
-  carry += decoder.end();
-  if (carry) { rules.leak.protect(carry); yield neutralizeText(carry); }
 }
 
 const EMPTY_STAND_IN = { json: '{}\n', html: '<!doctype html><html></html>\n', text: '' };
@@ -151,7 +158,7 @@ async function sanitizeMember(entry, kind, outName, rules, spool, options) {
         budgets,
       });
     } else {
-      generator = neutralizeTextStream(source, rules);
+      generator = neutralizeTextStream(source, rules, budgets);
     }
     await pipeline(Readable.from(generator, { objectMode: false }), fs.createWriteStream(spool, { mode: 0o600 }));
     if (record.structure) {
@@ -226,6 +233,8 @@ class ZipSink {
 
 const coverageError = () => new SanitizerError('E_LEAK_COVERAGE', 'Leak tracking overflowed; verification is incomplete and the output was not published', 3);
 const OUTPUT_MARKER = '.mp-sanitizer-output';
+// Kept structural names (conversations.json, user.json, ...) are never renamed: a repeat is a real duplicate.
+const KEPT_STRUCTURAL = /(?:^|\/)(?:conversations(?:-\d{1,6})?\.json|(?:user|message_feedback|shared_conversations|export_manifest|model_comparisons|library|projects|gizmos)\.jsonl?|chat\.html|MyActivity\.html|archive_browser\.html|index\.html)$/
 const fold = value => (process.platform === 'win32' || process.platform === 'darwin' ? value.toLowerCase() : value);
 
 /** Canonical path of something that may not exist yet: real path of the nearest existing ancestor + the rest. */
@@ -330,22 +339,37 @@ export async function sanitize({
         if (!used.has(outName)) { used.add(outName); await sink.addDirectory?.(outName); }
         continue;
       }
-      if (used.has(outName)) {
-        members.push({ name: outName, kind: kindOf(entry.name), status: 'failed:E_NAME_COLLISION', outputBytes: 0, sourceSizeClass: sizeClass(entry.size) });
+      let finalName = outName;
+      // Different input names can map to the same shaped name (short names collide often). Re-key the
+      // mapping deterministically until the name is free; a name that cannot change (a kept structural
+      // name appearing twice) is a genuine duplicate.
+      for (let attempt = 1; used.has(finalName) && source.kind !== 'file' && attempt <= 64; attempt++) {
+        const candidate = rules.memberName(entry.name, attempt);
+        if (candidate === finalName) break;
+        finalName = candidate;
+      }
+      // Guaranteed uniqueness even when the shaped name space is nearly full: a deterministic counter.
+      if (used.has(finalName) && source.kind !== 'file') {
+        const dot = finalName.lastIndexOf('.');
+        const [stem, ext] = dot > finalName.lastIndexOf('/') + 1 ? [finalName.slice(0, dot), finalName.slice(dot)] : [finalName, ''];
+        for (let n = 1; used.has(finalName) && n <= 1_000_000 && !KEPT_STRUCTURAL.test(entry.name); n++) finalName = `${stem}_${n}${ext}`;
+      }
+      if (used.has(finalName)) {
+        members.push({ name: finalName, kind: kindOf(entry.name), status: 'failed:E_NAME_COLLISION', outputBytes: 0, sourceSizeClass: sizeClass(entry.size) });
         continue;
       }
-      used.add(outName);
+      used.add(finalName);
       const kind = kindOf(entry.name);
       const spool = path.join(spoolDir, String(index++));
       if (members.length >= budgets.maxMembers) throw new BudgetError('maxMembers', budgets.maxMembers);
-      const record = await sanitizeMember(entry, kind, outName, rules, spool, { hints, budgets });
+      const record = await sanitizeMember(entry, kind, finalName, rules, spool, { hints, budgets });
       summaryTotal += summaryEntries(record.inputSummary);
       if (summaryTotal > budgets.maxSummaryEntries) throw new BudgetError('maxSummaryEntries', budgets.maxSummaryEntries);
       if (leak.partial) throw Object.assign(coverageError(), { checks: { structure: 'NOT_RUN', leak: 'INCOMPLETE' } }); // stop early: part of the input can no longer be checked
       const outputBytes = (await fs.promises.stat(spool)).size;
-      await sink.add(outName, spool);
+      await sink.add(finalName, spool);
       await fs.promises.rm(spool, { force: true });
-      members.push({ name: outName, ...record, outputBytes, sourceSizeClass: sizeClass(entry.size) });
+      members.push({ name: finalName, ...record, outputBytes, sourceSizeClass: sizeClass(entry.size) });
       delete members[members.length - 1].structure;
     }
     const written = await sink.finish();
@@ -455,7 +479,7 @@ function buildReport({ rules, leak, members, checks, source, provider, written, 
       zip64: Boolean(written.zip64),
     },
     counters: rules.counters,
-    resourceBudgets: { limits: budgets, worstCaseBytesIfAllReached: totalUpperBoundBytes(budgets), note: 'Input-dependent structures are capped; exceeding any cap stops the run (exit 5) without publishing.' },
+    resourceBudgets: { limits: budgets, enumeratedStructuresEstimateBytes: totalStructureEstimateBytes(budgets), note: 'Input-dependent structures are capped; exceeding any cap stops the run (exit 5) without publishing. The byte figure is an estimate for those enumerated structures, not a bound on process memory.' },
     // Structure fidelity is not a privacy qualification. PASS below means "nothing outside the
     // allow-lists survived"; whatever the allow-lists keep is listed here for the owner to judge.
     qualification: {
@@ -476,4 +500,4 @@ function buildReport({ rules, leak, members, checks, source, provider, written, 
   };
 }
 
-export { BudgetError, memoryUpperBoundBytes, ZipError };
+export { BudgetError, structureEstimateBytes, ZipError };

@@ -2,7 +2,8 @@
 // identifiers, tokens, members, nesting depth, token length) has a named budget here. Exceeding
 // one throws BudgetError: the run stops, nothing is published, an existing output is untouched
 // and all spool/partial files are removed. Budgets can only be lowered or raised explicitly by the
-// caller; the defaults are sized so a real 1 GB export fits with large headroom.
+// caller; the defaults are sized so a real 1 GB export fits with large headroom. The budgets bound
+// the enumerated structures; they are not a hard cap on the process's peak memory.
 
 export class BudgetError extends Error {
   constructor(budget, limit) {
@@ -40,11 +41,12 @@ export function resolveBudgets(overrides = {}) {
 const slots = entries => 2 ** Math.ceil(Math.log2(Math.max(16, entries * 2))); // open addressing keeps load <= 0.5
 
 /**
- * Worst-case bytes held by input-dependent structures if EVERY budget is reached at once
- * (a ceiling, not an expectation; the measured typical figure is far lower). Hash tables are
- * typed arrays of 8 bytes per slot and briefly hold old + new tables while growing.
+ * ESTIMATE of the bytes held by the ENUMERATED input-dependent structures if every budget were
+ * reached at once. This is not a proven upper bound on process memory: Node's heap and garbage
+ * collection, parse and read buffers, zlib state and the spool file are outside it. Hash tables
+ * are typed arrays of 8 bytes per slot and briefly hold old + new tables while growing.
  */
-export function memoryUpperBoundBytes(budgets = DEFAULT_BUDGETS) {
+export function structureEstimateBytes(budgets = DEFAULT_BUDGETS) {
   const table = entries => slots(entries) * 8;
   const grow = bytes => Math.ceil(bytes * 1.5);
   return {
@@ -60,6 +62,6 @@ export function memoryUpperBoundBytes(budgets = DEFAULT_BUDGETS) {
   };
 }
 
-export function totalUpperBoundBytes(budgets = DEFAULT_BUDGETS) {
-  return Object.values(memoryUpperBoundBytes(budgets)).reduce((sum, bytes) => sum + bytes, 0);
+export function totalStructureEstimateBytes(budgets = DEFAULT_BUDGETS) {
+  return Object.values(structureEstimateBytes(budgets)).reduce((sum, bytes) => sum + bytes, 0);
 }

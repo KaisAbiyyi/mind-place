@@ -83,15 +83,42 @@ Regression tests (all deterministic, using small explicit budgets): `every input
 
 Still **NOT_RUN** (unchanged from the review): execution of the CLI on **Windows** (directory, symlink/reparse-point and `--force` failure paths, zip fixtures), the owner-local trial on a **real** export, and exact-head hosted CI for the new commit.
 
+## Re-review round 3 — SAN-F07 (P2): remaining unbounded ingest buffers
+
+Finding ([comment](https://github.com/KaisAbiyyi/mind-place/pull/167#issuecomment-6810832761), reviewed head `5e78d81`): SAN-F01 to F05 remain addressed and SAN-F06 is "substantially repaired", but three input paths still accumulated or enumerated without a bound, and the 1 GiB figure was presented as a guarantee. Hosted CI at `5e78d81` was SUCCESS (it does not cover these fixtures). Scope of this round: SAN-F07 only; nothing else was reworked.
+
+| Finding | Cause | Correction |
+| --- | --- | --- |
+| **F07-A** text member without newlines | `neutralizeTextStream()` and `scanForLeaks()` kept `carry = (carry + chunk).split('\n').pop()` with no cap, so one long line grew the buffer without limit (and `scanForLeaks` also split UTF-8 sequences across chunks) | New `text-stream.mjs` `boundedLines()`: decodes with a `StringDecoder`, yields complete lines and checks `carry + piece` against `maxTokenChars` **before** concatenating. Both callers use it. Overflow is `E_BUDGET(maxTokenChars)`, exit 5, nothing published |
+| **F07-B** unfinished HTML declarations | `<!` / `<?` with no `>` returned for more data without a size check (only comments, tags and raw text were checked) | The same pre-buffer check was added to that branch, and a completed declaration is checked at scan time too |
+| **F07-C** directory enumeration | `readdir(dir)` built and sorted the whole name array before `maxMembers` was applied | `opendir()` iterated incrementally; every name seen (files, directories, links) counts against `maxMembers` and the walk stops with `E_BUDGET` after `maxMembers` names, before anything is sorted |
+| **Docs** the 1 GiB figure | `totalUpperBoundBytes()` and the README read as an absolute memory guarantee although some paths sat outside the model | Renamed to `structureEstimateBytes()` / `totalStructureEstimateBytes()` and the report field to `enumeratedStructuresEstimateBytes`; README and the report note now say it is an **estimate of the enumerated structures, not a bound on process peak memory** (Node heap, buffers, zlib and spool are outside it). A test fails if the README claims otherwise |
+
+Regression tests (`test/import-sanitizer.test.mjs`, all deterministic, every one asserting exit 5, the exact budget, the previous output unchanged and an unchanged directory listing):
+
+- `SAN-F07-A: a text member without newlines is bounded before the buffer grows` — chunk-independent lines and UTF-8, exact-limit boundary, an endless single line refused after about one budget of input (source consumption asserted), a long line after ordinary lines, and the leak scan.
+- `SAN-F07-A: .txt and .md members without newlines stop the run safely` — file, directory and zip inputs; ordinary multi-line text is still neutralized.
+- `SAN-F07-B: unfinished or oversized HTML declarations are bounded before the buffer grows` — `<!`, `<?`, comment and tag, unterminated across many chunks (consumption asserted) and completed-but-oversized, via both the rewriter and the scanner, and at run level.
+- `SAN-F07-C: directories are enumerated incrementally with a cap` — a 2,000-entry directory with `maxMembers: 10`: `readdir` is replaced by a thrower, at most 11 entries are pulled from the directory, subdirectory names count too, and a small directory is still sorted and processed.
+
+**The tests were checked against the defect.** Each guard was removed in turn and the matching test failed: text-line cap removed (both A tests fail), unfinished `<!`/`<?` cap removed (the B test fails; the test source now throws `SOURCE_DRAINED` after a few MB so an unguarded scanner fails fast instead of hanging CI), `readdir` materialization restored (the C test fails). The guards were then restored.
+
+Still **NOT_RUN**: execution of the CLI on **Windows**, the owner-local **real-export** trial, and exact-head hosted CI for the new commit. A step-by-step owner runbook for both is now in the README ("Owner qualification runbook"). It records results as PASS/FAIL/PARTIAL/BLOCKED and asks that no real data be pasted anywhere.
+
+**Found while verifying this round (not from the review).** Re-running the suite repeatedly exposed two intermittent failures that the random per-run key (SAN-F03) had made visible:
+
+1. *A defect in the tool.* Member names were mapped by shape without a uniqueness guarantee, so two different short names (for example `a.json` and `b.json`) could map to the same output name and the second member was dropped as `failed:E_NAME_COLLISION` (exit 2). With the former fixed key this never showed. Identifiers and class tokens already had injective tables; names did not. Fix: on a collision only the final name segment is re-keyed deterministically (directory prefixes stay consistent between entries), with a numeric-suffix fallback so uniqueness never depends on luck; kept structural names such as `conversations.json` are never renamed, so a genuine duplicate is still reported. Test: `member names never collide…` (52 single-letter names, directory and zip, every run).
+2. *A flaky test of mine.* The Gemini test rejected output matching `/app/c_`; because identifiers keep their shape, a pseudonym starts with `c` about one time in 26. The check now asserts the planted identifiers are absent instead. The suite passed 8 consecutive runs after both fixes.
+
 ## Verification
 
 Environment: Linux x86_64, Node 22.23, Cargo 1.97. Synthetic data only.
 
 | Command | Result |
 | --- | --- |
-| `node --import tsx --test test/import-sanitizer.test.mjs` | PASS: 44 passed, 0 failed (29 before re-review round 1; 37 before round 2) |
+| `node --import tsx --test test/import-sanitizer.test.mjs` | PASS: 49 passed, 0 failed, repeated 8 times without a flake (29 initially; 37 after round 1; 44 after round 2) |
 | `cargo test --locked -p mind-place-archive --tests` | PASS: 124 passed, 0 failed, 0 ignored (includes the 3 parser cross-check tests and the 5 FIX-F01 tests) |
-| `npm run test:web` | PASS: 315 tests, 313 passed, 0 failed, 2 skipped (Windows-only) |
+| `npm run test:web` | PASS: 320 tests, 318 passed, 0 failed, 2 skipped (Windows-only) |
 | `npm run test:rust` | PASS: 355 passed, 0 failed, 1 ignored (existing qualification-ignored test) |
 | `cargo fmt --all -- --check`, `npm run verify:repo`, `npm run typecheck`, `node scripts/verify-workflow-security.mjs`, `git diff --check` | PASS |
 | Run on a **real** ChatGPT/Gemini export | **NOT_RUN** (owner-local step) |

@@ -10,6 +10,7 @@ import { DistinctCounter } from './leak-check.mjs';
 import { CLOCK_NODE, isDataKey, isIdContainerKey, isIdKey, isIdValue, isKnownClassToken } from './rules.mjs';
 import { jsonStrings, rewriteJson } from './json-stream.mjs';
 import { htmlStrings, rewriteHtml } from './html-stream.mjs';
+import { boundedLines } from './text-stream.mjs';
 
 const MAX_PATHS = 20_000;
 const MAX_NAMES = 5_000;
@@ -178,14 +179,6 @@ export async function scanForLeaks(kind, readable, registry, budgets = DEFAULT_B
   let leaks = 0;
   if (kind === 'json') for await (const text of jsonStrings(readable, budgets)) leaks += registry.countLeaks(text);
   else if (kind === 'html') for await (const text of htmlStrings(readable, budgets)) leaks += registry.countLeaks(text);
-  else {
-    let carry = '';
-    for await (const chunk of readable) {
-      const lines = (carry + chunk.toString('utf8')).split('\n');
-      carry = lines.pop();
-      for (const line of lines) leaks += registry.countLeaks(line);
-    }
-    leaks += registry.countLeaks(carry);
-  }
+  else for await (const { line } of boundedLines(readable, budgets)) leaks += registry.countLeaks(line);
   return leaks;
 }

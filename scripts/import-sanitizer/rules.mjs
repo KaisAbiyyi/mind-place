@@ -476,15 +476,16 @@ export class Rules {
 
   // ---- members ----
 
-  memberName(rawName) {
+  /** `attempt` re-keys only the final segment, so directory prefixes stay consistent between entries. */
+  memberName(rawName, attempt = 0) {
     const name = rawName.replaceAll('\\', '/'); // some zip tools store Windows separators
     const isDir = name.endsWith('/');
     const parts = (isDir ? name.slice(0, -1) : name).split('/');
-    const out = parts.map((segment, index) => this.#segmentName(segment, index === parts.length - 1 && !isDir));
+    const out = parts.map((segment, index) => this.#segmentName(segment, index === parts.length - 1 && !isDir, index === parts.length - 1 ? attempt : 0));
     return out.join('/') + (isDir ? '/' : '');
   }
 
-  #segmentName(segment, isFile) {
+  #segmentName(segment, isFile, attempt) {
     if (!segment || segment === '.' || segment === '..') return 'x';
     if (STRUCTURAL_NAMES.has(segment) || STRUCTURAL_NAME_PATTERN.test(segment)) {
       this.#note(this.residual.memberNames, segment);
@@ -497,9 +498,9 @@ export class Rules {
     const id = FILE_ID_IN_NAME.exec(stem);
     if (id) {
       const rest = stem.slice(id[1].length);
-      return `${this.pseudonymize(id[1])}${rest ? this.#portable(this.#shape(rest, 'name')) : ''}${this.kept(ext)}`;
+      return `${this.pseudonymize(id[1])}${rest ? this.#portable(this.#shape(rest, 'name', attempt)) : ''}${this.kept(ext)}`;
     }
-    return `${this.#portable(this.#shape(stem, 'name'))}${this.kept(ext)}`;
+    return `${this.#portable(this.#shape(stem, 'name', attempt))}${this.kept(ext)}`;
   }
 
   /** Output names must be valid on Windows too: no reserved characters, no trailing dot or space. */

@@ -112,10 +112,15 @@ export async function* scanHtml(readable, { maxTokenChars = DEFAULT_BUDGETS.maxT
         if (buf[pos + 1] === '!' || buf[pos + 1] === '?') {
           const close = buf.indexOf('>', pos);
           if (close < 0) {
-            if (!eof) return;
+            if (!eof) {
+              // An unfinished <! or <? construct must not accumulate without bound either.
+              if (buf.length - pos > maxTokenChars) throw new HtmlError('E_HTML_TOKEN_TOO_LARGE');
+              return;
+            }
             yield { type: 'text', raw: buf.slice(pos) };
             pos = buf.length;
           } else {
+            if (close + 1 - pos > maxTokenChars) throw new HtmlError('E_HTML_TOKEN_TOO_LARGE');
             yield { type: 'decl', raw: buf.slice(pos, close + 1) };
             pos = close + 1;
           }
