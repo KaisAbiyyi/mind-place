@@ -195,7 +195,7 @@ class FileSink {
   constructor(output) { this.output = output; this.partial = `${output}.partial`; }
   async add(name, spool) { await fs.promises.copyFile(spool, this.partial, fs.constants.COPYFILE_EXCL); }
   async finish() { return { entries: 1 }; }
-  async publish(force) { await publishAtomically(this.partial, this.output, force); }
+  async publish(force) { return publishAtomically(this.partial, this.output, force); }
   async discard() { await fs.promises.rm(this.partial, { force: true }); }
 }
 
@@ -213,7 +213,7 @@ class DirSink {
     await fs.promises.copyFile(spool, target, fs.constants.COPYFILE_EXCL);
   }
   async finish() { return {}; }
-  async publish(force) { await publishAtomically(this.partial, this.output, force); }
+  async publish(force) { return publishAtomically(this.partial, this.output, force); }
   async discard() { await fs.promises.rm(this.partial, { recursive: true, force: true }); }
 }
 
@@ -225,7 +225,7 @@ class ZipSink {
   }
   async addDirectory(name) { await this.writer.addDirectory(name); }
   async finish() { return this.writer.finish(); }
-  async publish(force) { await publishAtomically(this.partial, this.output, force); }
+  async publish(force) { return publishAtomically(this.partial, this.output, force); }
   async discard() { this.writer.abort(); await fs.promises.rm(this.partial, { force: true }); }
 }
 
@@ -250,24 +250,35 @@ async function resolveReal(target) {
   }
 }
 
+async function assertDisjoint(first, second, message, code) {
+  const realFirst = fold(await resolveReal(first));
+  const realSecond = fold(await resolveReal(second));
+  const within = (child, parent) => child === parent || child.startsWith(parent.endsWith(path.sep) ? parent : parent + path.sep);
+  if (within(realFirst, realSecond) || within(realSecond, realFirst)) throw new SanitizerError(code, message);
+}
+
 /**
  * Refuses a write target that is the input, inside it, or an ANCESTOR of it, after resolving
  * symbolic links (and, on Windows, junctions) in every existing component.
  */
 export async function assertOutputDoesNotOverlap(input, target, what = 'Output') {
-  const realIn = fold(await resolveReal(input));
-  const realTarget = fold(await resolveReal(target));
-  const within = (child, parent) => child === parent || child.startsWith(parent.endsWith(path.sep) ? parent : parent + path.sep);
-  if (within(realTarget, realIn) || within(realIn, realTarget)) {
-    throw new SanitizerError('E_OUTPUT_OVERLAPS_INPUT', `${what} must not be the input, inside it, or a directory that contains it`);
-  }
+  await assertDisjoint(input, target, `${what} must not be the input, inside it, or a directory that contains it`, 'E_OUTPUT_OVERLAPS_INPUT');
 }
 
-/** A report path must not clobber the input, and must not be the sanitized output. */
+/**
+ * The report is a separate artifact: it must be disjoint from the input AND from the sanitized
+ * output (equal, inside it, or containing it, on canonical paths), and must not be a staging or
+ * aside name the tool creates next to the output. Otherwise it could replace or add to the files
+ * whose verification the printed PASS describes.
+ */
 export async function assertReportPath(input, output, report) {
-  await assertOutputDoesNotOverlap(input, report, 'Report');
-  if (output && fold(await resolveReal(output)) === fold(await resolveReal(report))) {
-    throw new SanitizerError('E_REPORT_IS_OUTPUT', 'The report path must differ from the output path');
+  await assertDisjoint(input, report, 'The report path must not be the input, inside it, or a directory that contains it', 'E_REPORT_OVERLAPS_INPUT');
+  if (!output) return;
+  await assertDisjoint(output, report, 'The report path must not be the output, inside it, or a directory that contains it', 'E_REPORT_OVERLAPS_OUTPUT');
+  const realReport = fold(await resolveReal(report));
+  const realOutput = fold(await resolveReal(output));
+  if (realReport === `${realOutput}.partial` || realReport.startsWith(`${realOutput}.replaced-`)) {
+    throw new SanitizerError('E_REPORT_OVERLAPS_OUTPUT', 'The report path must not be a staging name used for the output');
   }
 }
 
@@ -287,7 +298,13 @@ async function assertReplaceable(output, stat) {
  */
 async function publishAtomically(partial, output, force) {
   const existing = await fs.promises.lstat(output).catch(() => null);
-  if (!existing) { await fs.promises.rename(partial, output); return; }
+  if (!existing) {
+    await fs.promises.rename(partial, output);
+    return {
+      commit: async () => {},
+      undo: async () => { await fs.promises.rename(output, partial); }, // the caller then discards the partial
+    };
+  }
   if (!force) throw new SanitizerError('E_OUTPUT_EXISTS', 'Output already exists; pass --force to replace it');
   await assertReplaceable(output, existing);
   const aside = `${output}.replaced-${process.pid}-${Date.now()}`;
@@ -298,12 +315,48 @@ async function publishAtomically(partial, output, force) {
     await fs.promises.rename(aside, output);
     throw error;
   }
-  await fs.promises.rm(aside, { recursive: true, force: true }).catch(() => {});
+  // The previous output is kept until the caller commits, so a later failure can restore it.
+  return {
+    commit: async () => { await fs.promises.rm(aside, { recursive: true, force: true }).catch(() => {}); },
+    undo: async () => {
+      await fs.promises.rename(output, partial);
+      await fs.promises.rename(aside, output);
+    },
+  };
+}
+
+/**
+ * Stages the report next to its final path (exclusive create) BEFORE the output is published, so a
+ * report that cannot be written stops the run while nothing has been published yet.
+ */
+async function stageReport(reportPath, json, force) {
+  const existing = await fs.promises.lstat(reportPath).catch(() => null);
+  if (existing && !force) throw new SanitizerError('E_REPORT_EXISTS', 'The report already exists; pass --force to replace it');
+  if (existing && !existing.isFile()) throw new SanitizerError('E_REPORT_NOT_REPLACEABLE', 'Refusing to replace a report path that is not a regular file');
+  const staged = `${reportPath}.partial-${process.pid}`;
+  try {
+    await fs.promises.writeFile(staged, json, { flag: 'wx', mode: 0o600 });
+  } catch (error) {
+    throw new SanitizerError('E_REPORT_WRITE', `The report could not be staged (${error?.code ?? 'error'}); nothing was published`);
+  }
+  let done = false;
+  return {
+    async commit() {
+      if (force) await fs.promises.rename(staged, reportPath);
+      else {
+        // no-clobber: link fails if something appeared in the meantime
+        await fs.promises.link(staged, reportPath);
+        await fs.promises.rm(staged, { force: true });
+      }
+      done = true;
+    },
+    async discard() { if (!done) await fs.promises.rm(staged, { force: true }).catch(() => {}); },
+  };
 }
 
 export async function sanitize({
   input, output, provider = 'auto', salt, timestamps = 'day', keepLabels = [], keepEnums = [], keepClasses = [],
-  dryRun = false, force = false, ownerHints = false, budgets: budgetOverrides,
+  dryRun = false, force = false, ownerHints = false, budgets: budgetOverrides, report: reportPath,
 }) {
   const budgets = resolveBudgets(budgetOverrides);
   if (!input) throw new SanitizerError('E_USAGE', 'An input path is required');
@@ -312,6 +365,7 @@ export async function sanitize({
     if (!output) throw new SanitizerError('E_USAGE', 'An output path is required');
     // All checks happen before anything is created, moved or deleted.
     await assertOutputDoesNotOverlap(input, output);
+    if (reportPath) await assertReportPath(input, output, reportPath);
     const existing = await fs.promises.lstat(output).catch(() => null);
     if (existing && !force) throw new SanitizerError('E_OUTPUT_EXISTS', 'Output already exists; pass --force to replace it');
     if (existing) await assertReplaceable(output, existing);
@@ -319,6 +373,7 @@ export async function sanitize({
       throw new SanitizerError('E_OUTPUT_EXISTS', 'A leftover .partial output exists; remove it first');
     }
   }
+  if (dryRun && reportPath) await assertReportPath(input, null, reportPath);
   const leak = new LeakRegistry({ maxHashes: budgets.maxProtectedPieces, maxKept: budgets.maxKeptPieces });
   const rules = new Rules({ salt, timestamps, keepLabels, keepEnums, keepClasses, budgets, leak });
   const source = await openSource(input, budgets);
@@ -329,6 +384,7 @@ export async function sanitize({
   const members = [];
   const used = new Set();
   let summaryTotal = 0;
+  let stagedReport = null;
   let ok = false;
   try {
     if (sink.init) await sink.init();
@@ -418,11 +474,22 @@ export async function sanitize({
     if (checks.structure === 'FAIL') {
       throw Object.assign(new SanitizerError('E_STRUCTURE', 'Sanitized output does not have the structure of the input', 4), { checks });
     }
-    if (!dryRun) await sink.publish(force);
-    ok = true;
-
     const failed = members.filter(member => member.status.startsWith('failed'));
     const report = buildReport({ rules, leak, members, checks, source, provider, written, dryRun, timestamps, budgets });
+    // Transaction: stage the report, publish the verified output, commit the report. If the report
+    // cannot be committed the output publication is rolled back (a previous output is restored), so a
+    // report failure never leaves a published output the caller was told had failed.
+    stagedReport = reportPath ? await stageReport(reportPath, `${JSON.stringify(report, null, 2)}\n`, force) : null;
+    const publication = dryRun ? null : await sink.publish(force);
+    try {
+      await stagedReport?.commit();
+    } catch (error) {
+      await publication?.undo().catch(() => {});
+      throw new SanitizerError('E_REPORT_WRITE', `The report could not be written (${error?.code ?? 'error'}); the output was not published and any previous output was restored`);
+    }
+    await publication?.commit();
+    ok = true;
+
     return {
       exitCode: failed.length ? 2 : 0,
       report,
@@ -430,6 +497,7 @@ export async function sanitize({
       outputPath: dryRun ? null : output,
     };
   } finally {
+    await stagedReport?.discard();
     await source.close();
     await fs.promises.rm(spoolDir, { recursive: true, force: true });
     if (!ok || dryRun) {

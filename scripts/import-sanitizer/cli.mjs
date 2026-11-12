@@ -3,7 +3,7 @@
 // Output is limited to counts, sanitized member names and check results; no input text is printed.
 import fs from 'node:fs';
 import { parseArgs } from 'node:util';
-import { assertReportPath, sanitize } from './sanitize.mjs';
+import { sanitize } from './sanitize.mjs';
 
 const HELP = `Mind Place import sanitizer: structure-preserving, content-free copy of a real export.
 
@@ -21,7 +21,8 @@ Usage:
   --keep-class <name>   Also keep this reviewed HTML class token (repeatable); unknown class names are replaced by default
   --keep-enum <k=v>     Also keep this enum value verbatim, e.g. status=queued (repeatable; review the report first)
   --salt-file <path>    File holding the pseudonym key. Default: a fresh random key per run (never stored or printed)
-  --report <path>       Write the shareable JSON report here
+  --report <path>       Write the shareable JSON report here. Must be outside the input AND the output; it is staged
+                        before the output is published and the whole run is rolled back if it cannot be written
   --owner-hints         Print frequent leading words of HTML text nodes to the terminal ONLY (never to the report)
   --force               Replace an existing output, only after the new one is fully written and verified; refuses
                         directories not created by this tool, symlinks, and anything that contains or is the input
@@ -67,7 +68,6 @@ const bar = text => `${text}${' '.repeat(Math.max(0, 30 - text.length))}`;
 const units = bytes => (bytes >= 2 ** 20 ? `${(bytes / 2 ** 20).toFixed(1)} MiB` : bytes >= 1024 ? `${(bytes / 1024).toFixed(1)} KiB` : `${bytes} B`);
 
 try {
-  if (args.report) await assertReportPath(args.input, args.output, args.report);
   const result = await sanitize({
     input: args.input,
     output: args.output,
@@ -80,9 +80,9 @@ try {
     dryRun: Boolean(args['dry-run']),
     force: Boolean(args.force),
     ownerHints: Boolean(args['owner-hints']),
+    report: args.report,
   });
   const { report } = result;
-  if (args.report) fs.writeFileSync(args.report, `${JSON.stringify(report, null, 2)}\n`, { flag: args.force ? 'w' : 'wx', mode: 0o600 });
 
   const out = [];
   out.push(`Mind Place import sanitizer: ${report.provider} ${report.inputKind}`);

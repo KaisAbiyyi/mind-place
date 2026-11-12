@@ -110,15 +110,37 @@ Still **NOT_RUN**: execution of the CLI on **Windows**, the owner-local **real-e
 1. *A defect in the tool.* Member names were mapped by shape without a uniqueness guarantee, so two different short names (for example `a.json` and `b.json`) could map to the same output name and the second member was dropped as `failed:E_NAME_COLLISION` (exit 2). With the former fixed key this never showed. Identifiers and class tokens already had injective tables; names did not. Fix: on a collision only the final name segment is re-keyed deterministically (directory prefixes stay consistent between entries), with a numeric-suffix fallback so uniqueness never depends on luck; kept structural names such as `conversations.json` are never renamed, so a genuine duplicate is still reported. Test: `member names never collide…` (52 single-letter names, directory and zip, every run).
 2. *A flaky test of mine.* The Gemini test rejected output matching `/app/c_`; because identifiers keep their shape, a pseudonym starts with `c` about one time in 26. The check now asserts the planted identifiers are absent instead. The suite passed 8 consecutive runs after both fixes.
 
+## Re-review round 4 — SAN-F08 (P2): `--report` could change the verified output after publication
+
+Finding ([comment](https://github.com/KaisAbiyyi/mind-place/pull/167#issuecomment-6811476735), reviewed head `aa8b1c4`): SAN-F07 is **resolved** and hosted CI at that head was SUCCESS. New: `assertReportPath()` only rejected input/report overlap and an exact output/report match, and the CLI wrote the report **after** `sanitize()` had verified and published the output. So `--output out/ --report out/user.json --force` replaced a verified member with the report (the printed PASS then described bytes that were no longer there); without `--force` the exclusive write failed after the output was already published; a new report name inside the output added an unverified file.
+
+| Item | Correction |
+| --- | --- |
+| Preflight | `assertReportPath()` now requires the report to be disjoint from the input **and from the output** on canonical paths (equal, inside or containing, including symlink/junction aliases), and not the tool's own `<output>.partial` / `<output>.replaced-*` names. Codes: `E_REPORT_OVERLAPS_OUTPUT`, `E_REPORT_OVERLAPS_INPUT`. It runs inside `sanitize()` (so API callers are covered too), before the source is opened, and for a dry run against the input |
+| Ordering | `sanitize()` owns the report. The report is **staged** (exclusive create next to its final path) after verification and **before** the output is published; then the output is published; then the report is committed (rename with `--force`, no-clobber `link` without) |
+| Failure | If the report cannot be staged, nothing has been published (`E_REPORT_WRITE`). If the final commit fails, the output publication is **rolled back**: a new output is removed, a replaced output is restored from its aside copy, a previous report is untouched. Never a published output with a failed report. `publishAtomically()` now returns `commit()` / `undo()`; the previous output is deleted only after the report is committed |
+| Existing report | Needs `--force` (`E_REPORT_EXISTS`); a directory or symlink at the report path is never replaced (`E_REPORT_NOT_REPLACEABLE`); a run that fails verification leaves an existing report untouched |
+
+Regression tests (CLI level for the isolation matrix, API level for failure injection):
+
+- `SAN-F08: a report inside, at, above or aliasing the output is refused before anything is read or written` — 11 report paths × with and without `--force`: an existing member (`out/user.json`, the reviewer's scenario), a new file in the output, a nested path, an ancestor of the output, the output itself, `.partial`, `.replaced-*`, a symlink alias into the output, a symlink alias to the output, and report = input file / input directory. Each asserts exit 1, the exact error code, the previous verified output byte-identical (sha256 snapshot), the input byte-identical, and an unchanged directory listing next to and above the output; plus the same codes for programmatic callers and a dry run.
+- `SAN-F08: a report beside (not inside) the output is allowed, staged first, and never changes the verified output` — the report's per-member sizes equal the published files, no report or staging file inside the output, an existing report needs `--force`, a refused report stops the run before any output exists.
+- `SAN-F08: if the report cannot be written the output is not published and a previous output survives` — the final commit is made to fail (`ENOSPC`): no previous output (nothing published, nothing left over), a previous tool-made directory output plus a previous report (both restored byte for byte), and a single-file output.
+- `SAN-F08: a report that cannot be staged, or a run that fails verification, publishes nothing and leaves the old report` — missing parent directory (CLI exit 1), a leak failure with an existing report, a directory at the report path.
+
+**Checked against the defect:** removing the report-vs-output preflight makes the isolation test fail, and removing the rollback makes the failure-injection test fail; both were restored.
+
+Still **NOT_RUN**: Windows execution of the CLI (the report/output overlap checks rely on `realpath`; junction behaviour is in the owner runbook), the owner-local real-export trial, and the hosted CI run on the new head.
+
 ## Verification
 
 Environment: Linux x86_64, Node 22.23, Cargo 1.97. Synthetic data only.
 
 | Command | Result |
 | --- | --- |
-| `node --import tsx --test test/import-sanitizer.test.mjs` | PASS: 49 passed, 0 failed, repeated 8 times without a flake (29 initially; 37 after round 1; 44 after round 2) |
+| `node --import tsx --test test/import-sanitizer.test.mjs` | PASS: 53 passed, 0 failed (29 initially; 37, 44 and 49 after rounds 1 to 3; stable over repeated runs) |
 | `cargo test --locked -p mind-place-archive --tests` | PASS: 124 passed, 0 failed, 0 ignored (includes the 3 parser cross-check tests and the 5 FIX-F01 tests) |
-| `npm run test:web` | PASS: 320 tests, 318 passed, 0 failed, 2 skipped (Windows-only) |
+| `npm run test:web` | PASS: 324 tests, 322 passed, 0 failed, 2 skipped (Windows-only) |
 | `npm run test:rust` | PASS: 355 passed, 0 failed, 1 ignored (existing qualification-ignored test) |
 | `cargo fmt --all -- --check`, `npm run verify:repo`, `npm run typecheck`, `node scripts/verify-workflow-security.mjs`, `git diff --check` | PASS |
 | Run on a **real** ChatGPT/Gemini export | **NOT_RUN** (owner-local step) |

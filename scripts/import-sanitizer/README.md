@@ -32,14 +32,14 @@ report, after reading the inventory printed on screen.
 | --- | --- |
 | `--input` / `--output` | zip → zip, directory → directory, file → file. The output must not exist (`--force` replaces it) and must not be inside the input. |
 | `--dry-run` | Run all checks, print the inventory, keep no output. |
-| `--report <file>` | Write the shareable JSON inventory. It describes the **sanitized output only**. |
+| `--report <file>` | Write the shareable JSON inventory. It describes the **sanitized output only**. The report is a separate artifact: its path must be outside the input **and outside the output** (not equal to it, not inside it, not a directory that contains it, also through symlinks/junctions, and not a `.partial` / `.replaced-*` name the tool uses), otherwise it could replace or add to the files that were verified. It is staged **before** the output is published and committed right after; if it cannot be written the run is rolled back (nothing is published, a previous output and report are restored). An existing report needs `--force`. |
 | `--timestamps day\|keep` | `day` (default) keeps the date and drops the time of day, preserving number formats. `keep` leaves timestamps as they are. |
 | `--keep-label <text>` | Also keep this structural HTML label, repeatable. Use it for a localized "Prompted". |
 | `--keep-enum <key=value>` | Also keep this enum value verbatim (repeatable), e.g. `status=queued`. Review the report first: kept values are exempt from the leak check. |
 | `--keep-class <name>` | Also keep this HTML class token (repeatable). Unknown class names are private by default. |
 | `--owner-hints` | Prints frequent leading words of HTML text nodes **to the terminal only**, to help you choose `--keep-label`. Never written to the report. |
 | `--salt-file <path>` / `MIND_PLACE_SANITIZER_SALT` | Pseudonym key, **opt-in** for reproducible output. By default every run uses a fresh random 256-bit key that is never written, logged or reported, so identifiers (even short, sequential ones) cannot be confirmed offline by enumerating candidates. There is deliberately no command-line salt option. |
-| `--force` | Replace an existing output, but **only after the new one is fully written and verified** (the old one is moved aside and removed last, and restored if the swap fails). Refuses a directory that this tool did not create, a symbolic link, and any output that is the input, inside it, or a directory that contains it (checked on canonical paths, after resolving links). |
+| `--force` | Replace an existing output (and an existing report file), but **only after the new one is fully written and verified** (the old one is moved aside and removed last, and restored if the swap fails). Refuses a directory that this tool did not create, a symbolic link, and any output that is the input, inside it, or a directory that contains it (checked on canonical paths, after resolving links). |
 
 Exit codes: `0` PASS · `1` usage or I/O error · `2` PARTIAL (some members could not be parsed and were
 replaced by empty stand-ins; see STATUS) · `3` leak check FAILED **or INCOMPLETE** (tracking overflowed, so part of

@@ -1108,3 +1108,171 @@ test('member names never collide: different input names stay different files und
     await writer.finish();
   } finally { t.done(); }
 });
+
+// ------------------------------------------------------------------ SAN-F08 (report isolation from the output)
+
+import { createHash } from 'node:crypto';
+
+/** Relative path -> sha256 of every file under `dir` (symlinks not followed). */
+function snapshot(dir) {
+  const out = {};
+  const walk = (current, prefix) => {
+    for (const entry of fs.readdirSync(current, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+      const file = path.join(current, entry.name);
+      const name = `${prefix}${entry.name}`;
+      if (entry.isDirectory()) walk(file, `${name}/`);
+      else if (entry.isFile()) out[name] = createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+      else out[name] = 'link';
+    }
+  };
+  walk(dir, '');
+  return out;
+}
+
+function reportFixture(name) {
+  const t = scratch(name);
+  fs.mkdirSync(path.join(t.dir, 'work'));
+  writeChatGptExport(path.join(t.dir, 'in'), { seed: 4, conversations: 3 });
+  const out = path.join(t.dir, 'work', 'out');
+  return { t, out, input: path.join(t.dir, 'in'), work: path.join(t.dir, 'work') };
+}
+
+test('SAN-F08: a report inside, at, above or aliasing the output is refused before anything is read or written', async () => {
+  const { t, out, input, work } = reportFixture('san-f08-overlap');
+  try {
+    // A previous verified output, produced by a normal run (report kept outside of it).
+    const first = runCli(['--input', input, '--output', out, '--report', path.join(t.dir, 'first-report.json')]);
+    assert.equal(first.status, 0, first.stderr);
+    const outBefore = snapshot(out);
+    const inBefore = snapshot(input);
+    const workBefore = fs.readdirSync(work).sort();
+    assert.ok(outBefore['user.json'], 'the previous output has a user.json member');
+    fs.symlinkSync(out, path.join(t.dir, 'alias'));
+    const rootBefore = fs.readdirSync(t.dir).sort();
+
+    const refused = [
+      [path.join(out, 'user.json'), 'E_REPORT_OVERLAPS_OUTPUT'], // the reviewer's scenario: overwrites a member after verification
+      [path.join(out, 'new-report.json'), 'E_REPORT_OVERLAPS_OUTPUT'], // adds an unverified file after publication
+      [path.join(out, 'sub', 'deep.json'), 'E_REPORT_OVERLAPS_OUTPUT'],
+      [work, 'E_REPORT_OVERLAPS_OUTPUT'], // an ancestor of the output
+      [out, 'E_REPORT_OVERLAPS_OUTPUT'], // equal to the output
+      [`${out}.partial`, 'E_REPORT_OVERLAPS_OUTPUT'], // the tool's own staging name
+      [`${out}.replaced-1-1`, 'E_REPORT_OVERLAPS_OUTPUT'], // the tool's own aside name
+      [path.join(t.dir, 'alias', 'user.json'), 'E_REPORT_OVERLAPS_OUTPUT'], // symlink alias into the output
+      [path.join(t.dir, 'alias'), 'E_REPORT_OVERLAPS_OUTPUT'],
+      [path.join(input, 'user.json'), 'E_REPORT_OVERLAPS_INPUT'],
+      [input, 'E_REPORT_OVERLAPS_INPUT'],
+    ];
+    for (const [report, code] of refused) {
+      for (const force of [true, false]) {
+        const run = runCli(['--input', input, '--output', out, '--report', report, ...(force ? ['--force'] : [])]);
+        const label = `${path.relative(t.dir, report)} force=${force}`;
+        assert.equal(run.status, 1, `${label}\n${run.stdout}${run.stderr}`);
+        assert.match(run.stderr, new RegExp(code), label);
+        assert.deepEqual(snapshot(out), outBefore, `${label}: the verified output is untouched`);
+        assert.deepEqual(snapshot(input), inBefore, `${label}: the input is untouched`);
+        assert.deepEqual(fs.readdirSync(work).sort(), workBefore, `${label}: nothing was created next to the output`);
+        assert.deepEqual(fs.readdirSync(t.dir).sort(), rootBefore, `${label}: nothing was created anywhere else`);
+      }
+    }
+    // The same rules protect programmatic callers, and a dry run (no output) still protects the input.
+    for (const [report, code] of refused.slice(0, 4)) {
+      await assert.rejects(sanitize({ input, output: out, force: true, report }), { code }, report);
+    }
+    await assert.rejects(sanitize({ input, dryRun: true, report: path.join(input, 'x.json') }), { code: 'E_REPORT_OVERLAPS_INPUT' });
+    assert.deepEqual(snapshot(out), outBefore);
+  } finally { t.done(); }
+});
+
+test('SAN-F08: a report beside (not inside) the output is allowed, staged first, and never changes the verified output', async () => {
+  const { t, out, input } = reportFixture('san-f08-ok');
+  try {
+    const report = path.join(t.dir, 'reports', 'report.json');
+    fs.mkdirSync(path.dirname(report));
+    const run = runCli(['--input', input, '--output', out, '--report', report]);
+    assert.equal(run.status, 0, run.stderr);
+    const parsed = JSON.parse(fs.readFileSync(report, 'utf8'));
+    // The report describes exactly the bytes that were published: sizes match the files on disk.
+    const published = readTree(out);
+    for (const member of parsed.members) assert.equal(published.get(member.name)?.length, member.outputBytes, member.name);
+    assert.ok(![...published.keys()].some(name => /report|\.partial/.test(name)), 'no report or staging file inside the output');
+    assert.deepEqual(fs.readdirSync(path.dirname(report)), ['report.json'], 'no staged report left behind');
+    // Replacing an existing report needs --force and happens atomically.
+    const again = runCli(['--input', input, '--output', path.join(t.dir, 'out2'), '--report', report]);
+    assert.equal(again.status, 1);
+    assert.match(again.stderr, /E_REPORT_EXISTS/);
+    assert.equal(fs.existsSync(path.join(t.dir, 'out2')), false, 'a refused report stops the run before any output');
+    assert.equal(runCli(['--input', input, '--output', path.join(t.dir, 'out2'), '--report', report, '--force']).status, 0);
+  } finally { t.done(); }
+});
+
+test('SAN-F08: if the report cannot be written the output is not published and a previous output survives', async () => {
+  const { t, out, input } = reportFixture('san-f08-rollback');
+  const { rename, link } = fs.promises;
+  try {
+    const report = path.join(t.dir, 'report.json');
+    const failCommit = () => {
+      // Fail only the final report commit, after the output has already been swapped in.
+      fs.promises.rename = async (from, to) => { if (to === report) throw Object.assign(new Error('disk full'), { code: 'ENOSPC' }); return rename(from, to); };
+      fs.promises.link = async (from, to) => { if (to === report) throw Object.assign(new Error('disk full'), { code: 'ENOSPC' }); return link(from, to); };
+    };
+    const restore = () => { fs.promises.rename = rename; fs.promises.link = link; };
+    const rootBefore = fs.readdirSync(t.dir).sort();
+
+    // (1) No previous output: nothing is left published.
+    failCommit();
+    await assert.rejects(sanitize({ input, output: out, report }), error => error.code === 'E_REPORT_WRITE' && /not published/.test(error.message));
+    restore();
+    assert.equal(fs.existsSync(out), false);
+    assert.equal(fs.existsSync(report), false);
+    assert.deepEqual(fs.readdirSync(t.dir).sort(), rootBefore);
+    assert.deepEqual(fs.readdirSync(path.dirname(out)), [], 'no .partial, aside or staged file next to the output');
+
+    // (2) A previous tool-made output directory and a previous report: both are restored byte for byte.
+    assert.equal((await sanitize({ input, output: out, report })).exitCode, 0);
+    const outBefore = snapshot(out);
+    const reportBefore = fs.readFileSync(report);
+    failCommit();
+    await assert.rejects(sanitize({ input, output: out, report, force: true }), { code: 'E_REPORT_WRITE' });
+    restore();
+    assert.deepEqual(snapshot(out), outBefore, 'the previous output is restored');
+    assert.ok(fs.readFileSync(report).equals(reportBefore), 'the previous report is untouched');
+    assert.deepEqual(fs.readdirSync(path.dirname(out)), ['out']);
+    assert.deepEqual(fs.readdirSync(t.dir).sort(), [...rootBefore, 'report.json'].sort());
+
+    // (3) A single-file output is rolled back the same way.
+    const file = path.join(t.dir, 'one.json');
+    fs.writeFileSync(file, 'PREVIOUS');
+    failCommit();
+    await assert.rejects(sanitize({ input: path.join(input, 'user.json'), output: file, report, force: true }), { code: 'E_REPORT_WRITE' });
+    restore();
+    assert.equal(fs.readFileSync(file, 'utf8'), 'PREVIOUS');
+  } finally { fs.promises.rename = rename; fs.promises.link = link; t.done(); }
+});
+
+test('SAN-F08: a report that cannot be staged, or a run that fails verification, publishes nothing and leaves the old report', async () => {
+  const { t, out, input } = reportFixture('san-f08-staging');
+  const original = Rules.prototype.jsonString;
+  try {
+    // Parent directory missing: refused before anything is published (CLI: exit 1, no output).
+    const run = runCli(['--input', input, '--output', out, '--report', path.join(t.dir, 'missing-dir', 'report.json')]);
+    assert.equal(run.status, 1);
+    assert.match(run.stderr, /E_REPORT_WRITE/);
+    assert.equal(fs.existsSync(out), false);
+    assert.deepEqual(fs.readdirSync(path.join(t.dir, 'work')), []);
+
+    // A run that fails its leak check must not replace an existing report either.
+    const report = path.join(t.dir, 'report.json');
+    fs.writeFileSync(report, 'PREVIOUS REPORT');
+    Rules.prototype.jsonString = function leaky(value, ctx) { return ctx.key === 'title' ? value : original.call(this, value, ctx); };
+    await assert.rejects(sanitize({ input, output: out, report, force: true }), { code: 'E_LEAK' });
+    Rules.prototype.jsonString = original;
+    assert.equal(fs.readFileSync(report, 'utf8'), 'PREVIOUS REPORT');
+    assert.equal(fs.existsSync(out), false);
+    assert.deepEqual(fs.readdirSync(t.dir).sort(), ['in', 'report.json', 'work']);
+    // A directory or symlink at the report path is never replaced.
+    fs.mkdirSync(path.join(t.dir, 'report-dir'));
+    await assert.rejects(sanitize({ input, output: out, report: path.join(t.dir, 'report-dir'), force: true }), { code: 'E_REPORT_NOT_REPLACEABLE' });
+    assert.equal(fs.existsSync(out), false);
+  } finally { Rules.prototype.jsonString = original; t.done(); }
+});
