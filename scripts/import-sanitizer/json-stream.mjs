@@ -3,10 +3,11 @@
 // The rewriter never builds a document: tokens are classified in context (object key, array
 // element, enclosing key) and re-emitted. Whitespace, key order, nesting, number formats and
 // the escaping of preserved strings are kept byte-for-byte; every other string is replaced by
-// the rules. Memory is bounded by the largest single token, not by the file.
+// the rules. Memory does not depend on the file size: it is bounded by the largest single token and
+// the nesting depth, both capped by budgets (budgets.mjs).
 import { StringDecoder } from 'node:string_decoder';
 
-export const MAX_TOKEN_CHARS = 128 * 1024 * 1024;
+import { DEFAULT_BUDGETS } from './budgets.mjs';
 
 export class JsonError extends Error {
   constructor(code, offset) {
@@ -19,7 +20,7 @@ const PUNCT = new Set(['{', '}', '[', ']', ':', ',']);
 const WS = /[ \t\r\n﻿]/;
 
 /** Yields { type: 'ws' | 'punct' | 'string' | 'scalar', raw } without ever holding the whole input. */
-export async function* scanJson(readable) {
+export async function* scanJson(readable, { maxTokenChars = DEFAULT_BUDGETS.maxTokenChars } = {}) {
   const decoder = new StringDecoder('utf8');
   let buf = '';
   let pos = 0;
@@ -49,15 +50,20 @@ export async function* scanJson(readable) {
         }
         if (end < 0) {
           if (eof) throw new JsonError('E_JSON_UNTERMINATED_STRING', consumed + pos);
-          if (buf.length - pos > MAX_TOKEN_CHARS) throw new JsonError('E_JSON_TOKEN_TOO_LARGE', consumed + pos);
+          if (buf.length - pos > maxTokenChars) throw new JsonError('E_JSON_TOKEN_TOO_LARGE', consumed + pos);
           return;
         }
+        if (end - pos > maxTokenChars) throw new JsonError('E_JSON_TOKEN_TOO_LARGE', consumed + pos);
         yield { type: 'string', raw: buf.slice(pos, end) };
         pos = end;
       } else {
         let end = pos + 1;
         while (end < buf.length && !WS.test(buf[end]) && !PUNCT.has(buf[end]) && buf[end] !== '"') end++;
-        if (end >= buf.length && !eof) return; // the scalar may continue in the next chunk
+        if (end >= buf.length && !eof) {
+          if (buf.length - pos > maxTokenChars) throw new JsonError('E_JSON_TOKEN_TOO_LARGE', consumed + pos);
+          return; // the scalar may continue in the next chunk
+        }
+        if (end - pos > maxTokenChars) throw new JsonError('E_JSON_TOKEN_TOO_LARGE', consumed + pos);
         yield { type: 'scalar', raw: buf.slice(pos, end) };
         pos = end;
       }
@@ -92,7 +98,7 @@ const OUT_FLUSH_CHARS = 256 * 1024;
  * key(path, segment, original, result).
  * `multiRoot` accepts several top-level values (JSON Lines).
  */
-export async function* rewriteJson(readable, rules, { events = null, multiRoot = false } = {}) {
+export async function* rewriteJson(readable, rules, { events = null, multiRoot = false, budgets = DEFAULT_BUDGETS } = {}) {
   const frames = [];
   let out = '';
   let rootValues = 0;
@@ -116,7 +122,7 @@ export async function* rewriteJson(readable, rules, { events = null, multiRoot =
     }
   };
 
-  for await (const token of scanJson(readable)) {
+  for await (const token of scanJson(readable, budgets)) {
     const { type, raw } = token;
     offset += raw.length;
     if (type === 'ws') {
@@ -125,6 +131,7 @@ export async function* rewriteJson(readable, rules, { events = null, multiRoot =
       out += raw;
       if (raw === '{' || raw === '[') {
         beginValue();
+        if (frames.length >= budgets.maxJsonDepth) throw new JsonError('E_JSON_TOO_DEEP', offset);
         const path = valuePath();
         const parentKey = valueKey();
         events?.container(path, raw === '{' ? 'object' : 'array');
@@ -184,8 +191,8 @@ export async function* rewriteJson(readable, rules, { events = null, multiRoot =
 }
 
 /** Strings of a JSON stream (keys and values), decoded, for the independent output leak scan. */
-export async function* jsonStrings(readable) {
-  for await (const token of scanJson(readable)) {
+export async function* jsonStrings(readable, budgets = DEFAULT_BUDGETS) {
+  for await (const token of scanJson(readable, budgets)) {
     if (token.type === 'string') yield decodeString(token.raw);
   }
 }

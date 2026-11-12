@@ -9,7 +9,8 @@ import { Readable } from 'node:stream';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { sanitize } from '../scripts/import-sanitizer/sanitize.mjs';
-import { LeakRegistry } from '../scripts/import-sanitizer/leak-check.mjs';
+import { DEFAULT_BUDGETS, totalUpperBoundBytes } from '../scripts/import-sanitizer/budgets.mjs';
+import { DistinctCounter, LeakRegistry } from '../scripts/import-sanitizer/leak-check.mjs';
 import { rewriteHtml, scanHtml } from '../scripts/import-sanitizer/html-stream.mjs';
 import { rewriteJson } from '../scripts/import-sanitizer/json-stream.mjs';
 import { lengthClass, neutralizeText, Rules } from '../scripts/import-sanitizer/rules.mjs';
@@ -767,7 +768,7 @@ test('SAN-F04: if leak tracking overflows the run fails closed and publishes not
     writeChatGptExport(path.join(t.dir, 'in'), { seed: 14, conversations: 3, multi: false });
     const input = path.join(t.dir, 'in', 'conversations.json');
     const output = path.join(t.dir, 'out.json');
-    await assert.rejects(sanitize({ input, output, leakLimit: 5 }), error => {
+    await assert.rejects(sanitize({ input, output, budgets: { maxProtectedPieces: 5 } }), error => {
       assert.equal(error.code, 'E_LEAK_COVERAGE');
       assert.equal(error.exitCode, 3);
       assert.equal(error.checks.leak, 'INCOMPLETE');
@@ -812,5 +813,137 @@ test('SAN-F05: the report separates structure fidelity from privacy and lists th
 
     const keep = await sanitize({ input: path.join(t.dir, 'chatgpt'), output: path.join(t.dir, 'o3'), timestamps: 'keep' });
     assert.match(keep.report.residualMetadata.timestampPrecision, /full precision/);
+  } finally { t.done(); }
+});
+
+// ------------------------------------------------------------------ SAN-F06 (resource budgets)
+
+/** Runs a sanitize that must hit a budget, and proves the failure is safe. */
+async function assertBudgetStops(t, input, budgets, budget, extra = {}) {
+  const output = path.join(t.dir, 'out');
+  fs.writeFileSync(output, 'PREVIOUS OUTPUT');
+  const before = fs.readdirSync(t.dir).sort();
+  await assert.rejects(sanitize({ input, output, force: true, budgets, ...extra }), error => {
+    assert.equal(error.code, 'E_BUDGET', `${budget}: ${error.message}`);
+    assert.equal(error.budget, budget);
+    assert.equal(error.exitCode, 5);
+    assert.equal(error.limit, budgets[budget]);
+    assert.doesNotMatch(error.message, /secret/i, 'a budget message never quotes input');
+    return true;
+  });
+  assert.equal(fs.readFileSync(output, 'utf8'), 'PREVIOUS OUTPUT', 'the previous output survives');
+  assert.deepEqual(fs.readdirSync(t.dir).sort(), before, 'no partial, spool or aside file is left behind');
+}
+
+test('SAN-F06: every input-dependent structure has a named budget and the worst case is bounded and documented', async () => {
+  const names = Object.keys(DEFAULT_BUDGETS);
+  for (const name of ['maxProtectedPieces', 'maxKeptPieces', 'maxDistinctIdentifiers', 'maxUnknownClassTokens', 'maxShortIdentifiers', 'maxShortIdentifierBytes', 'maxMembers', 'maxSummaryEntries', 'maxJsonDepth', 'maxTokenChars']) {
+    assert.ok(names.includes(name), name);
+    assert.ok(Number.isInteger(DEFAULT_BUDGETS[name]) && DEFAULT_BUDGETS[name] > 0, name);
+  }
+  assert.ok(totalUpperBoundBytes() < 1024 ** 3, 'if every budget were reached at once the structures still stay below 1 GiB');
+  assert.ok(totalUpperBoundBytes({ ...DEFAULT_BUDGETS, maxProtectedPieces: 1000 }) < totalUpperBoundBytes());
+  await assert.rejects(sanitize({ input: 'x', output: 'y', budgets: { nope: 1 } }), /E_OPTION/);
+  const readme = fs.readFileSync(path.join(root, 'scripts', 'import-sanitizer', 'README.md'), 'utf8');
+  for (const name of names) assert.ok(readme.includes(name), `README documents ${name}`);
+  assert.doesNotMatch(readme, /memory bounded by the largest single string/);
+});
+
+test('SAN-F06: the hash tables never grow past their budget, however many distinct values arrive', () => {
+  const counter = new DistinctCounter({ max: 1000, budget: 'maxDistinctIdentifiers' });
+  let thrownAt = null;
+  for (let i = 0; i < 1_000_000; i++) {
+    try { counter.add(`identifier-${i}`); } catch (error) { thrownAt = i; assert.equal(error.code, 'E_BUDGET'); break; }
+  }
+  assert.equal(thrownAt, 1000, 'the 1001st distinct value is the first refused');
+  assert.ok(counter.set.capacity <= 4096, `capacity ${counter.set.capacity}`);
+  counter.add('identifier-5'); // a value already counted is never refused
+  const registry = new LeakRegistry({ maxHashes: 100, maxKept: 100 });
+  for (let i = 0; i < 100_000; i++) registry.protect(`input-string-number-${i}`);
+  assert.equal(registry.partial, true);
+  assert.equal(registry.protectedSet.capacity, 1 << 16, 'the table keeps its initial size instead of growing past the budget');
+  assert.throws(() => { for (let i = 0; i < 1000; i++) registry.markKept(`allow-listed-value-${i}`); }, { code: 'E_BUDGET' });
+});
+
+test('SAN-F06: many distinct identifiers stop the run safely (JSON identifiers, short identifiers, kept keys)', async () => {
+  const t = scratch('san-f06-ids');
+  try {
+    fs.mkdirSync(path.join(t.dir, 'in'));
+    const conversation = (ids, key) => JSON.stringify([{ id: ids[0], title: 't', current_node: ids[0], mapping: Object.fromEntries(ids.map(id => [id, { id, parent: null, children: [], message: null, [key]: 1 }])) }]);
+    const uuids = Array.from({ length: 300 }, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`);
+    fs.writeFileSync(path.join(t.dir, 'in', 'a.json'), conversation(uuids, 'x'));
+    await assertBudgetStops(t, path.join(t.dir, 'in', 'a.json'), { maxDistinctIdentifiers: 50 }, 'maxDistinctIdentifiers');
+
+    const shorts = Array.from({ length: 300 }, (_, i) => `n${i}`);
+    fs.writeFileSync(path.join(t.dir, 'in', 'b.json'), conversation(shorts, 'x'));
+    await assertBudgetStops(t, path.join(t.dir, 'in', 'b.json'), { maxShortIdentifiers: 100 }, 'maxShortIdentifiers');
+    await assertBudgetStops(t, path.join(t.dir, 'in', 'b.json'), { maxShortIdentifierBytes: 600 }, 'maxShortIdentifierBytes');
+
+    // Many distinct object keys are each registered as an allow-listed (kept) value.
+    const keys = Object.fromEntries(Array.from({ length: 300 }, (_, i) => [`distinct_field_name_${i}`, i]));
+    fs.writeFileSync(path.join(t.dir, 'in', 'c.json'), JSON.stringify([keys]));
+    await assertBudgetStops(t, path.join(t.dir, 'in', 'c.json'), { maxKeptPieces: 50 }, 'maxKeptPieces');
+  } finally { t.done(); }
+});
+
+test('SAN-F06: many distinct HTML class names stop the run safely', async () => {
+  const t = scratch('san-f06-classes');
+  try {
+    fs.mkdirSync(path.join(t.dir, 'in'));
+    const cards = Array.from({ length: 200 }, (_, i) => `<div class="private-class-number-${i}">x</div>`).join('');
+    fs.writeFileSync(path.join(t.dir, 'in', 'page.html'), `<html><body>${cards}</body></html>`);
+    await assertBudgetStops(t, path.join(t.dir, 'in', 'page.html'), { maxUnknownClassTokens: 20 }, 'maxUnknownClassTokens');
+  } finally { t.done(); }
+});
+
+test('SAN-F06: too many members, too many summary entries, and leak-table overflow stop the run safely', async () => {
+  const t = scratch('san-f06-members');
+  try {
+    fs.mkdirSync(path.join(t.dir, 'in'));
+    for (let i = 0; i < 40; i++) fs.writeFileSync(path.join(t.dir, 'in', `f${i}.json`), JSON.stringify({ [`field_${i}_a`]: { [`field_${i}_b`]: 1 }, [`field_${i}_c`]: [1, 2] }));
+    await assertBudgetStops(t, path.join(t.dir, 'in'), { maxMembers: 10 }, 'maxMembers');
+    await assertBudgetStops(t, path.join(t.dir, 'in'), { maxSummaryEntries: 30 }, 'maxSummaryEntries');
+    await zipDirectory(path.join(t.dir, 'in'), path.join(t.dir, 'many.zip'));
+    await assertBudgetStops(t, path.join(t.dir, 'many.zip'), { maxMembers: 10 }, 'maxMembers');
+    // Leak-table overflow keeps its own, earlier exit code (3, E_LEAK_COVERAGE) and also stops at once.
+    fs.writeFileSync(path.join(t.dir, 'in2.json'), JSON.stringify(Array.from({ length: 200 }, (_, i) => ({ text: `distinct sentence number ${i} with words` }))));
+    fs.writeFileSync(path.join(t.dir, 'keep.txt'), 'x');
+    await assert.rejects(sanitize({ input: path.join(t.dir, 'in2.json'), output: path.join(t.dir, 'o2.json'), budgets: { maxProtectedPieces: 10 } }), { code: 'E_LEAK_COVERAGE', exitCode: 3 });
+    assert.equal(fs.existsSync(path.join(t.dir, 'o2.json')), false);
+  } finally { t.done(); }
+});
+
+test('SAN-F06: nesting depth and token size are bounded, so crafted input cannot exhaust memory', async () => {
+  const bomb = '['.repeat(2_000_000); // 2 MB of opening brackets: unbounded frames would be ~2M objects
+  const started = Date.now();
+  await assert.rejects(collect(rewriteJson(bytesIn(bomb, 1 << 16), new Rules({ salt: 'k' }))), { code: 'E_JSON_TOO_DEEP' });
+  assert.ok(Date.now() - started < 5000);
+  await assert.rejects(collect(rewriteJson(bytesIn(`"${'a'.repeat(5000)}"`, 1024), new Rules({ salt: 'k' }), { budgets: { ...DEFAULT_BUDGETS, maxTokenChars: 2000 } })), { code: 'E_JSON_TOKEN_TOO_LARGE' });
+  await assert.rejects(collect(rewriteJson(bytesIn(`[${'1'.repeat(5000)}]`, 1024), new Rules({ salt: 'k' }), { budgets: { ...DEFAULT_BUDGETS, maxTokenChars: 2000 } })), { code: 'E_JSON_TOKEN_TOO_LARGE' });
+  await assert.rejects(collect(rewriteHtml(bytesIn(`<p>${'a'.repeat(5000)}`, 1024), new Rules({ salt: 'k' }), { budgets: { ...DEFAULT_BUDGETS, maxTokenChars: 2000 } })), { code: 'E_HTML_TOKEN_TOO_LARGE' });
+
+  // At run level these are budget errors too: nothing published, previous output untouched.
+  const t = scratch('san-f06-depth');
+  try {
+    fs.mkdirSync(path.join(t.dir, 'in'));
+    fs.writeFileSync(path.join(t.dir, 'in', 'deep.json'), '['.repeat(1000) + ']'.repeat(1000));
+    await assertBudgetStops(t, path.join(t.dir, 'in', 'deep.json'), { maxJsonDepth: 50 }, 'maxJsonDepth');
+    fs.writeFileSync(path.join(t.dir, 'in', 'big.json'), JSON.stringify([`secret ${'x'.repeat(5000)}`]));
+    await assertBudgetStops(t, path.join(t.dir, 'in', 'big.json'), { maxTokenChars: 1000 }, 'maxTokenChars');
+  } finally { t.done(); }
+});
+
+test('SAN-F06: a high-cardinality export within the budgets completes and reports its limits', async () => {
+  const t = scratch('san-f06-ok');
+  try {
+    fs.mkdirSync(path.join(t.dir, 'in'));
+    const ids = Array.from({ length: 20_000 }, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`);
+    fs.writeFileSync(path.join(t.dir, 'in', 'conversations.json'), JSON.stringify([{ id: ids[0], title: 't', current_node: ids[0], mapping: Object.fromEntries(ids.map(id => [id, { id, parent: null, children: [], message: null }])) }]));
+    const result = await sanitize({ input: path.join(t.dir, 'in', 'conversations.json'), output: path.join(t.dir, 'out.json') });
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.report.members[0].structure.distinctIdentifiers, 20_001 - 1 + 1 - 0 === 20_001 ? 20_000 : 0);
+    assert.deepEqual(result.report.resourceBudgets.limits, DEFAULT_BUDGETS);
+    assert.ok(result.report.resourceBudgets.worstCaseBytesIfAllReached < 1024 ** 3);
+    assert.equal(runCli(['--help']).stdout.includes('5 resource budget exceeded'), true);
   } finally { t.done(); }
 });

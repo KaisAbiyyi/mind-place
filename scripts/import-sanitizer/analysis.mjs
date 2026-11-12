@@ -5,6 +5,7 @@
 //     against the registry of input strings.
 //
 // The inventory describes the *sanitized output only*, so it is safe to share by construction.
+import { DEFAULT_BUDGETS } from './budgets.mjs';
 import { DistinctCounter } from './leak-check.mjs';
 import { CLOCK_NODE, isDataKey, isIdContainerKey, isIdKey, isIdValue, isKnownClassToken } from './rules.mjs';
 import { jsonStrings, rewriteJson } from './json-stream.mjs';
@@ -34,10 +35,10 @@ function bump(map, key, by = 1) {
 }
 
 export class JsonStructure {
-  constructor() {
+  constructor(budgets = DEFAULT_BUDGETS) {
     this.paths = new Map();
     this.keys = new Map();
-    this.ids = new DistinctCounter();
+    this.ids = new DistinctCounter({ max: budgets.maxDistinctIdentifiers, budget: 'maxDistinctIdentifiers' });
     this.overflow = false;
   }
 
@@ -78,12 +79,12 @@ export class JsonStructure {
 }
 
 export class HtmlStructure {
-  constructor(labels = ['Prompted']) {
+  constructor(labels = ['Prompted'], budgets = DEFAULT_BUDGETS) {
     this.labels = labels;
     this.tags = new Map();
     this.attributes = new Map();
     this.classes = new Map();
-    this.unknownClassTokens = new DistinctCounter(); // pseudonymized in the output, so only their number is comparable
+    this.unknownClassTokens = new DistinctCounter({ max: budgets.maxUnknownClassTokens, budget: 'maxUnknownClassTokens' }); // pseudonymized in the output, so only their number is comparable
     this.hosts = new Map();
     this.counts = { textNodes: 0, clockNodes: 0, labelNodes: 0, comments: 0, rawText: 0, declarations: 0, endTags: 0 };
   }
@@ -137,16 +138,22 @@ async function drain(generator) {
   for await (const _ of generator) { /* output discarded: only the events matter */ }
 }
 
-export async function analyzeJson(readable, { multiRoot = false } = {}) {
-  const structure = new JsonStructure();
-  await drain(rewriteJson(readable, IDENTITY_RULES, { events: structure.events(), multiRoot }));
+export async function analyzeJson(readable, { multiRoot = false, budgets = DEFAULT_BUDGETS } = {}) {
+  const structure = new JsonStructure(budgets);
+  await drain(rewriteJson(readable, IDENTITY_RULES, { events: structure.events(), multiRoot, budgets }));
   return structure;
 }
 
-export async function analyzeHtml(readable, labels) {
-  const structure = new HtmlStructure(labels);
-  await drain(rewriteHtml(readable, IDENTITY_RULES, { events: structure.events() }));
+export async function analyzeHtml(readable, labels, budgets = DEFAULT_BUDGETS) {
+  const structure = new HtmlStructure(labels, budgets);
+  await drain(rewriteHtml(readable, IDENTITY_RULES, { events: structure.events(), budgets }));
   return structure;
+}
+
+/** Number of entries a summary holds, charged against the cross-member summary budget. */
+export function summaryEntries(summary) {
+  if (!summary) return 0;
+  return Object.values(summary).reduce((sum, value) => sum + (value && typeof value === 'object' ? Object.keys(value).length : 1), 0);
 }
 
 export function structuresEqual(a, b) {
@@ -167,10 +174,10 @@ export function structureDifferences(a, b, limit = 5) {
 }
 
 /** Counts leaking strings in a sanitized output entry (kind: json | html | text | name). */
-export async function scanForLeaks(kind, readable, registry) {
+export async function scanForLeaks(kind, readable, registry, budgets = DEFAULT_BUDGETS) {
   let leaks = 0;
-  if (kind === 'json') for await (const text of jsonStrings(readable)) leaks += registry.countLeaks(text);
-  else if (kind === 'html') for await (const text of htmlStrings(readable)) leaks += registry.countLeaks(text);
+  if (kind === 'json') for await (const text of jsonStrings(readable, budgets)) leaks += registry.countLeaks(text);
+  else if (kind === 'html') for await (const text of htmlStrings(readable, budgets)) leaks += registry.countLeaks(text);
   else {
     let carry = '';
     for await (const chunk of readable) {

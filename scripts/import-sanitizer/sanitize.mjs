@@ -11,17 +11,17 @@ import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
 import { StringDecoder } from 'node:string_decoder';
 import {
-  analyzeHtml, analyzeJson, HtmlStructure, JsonStructure, scanForLeaks, structureDifferences, structuresEqual,
+  analyzeHtml, analyzeJson, HtmlStructure, JsonStructure, scanForLeaks, structureDifferences, structuresEqual, summaryEntries,
 } from './analysis.mjs';
+import { BudgetError, memoryUpperBoundBytes, resolveBudgets, totalUpperBoundBytes } from './budgets.mjs';
 import { LeakError, LeakRegistry } from './leak-check.mjs';
 import { rewriteHtml } from './html-stream.mjs';
 import { rewriteJson } from './json-stream.mjs';
 import { HTML_MEMBER, JSON_MEMBER, neutralizeText, Rules, TEXT_MEMBER } from './rules.mjs';
-import { openZip, ZipError, ZipWriter } from './zip.mjs';
+import { openZip, READER_LIMITS, ZipError, ZipWriter } from './zip.mjs';
 
 export const TOOL = 'mind-place-import-sanitizer';
 export const TOOL_VERSION = 1;
-export const MAX_DIRECTORY_ENTRIES = 1_000_000;
 const READ_CHUNK = 1 << 20;
 
 export class SanitizerError extends Error {
@@ -55,7 +55,7 @@ const sizeClass = bytes => (bytes <= 0 ? 0 : 2 ** Math.ceil(Math.log2(bytes)));
 
 // ---------------------------------------------------------------- sources
 
-async function walk(root) {
+async function walk(root, maxMembers) {
   const out = [];
   const skipped = { symlinks: 0 };
   async function visit(dir, depth) {
@@ -68,7 +68,7 @@ async function walk(root) {
       if (stat.isDirectory()) await visit(file, depth + 1);
       else if (stat.isFile()) {
         out.push({ name: path.relative(root, file).split(path.sep).join('/'), size: stat.size, open: async () => fs.createReadStream(file, { highWaterMark: READ_CHUNK }) });
-        if (out.length > MAX_DIRECTORY_ENTRIES) throw new SanitizerError('E_ENTRY_LIMIT', 'Too many files');
+        if (out.length > maxMembers) throw new BudgetError('maxMembers', maxMembers);
       }
     }
   }
@@ -76,12 +76,12 @@ async function walk(root) {
   return { entries: out, skipped };
 }
 
-export async function openSource(input) {
+export async function openSource(input, budgets = resolveBudgets()) {
   const stat = await fs.promises.lstat(input).catch(() => null);
   if (!stat) throw new SanitizerError('E_INPUT_MISSING', 'Input path does not exist');
   if (stat.isSymbolicLink()) throw new SanitizerError('E_INPUT_SYMLINK', 'Input path must not be a symbolic link');
   if (stat.isDirectory()) {
-    const { entries, skipped } = await walk(input);
+    const { entries, skipped } = await walk(input, budgets.maxMembers);
     return { kind: 'dir', entries, skipped, close: async () => {} };
   }
   if (!stat.isFile()) throw new SanitizerError('E_INPUT_TYPE', 'Input must be a file or directory');
@@ -90,7 +90,8 @@ export async function openSource(input) {
   await handle.read(head, 0, 4, 0);
   await handle.close();
   if (head.readUInt32LE(0) === 0x04034b50 || head.readUInt32LE(0) === 0x06054b50) {
-    const zip = await openZip(input);
+    const zip = await openZip(input, { ...READER_LIMITS, maxEntries: budgets.maxMembers, maxCentralDirectoryBytes: Math.min(READER_LIMITS.maxCentralDirectoryBytes, budgets.maxMembers * 1024) })
+      .catch(error => { throw error?.code === 'E_ZIP_LIMIT' ? new BudgetError('maxMembers', budgets.maxMembers) : error; });
     const entries = zip.entries.map(entry => ({
       name: entry.name,
       size: entry.uncompressedSize,
@@ -125,6 +126,7 @@ async function* neutralizeTextStream(readable, rules) {
 const EMPTY_STAND_IN = { json: '{}\n', html: '<!doctype html><html></html>\n', text: '' };
 
 async function sanitizeMember(entry, kind, outName, rules, spool, options) {
+  const { budgets } = options;
   const record = { kind, status: 'ok', structure: null };
   if (kind === 'media') {
     const bytes = rules.standIn(entry.name);
@@ -136,16 +138,17 @@ async function sanitizeMember(entry, kind, outName, rules, spool, options) {
     const source = await entry.open();
     let generator;
     if (kind === 'json') {
-      const structure = new JsonStructure();
+      const structure = new JsonStructure(budgets);
       record.structure = structure;
-      generator = rewriteJson(source, rules, { events: structure.events(), multiRoot: /\.(?:jsonl|ndjson)$/i.test(entry.name) });
+      generator = rewriteJson(source, rules, { events: structure.events(), multiRoot: /\.(?:jsonl|ndjson)$/i.test(entry.name), budgets });
     } else if (kind === 'html') {
-      const structure = new HtmlStructure(rules.keepLabels);
+      const structure = new HtmlStructure(rules.keepLabels, budgets);
       record.structure = structure;
       const hints = options.hints;
       const events = structure.events();
       generator = rewriteHtml(source, rules, {
         events: hints ? { ...events, text: (raw, result) => { events.text(raw, result); hints.add(raw); } } : events,
+        budgets,
       });
     } else {
       generator = neutralizeTextStream(source, rules);
@@ -156,6 +159,9 @@ async function sanitizeMember(entry, kind, outName, rules, spool, options) {
       record.structure = null; // release the hash tables: only the summary is needed from here on
     }
   } catch (error) {
+    if (error instanceof BudgetError) throw error; // a resource limit stops the whole run, never a quiet stand-in
+    const exceeded = { E_JSON_TOO_DEEP: 'maxJsonDepth', E_JSON_TOKEN_TOO_LARGE: 'maxTokenChars', E_HTML_TOKEN_TOO_LARGE: 'maxTokenChars' }[error?.code];
+    if (exceeded) throw new BudgetError(exceeded, budgets[exceeded]);
     // Content-free reason only: parser messages can quote the input.
     record.status = `failed:${error?.code ?? 'E_PROCESSING'}`;
     record.structure = null;
@@ -218,6 +224,7 @@ class ZipSink {
 
 // ---------------------------------------------------------------- run
 
+const coverageError = () => new SanitizerError('E_LEAK_COVERAGE', 'Leak tracking overflowed; verification is incomplete and the output was not published', 3);
 const OUTPUT_MARKER = '.mp-sanitizer-output';
 const fold = value => (process.platform === 'win32' || process.platform === 'darwin' ? value.toLowerCase() : value);
 
@@ -287,8 +294,9 @@ async function publishAtomically(partial, output, force) {
 
 export async function sanitize({
   input, output, provider = 'auto', salt, timestamps = 'day', keepLabels = [], keepEnums = [], keepClasses = [],
-  dryRun = false, force = false, ownerHints = false, leakLimit,
+  dryRun = false, force = false, ownerHints = false, budgets: budgetOverrides,
 }) {
+  const budgets = resolveBudgets(budgetOverrides);
   if (!input) throw new SanitizerError('E_USAGE', 'An input path is required');
   const workRoot = dryRun ? os.tmpdir() : path.dirname(path.resolve(output ?? '.'));
   if (!dryRun) {
@@ -302,15 +310,16 @@ export async function sanitize({
       throw new SanitizerError('E_OUTPUT_EXISTS', 'A leftover .partial output exists; remove it first');
     }
   }
-  const leak = new LeakRegistry({ maxHashes: leakLimit });
-  const rules = new Rules({ salt, timestamps, keepLabels, keepEnums, keepClasses, leak });
-  const source = await openSource(input);
+  const leak = new LeakRegistry({ maxHashes: budgets.maxProtectedPieces, maxKept: budgets.maxKeptPieces });
+  const rules = new Rules({ salt, timestamps, keepLabels, keepEnums, keepClasses, budgets, leak });
+  const source = await openSource(input, budgets);
   const outputPath = dryRun ? path.join(await fs.promises.mkdtemp(path.join(workRoot, 'mp-sanitize-dry-')), 'out') : output;
   const sink = source.kind === 'zip' ? new ZipSink(outputPath) : source.kind === 'dir' ? new DirSink(outputPath) : new FileSink(outputPath);
   const spoolDir = await fs.promises.mkdtemp(path.join(dryRun ? workRoot : path.dirname(path.resolve(output)), '.mp-sanitize-spool-'));
   const hints = ownerHints ? new LeadingWordHints() : null;
   const members = [];
   const used = new Set();
+  let summaryTotal = 0;
   let ok = false;
   try {
     if (sink.init) await sink.init();
@@ -328,7 +337,11 @@ export async function sanitize({
       used.add(outName);
       const kind = kindOf(entry.name);
       const spool = path.join(spoolDir, String(index++));
-      const record = await sanitizeMember(entry, kind, outName, rules, spool, { hints });
+      if (members.length >= budgets.maxMembers) throw new BudgetError('maxMembers', budgets.maxMembers);
+      const record = await sanitizeMember(entry, kind, outName, rules, spool, { hints, budgets });
+      summaryTotal += summaryEntries(record.inputSummary);
+      if (summaryTotal > budgets.maxSummaryEntries) throw new BudgetError('maxSummaryEntries', budgets.maxSummaryEntries);
+      if (leak.partial) throw Object.assign(coverageError(), { checks: { structure: 'NOT_RUN', leak: 'INCOMPLETE' } }); // stop early: part of the input can no longer be checked
       const outputBytes = (await fs.promises.stat(spool)).size;
       await sink.add(outName, spool);
       await fs.promises.rm(spool, { force: true });
@@ -338,7 +351,7 @@ export async function sanitize({
     const written = await sink.finish();
 
     // ---- verification pass over the bytes that will actually be shared
-    const verify = await openSource(sink.partial);
+    const verify = await openSource(sink.partial, budgets);
     const checks = { structure: 'PASS', leak: 'PASS', structureDifferences: [], leakCount: 0 };
     const byName = new Map(members.map(member => [member.name, member]));
     for (const entry of verify.entries) {
@@ -348,7 +361,7 @@ export async function sanitize({
       checks.leakCount += leak.countLeaks(outName.split('/').join(' '));
       for (const segment of outName.split('/')) checks.leakCount += leak.countLeaks(segment);
       if (member.kind === 'json' && member.inputSummary) {
-        const after = await analyzeJson(await entry.open(), { multiRoot: /\.(?:jsonl|ndjson)$/i.test(outName) });
+        const after = await analyzeJson(await entry.open(), { multiRoot: /\.(?:jsonl|ndjson)$/i.test(outName), budgets });
         const before = member.inputSummary;
         const afterSummary = after.summary();
         if (!structuresEqual(before, afterSummary)) {
@@ -357,7 +370,7 @@ export async function sanitize({
         }
         member.output = afterSummary;
       } else if (member.kind === 'html' && member.inputSummary) {
-        const after = await analyzeHtml(await entry.open(), rules.keepLabels);
+        const after = await analyzeHtml(await entry.open(), rules.keepLabels, budgets);
         const before = member.inputSummary;
         const afterSummary = after.summary();
         if (!structuresEqual(before, afterSummary)) {
@@ -366,7 +379,7 @@ export async function sanitize({
         }
         member.output = afterSummary;
       }
-      if (member.kind !== 'media') checks.leakCount += await scanForLeaks(member.kind, await entry.open(), leak);
+      if (member.kind !== 'media') checks.leakCount += await scanForLeaks(member.kind, await entry.open(), leak, budgets);
     }
     await verify.close();
     if (checks.leakCount > 0) {
@@ -376,7 +389,7 @@ export async function sanitize({
     if (leak.partial) {
       // Tracking overflowed: part of the input was never checked, so this is not a pass.
       checks.leak = 'INCOMPLETE';
-      throw Object.assign(new SanitizerError('E_LEAK_COVERAGE', 'Leak tracking overflowed; verification is incomplete and the output was not published', 3), { checks });
+      throw Object.assign(coverageError(), { checks });
     }
     if (checks.structure === 'FAIL') {
       throw Object.assign(new SanitizerError('E_STRUCTURE', 'Sanitized output does not have the structure of the input', 4), { checks });
@@ -385,7 +398,7 @@ export async function sanitize({
     ok = true;
 
     const failed = members.filter(member => member.status.startsWith('failed'));
-    const report = buildReport({ rules, leak, members, checks, source, provider, written, dryRun, timestamps });
+    const report = buildReport({ rules, leak, members, checks, source, provider, written, dryRun, timestamps, budgets });
     return {
       exitCode: failed.length ? 2 : 0,
       report,
@@ -402,7 +415,7 @@ export async function sanitize({
   }
 }
 
-function buildReport({ rules, leak, members, checks, source, provider, written, dryRun, timestamps }) {
+function buildReport({ rules, leak, members, checks, source, provider, written, dryRun, timestamps, budgets }) {
   const unknown = {};
   const out = members.map(member => {
     const summary = member.output ?? null;
@@ -442,6 +455,7 @@ function buildReport({ rules, leak, members, checks, source, provider, written, 
       zip64: Boolean(written.zip64),
     },
     counters: rules.counters,
+    resourceBudgets: { limits: budgets, worstCaseBytesIfAllReached: totalUpperBoundBytes(budgets), note: 'Input-dependent structures are capped; exceeding any cap stops the run (exit 5) without publishing.' },
     // Structure fidelity is not a privacy qualification. PASS below means "nothing outside the
     // allow-lists survived"; whatever the allow-lists keep is listed here for the owner to judge.
     qualification: {
@@ -462,4 +476,4 @@ function buildReport({ rules, leak, members, checks, source, provider, written, 
   };
 }
 
-export { ZipError };
+export { BudgetError, memoryUpperBoundBytes, ZipError };

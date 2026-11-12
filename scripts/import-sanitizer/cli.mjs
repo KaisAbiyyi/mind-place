@@ -28,7 +28,7 @@ Usage:
   --help
 
 Environment: MIND_PLACE_SANITIZER_SALT supplies the pseudonym key instead of --salt-file.
-Exit codes: 0 PASS | 1 usage/IO error | 2 PARTIAL (some members replaced by stand-ins) | 3 leak check FAILED or INCOMPLETE | 4 structure check FAILED
+Exit codes: 0 PASS | 1 usage/IO error | 2 PARTIAL (some members replaced by stand-ins) | 3 leak check FAILED or INCOMPLETE | 4 structure check FAILED | 5 resource budget exceeded
 
 PASS is structure fidelity plus "nothing outside the allow-lists survived". It is NOT an anonymity guarantee: read the
 residual metadata the tool prints before sharing anything.

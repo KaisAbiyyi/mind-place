@@ -7,6 +7,7 @@
 // supplies one; it is never written, logged or reported, so even short or guessable identifiers
 // cannot be confirmed offline by enumerating candidates. No name, e-mail address or text is hashed.
 import { createHmac, randomBytes } from 'node:crypto';
+import { BudgetError, DEFAULT_BUDGETS } from './budgets.mjs';
 import { LeakRegistry } from './leak-check.mjs';
 
 
@@ -153,7 +154,7 @@ export function isDataKey(key) {
 export const CLOCK_NODE = /^(\s*)(\d{1,2} \p{L}{3,10} \d{4}, )(\d{1,2}):(\d{2}):(\d{2})( [A-Za-z]{1,6}|\s?[+-]\d{2}:?\d{2})?(\s*)$/u;
 
 export class Rules {
-  constructor({ salt, timestamps = 'day', keepLabels = [], keepEnums = [], keepClasses = [], leak = new LeakRegistry() } = {}) {
+  constructor({ salt, timestamps = 'day', keepLabels = [], keepEnums = [], keepClasses = [], budgets = DEFAULT_BUDGETS, leak = new LeakRegistry() } = {}) {
     if (!['day', 'keep'].includes(timestamps)) throw new Error('E_OPTION timestamps must be day or keep');
     // A fresh random key per run unless the owner opts into reproducibility. It is never emitted.
     this.salt = salt ?? randomBytes(32).toString('hex');
@@ -172,6 +173,8 @@ export class Rules {
     this.leak = leak;
     this.shortIds = new Map(); // original -> pseudonym, only for short IDs, to keep the mapping injective
     this.shortIdTaken = new Map(); // pseudonym -> original
+    this.shortIdBytes = 0;
+    this.budgets = budgets;
     this.counters = { stringsReplaced: 0, idsPseudonymized: 0, mediaStandIns: 0, timestampsCoarsened: 0, enumValuesReplaced: 0 };
     this.keptEnums = new Map(); // key -> Map(value -> count): exactly which enum-like values were preserved
     this.keptEnumOverflow = false;
@@ -242,6 +245,10 @@ export class Rules {
       const candidate = this.#shape(value, label, attempt);
       const owner = this.shortIdTaken.get(`${label}\0${candidate}`);
       if (owner === undefined || owner === value) {
+        // The injectivity table grows with the number of distinct short identifiers: budgeted.
+        if (this.shortIds.size >= this.budgets.maxShortIdentifiers) throw new BudgetError('maxShortIdentifiers', this.budgets.maxShortIdentifiers);
+        this.shortIdBytes += (value.length + candidate.length) * 2;
+        if (this.shortIdBytes > this.budgets.maxShortIdentifierBytes) throw new BudgetError('maxShortIdentifierBytes', this.budgets.maxShortIdentifierBytes);
         this.shortIds.set(`${label}\0${value}`, candidate);
         this.shortIdTaken.set(`${label}\0${candidate}`, value);
         return candidate;

@@ -43,7 +43,7 @@ report, after reading the inventory printed on screen.
 
 Exit codes: `0` PASS · `1` usage or I/O error · `2` PARTIAL (some members could not be parsed and were
 replaced by empty stand-ins; see STATUS) · `3` leak check FAILED **or INCOMPLETE** (tracking overflowed, so part of
-the input was never checked) · `4` structure check FAILED. On `3` and `4` no output is left behind.
+the input was never checked) · `4` structure check FAILED · `5` resource budget exceeded. On `3`, `4` and `5` no output is left behind and an existing output is untouched.
 
 ## What PASS does and does not mean
 
@@ -103,12 +103,38 @@ single file, a directory, a zip with one `conversations.json`, and a zip with se
 `conversations-*.json` members. It never contains input text. Read it before sharing anyway. The leak check deliberately
 exempts allow-listed values, so the residual-metadata list is where you spot anything you would rather not disclose.
 
-## Performance
+## Resource budgets (memory is bounded by budgets, not by the largest string)
 
-Streaming, memory bounded by the largest single string. Measured on a synthetic 151 MB `conversations.json`
-(Linux, Node 22): about 13 s including the full verification pass, 140 MB resident, output 109 MB (measured before the
-re-review changes; the new checks add negligible work). Expect
-roughly 1.5 minutes for a 1 GB input. Hosted CI does not time this; the figure is a local observation.
+Streaming keeps the *content* flowing, but several structures grow with the **number of distinct** identifiers,
+tokens, members or the nesting depth of the input. Each one has a named budget. Exceeding any budget stops the run
+with `E_BUDGET` (exit `5`; the leak table overflow keeps its own `E_LEAK_COVERAGE`, exit `3`): **nothing is
+published, an existing output is left untouched, and every spool and partial file is removed.** Budgets are
+recorded in the report (`resourceBudgets`).
+
+| Budget | Default | Bounds |
+| --- | ---: | --- |
+| `maxProtectedPieces` | 8,000,000 | leak registry: distinct input strings and tokens of 8+ characters |
+| `maxKeptPieces` | 1,000,000 | leak registry: distinct allow-listed values (kept keys, enum values, …) |
+| `maxDistinctIdentifiers` | 4,000,000 | per JSON member, for the input-side and the output-side structure analysis |
+| `maxUnknownClassTokens` | 1,000,000 | per HTML member: distinct unknown class names |
+| `maxShortIdentifiers` / `maxShortIdentifierBytes` | 100,000 / 8 MiB | injectivity table for short identifiers |
+| `maxMembers` | 100,000 | files or zip entries (also caps the zip central directory that is read into memory) |
+| `maxSummaryEntries` | 500,000 | path/tag entries held across all members' summaries |
+| `maxJsonDepth` | 256 | JSON nesting (a file of `[[[[…` can no longer grow a stack) |
+| `maxTokenChars` | 32 Mi chars | one JSON string or scalar, one HTML text node, one tag |
+
+Worst case if **every** budget were reached at the same time: below 1 GiB for the input-dependent structures
+(`totalUpperBoundBytes()` in `budgets.mjs`, asserted in the tests; hash tables are typed arrays at 8 bytes per slot and
+briefly hold old and new tables while growing). The typical figure is far lower. Measured locally (Linux, Node 22):
+
+| Input | Result | Peak RSS |
+| --- | --- | ---: |
+| 151 MB synthetic `conversations.json` (ordinary text-heavy export) | PASS in about 13 s | 140 MiB |
+| 128 MB export with 1,000,000 distinct identifiers | PASS in about 66 s | 208 MiB |
+| 576 MB crafted export with 4,500,000 distinct identifiers | stopped at the 4,000,000 budget, exit 5, previous output intact, nothing left behind | 327 MiB |
+
+These are one-off local observations, not CI measurements. There is no command-line option to raise a budget; the
+`budgets` option of the programmatic `sanitize()` exists for tests and for owners who knowingly need more.
 
 ## Development
 

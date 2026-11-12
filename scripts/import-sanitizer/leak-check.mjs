@@ -4,8 +4,9 @@
 // Input strings are held only as 64-bit hashes in a bounded in-memory table; the check never
 // writes, logs or returns any input content, only counts.
 
+import { BudgetError, DEFAULT_BUDGETS } from './budgets.mjs';
+
 export const LEAK_MIN_CHARS = 8;
-export const MAX_TRACKED_HASHES = 40_000_000;
 const TOKEN_SPLIT = /[^\p{L}\p{N}_-]+/u;
 
 function hash64(text) {
@@ -69,8 +70,16 @@ class HashSet64 {
 
 /** Counts distinct strings by 64-bit hash (bounded memory, no strings retained). */
 export class DistinctCounter {
-  constructor() { this.set = new HashSet64(1 << 8); }
-  add(text) { const [hi, lo] = hash64(text); this.set.add(hi, lo); }
+  constructor({ max, budget }) {
+    this.max = max;
+    this.budget = budget;
+    this.set = new HashSet64(1 << 8);
+  }
+  add(text) {
+    const [hi, lo] = hash64(text);
+    if (this.set.size >= this.max && !this.set.has(hi, lo)) throw new BudgetError(this.budget, this.max);
+    this.set.add(hi, lo);
+  }
   get size() { return this.set.size; }
 }
 
@@ -83,8 +92,9 @@ export class LeakError extends Error {
 }
 
 export class LeakRegistry {
-  constructor({ maxHashes = MAX_TRACKED_HASHES } = {}) {
+  constructor({ maxHashes = DEFAULT_BUDGETS.maxProtectedPieces, maxKept = DEFAULT_BUDGETS.maxKeptPieces } = {}) {
     this.maxHashes = maxHashes;
+    this.maxKept = maxKept;
     this.protectedSet = new HashSet64();
     this.keptSet = new HashSet64();
     this.partial = false;
@@ -93,9 +103,12 @@ export class LeakRegistry {
 
   #add(set, text) {
     const [hi, lo] = hash64(text);
-    if (set === this.protectedSet && set.size >= this.maxHashes) {
-      this.partial = true;
+    if (set === this.protectedSet && set.size >= this.maxHashes && !set.has(hi, lo)) {
+      this.partial = true; // the run stops at the next member boundary (E_LEAK_COVERAGE)
       return;
+    }
+    if (set === this.keptSet && set.size >= this.maxKept && !set.has(hi, lo)) {
+      throw new BudgetError('maxKeptPieces', this.maxKept);
     }
     set.add(hi, lo);
   }

@@ -14,9 +14,10 @@ Status: **READY FOR REVIEW**. Neither acceptance nor a merge request. Only the r
 | Module | Role |
 | --- | --- |
 | `zip.mjs` | Dependency-free zip reader (CRC/size verified while streaming, ZIP64) and deterministic writer (fixed timestamps, input order, ZIP64 counts/offsets) |
-| `json-stream.mjs` | Streaming JSON tokenizer and rewriter: no document is built; layout, key order and number formats are kept byte-for-byte |
+| `json-stream.mjs` | Streaming JSON tokenizer and rewriter: no document is built; layout, key order and number formats are kept byte-for-byte; nesting depth and token size are budgeted |
 | `html-stream.mjs` | Streaming HTML scanner and rewriter that keeps tags, attribute names, quoting style, case and comment boundaries; independent of read chunking |
 | `rules.mjs` | Default-deny rules: enum allow-list, same-shape keyed pseudonyms, length-class filler, URL/timestamp/name handling, media stand-ins |
+| `budgets.mjs` | Named resource budgets for every input-dependent structure, the `BudgetError` (exit 5) and the worst-case memory model |
 | `leak-check.mjs` | 64-bit-hash registry of every input string and 8+ character token; no content stored or printed |
 | `analysis.mjs` | Structure inventory, input-vs-output structure equality, independent leak scan |
 | `sanitize.mjs`, `cli.mjs` | Orchestration (zip / directory / file), spooling, verification pass, atomic publish, report, exit codes |
@@ -56,15 +57,41 @@ Also fixed while doing this: a class attribute made only of known tokens survive
 
 Still **NOT_RUN** and still required by the review: running the CLI **on Windows** (directory, symlink/reparse-point and `--force` failure paths, zip fixtures; path handling is covered here only on Linux, with Windows-reserved-character and backslash-separator unit tests), the owner-local trial on a **real** export, and exact-head hosted CI. A reviewer should also decide whether the built-in vocabularies are the right size: a smaller vocabulary is safer and keeps less parser-relevant structure (for example a real class that the Gemini parser treats specially is replaced unless you pass `--keep-class`).
 
+## Re-review round 2 — SAN-F06 (P2): unbounded cardinality memory growth
+
+Finding ([comment](https://github.com/KaisAbiyyi/mind-place/pull/167#issuecomment-6810518849), reviewed head `b6ec07a`): the README said streaming memory is bounded by the largest single string, but `DistinctCounter`/`HashSet64`, `JsonStructure.ids`, `HtmlStructure.unknownClassTokens` and `Rules.shortIds`/`shortIdTaken` grow with the number of distinct identifiers or tokens, and only `LeakRegistry.protectedSet` had a cap. A crafted high-cardinality export could exhaust memory. All other findings of the previous round were confirmed addressed; the hosted CI run at that head was SUCCESS.
+
+I audited every structure whose size depends on the input, not only the ones named. Besides the reviewer's list, these were also unbounded and are now budgeted: the leak registry's *kept* table, the JSON frame stack (nesting depth), JSON scalar tokens (only strings were capped), complete tokens that fit inside one read chunk (the cap was only enforced while a token was still incomplete; found by the new test), member and zip-entry counts (the whole zip central directory is read into memory), and the summaries kept across members.
+
+| Structure | Budget (default) | On overflow |
+| --- | --- | --- |
+| leak registry protected table | `maxProtectedPieces` 8,000,000 | stops at the next member boundary: `E_LEAK_COVERAGE`, exit 3, `leak: INCOMPLETE` |
+| leak registry kept table | `maxKeptPieces` 1,000,000 | `E_BUDGET`, exit 5 |
+| `JsonStructure.ids` (input and output analysis) | `maxDistinctIdentifiers` 4,000,000 | `E_BUDGET`, exit 5 |
+| `HtmlStructure.unknownClassTokens` | `maxUnknownClassTokens` 1,000,000 | `E_BUDGET`, exit 5 |
+| `Rules.shortIds` / `shortIdTaken` | `maxShortIdentifiers` 100,000 and `maxShortIdentifierBytes` 8 MiB | `E_BUDGET`, exit 5 |
+| members and zip entries | `maxMembers` 100,000 | `E_BUDGET`, exit 5 |
+| summaries across members | `maxSummaryEntries` 500,000 | `E_BUDGET`, exit 5 |
+| JSON nesting | `maxJsonDepth` 256 | `E_BUDGET`, exit 5 (previously a per-member stand-in) |
+| one token / text node / tag | `maxTokenChars` 32 Mi chars | `E_BUDGET`, exit 5 (previously a per-member stand-in) |
+
+A budget stop never publishes, never touches a previous output, never quotes input, and removes every spool, partial and aside file. Depth and token overflows are deliberately whole-run failures rather than quiet stand-ins.
+
+**Upper bound, demonstrated.** `totalUpperBoundBytes()` models the worst case if every budget were reached simultaneously: under 1 GiB (asserted in a test). Measured locally: ordinary 151 MB export 140 MiB peak RSS; 128 MB export with 1,000,000 distinct identifiers passes at 208 MiB; a 576 MB crafted export with 4,500,000 distinct identifiers is stopped at the 4,000,000 budget at 327 MiB with the previous output intact. These are local one-off observations, not CI measurements. The README's memory claim is replaced by the budget table.
+
+Regression tests (all deterministic, using small explicit budgets): `every input-dependent structure has a named budget and the worst case is bounded and documented`, `the hash tables never grow past their budget, however many distinct values arrive`, `many distinct identifiers stop the run safely` (JSON identifiers, short identifiers, short-identifier bytes, kept keys), `many distinct HTML class names stop the run safely`, `too many members, too many summary entries, and leak-table overflow stop the run safely` (directory, zip and the leak table), `nesting depth and token size are bounded` (a 2 MB `[[[[…` bomb is refused in well under 5 s; JSON string, JSON scalar, HTML text, and run-level), and `a high-cardinality export within the budgets completes and reports its limits`. Every budget-stop test asserts the exact budget, exit code 5, the previous output unchanged and an unchanged directory listing.
+
+Still **NOT_RUN** (unchanged from the review): execution of the CLI on **Windows** (directory, symlink/reparse-point and `--force` failure paths, zip fixtures), the owner-local trial on a **real** export, and exact-head hosted CI for the new commit.
+
 ## Verification
 
 Environment: Linux x86_64, Node 22.23, Cargo 1.97. Synthetic data only.
 
 | Command | Result |
 | --- | --- |
-| `node --import tsx --test test/import-sanitizer.test.mjs` | PASS: 37 passed, 0 failed (29 before re-review round 1) |
+| `node --import tsx --test test/import-sanitizer.test.mjs` | PASS: 44 passed, 0 failed (29 before re-review round 1; 37 before round 2) |
 | `cargo test --locked -p mind-place-archive --tests` | PASS: 124 passed, 0 failed, 0 ignored (includes the 3 parser cross-check tests and the 5 FIX-F01 tests) |
-| `npm run test:web` | PASS: 308 tests, 306 passed, 0 failed, 2 skipped (Windows-only) |
+| `npm run test:web` | PASS: 315 tests, 313 passed, 0 failed, 2 skipped (Windows-only) |
 | `npm run test:rust` | PASS: 355 passed, 0 failed, 1 ignored (existing qualification-ignored test) |
 | `cargo fmt --all -- --check`, `npm run verify:repo`, `npm run typecheck`, `node scripts/verify-workflow-security.mjs`, `git diff --check` | PASS |
 | Run on a **real** ChatGPT/Gemini export | **NOT_RUN** (owner-local step) |

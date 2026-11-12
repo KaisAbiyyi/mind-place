@@ -6,7 +6,7 @@
 // The scan is independent of how the input is chunked.
 import { StringDecoder } from 'node:string_decoder';
 
-export const MAX_HTML_TOKEN_CHARS = 128 * 1024 * 1024;
+import { DEFAULT_BUDGETS } from './budgets.mjs';
 const RAW_TEXT = new Set(['script', 'style', 'textarea', 'title']);
 
 export class HtmlError extends Error {
@@ -74,7 +74,7 @@ function parseTag(buf, pos) {
  * Yields segments: { type: 'text'|'comment'|'decl'|'start'|'end'|'rawtext', raw, ... }.
  * start/end carry `name` and `parts` ({lit} or {lit, attr, quote, value}); rawtext carries `tag`.
  */
-export async function* scanHtml(readable) {
+export async function* scanHtml(readable, { maxTokenChars = DEFAULT_BUDGETS.maxTokenChars } = {}) {
   const decoder = new StringDecoder('utf8');
   let buf = '';
   let pos = 0;
@@ -87,7 +87,7 @@ export async function* scanHtml(readable) {
         const rest = buf.slice(pos);
         const found = close.exec(rest);
         if (!found && !eof) {
-          if (rest.length > MAX_HTML_TOKEN_CHARS) throw new HtmlError('E_HTML_TOKEN_TOO_LARGE');
+          if (rest.length > maxTokenChars) throw new HtmlError('E_HTML_TOKEN_TOO_LARGE');
           return;
         }
         const end = found ? pos + found.index : buf.length;
@@ -100,7 +100,7 @@ export async function* scanHtml(readable) {
         if (buf.startsWith('<!--', pos)) {
           const close = buf.indexOf('-->', pos + 4);
           if (close < 0) {
-            if (!eof) { if (buf.length - pos > MAX_HTML_TOKEN_CHARS) throw new HtmlError('E_HTML_TOKEN_TOO_LARGE'); return; }
+            if (!eof) { if (buf.length - pos > maxTokenChars) throw new HtmlError('E_HTML_TOKEN_TOO_LARGE'); return; }
             yield { type: 'comment', raw: buf.slice(pos), body: buf.slice(pos + 4) };
             pos = buf.length;
           } else {
@@ -123,7 +123,7 @@ export async function* scanHtml(readable) {
         }
         const tag = parseTag(buf, pos);
         if (tag === null) {
-          if (!eof) { if (buf.length - pos > MAX_HTML_TOKEN_CHARS) throw new HtmlError('E_HTML_TOKEN_TOO_LARGE'); return; }
+          if (!eof) { if (buf.length - pos > maxTokenChars) throw new HtmlError('E_HTML_TOKEN_TOO_LARGE'); return; }
           yield { type: 'text', raw: buf.slice(pos) };
           pos = buf.length;
           continue;
@@ -141,7 +141,7 @@ export async function* scanHtml(readable) {
         const next = buf.indexOf('<', end);
         if (next < 0) {
           if (!eof) {
-            if (buf.length - pos > MAX_HTML_TOKEN_CHARS) throw new HtmlError('E_HTML_TOKEN_TOO_LARGE');
+            if (buf.length - pos > maxTokenChars) throw new HtmlError('E_HTML_TOKEN_TOO_LARGE');
             return;
           }
           end = buf.length;
@@ -171,9 +171,10 @@ const OUT_FLUSH_CHARS = 256 * 1024;
 const safeAttr = (value, quote) => value.replace(quote ? new RegExp(quote, 'g') : /[\s>"']/g, 'x');
 
 /** Rewrites an HTML stream through `rules`. `events` receives structure callbacks for the inventory. */
-export async function* rewriteHtml(readable, rules, { events = null } = {}) {
+export async function* rewriteHtml(readable, rules, { events = null, budgets = DEFAULT_BUDGETS } = {}) {
   let out = '';
-  for await (const segment of scanHtml(readable)) {
+  for await (const segment of scanHtml(readable, budgets)) {
+    if (segment.raw.length > budgets.maxTokenChars) throw new HtmlError('E_HTML_TOKEN_TOO_LARGE');
     // Every input string is tracked by the leak registry; only allow-listed output is exempt.
     if (rules.leak) {
       if (segment.type === 'text') rules.leak.protect(segment.raw.trim());
@@ -223,8 +224,9 @@ export async function* rewriteHtml(readable, rules, { events = null } = {}) {
 }
 
 /** Strings of an HTML stream (text, attribute values, comments, raw text) for the output leak scan. */
-export async function* htmlStrings(readable) {
-  for await (const segment of scanHtml(readable)) {
+export async function* htmlStrings(readable, budgets = DEFAULT_BUDGETS) {
+  for await (const segment of scanHtml(readable, budgets)) {
+    if (segment.raw.length > budgets.maxTokenChars) throw new HtmlError('E_HTML_TOKEN_TOO_LARGE');
     if (segment.type === 'text') yield segment.raw.trim();
     else if (segment.type === 'comment') yield segment.body;
     else if (segment.type === 'rawtext') yield segment.raw;

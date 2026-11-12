@@ -11,9 +11,9 @@
   "commands": [
     {
       "command": "node --import tsx --test test/import-sanitizer.test.mjs",
-      "passed": 37,
+      "passed": 44,
       "failed": 0,
-      "note": "29 before re-review round 1; +8 regression tests for SAN-F01..F05"
+      "note": "29 initially; 37 after round 1; 44 after round 2 (SAN-F06)"
     },
     {
       "command": "cargo test --locked -p mind-place-archive --tests",
@@ -28,8 +28,8 @@
     },
     {
       "command": "npm run test:web",
-      "tests": 308,
-      "passed": 306,
+      "tests": 315,
+      "passed": 313,
       "failed": 0,
       "skipped": 2,
       "note": "2 skipped are Windows-only"
@@ -80,6 +80,20 @@
     "fixed": true,
     "windows_run": "NOT_RUN",
     "hosted_ci": "NOT_RUN",
+    "real_export": "NOT_RUN"
+  },
+  "re_review_round_2": {
+    "finding": "SAN-F06",
+    "fixed": true,
+    "measured_local": {
+      "ordinary_151MB_peak_rss_mib": 140,
+      "one_million_identifiers_peak_rss_mib": 208,
+      "crafted_4_5_million_identifiers": "stopped at 4,000,000 budget, exit 5, previous output intact",
+      "peak_rss_mib": 327
+    },
+    "worst_case_model_below_gib": 1,
+    "windows_run": "NOT_RUN",
+    "hosted_ci_for_new_head": "NOT_RUN",
     "real_export": "NOT_RUN"
   }
 }
