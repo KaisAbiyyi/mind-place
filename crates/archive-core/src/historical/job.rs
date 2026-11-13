@@ -17,7 +17,8 @@ use crate::importers::gemini_takeout::{GeminiTakeoutParser, MAX_TAKEOUT_HTML_BYT
 use crate::importers::{BoundedArrayLimits, ReconciledItem, RecordSpan};
 use crate::store::{
     archive_id_for, atomic_write, bounded_read, checked_dir, hex_id, is_transient_sharing, no_link,
-    persist_retry, retry_transient, snapshot_identity, sweep_temp_files,
+    persist_retry, retry_transient, snapshot_identity, sweep_conversation_temp_files,
+    sweep_temp_files,
 };
 use crate::{ArchiveError, ArchiveStore, Capture, Result, MAX_CAPTURE_BYTES};
 use fs2::FileExt;
@@ -644,7 +645,12 @@ impl ArchiveStore {
         let mut removed = 0;
         let mut directories = Vec::new();
         if let Ok(entries) = fs::read_dir(self.root.join("conversations")) {
-            directories.extend(entries.flatten().map(|entry| entry.path()));
+            for entry in entries.flatten() {
+                let conversation = entry.path();
+                directories.push(conversation.join("captures"));
+                directories.push(conversation.join("assets"));
+                directories.push(conversation);
+            }
         }
         let imports = self.imports_dir();
         for kind in ["raw", "evidence", "dispositions"] {
@@ -1152,7 +1158,7 @@ impl ArchiveStore {
         // A kill during this item's projection write may have left a temporary file in its
         // conversation directory. The caller holds the archive lock, so no writer owns one.
         if let StagedDisposition::Projected { archive_id, .. } = &item.disposition {
-            sweep_temp_files(&self.conversation_dir(archive_id)?);
+            sweep_conversation_temp_files(&self.conversation_dir(archive_id)?);
         }
         let evidence_id = evidence_id_for(manifest, &item);
         let final_raw = self.sharded("raw", &item.payload_sha256, "raw")?;

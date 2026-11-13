@@ -1691,6 +1691,7 @@ fn leftover_temp_files_are_swept_and_nothing_else_is_touched() {
     };
     let orphans = [
         conversation.join(".tmpAbC123"),
+        conversation.join("captures").join(".tmpCAP006"),
         shard("raw").join(".tmpRAW001"),
         shard("evidence").join(".tmpEVI002"),
         shard("dispositions").join(".tmpLNK003"),
@@ -1755,6 +1756,7 @@ fn a_restarted_import_removes_the_temp_files_a_killed_run_left_behind() {
         .unwrap()
         .path();
     plant(&in_flight.join(".tmpFLT001"));
+    plant(&in_flight.join("captures").join(".tmpFLT007"));
     plant(&finished_earlier.join(".tmpOLD002"));
     plant(&job.join(".tmpJOB003"));
     plant(&raw_shard.join(".tmpRAW004"));
@@ -1763,6 +1765,7 @@ fn a_restarted_import_removes_the_temp_files_a_killed_run_left_behind() {
     assert!(receipt.resumed);
     // Swept by the restart: the job directory, the shards and the in-flight conversation.
     assert!(!in_flight.join(".tmpFLT001").exists());
+    assert!(!in_flight.join("captures").join(".tmpFLT007").exists());
     assert!(!job.join(".tmpJOB003").exists());
     assert!(!raw_shard.join(".tmpRAW004").exists());
     // A conversation that was already finished is not revisited by an import; the maintenance

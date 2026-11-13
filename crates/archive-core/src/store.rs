@@ -170,6 +170,15 @@ pub(crate) fn sweep_temp_files(dir: &Path) -> usize {
     removed
 }
 
+/// Sweeps a conversation directory and the two subdirectories the store writes into
+/// (`captures` for snapshots, `assets` for images). Same locking requirement as
+/// [`sweep_temp_files`].
+pub(crate) fn sweep_conversation_temp_files(dir: &Path) -> usize {
+    sweep_temp_files(dir)
+        + sweep_temp_files(&dir.join("captures"))
+        + sweep_temp_files(&dir.join("assets"))
+}
+
 pub(crate) fn atomic_write(path: &Path, bytes: &[u8], immutable: bool) -> Result<()> {
     no_link(path)?;
     let parent = path
