@@ -3,10 +3,11 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::io::Read;
 
-use crate::importers::{RawEvidenceEnvelope, ReconciledItem};
+use crate::importers::{RawEvidenceEnvelope, ReconciledItem, RecordSpan};
 use crate::{Capture, Message};
 
-const MAX_TAKEOUT_HTML_BYTES: u64 = 64 * 1024 * 1024; // 64 MiB
+/// Largest Takeout HTML file accepted; the read is capped at this plus one byte.
+pub const MAX_TAKEOUT_HTML_BYTES: u64 = 64 * 1024 * 1024; // 64 MiB
 
 pub fn parse_takeout_timestamp(s: &str) -> Option<String> {
     let s = s.trim();
@@ -302,15 +303,35 @@ pub struct GeminiTakeoutParser;
 
 impl GeminiTakeoutParser {
     pub fn parse_cards_html<R: Read>(
-        mut reader: R,
+        reader: R,
     ) -> Result<Vec<ReconciledItem>, Box<dyn std::error::Error>> {
+        Ok(
+            Self::parse_cards_html_spanned(reader, MAX_TAKEOUT_HTML_BYTES, usize::MAX)?
+                .into_iter()
+                .map(|(_, item)| item)
+                .collect(),
+        )
+    }
+
+    /// Parses cards and reports, for each, the span (offset, length, SHA-256) of the exact
+    /// source bytes the card was cut from. The file must be valid UTF-8 and at most
+    /// `max_bytes`; reading is capped at `max_bytes + 1`; more than `max_cards` cards is refused.
+    pub fn parse_cards_html_spanned<R: Read>(
+        mut reader: R,
+        max_bytes: u64,
+        max_cards: usize,
+    ) -> Result<Vec<(RecordSpan, ReconciledItem)>, Box<dyn std::error::Error>> {
         let mut html = String::new();
         reader
             .by_ref()
-            .take(MAX_TAKEOUT_HTML_BYTES + 1)
+            .take(max_bytes.saturating_add(1))
             .read_to_string(&mut html)?;
-        if html.len() > MAX_TAKEOUT_HTML_BYTES as usize {
-            return Err("Gemini Takeout HTML exceeds maximum allowed 64 MiB limit".into());
+        if html.len() as u64 > max_bytes {
+            return Err(format!(
+                "Gemini Takeout HTML exceeds maximum allowed {} byte limit",
+                max_bytes
+            )
+            .into());
         }
 
         let mut items = Vec::new();
@@ -352,11 +373,14 @@ impl GeminiTakeoutParser {
         if ranges.is_empty() && !html.trim().is_empty() {
             ranges.push(0..html.len());
         }
+        if ranges.len() > max_cards {
+            return Err("Gemini Takeout HTML has more cards than the allowed limit".into());
+        }
         for (idx, range) in ranges.into_iter().enumerate() {
-            items.push(Self::parse_single_card(
-                &html[range],
-                idx,
-                &mut seen_identities,
+            let span = RecordSpan::of(range.start as u64, html[range.clone()].as_bytes());
+            items.push((
+                span,
+                Self::parse_single_card(&html[range], idx, &mut seen_identities),
             ));
         }
 

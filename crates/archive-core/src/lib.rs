@@ -2,13 +2,14 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 pub mod generic;
+pub mod historical;
 pub mod importers;
 mod legacy;
 mod store;
 pub use generic::{GenericImportReceipt, MAX_GENERIC_IMPORT_BYTES};
 pub use importers::{
     stream_top_level_array, BatchImportReceipt, DiscoveredAsset, ImportSourceInventory,
-    RawEvidenceEnvelope, ReconciledItem,
+    RawEvidenceEnvelope, ReconciledItem, RecordSpan,
 };
 pub use store::{
     conversation_id_from_url, markdown, validate_capture, validate_historical_capture,

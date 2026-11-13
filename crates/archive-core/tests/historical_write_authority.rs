@@ -36,6 +36,12 @@ const LEDGER: &[(&str, Governance)] = &[
         "save_authorized_historical_import",
         Governance::RequiresAuthorization,
     ),
+    // MP-IMPORT-RAW-01: raw-evidence-preserving source import. Takes no inventory or hash from
+    // the caller; measures the source itself and verifies the gate per item.
+    (
+        "import_authorized_source",
+        Governance::RequiresAuthorization,
+    ),
     ("save_historical_import", Governance::RejectsAll),
     // Ordinary save: refuses takeout-import / export-import; accepts live DOM captures and,
     // as the sink of the two importers below, legacy-import / generic-import captures.
@@ -347,10 +353,11 @@ fn every_public_persisting_entry_point_is_classified() {
          ledger. Classify it in tests/historical_write_authority.rs and \
          docs/implementation-summary/2026-11-11-mp-import-fix-01.md."
     );
-    // The shared sink is reachable from exactly two places: ordinary save and the
-    // authorization-gated historical entry point.
+    // The shared sink is reachable from exactly three places: ordinary save, the
+    // authorization-gated capture entry point, and the authorization-gated source import
+    // (`historical/job.rs`, which publishes raw evidence and provenance first).
     assert_eq!(
-        save_under_lock_calls, 2,
+        save_under_lock_calls, 3,
         "save_under_lock call sites changed; re-classify every historical write path"
     );
     // Only the authorization-gated entry accepts the authorization type.
