@@ -10,6 +10,16 @@ use std::{
     time::{Duration, Instant},
 };
 
+/// Owner-issued import authority plus the independently established job context.
+/// This authorizes only legacy plaintext archives; vault markers still fail closed.
+pub struct HistoricalImportAuthorization<'a> {
+    pub gate: &'a mind_place_security::SecurityGate,
+    pub lease: mind_place_security::UnlockLease,
+    pub capability: &'a mind_place_security::ImportAuthorizationCapability,
+    pub job_id: &'a str,
+    pub inventory: &'a ImportSourceInventory,
+}
+
 pub const MAX_CAPTURE_BYTES: usize = 32 * 1024 * 1024;
 const MAX_MESSAGE_BYTES: usize = 4 * 1024 * 1024;
 const MAX_IMAGE_BYTES: usize = 8 * 1024 * 1024;
@@ -222,40 +232,79 @@ fn claude_conversation_id_from_url(source: &str) -> Result<String> {
 }
 
 pub fn validate_capture(c: &mut Capture) -> Result<()> {
-    validate(c)
+    if c.provider == "generic" && c.capture_method == "generic-import" {
+        validate_historical_capture(c, "generic")
+    } else if c.capture_method == "legacy-import" {
+        validate_stored_capture(c)
+    } else if c.capture_method == "takeout-import" {
+        validate_historical_capture(c, "gemini")
+    } else if c.capture_method == "export-import" {
+        validate_historical_capture(c, "chatgpt")
+    } else {
+        validate_live_capture(c)
+    }
 }
 
-fn validate(c: &mut Capture) -> Result<()> {
-    if c.schema_version != 1
-        || !matches!(
-            c.provider.as_str(),
-            "chatgpt" | "gemini" | "generic" | "claude"
+pub fn validate_stored_capture(c: &Capture) -> Result<()> {
+    if c.schema_version != 1 {
+        return Err(invalid("Unsupported archive schema or provider"));
+    }
+    match c.provider.as_str() {
+        "gemini" => {
+            if !matches!(c.capture_method.as_str(), "manual-dom" | "takeout-import") {
+                return Err(invalid("Invalid Gemini stored capture method"));
+            }
+        }
+        "chatgpt" => {
+            if !matches!(
+                c.capture_method.as_str(),
+                "manual-dom" | "automatic-dom" | "legacy-import" | "export-import"
+            ) {
+                return Err(invalid("Invalid ChatGPT stored capture method"));
+            }
+        }
+        "generic" => {
+            if c.capture_method != "generic-import" || !hex_id(&c.conversation_id) {
+                return Err(invalid("Invalid generic source identity or capture method"));
+            }
+        }
+        "claude" => {
+            if c.capture_method != "manual-dom" {
+                return Err(invalid("Invalid Claude stored capture method"));
+            }
+        }
+        _ => return Err(invalid("Unsupported archive schema or provider")),
+    }
+    if !matches!(c.completeness.as_str(), "partial" | "complete") {
+        return Err(invalid("Invalid completeness value"));
+    }
+    if c.source_url.len() > 32768 {
+        return Err(invalid("Capture URL exceeds its size limit"));
+    }
+    validate_content_bounds(c)
+}
+
+pub fn validate_live_capture(c: &mut Capture) -> Result<()> {
+    if c.provider == "generic"
+        || matches!(
+            c.capture_method.as_str(),
+            "legacy-import" | "takeout-import" | "export-import" | "generic-import"
         )
     {
+        return Err(invalid(
+            "Historical or generic methods not permitted on live capture",
+        ));
+    }
+    if c.schema_version != 1 || !matches!(c.provider.as_str(), "chatgpt" | "gemini" | "claude") {
         return Err(invalid("Unsupported archive schema or provider"));
     }
     if matches!(c.provider.as_str(), "gemini" | "claude") && c.capture_method != "manual-dom" {
         return Err(invalid("Gemini capture is explicit manual DOM only"));
     }
-    if c.provider == "generic" {
-        // A generic import must not claim a browser-provider source.
-        if c.capture_method != "generic-import"
-            || !hex_id(&c.conversation_id)
-            || c.source_url != format!("mindplace-import://generic/{}", c.conversation_id)
-        {
-            return Err(invalid("Invalid generic source identity or capture method"));
-        }
-    } else if !matches!(
-        c.capture_method.as_str(),
-        "manual-dom" | "automatic-dom" | "legacy-import"
-    ) {
+    if !matches!(c.capture_method.as_str(), "manual-dom" | "automatic-dom") {
         return Err(invalid("Unsupported capture method"));
     }
-    if !matches!(c.completeness.as_str(), "partial" | "complete")
-        || ((c.provider == "generic"
-            || matches!(c.capture_method.as_str(), "manual-dom" | "automatic-dom"))
-            && c.completeness != "partial")
-    {
+    if c.completeness != "partial" {
         return Err(invalid(
             "A DOM read cannot prove complete conversation history",
         ));
@@ -267,7 +316,6 @@ fn validate(c: &mut Capture) -> Result<()> {
         "chatgpt" => conversation_id_from_url(&c.source_url)?,
         "gemini" => gemini_conversation_id_from_url(&c.source_url)?,
         "claude" => claude_conversation_id_from_url(&c.source_url)?,
-        "generic" => c.conversation_id.clone(),
         _ => return Err(invalid("Unsupported archive provider")),
     };
     let supplied_id = if matches!(c.provider.as_str(), "chatgpt" | "claude") {
@@ -281,6 +329,118 @@ fn validate(c: &mut Capture) -> Result<()> {
         ));
     }
     c.conversation_id = canonical_id;
+    if c.completeness == "partial" && c.warnings.is_empty() {
+        c.warnings
+            .push("Only loaded messages were captured; unloaded history may be missing.".into());
+    }
+    validate_content_bounds(c)
+}
+
+pub fn validate_historical_capture(c: &mut Capture, expected_provider: &str) -> Result<()> {
+    if c.schema_version != 1 {
+        return Err(invalid("Unsupported archive schema version"));
+    }
+    if c.provider != expected_provider {
+        return Err(invalid("Provider mismatch in historical import"));
+    }
+    if matches!(c.capture_method.as_str(), "manual-dom" | "automatic-dom") {
+        return Err(invalid(
+            "Live capture methods not permitted on historical import",
+        ));
+    }
+    if !matches!(c.completeness.as_str(), "partial" | "complete") {
+        return Err(invalid("Invalid completeness value"));
+    }
+    if c.source_url.len() > 32768 {
+        return Err(invalid("Capture URL exceeds its size limit"));
+    }
+
+    match expected_provider {
+        "gemini" => {
+            if c.capture_method != "takeout-import" {
+                return Err(invalid(
+                    "Gemini historical import must use takeout-import method",
+                ));
+            }
+            if c.source_url.starts_with("https://gemini.google.com/") {
+                let canonical_id = gemini_conversation_id_from_url(&c.source_url)?;
+                if c.conversation_id != canonical_id {
+                    return Err(invalid(
+                        "Capture URL and conversation identity do not match",
+                    ));
+                }
+            } else if let Some(id) = c
+                .source_url
+                .strip_prefix("mindplace-import://gemini-takeout/")
+            {
+                if id.is_empty() || c.conversation_id != id {
+                    return Err(invalid(
+                        "Capture URL and conversation identity do not match",
+                    ));
+                }
+            } else if let Some(sha) = c
+                .source_url
+                .strip_prefix("mindplace-import://gemini-canvas/")
+            {
+                if !hex_id(sha) || c.conversation_id != sha {
+                    return Err(invalid("Invalid Gemini Canvas identity or content hash"));
+                }
+            } else {
+                return Err(invalid("Invalid Gemini Takeout source URL"));
+            }
+        }
+        "chatgpt" => {
+            if c.capture_method != "export-import" {
+                return Err(invalid(
+                    "ChatGPT historical import must use export-import method",
+                ));
+            }
+            if c.source_url.starts_with("https://chatgpt.com/")
+                || c.source_url.starts_with("https://chat.openai.com/")
+            {
+                let canonical_id = conversation_id_from_url(&c.source_url)?;
+                if c.conversation_id.to_ascii_lowercase() != canonical_id {
+                    return Err(invalid(
+                        "Capture URL and conversation identity do not match",
+                    ));
+                }
+                c.conversation_id = canonical_id;
+            } else if let Some(id) = c
+                .source_url
+                .strip_prefix("mindplace-import://chatgpt-export/")
+            {
+                if !uuid(id) {
+                    return Err(invalid("Invalid ChatGPT export conversation UUID"));
+                }
+                if c.conversation_id.to_ascii_lowercase() != id.to_ascii_lowercase() {
+                    return Err(invalid(
+                        "Capture URL and conversation identity do not match",
+                    ));
+                }
+                c.conversation_id = id.to_ascii_lowercase();
+            } else {
+                return Err(invalid("Invalid ChatGPT export source URL"));
+            }
+        }
+        "generic" => {
+            if c.capture_method != "generic-import" || !hex_id(&c.conversation_id) {
+                return Err(invalid("Invalid generic source identity or capture method"));
+            }
+            if c.source_url != format!("mindplace-import://generic/{}", c.conversation_id) {
+                return Err(invalid("Capture URL and generic identity do not match"));
+            }
+        }
+        _ => return Err(invalid("Unsupported historical import provider")),
+    }
+
+    if c.completeness == "partial" && c.warnings.is_empty() {
+        c.warnings
+            .push("Only partial conversation history was available in export.".into());
+    }
+    validate_content_bounds(c)
+}
+
+fn validate_content_bounds(c: &Capture) -> Result<()> {
     if c.title.trim().is_empty() || c.title.len() > 1024 {
         return Err(invalid("Conversation title is missing or too long"));
     }
@@ -303,10 +463,6 @@ fn validate(c: &mut Capture) -> Result<()> {
     }
     if c.warnings.len() > 32 || c.warnings.iter().any(|w| w.len() > 2048) {
         return Err(invalid("Too many or oversized capture warnings"));
-    }
-    if c.completeness == "partial" && c.warnings.is_empty() {
-        c.warnings
-            .push("Only loaded messages were captured; unloaded history may be missing.".into());
     }
     let mut ids = HashSet::new();
     for m in &c.messages {
@@ -489,7 +645,77 @@ impl ArchiveStore {
     }
 
     pub fn save(&self, mut capture: Capture) -> Result<SaveReceipt> {
-        validate(&mut capture)?;
+        validate_capture(&mut capture)?;
+        if matches!(
+            capture.capture_method.as_str(),
+            "takeout-import" | "export-import"
+        ) {
+            return Err(invalid(
+                "Historical imports cannot be saved through ordinary save; use authorized historical import entry point",
+            ));
+        }
+        self.save_validated(capture)
+    }
+
+    /// The former unauthenticated entry point is retained as a fail-closed shim.
+    /// Callers must use `save_authorized_historical_import` with owner authority.
+    pub fn save_historical_import(
+        &self,
+        _capture: Capture,
+        _expected_provider: &str,
+    ) -> Result<SaveReceipt> {
+        Err(invalid("Owner import authorization is required"))
+    }
+
+    pub fn save_authorized_historical_import(
+        &self,
+        mut capture: Capture,
+        authorization: &HistoricalImportAuthorization<'_>,
+    ) -> Result<SaveReceipt> {
+        let auth = authorization;
+        // An unlocked gate for another profile must never authorize this archive.
+        let expected_config = self
+            .root
+            .parent()
+            .ok_or_else(|| invalid("Missing archive owner root"))?
+            .join("security-v1.json");
+        if fs::canonicalize(auth.gate.config_path())? != fs::canonicalize(expected_config)? {
+            return Err(invalid("Import authority belongs to another archive owner"));
+        }
+        let verify = || {
+            auth.gate
+                .verify_import_capability_bound(
+                    auth.lease,
+                    auth.capability,
+                    &auth.inventory.provider,
+                    auth.job_id,
+                    &auth.inventory.source_root,
+                    &auth.inventory.manifest_sha256,
+                )
+                .map_err(|_| invalid("Owner import authorization is invalid or revoked"))
+        };
+        verify()?;
+        validate_historical_capture(&mut capture, &auth.inventory.provider)?;
+        let _lock = self.lock()?;
+        auth.gate
+            .with_verified_import_capability_bound(
+                auth.lease,
+                auth.capability,
+                &auth.inventory.provider,
+                auth.job_id,
+                &auth.inventory.source_root,
+                &auth.inventory.manifest_sha256,
+                || self.save_under_lock(capture),
+            )
+            .map_err(|_| invalid("Owner import authorization is invalid or revoked"))?
+    }
+
+    fn save_validated(&self, capture: Capture) -> Result<SaveReceipt> {
+        let _lock = self.lock()?;
+        self.save_under_lock(capture)
+    }
+
+    fn save_under_lock(&self, mut capture: Capture) -> Result<SaveReceipt> {
         if capture.provider == "generic" {
             // A generic locator is meaningful only when its immutable raw source exists.
             // Do not accept a fabricated generic capture without preserved evidence.
@@ -507,7 +733,6 @@ impl ArchiveStore {
                 ));
             }
         }
-        let _lock = self.lock()?;
         let id = digest(format!("{}:{}", capture.provider, capture.conversation_id).as_bytes());
         let dir = self.conversation_dir(&id)?;
         checked_dir(&dir)?;

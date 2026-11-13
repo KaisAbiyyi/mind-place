@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { assertPinnedCrateNotices } from './notice-coverage.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const portable = path.join(root, 'release', `${process.platform}-${process.arch}`);
@@ -13,6 +14,9 @@ const notices = fs.readFileSync(path.join(portable, 'THIRD-PARTY-NOTICES.txt'), 
 if (!notices.includes('third-party source and license notices') || !notices.includes('Declared license:')) {
   throw new Error('Portable third-party notice inventory is missing or incomplete');
 }
+// Dependency-specific coverage: every exact-pinned shipped crate (for example html5gum) needs
+// its own notice section, declared license and license text, not just any notice file.
+const covered = assertPinnedCrateNotices(notices, root);
 if (process.platform === 'win32') {
   for (const name of ['tunnel-client.exe', 'tunnel/receipt.json']) {
     if (!fs.statSync(path.join(portable, name)).isFile()) throw new Error(`Missing bundled tunnel helper provenance: ${name}`);
@@ -21,4 +25,4 @@ if (process.platform === 'win32') {
     throw new Error('Missing tunnel-helper third-party license notices');
   }
 }
-console.log('Portable MIT license and third-party notice resources OK');
+console.log(`Portable MIT license and third-party notice resources OK (${covered.length} pinned crates covered)`);

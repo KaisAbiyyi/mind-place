@@ -3,8 +3,11 @@ pub mod vault_backup;
 pub mod vault_fence;
 pub mod vault_first_run;
 pub mod vault_fs;
+pub mod vault_import_auth;
 pub mod vault_migration;
 pub mod vault_storage;
+
+pub use vault_import_auth::ImportAuthorizationCapability;
 
 use argon2::{
     password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
@@ -12,6 +15,7 @@ use argon2::{
 };
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashMap,
     fs::{self, File},
     io::{Read, Write},
     path::{Path, PathBuf},
@@ -120,24 +124,41 @@ struct StoredSecurityConfig {
     password_hash: String,
 }
 
-#[derive(Debug)]
-struct RuntimeState {
-    configured: bool,
-    locked: bool,
-    epoch: u64,
-    failed_attempts: u32,
-    blocked_until: Option<Instant>,
+#[derive(Clone, Debug)]
+pub struct ActiveImportRecord {
+    pub token: [u8; 32],
+    pub job_id: String,
+    pub provider: String,
+    pub canonical_source_root: PathBuf,
+    pub manifest_hash: [u8; 32],
+    pub lease_epoch: u64,
+    pub created_at: Instant,
+    pub ttl: Duration,
+    pub revoked: bool,
+    pub usage_count: u64,
+    pub last_verified_at: Option<Instant>,
 }
 
 #[derive(Debug)]
-struct Inner {
-    config_path: PathBuf,
-    state: Mutex<RuntimeState>,
+pub(crate) struct RuntimeState {
+    pub(crate) configured: bool,
+    pub(crate) locked: bool,
+    pub(crate) epoch: u64,
+    pub(crate) failed_attempts: u32,
+    pub(crate) blocked_until: Option<Instant>,
+    pub(crate) active_imports: HashMap<[u8; 32], ActiveImportRecord>,
+}
+
+#[derive(Debug)]
+pub(crate) struct Inner {
+    pub(crate) config_path: PathBuf,
+    pub(crate) instance_id: [u8; 16],
+    pub(crate) state: Mutex<RuntimeState>,
 }
 
 #[derive(Clone, Debug)]
 pub struct SecurityGate {
-    inner: Arc<Inner>,
+    pub(crate) inner: Arc<Inner>,
 }
 
 impl SecurityGate {
@@ -151,15 +172,19 @@ impl SecurityGate {
         } else {
             false
         };
+        let mut instance_id = [0u8; 16];
+        getrandom::fill(&mut instance_id).map_err(|_| SecurityError::Crypto)?;
         Ok(Self {
             inner: Arc::new(Inner {
                 config_path,
+                instance_id,
                 state: Mutex::new(RuntimeState {
                     configured,
                     locked: true,
                     epoch: 0,
                     failed_attempts: 0,
                     blocked_until: None,
+                    active_imports: HashMap::new(),
                 }),
             }),
         })
@@ -271,11 +296,15 @@ impl SecurityGate {
         Ok(())
     }
 
+    pub fn instance_id(&self) -> [u8; 16] {
+        self.inner.instance_id
+    }
+
     pub fn config_path(&self) -> &Path {
         &self.inner.config_path
     }
 
-    fn lock_state(&self) -> MutexGuard<'_, RuntimeState> {
+    pub(crate) fn lock_state(&self) -> MutexGuard<'_, RuntimeState> {
         self.inner
             .state
             .lock()
@@ -297,9 +326,10 @@ fn advance_epoch(state: &mut RuntimeState) {
     if state.epoch == 0 {
         state.epoch = 1;
     }
+    state.active_imports.clear();
 }
 
-fn validate_secret(secret: &[u8]) -> Result<()> {
+pub(crate) fn validate_secret(secret: &[u8]) -> Result<()> {
     if secret.len() < MIN_SECRET_BYTES
         || secret.len() > MAX_SECRET_BYTES
         || secret.iter().all(u8::is_ascii_whitespace)
@@ -330,14 +360,14 @@ fn hash_secret(secret: &[u8]) -> Result<String> {
         .map_err(|_| SecurityError::Crypto)
 }
 
-fn verify_secret(secret: &[u8], encoded: &str) -> Result<()> {
+pub(crate) fn verify_secret(secret: &[u8], encoded: &str) -> Result<()> {
     let parsed = PasswordHash::new(encoded).map_err(|_| SecurityError::InvalidConfig)?;
     Argon2::default()
         .verify_password(secret, &parsed)
         .map_err(|_| SecurityError::InvalidCredentials)
 }
 
-fn validate_config(config: &StoredSecurityConfig) -> Result<()> {
+pub(crate) fn validate_config(config: &StoredSecurityConfig) -> Result<()> {
     if config.schema_version != SCHEMA_VERSION {
         return Err(SecurityError::UnsupportedSchema);
     }
@@ -357,21 +387,21 @@ fn validate_config(config: &StoredSecurityConfig) -> Result<()> {
     Ok(())
 }
 
-fn remaining_block(state: &RuntimeState) -> Option<Duration> {
+pub(crate) fn remaining_block(state: &RuntimeState) -> Option<Duration> {
     state
         .blocked_until
         .and_then(|deadline| deadline.checked_duration_since(Instant::now()))
 }
 
-fn retry_after_ms(state: &RuntimeState) -> u64 {
+pub(crate) fn retry_after_ms(state: &RuntimeState) -> u64 {
     remaining_block(state).map(duration_ms_ceil).unwrap_or(0)
 }
 
-fn duration_ms_ceil(duration: Duration) -> u64 {
+pub(crate) fn duration_ms_ceil(duration: Duration) -> u64 {
     duration.as_millis().saturating_add(1).min(u64::MAX as u128) as u64
 }
 
-fn failure_delay(failed_attempts: u32) -> Duration {
+pub(crate) fn failure_delay(failed_attempts: u32) -> Duration {
     if failed_attempts < FAILURE_DELAY_START {
         return Duration::ZERO;
     }
@@ -379,7 +409,7 @@ fn failure_delay(failed_attempts: u32) -> Duration {
     Duration::from_secs((1u64 << exponent).min(MAX_FAILURE_DELAY_SECS))
 }
 
-fn read_config(path: &Path) -> Result<StoredSecurityConfig> {
+pub(crate) fn read_config(path: &Path) -> Result<StoredSecurityConfig> {
     validate_path(path)?;
     let file = File::open(path)?;
     if file.metadata()?.len() > MAX_CONFIG_BYTES as u64 {
