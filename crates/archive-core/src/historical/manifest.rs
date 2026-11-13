@@ -6,17 +6,26 @@
 //! claim. The owner flow measures first, pins `sha256()` in the security capability, and the
 //! import re-measures and compares, so a swapped file cannot ride on a hash the caller supplied.
 //!
-//! Errors carry stable codes (`E_SOURCE_*`) and never include file content.
+//! A source is a folder or a single zip file (MP-IMPORT-APP-01). For a zip the entries are its
+//! members: decompressed size and the SHA-256 of the decompressed bytes, so raw-evidence offsets
+//! mean the same thing for both kinds. The zip manifest hash also binds the archive length and
+//! the SHA-256 of the archive bytes.
+//!
+//! Errors carry stable codes (`E_SOURCE_*`, `E_ZIP_*`) and never include file content.
 
+use super::zip::{self, ZipEntry};
 use crate::{ArchiveError, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs::{self, File, OpenOptions};
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 /// Domain separator of the manifest hash.
 pub const MANIFEST_DOMAIN: &[u8] = b"mind-place/import-source-manifest/v1\0";
+/// Domain separator of the manifest hash of a zip source.
+pub const ZIP_MANIFEST_DOMAIN: &[u8] = b"mind-place/import-source-manifest/zip/v1\0";
 
 pub(crate) fn coded(code: &str, detail: &str) -> ArchiveError {
     ArchiveError::Invalid(format!("{code}: {detail}"))
@@ -29,8 +38,10 @@ pub struct ManifestLimits {
     pub max_entries: usize,
     pub max_depth: usize,
     pub max_path_bytes: usize,
-    /// Most bytes hashed across all files.
+    /// Most bytes hashed across all files (for a zip: decompressed bytes).
     pub max_total_bytes: u64,
+    /// Most decompressed bytes per compressed byte for a zip member larger than 1 MiB.
+    pub max_zip_ratio: u64,
 }
 
 impl Default for ManifestLimits {
@@ -40,6 +51,7 @@ impl Default for ManifestLimits {
             max_depth: 32,
             max_path_bytes: 512,
             max_total_bytes: 64 * 1024 * 1024 * 1024,
+            max_zip_ratio: 200,
         }
     }
 }
@@ -53,28 +65,72 @@ pub struct ManifestEntry {
     pub sha256: String,
 }
 
-/// A measured source folder. Constructed only by [`SourceManifest::measure`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ZipSource {
+    archive_bytes: u64,
+    archive_modified: Option<SystemTime>,
+    archive_sha256: [u8; 32],
+    /// File members, sorted by name (the same order as `entries`).
+    members: Vec<ZipEntry>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum SourceKind {
+    Folder,
+    Zip(ZipSource),
+}
+
+/// A measured source folder or zip file. Constructed only by [`SourceManifest::measure`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SourceManifest {
     root: PathBuf,
+    kind: SourceKind,
     entries: Vec<ManifestEntry>,
     sha256: [u8; 32],
     total_bytes: u64,
 }
 
 impl SourceManifest {
-    /// Walks `source_root` and hashes every regular file. Symlinks, reparse points, devices,
-    /// non-UTF-8 or unsafe names, and anything beyond `limits` are typed errors, not skipped.
+    /// Measures a source folder (walks it and hashes every regular file) or a zip file (hashes
+    /// the archive and the decompressed bytes of every member). Symlinks, reparse points,
+    /// devices, non-UTF-8 or unsafe names, unsupported zip features and anything beyond
+    /// `limits` are typed errors, not skipped.
     pub fn measure(source_root: &Path, limits: ManifestLimits) -> Result<Self> {
-        Self::walk(source_root, limits, true)
+        mind_place_security::vault_import_auth::validate_import_source(source_root).map_err(
+            |_| {
+                coded(
+                    "E_SOURCE_ROOT",
+                    "Import source is not a safe folder or file",
+                )
+            },
+        )?;
+        let meta = fs::symlink_metadata(source_root)
+            .map_err(|_| coded("E_SOURCE_ROOT", "Import source cannot be inspected"))?;
+        if meta.is_file() {
+            Self::measure_zip(source_root, limits, true)
+        } else {
+            Self::walk(source_root, limits, true)
+        }
     }
 
-    /// Walks the folder again without hashing and requires the same set of files and sizes.
+    /// Re-reads the source without hashing member content and requires the same set of
+    /// entries and sizes (for a zip also the same archive length and modification time).
     /// Cheaper than [`Self::verify_unchanged`]; content binding comes from hashing the bytes
     /// while they are parsed.
     pub fn verify_layout_unchanged(&self, limits: ManifestLimits) -> Result<()> {
-        let again = Self::walk(&self.root, limits, false)?;
-        let same = again.entries.len() == self.entries.len()
+        let again = match &self.kind {
+            SourceKind::Folder => Self::walk(&self.root, limits, false)?,
+            SourceKind::Zip(_) => Self::measure_zip(&self.root, limits, false)?,
+        };
+        let same_archive = match (&self.kind, &again.kind) {
+            (SourceKind::Folder, SourceKind::Folder) => true,
+            (SourceKind::Zip(a), SourceKind::Zip(b)) => {
+                a.archive_bytes == b.archive_bytes && a.archive_modified == b.archive_modified
+            }
+            _ => false,
+        };
+        let same = same_archive
+            && again.entries.len() == self.entries.len()
             && again
                 .entries
                 .iter()
@@ -100,6 +156,12 @@ impl SourceManifest {
         )?;
         let root = fs::canonicalize(source_root)
             .map_err(|_| coded("E_SOURCE_ROOT", "Import source folder cannot be resolved"))?;
+        if !fs::metadata(&root).is_ok_and(|meta| meta.is_dir()) {
+            return Err(coded(
+                "E_SOURCE_ROOT",
+                "Import source folder is not a safe directory",
+            ));
+        }
 
         let mut entries = Vec::new();
         let mut visited = 0usize;
@@ -172,10 +234,149 @@ impl SourceManifest {
         let sha256 = manifest_digest(&entries);
         Ok(Self {
             root,
+            kind: SourceKind::Folder,
             entries,
             sha256,
             total_bytes,
         })
+    }
+
+    /// Measures a zip file. With `hash`, every member is decompressed and hashed; without it
+    /// only the directory is read (layout re-checks).
+    fn measure_zip(source: &Path, limits: ManifestLimits, hash: bool) -> Result<Self> {
+        let root = fs::canonicalize(source)
+            .map_err(|_| coded("E_SOURCE_ROOT", "Import source file cannot be resolved"))?;
+        let (mut file, before) = open_regular_no_follow(&root)?;
+        let archive_sha256 = if hash {
+            hash_open_file(&mut file, &before)?.1
+        } else {
+            [0u8; 32]
+        };
+        let directory = zip::read_directory(&mut file, before.len(), &limits)?;
+        let mut members: Vec<ZipEntry> = directory.into_iter().filter(|e| !e.is_dir).collect();
+        members.sort_by(|a, b| a.name.as_bytes().cmp(b.name.as_bytes()));
+        let mut entries = Vec::with_capacity(members.len());
+        let mut total_bytes = 0u64;
+        for member in &members {
+            let sha256 = if hash {
+                let handle = file
+                    .try_clone()
+                    .map_err(|_| coded("E_SOURCE_IO", "Import source file cannot be read"))?;
+                let reader = HashingReader::new(zip::member_reader(handle, member)?);
+                let (bytes, digest) = reader
+                    .finish_to_eof()
+                    .map_err(|error| zip::archive_error_from_io(&error))?;
+                if bytes != member.uncompressed {
+                    return Err(coded("E_ZIP_CORRUPT", "Zip member sizes disagree"));
+                }
+                hex(&digest)
+            } else {
+                String::new()
+            };
+            total_bytes += member.uncompressed;
+            entries.push(ManifestEntry {
+                path: member.name.clone(),
+                size: member.uncompressed,
+                sha256,
+            });
+        }
+        let after = file
+            .metadata()
+            .map_err(|_| coded("E_SOURCE_IO", "Import source file cannot be inspected"))?;
+        if after.len() != before.len() || after.modified().ok() != before.modified().ok() {
+            return Err(coded(
+                "E_SOURCE_CHANGING",
+                "Import source file changed while it was read",
+            ));
+        }
+        let sha256 = zip_manifest_digest(before.len(), &archive_sha256, &entries);
+        Ok(Self {
+            root,
+            kind: SourceKind::Zip(ZipSource {
+                archive_bytes: before.len(),
+                archive_modified: before.modified().ok(),
+                archive_sha256,
+                members,
+            }),
+            entries,
+            sha256,
+            total_bytes,
+        })
+    }
+
+    /// Opens one measured entry for streaming: the file itself for a folder, the decompressed
+    /// member (size and CRC-32 enforced) for a zip. The caller still compares the bytes it reads
+    /// with the entry hash.
+    pub(crate) fn open_member(&self, path: &str) -> Result<Box<dyn Read>> {
+        let entry = self
+            .entry(path)
+            .ok_or_else(|| coded("E_MEMBER_UNKNOWN", "An import member is not measured"))?;
+        match &self.kind {
+            SourceKind::Folder => {
+                let (file, meta) = open_regular_no_follow(&self.root.join(path))?;
+                if meta.len() != entry.size {
+                    return Err(coded(
+                        "E_SOURCE_MISMATCH",
+                        "An import member differs from its measured size",
+                    ));
+                }
+                Ok(Box::new(file))
+            }
+            SourceKind::Zip(source) => {
+                let index = source
+                    .members
+                    .binary_search_by(|m| m.name.as_bytes().cmp(path.as_bytes()))
+                    .map_err(|_| coded("E_MEMBER_UNKNOWN", "An import member is not measured"))?;
+                let member = &source.members[index];
+                let (mut file, meta) = open_regular_no_follow(&self.root)?;
+                if meta.len() != source.archive_bytes {
+                    return Err(coded(
+                        "E_SOURCE_MISMATCH",
+                        "The import archive differs from its measured size",
+                    ));
+                }
+                if zip::local_data_offset(&mut file, member)? != member.data_offset {
+                    return Err(coded(
+                        "E_SOURCE_MISMATCH",
+                        "The import archive differs from what was measured",
+                    ));
+                }
+                zip::member_reader(file, member)
+            }
+        }
+    }
+
+    /// `"folder"` or `"zip"`.
+    pub fn source_kind(&self) -> &'static str {
+        match self.kind {
+            SourceKind::Folder => "folder",
+            SourceKind::Zip(_) => "zip",
+        }
+    }
+
+    /// Bytes of the source as stored: the zip file length, or the folder's total.
+    pub fn stored_bytes(&self) -> u64 {
+        match &self.kind {
+            SourceKind::Folder => self.total_bytes,
+            SourceKind::Zip(source) => source.archive_bytes,
+        }
+    }
+
+    /// Lowercase hex SHA-256 of the zip archive bytes (`None` for a folder).
+    pub fn archive_sha256_hex(&self) -> Option<String> {
+        match &self.kind {
+            SourceKind::Folder => None,
+            SourceKind::Zip(source) => Some(hex(&source.archive_sha256)),
+        }
+    }
+
+    /// Entries that match the documented export layout of `provider` (unverified against real
+    /// exports; see the MP-IMPORT-APP-01 design note, section 3).
+    pub fn candidate_members(&self, provider: &str) -> Vec<&ManifestEntry> {
+        self.entries
+            .iter()
+            .filter(|entry| entry_matches_provider_layout(&entry.path, provider))
+            .collect()
     }
 
     /// Measures again and requires the same hash: the folder is unchanged since this manifest.
@@ -216,7 +417,37 @@ impl SourceManifest {
     }
 }
 
-fn check_component(name: &str) -> Result<()> {
+/// ChatGPT: `conversations.json` or `conversations-*.json` at any depth. Gemini: an `.html` file
+/// with a path component that names Gemini (case-insensitive), at any depth.
+pub fn entry_matches_provider_layout(path: &str, provider: &str) -> bool {
+    let file_name = path.rsplit('/').next().unwrap_or(path);
+    let lower = file_name.to_ascii_lowercase();
+    match provider {
+        "chatgpt" => {
+            lower == "conversations.json"
+                || (lower.starts_with("conversations-") && lower.ends_with(".json"))
+        }
+        "gemini" => {
+            lower.ends_with(".html")
+                && path
+                    .split('/')
+                    .any(|component| component.to_lowercase().contains("gemini"))
+        }
+        _ => false,
+    }
+}
+
+/// The file extension a member of `provider` must have when the owner picks it explicitly.
+pub fn member_extension_allowed(path: &str, provider: &str) -> bool {
+    let lower = path.rsplit('/').next().unwrap_or(path).to_ascii_lowercase();
+    match provider {
+        "chatgpt" => lower.ends_with(".json"),
+        "gemini" => lower.ends_with(".html") || lower.ends_with(".htm"),
+        _ => false,
+    }
+}
+
+pub(crate) fn check_component(name: &str) -> Result<()> {
     if name.is_empty()
         || name == "."
         || name == ".."
@@ -304,6 +535,10 @@ pub(crate) fn open_regular_no_follow(path: &Path) -> Result<(File, fs::Metadata)
 /// it is read.
 fn hash_regular_file(path: &Path, _inspected: &fs::Metadata) -> Result<(u64, [u8; 32])> {
     let (mut file, before) = open_regular_no_follow(path)?;
+    hash_open_file(&mut file, &before)
+}
+
+fn hash_open_file(file: &mut File, before: &fs::Metadata) -> Result<(u64, [u8; 32])> {
     let mut hasher = Sha256::new();
     let mut buffer = vec![0u8; 64 * 1024];
     let mut read_total = 0u64;
@@ -336,6 +571,27 @@ fn hash_regular_file(path: &Path, _inspected: &fs::Metadata) -> Result<(u64, [u8
         ));
     }
     Ok((read_total, hasher.finalize().into()))
+}
+
+/// `sha256(zip_domain || u64be(archive_len) || archive_sha256 || u64be(count) || entries as in
+/// [`manifest_digest`])`.
+fn zip_manifest_digest(
+    archive_len: u64,
+    archive_sha256: &[u8; 32],
+    entries: &[ManifestEntry],
+) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(ZIP_MANIFEST_DOMAIN);
+    hasher.update(archive_len.to_be_bytes());
+    hasher.update(archive_sha256);
+    hasher.update((entries.len() as u64).to_be_bytes());
+    for entry in entries {
+        hasher.update((entry.path.len() as u32).to_be_bytes());
+        hasher.update(entry.path.as_bytes());
+        hasher.update(entry.size.to_be_bytes());
+        hasher.update(unhex32(&entry.sha256).unwrap_or([0u8; 32]));
+    }
+    hasher.finalize().into()
 }
 
 /// `sha256(domain || u64be(count) || for each entry sorted by path bytes:

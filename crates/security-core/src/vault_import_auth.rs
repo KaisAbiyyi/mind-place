@@ -87,6 +87,32 @@ pub fn validate_source_directory(source_root: &Path) -> Result<()> {
     Ok(())
 }
 
+/// An import source is either a safe directory or a single regular file (an export zip,
+/// MP-IMPORT-APP-01). No link or reparse point is accepted in any existing ancestor or as the
+/// source itself.
+pub fn validate_import_source(source: &Path) -> Result<()> {
+    if !source.is_absolute() {
+        return Err(SecurityError::UnsafePath);
+    }
+    for ancestor in source.ancestors() {
+        if ancestor.exists() {
+            validate_path(ancestor)?;
+        }
+    }
+    let meta = fs::symlink_metadata(source)?;
+    if meta.file_type().is_symlink() || !(meta.is_dir() || meta.is_file()) {
+        return Err(SecurityError::UnsafePath);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        if meta.file_attributes() & 0x400 != 0 {
+            return Err(SecurityError::UnsafePath);
+        }
+    }
+    Ok(())
+}
+
 impl SecurityGate {
     pub fn verify_owner_credential(&self, credential: &[u8]) -> Result<()> {
         validate_secret(credential)?;
@@ -128,7 +154,7 @@ impl SecurityGate {
     ) -> Result<ImportAuthorizationCapability> {
         self.validate_lease(lease)?;
         self.verify_owner_credential(owner_auth_credential)?;
-        validate_source_directory(source_root)?;
+        validate_import_source(source_root)?;
 
         let canonical_root =
             fs::canonicalize(source_root).unwrap_or_else(|_| source_root.to_path_buf());
@@ -606,5 +632,72 @@ mod tests {
         let valid = fixture.path().join("valid_source");
         fs::create_dir(&valid).unwrap();
         assert!(validate_source_directory(&valid).is_ok());
+    }
+
+    #[test]
+    fn an_import_source_may_be_a_folder_or_a_regular_file_but_nothing_else() {
+        let fixture = tempdir().unwrap();
+        let folder = fixture.path().join("folder");
+        fs::create_dir(&folder).unwrap();
+        let file = fixture.path().join("export.zip");
+        fs::write(&file, b"PK synthetic").unwrap();
+        assert!(validate_import_source(&folder).is_ok());
+        assert!(validate_import_source(&file).is_ok());
+        // A file is still not a directory source.
+        assert!(validate_source_directory(&file).is_err());
+        assert!(validate_import_source(&fixture.path().join("missing.zip")).is_err());
+        assert!(validate_import_source(Path::new("relative.zip")).is_err());
+        #[cfg(unix)]
+        {
+            let link = fixture.path().join("link.zip");
+            std::os::unix::fs::symlink(&file, &link).unwrap();
+            assert!(validate_import_source(&link).is_err());
+            let under_link = fixture.path().join("linked-folder");
+            std::os::unix::fs::symlink(&folder, &under_link).unwrap();
+            fs::write(folder.join("inner.zip"), b"PK").unwrap();
+            assert!(validate_import_source(&under_link.join("inner.zip")).is_err());
+        }
+    }
+
+    #[test]
+    fn a_zip_file_source_is_authorized_and_bound_to_its_canonical_path() {
+        let fixture = tempdir().unwrap();
+        let gate = SecurityGate::open(fixture.path().join("gate.json")).unwrap();
+        let secret = b"correct-horse-battery-staple-99";
+        gate.initialize(secret).unwrap();
+        let lease = gate.require_unlocked().unwrap();
+        let zip = fixture.path().join("export.zip");
+        let other = fixture.path().join("other.zip");
+        fs::write(&zip, b"PK synthetic").unwrap();
+        fs::write(&other, b"PK synthetic").unwrap();
+        let cap = gate
+            .authorize_import_session(
+                lease,
+                secret,
+                "chatgpt",
+                &zip,
+                [3; 32],
+                Duration::from_secs(60),
+            )
+            .unwrap();
+        assert_eq!(cap.source_root(), fs::canonicalize(&zip).unwrap().as_path());
+        assert!(gate
+            .verify_import_capability_bound(lease, &cap, "chatgpt", cap.job_id(), &zip, &[3; 32])
+            .is_ok());
+        assert!(matches!(
+            gate.verify_import_capability_bound(
+                lease,
+                &cap,
+                "chatgpt",
+                cap.job_id(),
+                &other,
+                &[3; 32]
+            ),
+            Err(SecurityError::InvalidConfig)
+        ));
+        gate.lock();
+        assert!(gate
+            .verify_import_capability_bound(lease, &cap, "chatgpt", cap.job_id(), &zip, &[3; 32])
+            .is_err());
     }
 }

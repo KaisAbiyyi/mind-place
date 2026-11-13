@@ -9,9 +9,8 @@
 //!    done marker. Every step is content-addressed and idempotent, so running the same import
 //!    again repairs any crash.
 
-use super::manifest::{
-    coded, hex, open_regular_no_follow, unhex32, HashingReader, ManifestLimits, SourceManifest,
-};
+use super::manifest::{coded, hex, unhex32, HashingReader, ManifestLimits, SourceManifest};
+use super::zip::archive_error_from_io;
 use crate::importers::chatgpt_export::{ChatGptExportParser, ConversationIdTracker};
 use crate::importers::gemini_takeout::{GeminiTakeoutParser, MAX_TAKEOUT_HTML_BYTES};
 use crate::importers::{BoundedArrayLimits, ReconciledItem, RecordSpan};
@@ -142,6 +141,9 @@ pub enum ImportPoint {
 
 pub trait ImportProgress {
     fn checkpoint(&self, point: ImportPoint) -> Result<()>;
+    /// Called once before publication starts with the number of staged items, so a progress
+    /// display can show `seq / total`. Informational; never fails the job.
+    fn items_total(&self, _total: u64) {}
 }
 
 pub struct NoProgress;
@@ -609,6 +611,7 @@ impl ArchiveStore {
         }
 
         verify_staged_root(&job_dir, &state)?;
+        request.progress.items_total(state.item_count);
         self.publish_items(request, &manifest, &job_dir, &state)?;
         request.progress.checkpoint(ImportPoint::BeforeComplete)?;
         let receipt = self.finish_job(&job_dir, &mut state, cap.job_id())?;
@@ -1016,14 +1019,9 @@ impl ArchiveStore {
             let entry = manifest
                 .entry(&member.path)
                 .ok_or_else(|| coded("E_MEMBER_UNKNOWN", "An import member is not measured"))?;
-            let (file, meta) = open_regular_no_follow(&manifest.root().join(&member.path))?;
-            if meta.len() != entry.size {
-                return Err(coded(
-                    "E_SOURCE_MISMATCH",
-                    "An import member differs from its measured size",
-                ));
-            }
-            let mut reader = HashingReader::new(file);
+            // A folder file or a zip member (decompressed, size and CRC-32 enforced). Either
+            // way the bytes the parser reads are hashed and compared with the manifest below.
+            let mut reader = HashingReader::new(manifest.open_member(&member.path)?);
             let ctx = MemberCtx {
                 index: index as u32,
                 path: member.path.clone(),
@@ -1069,7 +1067,7 @@ impl ArchiveStore {
             }
             let (bytes, digest) = reader
                 .finish_to_eof()
-                .map_err(|_| coded("E_SOURCE_IO", "Import source file cannot be read"))?;
+                .map_err(|error| archive_error_from_io(&error))?;
             if bytes != entry.size || hex(&digest) != entry.sha256 {
                 return Err(coded(
                     "E_SOURCE_MISMATCH",
@@ -1577,8 +1575,9 @@ fn map_stream_error(error: Box<dyn std::error::Error>) -> ArchiveError {
         Ok(error) => return *error,
         Err(error) => error,
     };
-    if error.downcast_ref::<std::io::Error>().is_some() {
-        return coded("E_SOURCE_IO", "Import source file cannot be read");
+    if let Some(io) = error.downcast_ref::<std::io::Error>() {
+        // A zip member reader reports corruption as an io::Error carrying a coded error.
+        return archive_error_from_io(io);
     }
     let text = error.to_string();
     if text.contains("limit") || text.contains("exceeds") || text.contains("more cards") {
