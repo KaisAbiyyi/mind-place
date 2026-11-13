@@ -1876,3 +1876,136 @@ fn a_file_held_open_for_long_fails_with_a_stable_code_and_the_job_is_recoverable
     assert!(receipt.resumed);
     assert_eq!(receipt.imported + receipt.deduplicated, 3);
 }
+
+// ---------- review round 4: the sweep must stay inside the archive ----------
+
+#[derive(Clone, Copy, Debug)]
+enum LinkKind {
+    Symlink,
+    Junction,
+}
+
+/// Creates a directory link; false when this runner cannot create that kind.
+fn make_dir_link(kind: LinkKind, link: &Path, target: &Path) -> bool {
+    match kind {
+        LinkKind::Symlink => {
+            #[cfg(unix)]
+            {
+                std::os::unix::fs::symlink(target, link).is_ok()
+            }
+            #[cfg(windows)]
+            {
+                std::os::windows::fs::symlink_dir(target, link).is_ok()
+            }
+        }
+        LinkKind::Junction => {
+            #[cfg(windows)]
+            {
+                std::process::Command::new("cmd")
+                    .args(["/C", "mklink", "/J"])
+                    .arg(link)
+                    .arg(target)
+                    .output()
+                    .map(|out| {
+                        if !out.status.success() {
+                            eprintln!(
+                                "mklink failed: {} {}",
+                                String::from_utf8_lossy(&out.stdout),
+                                String::from_utf8_lossy(&out.stderr)
+                            );
+                        }
+                        out.status.success()
+                    })
+                    .unwrap_or(false)
+            }
+            #[cfg(not(windows))]
+            {
+                let _ = (link, target);
+                false
+            }
+        }
+    }
+}
+
+fn archive_dir_id(conversation_id: &str) -> String {
+    format!(
+        "{:x}",
+        Sha256::digest(format!("chatgpt:{conversation_id}").as_bytes())
+    )
+}
+
+#[test]
+fn the_sweep_never_follows_a_linked_directory_out_of_the_archive() {
+    let mut executed = 0;
+    for kind in [LinkKind::Symlink, LinkKind::Junction] {
+        // (name, what is linked, where the sentinel sits inside the external directory)
+        for case in [
+            "imports/raw",
+            "imports/raw/aa",
+            "imports/evidence/bb",
+            "conversations/<id>",
+            "conversations/<id>/captures",
+            "conversations/<id>/assets",
+        ] {
+            let fx = Fx::new("chatgpt");
+            let outside = tempfile::tempdir().unwrap();
+            let archive = fx.archive().to_path_buf();
+            let id = archive_dir_id(A);
+            // Component by component: a forward slash inside a path would be a switch to cmd.exe.
+            let link = case.split('/').fold(archive.clone(), |path, part| {
+                path.join(part.replace("<id>", &id))
+            });
+            std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+            // Sentinels in the external target at every depth the sweep could reach.
+            let sentinels = [
+                outside.path().join(".tmpOUT001"),
+                outside.path().join("aa").join(".tmpOUT002"),
+                outside.path().join("captures").join(".tmpOUT003"),
+                outside.path().join("assets").join(".tmpOUT004"),
+            ];
+            for sentinel in &sentinels {
+                plant(sentinel);
+            }
+            if !make_dir_link(kind, &link, outside.path()) {
+                eprintln!("BLOCKED: cannot create a {kind:?} on this runner ({case})");
+                continue;
+            }
+            executed += 1;
+            // A real in-archive orphan next to the linked directory must still be swept.
+            let real = archive
+                .join("conversations")
+                .join(archive_dir_id(B))
+                .join("captures")
+                .join(".tmpREAL01");
+            plant(&real);
+
+            let bytes = three_conversations();
+            let dir = fx.source("export", &[("conversations.json", &bytes)]);
+            fx.store
+                .sweep_orphaned_temp_files()
+                .unwrap_or_else(|e| panic!("{kind:?} {case}: maintenance sweep failed: {e}"));
+            // The normal cleanup of a real directory still works beside the link.
+            assert!(
+                !real.exists(),
+                "{kind:?} {case}: the in-archive orphan was not swept"
+            );
+            // An import also sweeps (start of the run and the in-flight conversation); it may
+            // fail on the linked directory afterwards, which is fine: only the sentinels matter.
+            let _ = fx.run_default(&dir, &[chatgpt("conversations.json")]);
+            for sentinel in &sentinels {
+                assert!(
+                    sentinel.exists(),
+                    "{kind:?} {case}: a file outside the archive was deleted: {sentinel:?}"
+                );
+            }
+            let _ = fx.store.sweep_orphaned_temp_files();
+            for sentinel in &sentinels {
+                assert!(sentinel.exists(), "{kind:?} {case}: {sentinel:?}");
+            }
+        }
+    }
+    assert!(
+        executed > 0,
+        "BLOCKED: no directory link could be created on this runner"
+    );
+}

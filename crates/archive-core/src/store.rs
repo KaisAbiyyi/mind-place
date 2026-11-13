@@ -145,11 +145,56 @@ pub(crate) fn is_orphan_temp_name(name: &str) -> bool {
         && name[4..].bytes().all(|b| b.is_ascii_alphanumeric())
 }
 
+fn is_real_directory(path: &Path) -> bool {
+    let Ok(meta) = fs::symlink_metadata(path) else {
+        return false;
+    };
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        if meta.file_attributes() & 0x400 != 0 {
+            return false;
+        }
+    }
+    meta.is_dir() && !meta.file_type().is_symlink()
+}
+
+/// True when `dir` is `root` or lies below it, and `root`, `dir` and every directory between them
+/// is a real directory: no symbolic link, junction or other reparse point at any level. A
+/// destructive operation uses this so a linked parent can never redirect it outside the archive.
+/// (The check and the later use are not atomic; a process that can rewrite the archive
+/// directories concurrently is outside the supported threat model, like for every other archive
+/// path check.)
+pub(crate) fn is_contained_real_dir(root: &Path, dir: &Path) -> bool {
+    let Ok(relative) = dir.strip_prefix(root) else {
+        return false;
+    };
+    let mut current = root.to_path_buf();
+    if !is_real_directory(&current) {
+        return false;
+    }
+    for component in relative.components() {
+        match component {
+            std::path::Component::Normal(part) => current.push(part),
+            _ => return false,
+        }
+        if !is_real_directory(&current) {
+            return false;
+        }
+    }
+    true
+}
+
 /// Removes leftover temporary files (a process was killed between creating one and moving it into
 /// place) from one directory, not recursively. Only regular files with the exact temporary-file
-/// name are removed, never links or directories. The caller must hold the lock that serializes
-/// every writer of this directory, otherwise a live writer's file could be removed.
-pub(crate) fn sweep_temp_files(dir: &Path) -> usize {
+/// name are removed, never links or directories, and only when `dir` is contained in the archive
+/// `root` through real directories only ([`is_contained_real_dir`]); otherwise nothing is touched.
+/// The caller must hold the lock that serializes every writer of this directory, otherwise a live
+/// writer's file could be removed.
+pub(crate) fn sweep_temp_files(root: &Path, dir: &Path) -> usize {
+    if !is_contained_real_dir(root, dir) {
+        return 0;
+    }
     let Ok(entries) = fs::read_dir(dir) else {
         return 0;
     };
@@ -173,10 +218,10 @@ pub(crate) fn sweep_temp_files(dir: &Path) -> usize {
 /// Sweeps a conversation directory and the two subdirectories the store writes into
 /// (`captures` for snapshots, `assets` for images). Same locking requirement as
 /// [`sweep_temp_files`].
-pub(crate) fn sweep_conversation_temp_files(dir: &Path) -> usize {
-    sweep_temp_files(dir)
-        + sweep_temp_files(&dir.join("captures"))
-        + sweep_temp_files(&dir.join("assets"))
+pub(crate) fn sweep_conversation_temp_files(root: &Path, dir: &Path) -> usize {
+    sweep_temp_files(root, dir)
+        + sweep_temp_files(root, &dir.join("captures"))
+        + sweep_temp_files(root, &dir.join("assets"))
 }
 
 pub(crate) fn atomic_write(path: &Path, bytes: &[u8], immutable: bool) -> Result<()> {
@@ -1397,8 +1442,13 @@ mod transient_and_sweep_tests {
         fs::write(&keep_file, b"x").unwrap();
         fs::create_dir(&keep_dir).unwrap();
         fs::write(&nested, b"x").unwrap();
-        assert_eq!(sweep_temp_files(dir.path()), 1);
+        assert_eq!(sweep_temp_files(dir.path(), dir.path()), 1);
         assert!(!orphan.exists() && keep_file.exists() && keep_dir.is_dir() && nested.exists());
-        assert_eq!(sweep_temp_files(&dir.path().join("missing")), 0);
+        assert_eq!(sweep_temp_files(dir.path(), &dir.path().join("missing")), 0);
+        // A directory outside the root is never swept, even with the exact name inside.
+        let outside = tempfile::tempdir().unwrap();
+        fs::write(outside.path().join(".tmpOut123"), b"x").unwrap();
+        assert_eq!(sweep_temp_files(dir.path(), outside.path()), 0);
+        assert!(outside.path().join(".tmpOut123").exists());
     }
 }

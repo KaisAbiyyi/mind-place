@@ -16,9 +16,9 @@ use crate::importers::chatgpt_export::{ChatGptExportParser, ConversationIdTracke
 use crate::importers::gemini_takeout::{GeminiTakeoutParser, MAX_TAKEOUT_HTML_BYTES};
 use crate::importers::{BoundedArrayLimits, ReconciledItem, RecordSpan};
 use crate::store::{
-    archive_id_for, atomic_write, bounded_read, checked_dir, hex_id, is_transient_sharing, no_link,
-    persist_retry, retry_transient, snapshot_identity, sweep_conversation_temp_files,
-    sweep_temp_files,
+    archive_id_for, atomic_write, bounded_read, checked_dir, hex_id, is_contained_real_dir,
+    is_transient_sharing, no_link, persist_retry, retry_transient, snapshot_identity,
+    sweep_conversation_temp_files, sweep_temp_files,
 };
 use crate::{ArchiveError, ArchiveStore, Capture, Result, MAX_CAPTURE_BYTES};
 use fs2::FileExt;
@@ -619,18 +619,28 @@ impl ArchiveStore {
     /// disposition shards. Holds the archive lock, so no writer has a live temporary file there.
     fn sweep_import_temp_files(&self, job_dir: &Path) -> Result<usize> {
         let _archive_lock = self.lock()?;
-        let mut removed = sweep_temp_files(job_dir) + sweep_temp_files(&job_dir.join("items"));
+        let mut removed = sweep_temp_files(&self.root, job_dir)
+            + sweep_temp_files(&self.root, &job_dir.join("items"));
         for kind in ["raw", "evidence", "dispositions"] {
-            let Ok(shards) = fs::read_dir(self.imports_dir().join(kind)) else {
-                continue;
-            };
-            for shard in shards.flatten() {
-                if shard.file_type().is_ok_and(|kind| kind.is_dir()) {
-                    removed += sweep_temp_files(&shard.path());
-                }
-            }
+            removed += self.sweep_shards(kind);
         }
         Ok(removed)
+    }
+
+    /// Sweeps every shard directory under `imports/<kind>`; does nothing unless `imports/<kind>`
+    /// is reached through real directories only.
+    fn sweep_shards(&self, kind: &str) -> usize {
+        let base = self.imports_dir().join(kind);
+        if !is_contained_real_dir(&self.root, &base) {
+            return 0;
+        }
+        let Ok(shards) = fs::read_dir(&base) else {
+            return 0;
+        };
+        shards
+            .flatten()
+            .map(|shard| sweep_temp_files(&self.root, &shard.path()))
+            .sum()
     }
 
     /// Maintenance: removes leftover temporary files (named exactly like the ones this crate
@@ -643,30 +653,24 @@ impl ArchiveStore {
         let _jobs_lock = self.jobs_lock()?;
         let _archive_lock = self.lock()?;
         let mut removed = 0;
-        let mut directories = Vec::new();
-        if let Ok(entries) = fs::read_dir(self.root.join("conversations")) {
-            for entry in entries.flatten() {
-                let conversation = entry.path();
-                directories.push(conversation.join("captures"));
-                directories.push(conversation.join("assets"));
-                directories.push(conversation);
+        let conversations = self.root.join("conversations");
+        if is_contained_real_dir(&self.root, &conversations) {
+            if let Ok(entries) = fs::read_dir(&conversations) {
+                for entry in entries.flatten() {
+                    removed += sweep_conversation_temp_files(&self.root, &entry.path());
+                }
             }
         }
-        let imports = self.imports_dir();
         for kind in ["raw", "evidence", "dispositions"] {
-            if let Ok(shards) = fs::read_dir(imports.join(kind)) {
-                directories.extend(shards.flatten().map(|entry| entry.path()));
-            }
+            removed += self.sweep_shards(kind);
         }
-        if let Ok(jobs) = fs::read_dir(imports.join("jobs")) {
-            for job in jobs.flatten() {
-                directories.push(job.path());
-                directories.push(job.path().join("items"));
-            }
-        }
-        for directory in directories {
-            if fs::symlink_metadata(&directory).is_ok_and(|meta| meta.is_dir()) {
-                removed += sweep_temp_files(&directory);
+        let jobs = self.imports_dir().join("jobs");
+        if is_contained_real_dir(&self.root, &jobs) {
+            if let Ok(entries) = fs::read_dir(&jobs) {
+                for job in entries.flatten() {
+                    removed += sweep_temp_files(&self.root, &job.path());
+                    removed += sweep_temp_files(&self.root, &job.path().join("items"));
+                }
             }
         }
         Ok(removed)
@@ -1158,7 +1162,7 @@ impl ArchiveStore {
         // A kill during this item's projection write may have left a temporary file in its
         // conversation directory. The caller holds the archive lock, so no writer owns one.
         if let StagedDisposition::Projected { archive_id, .. } = &item.disposition {
-            sweep_conversation_temp_files(&self.conversation_dir(archive_id)?);
+            sweep_conversation_temp_files(&self.root, &self.conversation_dir(archive_id)?);
         }
         let evidence_id = evidence_id_for(manifest, &item);
         let final_raw = self.sharded("raw", &item.payload_sha256, "raw")?;
