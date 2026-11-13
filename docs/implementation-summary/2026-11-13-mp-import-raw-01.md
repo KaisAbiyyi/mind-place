@@ -60,7 +60,7 @@ Environment: Windows 11 x64, Rust 1.91.1, Node 24.21.0, local run by the impleme
 
 | Command | Result |
 | --- | --- |
-| `cargo test --locked -p mind-place-archive --tests` | PASS: 152 passed, 0 failed (57 unit, 19 archive, 5 generic, 8 historical-write authority, 3 sanitizer compat, 18 second-correction, 6 legacy, **25 raw-evidence publication**, 2 registration, 9 validation boundaries) |
+| `cargo test --locked -p mind-place-archive --tests` | PASS: 157 passed, 0 failed after review round 1 (57 unit, 19 archive, 5 generic, 8 historical-write authority, 3 sanitizer compat, 18 second-correction, 6 legacy, **30 raw-evidence publication**, 2 registration, 9 validation boundaries) |
 | `npm run test:rust` (archive, capture-host, security, state, index, integration, documents) | PASS, exit 0 |
 | `npm run test:web` | PASS: 333 tests, 329 passed, 0 failed, 4 skipped |
 | `cargo fmt --all -- --check`, `npm run verify:repo`, `npm run typecheck` | PASS |
@@ -76,3 +76,20 @@ Environment: Windows 11 x64, Rust 1.91.1, Node 24.21.0, local run by the impleme
 ## Handoff
 
 `TASK_ID` MP-IMPORT-RAW-01 · `CLAIM` claimed by a Claude Code local session; no fencing generation · `BASE_SHA` `8350f8e` · `BRANCH` `work/mp-import-raw-01/atomic-raw-publication` · `PR` #168 (draft) · `LOCAL_REQUIRED` Windows qualification of the new tests and of crash/locking behaviour (NOT_RUN) · `HUMAN_REQUIRED` independent security re-review, then the owner's manual merge decision.
+
+## Independent implementation review, round 1 (exact head `393a214`) — fixes
+
+Verdict of the review: CHANGES REQUIRED (two P1, one P2). All three are fixed, each with a regression test that was checked against the defect (the guard was removed and the test failed).
+
+| Finding | Correction | Regression test |
+| --- | --- | --- |
+| **P1** `discard_staged_job` could erase a finished job's receipt and state | It now needs the owner's unlocked gate for this archive (`gate`, `lease`), refuses a finished job (state `complete` **or** a receipt on disk, even when the state file is unreadable) with `E_JOB_COMPLETE`, never touches published raw/evidence/projections, and keeps superseded receipts. Unfinished spools, missing keys and unreadable state without a receipt can still be discarded | `a_finished_job_is_an_audit_record_and_cannot_be_discarded`, `discarding_needs_the_owner_gate_and_only_removes_unfinished_spools` (finished, locked gate, foreign gate, invalid key, missing key, corrupt state) |
+| **P1** a finished-job replay returned success from a stale receipt | Completion now writes a per-item `ledger.jsonl`. A replay verifies, before returning, that every listed raw blob (existence and size), evidence record, disposition link and projection (`meta.json` and snapshot) still exists, else `E_PUBLISHED_MISMATCH`. A healthy replay reports `published_check = "presence-verified"` (a fresh run reports `published-now`). `verify_published_job(key, deep)` is a read-only check; `deep` also re-hashes raw blobs and parses evidence. `SourceImportRequest.repair = true` (off by default) re-stages and re-publishes a mismatched job, keeping the old receipt and ledger as `*.superseded-N` | `a_finished_job_is_checked_against_the_disk_before_success_is_reported` (missing raw, evidence, link, projection, ledger: fails without repair, repairs to a disk equal to the original with repair, old receipt kept), `a_same_size_corruption_of_a_raw_blob_needs_the_deep_check` |
+| **P2** job key omitted `max_staged_raw_bytes` | Added to the key, so a different cap is a different job and a verified spool is never reused under a new cap | `resuming_with_a_different_raw_byte_cap_never_reuses_the_old_spool` |
+
+Documented limits that follow from the review:
+
+- The cheap replay check proves presence and size, **not content**: a same-size corruption of a raw blob is found only by `verify_published_job(.., deep = true)` (tested).
+- The whole-folder manifest claim is bounded: after staging only paths and sizes are re-checked, so a same-size change to an **unselected** file between job start and publication is not detected at publication time (member bytes are hash-bound while parsed, and the job-start measurement covers every file).
+- A job that was finished by an earlier build has no ledger; its replay fails with `E_PUBLISHED_MISMATCH` until a repair or deep verification is run (no such job exists outside tests).
+- The old public `save_authorized_historical_import` remains an open owner decision (unchanged). The archive import surface is **not** raw-evidence-enforced while that API exists.

@@ -1067,7 +1067,9 @@ fn a_tampered_spool_is_detected_before_anything_is_published() {
     assert_eq!(count_under(&fx, "imports/raw"), 0);
     // Discarding the spool lets the owner run the import again from the source.
     let key = fx.store.incomplete_jobs().unwrap()[0].job_key.clone();
-    fx.store.discard_staged_job(&key).unwrap();
+    fx.store
+        .discard_staged_job(&fx.gate, fx.gate.require_unlocked().unwrap(), &key)
+        .unwrap();
     assert_eq!(fx.run_default(&dir, &members).unwrap().imported, 3);
 }
 
@@ -1165,4 +1167,257 @@ fn the_manifest_hash_is_deterministic_and_covers_names_sizes_and_content() {
         .unwrap_err()
         .to_string()
         .contains("E_SOURCE_CHANGED"));
+}
+
+// ---------- reviewer findings (round 1 on PR #168) ----------
+
+fn finished_job(fx: &Fx) -> (PathBuf, ImportJobReceipt) {
+    let bytes = three_conversations();
+    let dir = fx.source("export", &[("conversations.json", &bytes)]);
+    let receipt = fx
+        .run_default(&dir, &[chatgpt("conversations.json")])
+        .unwrap();
+    (dir, receipt)
+}
+
+fn discard(fx: &Fx, key: &str) -> Result<()> {
+    fx.store
+        .discard_staged_job(&fx.gate, fx.gate.require_unlocked().unwrap(), key)
+}
+
+#[test]
+fn a_finished_job_is_an_audit_record_and_cannot_be_discarded() {
+    let fx = Fx::new("chatgpt");
+    let (_, receipt) = finished_job(&fx);
+    let before = tree_digest(fx.archive(), |p| !p.ends_with(".lock"));
+    let message = discard(&fx, &receipt.job_key).unwrap_err().to_string();
+    assert!(message.contains("E_JOB_COMPLETE"), "{message}");
+    assert_eq!(before, tree_digest(fx.archive(), |p| !p.ends_with(".lock")));
+    let job = &job_dirs(&fx)[0];
+    assert!(job.join("receipt.json").exists() && job.join("state.json").exists());
+
+    // A receipt on disk protects the job even when its state file is unreadable.
+    std::fs::write(job.join("state.json"), b"not json").unwrap();
+    assert!(discard(&fx, &receipt.job_key)
+        .unwrap_err()
+        .to_string()
+        .contains("E_JOB_COMPLETE"));
+    assert!(job.join("receipt.json").exists());
+}
+
+#[test]
+fn discarding_needs_the_owner_gate_and_only_removes_unfinished_spools() {
+    let fx = Fx::new("chatgpt");
+    let bytes = three_conversations();
+    let dir = fx.source("export", &[("conversations.json", &bytes)]);
+    let members = [chatgpt("conversations.json")];
+    let cap = fx.authorize(&dir);
+    fx.run(
+        &cap,
+        &members,
+        &crash_at(ImportPoint::BeforeItem { seq: 1 }),
+        ImportJobLimits::default(),
+    )
+    .unwrap_err();
+    let key = fx.store.incomplete_jobs().unwrap()[0].job_key.clone();
+    let published = published_digest(&fx);
+
+    // A foreign gate and a locked gate cannot discard.
+    let other = tempfile::tempdir().unwrap();
+    let foreign = SecurityGate::open(other.path().join("security-v1.json")).unwrap();
+    foreign.initialize(CRED).unwrap();
+    assert!(fx
+        .store
+        .discard_staged_job(&foreign, foreign.require_unlocked().unwrap(), &key)
+        .is_err());
+    let lease = fx.gate.require_unlocked().unwrap();
+    fx.gate.lock();
+    let message = fx
+        .store
+        .discard_staged_job(&fx.gate, lease, &key)
+        .unwrap_err()
+        .to_string();
+    assert!(message.contains("E_AUTHORIZATION"), "{message}");
+    assert_eq!(fx.store.incomplete_jobs().unwrap().len(), 1);
+    fx.gate.unlock(CRED).unwrap();
+
+    // Unknown and invalid keys are harmless or refused.
+    assert!(discard(&fx, &"0".repeat(64)).is_ok());
+    assert!(discard(&fx, "../escape").is_err());
+
+    // Unfinished: removed, and what was published stays.
+    discard(&fx, &key).unwrap();
+    assert!(fx.store.incomplete_jobs().unwrap().is_empty());
+    assert_eq!(published_digest(&fx), published);
+    assert!(conversations(&fx) >= 1);
+
+    // An unreadable state with no receipt is not provably finished: it may be discarded.
+    let cap = fx.authorize(&dir);
+    fx.run(
+        &cap,
+        &members,
+        &crash_at(ImportPoint::Verified),
+        ImportJobLimits::default(),
+    )
+    .unwrap_err();
+    let job = job_dirs(&fx)[0].clone();
+    std::fs::write(job.join("state.json"), b"garbage").unwrap();
+    let key = job.file_name().unwrap().to_string_lossy().into_owned();
+    discard(&fx, &key).unwrap();
+    assert!(job_dirs(&fx).is_empty());
+}
+
+type Damage = fn(&Fx, &Path);
+
+#[test]
+fn a_finished_job_is_checked_against_the_disk_before_success_is_reported() {
+    let damages: [(&str, Damage); 5] = [
+        ("raw blob", |fx, _| {
+            let raw = files_under(&fx.archive().join("imports/raw"));
+            std::fs::remove_file(&raw[0]).unwrap();
+        }),
+        ("evidence", |fx, _| {
+            let evidence = files_under(&fx.archive().join("imports/evidence"));
+            std::fs::remove_file(&evidence[0]).unwrap();
+        }),
+        ("disposition link", |fx, _| {
+            let links = files_under(&fx.archive().join("imports/dispositions"));
+            std::fs::remove_file(&links[0]).unwrap();
+        }),
+        ("projection", |fx, _| {
+            let meta = files_under(&fx.archive().join("conversations"))
+                .into_iter()
+                .find(|p| p.ends_with("meta.json"))
+                .unwrap();
+            std::fs::remove_file(meta).unwrap();
+        }),
+        ("ledger", |_, job| {
+            std::fs::remove_file(job.join("ledger.jsonl")).unwrap();
+        }),
+    ];
+    for (name, damage) in damages {
+        let fx = Fx::new("chatgpt");
+        let (dir, receipt) = finished_job(&fx);
+        let members = [chatgpt("conversations.json")];
+        let expected = published_digest(&fx);
+
+        // A healthy replay says what it checked.
+        let again = fx.run_default(&dir, &members).unwrap();
+        assert!(again.already_complete, "{name}");
+        assert_eq!(again.published_check, "presence-verified");
+        assert_eq!(receipt.published_check, "published-now");
+        fx.store
+            .verify_published_job(&receipt.job_key, true)
+            .unwrap();
+
+        let job = job_dirs(&fx)[0].clone();
+        damage(&fx, &job);
+        // The stored receipt is a claim: without repair the replay must fail, not succeed.
+        let message = error_text(fx.run_default(&dir, &members));
+        assert!(
+            message.contains("E_PUBLISHED_MISMATCH"),
+            "{name}: {message}"
+        );
+        assert!(fx
+            .store
+            .verify_published_job(&receipt.job_key, false)
+            .unwrap_err()
+            .to_string()
+            .contains("E_PUBLISHED_MISMATCH"));
+        assert!(
+            job.join("receipt.json").exists(),
+            "{name}: receipt must survive a failed check"
+        );
+
+        // Explicit repair re-publishes what is missing and keeps the old audit files.
+        let cap = fx.authorize(&dir);
+        let mut request = SourceImportRequest::new(
+            &fx.gate,
+            fx.gate.require_unlocked().unwrap(),
+            &cap,
+            &members,
+        );
+        request.repair = true;
+        let repaired = fx.store.import_authorized_source(&request).unwrap();
+        assert!(!repaired.already_complete, "{name}");
+        assert_eq!(repaired.published_check, "published-now");
+        assert_eq!(
+            published_digest(&fx),
+            expected,
+            "{name}: repair differs from the original"
+        );
+        fx.store
+            .verify_published_job(&receipt.job_key, true)
+            .unwrap();
+        let superseded = std::fs::read_dir(&job)
+            .unwrap()
+            .filter(|e| {
+                e.as_ref()
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("receipt.superseded-")
+            })
+            .count();
+        assert!(superseded >= 1, "{name}: the old receipt must be kept");
+    }
+}
+
+#[test]
+fn a_same_size_corruption_of_a_raw_blob_needs_the_deep_check() {
+    let fx = Fx::new("chatgpt");
+    let (_, receipt) = finished_job(&fx);
+    let raw = files_under(&fx.archive().join("imports/raw"))[0].clone();
+    let mut bytes = std::fs::read(&raw).unwrap();
+    bytes[3] ^= 0x01;
+    std::fs::write(&raw, bytes).unwrap();
+    // The cheap check is documented as presence and size only.
+    fx.store
+        .verify_published_job(&receipt.job_key, false)
+        .unwrap();
+    assert!(fx
+        .store
+        .verify_published_job(&receipt.job_key, true)
+        .unwrap_err()
+        .to_string()
+        .contains("E_PUBLISHED_MISMATCH"));
+}
+
+#[test]
+fn resuming_with_a_different_raw_byte_cap_never_reuses_the_old_spool() {
+    let fx = Fx::new("chatgpt");
+    let bytes = three_conversations();
+    let dir = fx.source("export", &[("conversations.json", &bytes)]);
+    let members = [chatgpt("conversations.json")];
+    let cap = fx.authorize(&dir);
+    fx.run(
+        &cap,
+        &members,
+        &crash_at(ImportPoint::Verified),
+        ImportJobLimits::default(),
+    )
+    .unwrap_err();
+    let original = fx.store.incomplete_jobs().unwrap()[0].job_key.clone();
+
+    let tighter = ImportJobLimits {
+        max_staged_raw_bytes: 100,
+        ..ImportJobLimits::default()
+    };
+    let cap = fx.authorize(&dir);
+    let message = error_text(fx.run(
+        &cap,
+        &members,
+        &mind_place_archive::historical::NoProgress,
+        tighter,
+    ));
+    assert!(message.contains("E_SOURCE_LIMIT"), "{message}");
+    // The generous-cap spool is a different job: still there, untouched, nothing published.
+    let incomplete = fx.store.incomplete_jobs().unwrap();
+    assert_eq!(incomplete.len(), 1);
+    assert_eq!(incomplete[0].job_key, original);
+    assert_eq!(conversations(&fx), 0);
+    // And the original job still resumes under its own limits.
+    let receipt = fx.run_default(&dir, &members).unwrap();
+    assert_eq!(receipt.job_key, original);
+    assert!(receipt.resumed);
 }

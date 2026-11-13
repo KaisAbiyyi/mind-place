@@ -39,6 +39,8 @@ const MAX_RECEIPT_EXCEPTIONS: usize = 1000;
 const MAX_SOURCE_IDENTIFIER_BYTES: usize = 1024;
 const MAX_METADATA_JSON_BYTES: usize = 64 * 1024;
 const MAX_AUTHORIZED_IDS_KEPT: usize = 16;
+const LEDGER_FILE: &str = "ledger.jsonl";
+const MAX_LEDGER_LINE: u64 = 64 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -157,6 +159,10 @@ pub struct SourceImportRequest<'a> {
     pub members: &'a [ImportMember],
     pub limits: ImportJobLimits,
     pub progress: &'a dyn ImportProgress,
+    /// When a finished job no longer matches what is on disk (a published raw blob, evidence,
+    /// link or projection is missing), re-stage and re-publish it instead of failing. The old
+    /// receipt and ledger are kept as `*.superseded-N` files. Off by default.
+    pub repair: bool,
 }
 
 static NO_PROGRESS: NoProgress = NoProgress;
@@ -175,6 +181,7 @@ impl<'a> SourceImportRequest<'a> {
             members,
             limits: ImportJobLimits::default(),
             progress: &NO_PROGRESS,
+            repair: false,
         }
     }
 }
@@ -202,6 +209,8 @@ pub struct ItemReceipt {
     pub snapshot_id: Option<String>,
     pub raw_blob_new: bool,
     pub evidence_new: bool,
+    pub evidence_id: String,
+    pub payload_bytes: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -230,6 +239,9 @@ pub struct ImportJobReceipt {
     pub authorized_job_id: String,
     /// True when this call only returned the receipt of an already finished job.
     pub already_complete: bool,
+    /// `published-now` for a job this call finished; `presence-verified` when a finished job was
+    /// returned after checking that every published artifact it lists still exists.
+    pub published_check: String,
     /// True when the job needed more than one run. After a resume the single item that was in
     /// flight may be counted `deduplicated` rather than `imported`.
     pub resumed: bool,
@@ -485,7 +497,7 @@ impl ArchiveStore {
         let job_dir = self.job_dir(&job_key)?;
         no_link(&job_dir)?;
 
-        let existing = if job_dir.exists() {
+        let mut existing = if job_dir.exists() {
             Some(read_state(&job_dir)?)
         } else {
             None
@@ -494,15 +506,33 @@ impl ArchiveStore {
             if state.job_key != job_key || state.manifest_sha256 != manifest.sha256_hex() {
                 return Err(coded("E_STATE_CORRUPT", "Import job state does not match"));
             }
-            if state.phase == JobPhase::Complete {
-                let mut receipt: ImportJobReceipt = serde_json::from_slice(&bounded_read(
-                    &job_dir.join(RECEIPT_FILE),
-                    MAX_STATE_BYTES,
-                )?)
-                .map_err(|_| coded("E_STATE_CORRUPT", "Import receipt is unreadable"))?;
-                let _ = fs::remove_dir_all(job_dir.join("items"));
-                receipt.already_complete = true;
-                return Ok(receipt);
+        }
+        if existing
+            .as_ref()
+            .is_some_and(|state| state.phase == JobPhase::Complete)
+        {
+            // A stored receipt is a claim, not proof: check what it lists is still published.
+            match self.verify_published(&job_dir, existing.as_ref().unwrap(), false) {
+                Ok(()) => {
+                    let mut receipt: ImportJobReceipt = serde_json::from_slice(&bounded_read(
+                        &job_dir.join(RECEIPT_FILE),
+                        MAX_STATE_BYTES,
+                    )?)
+                    .map_err(|_| coded("E_STATE_CORRUPT", "Import receipt is unreadable"))?;
+                    let _ = fs::remove_dir_all(job_dir.join("items"));
+                    receipt.already_complete = true;
+                    receipt.published_check = "presence-verified".into();
+                    return Ok(receipt);
+                }
+                Err(error) if !request.repair => return Err(error),
+                Err(_) => {
+                    // Explicit repair: keep the old audit files, then stage and publish again
+                    // (every step is idempotent, so only what is missing is rewritten).
+                    supersede_receipt(&job_dir)?;
+                    let mut state = existing.take().unwrap();
+                    state.phase = JobPhase::Staging;
+                    existing = Some(state);
+                }
             }
         }
 
@@ -514,7 +544,7 @@ impl ArchiveStore {
             other => {
                 // Never staged, or interrupted while staging: nothing was published; restage.
                 if other.is_some() {
-                    fs::remove_dir_all(&job_dir)?;
+                    reset_job_dir(&job_dir)?;
                 }
                 checked_dir(&job_dir)?;
                 let state = JobState {
@@ -548,12 +578,12 @@ impl ArchiveStore {
 
         if state.phase == JobPhase::Staging {
             if let Err(error) = self.stage_job(request, &manifest, &members, &job_dir, &mut state) {
-                let _ = fs::remove_dir_all(&job_dir);
+                let _ = discard_job_dir(&job_dir);
                 return Err(error);
             }
             // The member bytes are already bound by hash; this only re-checks the file set.
             if let Err(error) = manifest.verify_layout_unchanged(limits.manifest) {
-                let _ = fs::remove_dir_all(&job_dir);
+                let _ = discard_job_dir(&job_dir);
                 return Err(error);
             }
             write_state(&job_dir, &state)?;
@@ -610,14 +640,137 @@ impl ArchiveStore {
         Ok(out)
     }
 
-    /// Removes a job's spool, state and receipt. Published raw, evidence and projections are
-    /// never touched. The same import can be run again afterwards.
-    pub fn discard_staged_job(&self, job_key: &str) -> Result<()> {
+    /// Removes the spool and state of an **unfinished** job. Needs the owner's unlocked gate for
+    /// this archive. A finished job (state `complete` or a receipt on disk) is an audit record and
+    /// is refused (`E_JOB_COMPLETE`); published raw, evidence and projections are never touched.
+    /// Superseded receipts from an earlier repair are kept. The same import can be run again.
+    pub fn discard_staged_job(
+        &self,
+        gate: &SecurityGate,
+        lease: UnlockLease,
+        job_key: &str,
+    ) -> Result<()> {
+        self.ensure_not_encrypted_vault()?;
+        self.require_same_owner(gate)?;
+        gate.validate_lease(lease).map_err(|_| {
+            coded(
+                "E_AUTHORIZATION",
+                "Owner authorization is required to discard an import job",
+            )
+        })?;
         let dir = self.job_dir(job_key)?;
         let _lock = self.jobs_lock()?;
         no_link(&dir)?;
-        if dir.exists() {
-            fs::remove_dir_all(&dir)?;
+        if !dir.exists() {
+            return Ok(());
+        }
+        let complete = dir.join(RECEIPT_FILE).exists()
+            || read_state(&dir).is_ok_and(|state| state.phase == JobPhase::Complete);
+        if complete {
+            return Err(coded(
+                "E_JOB_COMPLETE",
+                "A finished import job is an audit record and cannot be discarded",
+            ));
+        }
+        discard_job_dir(&dir)
+    }
+
+    /// Checks that everything a finished job lists is still published: the raw blob (size), the
+    /// evidence record, the disposition link and, for a projected item, its snapshot and
+    /// `meta.json`. With `deep`, raw blobs are re-hashed and evidence is parsed. Read-only.
+    pub fn verify_published_job(&self, job_key: &str, deep: bool) -> Result<()> {
+        self.ensure_not_encrypted_vault()?;
+        let dir = self.job_dir(job_key)?;
+        let _lock = self.jobs_lock()?;
+        no_link(&dir)?;
+        let state = read_state(&dir)?;
+        if state.phase != JobPhase::Complete {
+            return Err(coded("E_JOB_INCOMPLETE", "The import job is not finished"));
+        }
+        self.verify_published(&dir, &state, deep)
+    }
+
+    fn verify_published(&self, job_dir: &Path, state: &JobState, deep: bool) -> Result<()> {
+        let mismatch = |what: &str| coded("E_PUBLISHED_MISMATCH", what);
+        let ledger = job_dir.join(LEDGER_FILE);
+        no_link(&ledger)?;
+        let file = File::open(&ledger).map_err(|_| mismatch("The job ledger is missing"))?;
+        let mut reader = std::io::BufReader::new(file);
+        let mut seen = 0u64;
+        loop {
+            let mut line = Vec::new();
+            let read = std::io::BufRead::read_until(
+                &mut Read::take(&mut reader, MAX_LEDGER_LINE + 1),
+                b'\n',
+                &mut line,
+            )
+            .map_err(|_| mismatch("The job ledger cannot be read"))?;
+            if read == 0 {
+                break;
+            }
+            if line.len() as u64 > MAX_LEDGER_LINE {
+                return Err(mismatch("The job ledger is corrupt"));
+            }
+            let item: ItemReceipt =
+                serde_json::from_slice(&line).map_err(|_| mismatch("The job ledger is corrupt"))?;
+            if item.seq != seen {
+                return Err(mismatch("The job ledger is out of order"));
+            }
+            self.check_published_item(&item, deep)?;
+            seen += 1;
+        }
+        if seen != state.item_count {
+            return Err(mismatch("The job ledger is incomplete"));
+        }
+        Ok(())
+    }
+
+    fn check_published_item(&self, item: &ItemReceipt, deep: bool) -> Result<()> {
+        let mismatch = |what: &str| coded("E_PUBLISHED_MISMATCH", what);
+        let raw = self.sharded("raw", &item.payload_sha256, "raw")?;
+        no_link(&raw)?;
+        match fs::metadata(&raw) {
+            Ok(meta) if meta.is_file() && meta.len() == item.payload_bytes => {}
+            _ => {
+                return Err(mismatch(
+                    "A published raw blob is missing or has the wrong size",
+                ))
+            }
+        }
+        if deep && verify_blob(&raw, &item.payload_sha256, item.payload_bytes).is_err() {
+            return Err(mismatch("A published raw blob does not match its hash"));
+        }
+        let evidence = self.sharded("evidence", &item.evidence_id, "json")?;
+        no_link(&evidence)?;
+        if !evidence.is_file() {
+            return Err(mismatch("A provenance record is missing"));
+        }
+        if deep {
+            let record: serde_json::Value =
+                serde_json::from_slice(&bounded_read(&evidence, MAX_STATE_BYTES)?)
+                    .map_err(|_| mismatch("A provenance record is unreadable"))?;
+            if record["payload_sha256"] != item.payload_sha256.as_str() {
+                return Err(mismatch("A provenance record does not match its raw blob"));
+            }
+        }
+        let link = self.sharded("dispositions", &item.evidence_id, "json")?;
+        no_link(&link)?;
+        if !link.is_file() {
+            return Err(mismatch("A disposition link is missing"));
+        }
+        if let (Some(archive_id), Some(snapshot_id)) = (&item.archive_id, &item.snapshot_id) {
+            if !hex_id(snapshot_id) {
+                return Err(mismatch("A projection identity is invalid"));
+            }
+            let dir = self.conversation_dir(archive_id)?;
+            if !dir.join("meta.json").is_file()
+                || !dir
+                    .join("captures")
+                    .join(format!("{snapshot_id}.jsonl"))
+                    .is_file()
+            {
+                return Err(mismatch("A projection is missing"));
+            }
         }
         Ok(())
     }
@@ -1000,6 +1153,8 @@ impl ArchiveStore {
             snapshot_id,
             raw_blob_new,
             evidence_new,
+            evidence_id,
+            payload_bytes: item.payload_bytes,
         })
     }
 
@@ -1019,6 +1174,7 @@ impl ArchiveStore {
             staged_root_sha256: state.staged_root_sha256.clone().unwrap_or_default(),
             authorized_job_id: authorized_job_id.to_owned(),
             already_complete: false,
+            published_check: "published-now".into(),
             resumed: state.attempts > 1,
             members: state.members.clone(),
             records_scanned: state.item_count,
@@ -1034,12 +1190,16 @@ impl ArchiveStore {
             exceptions: Vec::new(),
             exceptions_omitted: 0,
         };
+        // One line per item: the ledger lets a later call check the job against the disk.
+        let mut ledger = tempfile::NamedTempFile::new_in(job_dir)?;
         for seq in 0..state.item_count {
             let done: ItemReceipt = serde_json::from_slice(&bounded_read(
                 &items_dir.join(format!("{seq:08}.done.json")),
                 MAX_STATE_BYTES,
             )?)
             .map_err(|_| coded("E_STATE_CORRUPT", "An item result is unreadable"))?;
+            ledger.write_all(&serde_json::to_vec(&done)?)?;
+            ledger.write_all(b"\n")?;
             match done.outcome {
                 ItemOutcome::Imported => receipt.imported += 1,
                 ItemOutcome::Deduplicated => receipt.deduplicated += 1,
@@ -1065,6 +1225,11 @@ impl ArchiveStore {
             }
         }
         receipt.raw_bytes_preserved = state.members.iter().map(|m| m.record_bytes).sum();
+        ledger.flush()?;
+        ledger.as_file().sync_all()?;
+        ledger
+            .persist(job_dir.join(LEDGER_FILE))
+            .map_err(|e| e.error)?;
         atomic_write(
             &job_dir.join(RECEIPT_FILE),
             &serde_json::to_vec(&receipt)?,
@@ -1256,6 +1421,7 @@ fn job_key_for(
     hasher.update((limits.chatgpt_stream.max_separator_bytes as u64).to_be_bytes());
     hasher.update(limits.max_takeout_html_bytes.to_be_bytes());
     hasher.update((limits.max_items as u64).to_be_bytes());
+    hasher.update(limits.max_staged_raw_bytes.to_be_bytes());
     hasher.update((members.len() as u32).to_be_bytes());
     for member in members {
         frame(&mut hasher, member.path.as_bytes());
@@ -1273,6 +1439,59 @@ fn evidence_id_for(manifest: &SourceManifest, item: &StagedItem) -> String {
     hasher.update(item.source.span.length.to_be_bytes());
     frame(&mut hasher, item.payload_sha256.as_bytes());
     hex(&hasher.finalize())
+}
+
+/// Removes everything in a job directory except superseded receipts and ledgers (audit files).
+fn reset_job_dir(job_dir: &Path) -> Result<()> {
+    for entry in fs::read_dir(job_dir)? {
+        let entry = entry?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with("receipt.superseded-") || name.starts_with("ledger.superseded-") {
+            continue;
+        }
+        let path = entry.path();
+        if entry.file_type()?.is_dir() {
+            fs::remove_dir_all(path)?;
+        } else {
+            fs::remove_file(path)?;
+        }
+    }
+    Ok(())
+}
+
+/// As [`reset_job_dir`], then removes the directory itself when nothing is left to keep.
+fn discard_job_dir(job_dir: &Path) -> Result<()> {
+    if job_dir.exists() {
+        reset_job_dir(job_dir)?;
+        let _ = fs::remove_dir(job_dir);
+    }
+    Ok(())
+}
+
+/// Keeps the receipt and ledger of a finished job under `*.superseded-N` before it is repaired.
+fn supersede_receipt(job_dir: &Path) -> Result<()> {
+    let mut n = 1u32;
+    while job_dir
+        .join(format!("receipt.superseded-{n}.json"))
+        .exists()
+    {
+        n += 1;
+    }
+    for (from, to) in [
+        (
+            RECEIPT_FILE.to_owned(),
+            format!("receipt.superseded-{n}.json"),
+        ),
+        (
+            LEDGER_FILE.to_owned(),
+            format!("ledger.superseded-{n}.jsonl"),
+        ),
+    ] {
+        if job_dir.join(&from).exists() {
+            fs::rename(job_dir.join(&from), job_dir.join(to))?;
+        }
+    }
+    Ok(())
 }
 
 fn read_state(job_dir: &Path) -> Result<JobState> {
