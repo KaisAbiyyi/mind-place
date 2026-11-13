@@ -29,6 +29,8 @@ const LOCAL_LEN: u64 = 30;
 const CENTRAL_LEN: usize = 46;
 /// Members at most this large are exempt from the ratio rule (tiny files compress oddly).
 const RATIO_EXEMPT_BYTES: u64 = 1024 * 1024;
+/// Decompressed bytes always allowed on top of `archive length * max ratio`.
+const AGGREGATE_ALLOWANCE_BYTES: u64 = 64 * 1024 * 1024;
 const METHOD_STORED: u16 = 0;
 const METHOD_DEFLATE: u16 = 8;
 
@@ -109,6 +111,16 @@ fn check_member_name(raw: &[u8], limits: &ManifestLimits) -> Result<(String, boo
     }
     for component in components {
         check_component(component)?;
+    }
+    // Bidirectional controls would let a name display differently from what it is when the
+    // owner reviews the candidate members.
+    if body.chars().any(|c| {
+        matches!(
+            c,
+            '\u{061C}' | '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}'
+        )
+    }) {
+        return Err(coded("E_SOURCE_NAME", "Zip member name is not allowed"));
     }
     Ok((body.to_owned(), is_dir))
 }
@@ -360,6 +372,18 @@ pub(crate) fn read_directory(
         if declared_total > limits.max_total_bytes {
             return Err(coded("E_SOURCE_LIMIT", "Import source is too large"));
         }
+        // Many small members are exempt from the per-member rule; the archive as a whole may
+        // still not expand beyond the same ratio (plus a small allowance).
+        if declared_total
+            > file_len
+                .saturating_mul(limits.max_zip_ratio)
+                .saturating_add(AGGREGATE_ALLOWANCE_BYTES)
+        {
+            return Err(coded(
+                "E_ZIP_BOMB",
+                "Zip archive expands far more than an export would",
+            ));
+        }
         if !is_dir && !names.insert(name.clone()) {
             return Err(coded(
                 "E_ZIP_DUPLICATE",
@@ -461,6 +485,7 @@ pub(crate) fn member_reader(mut file: File, entry: &ZipEntry) -> Result<Box<dyn 
         crc: Crc::new(),
         expected_crc: entry.crc32,
         finished: false,
+        failed: false,
     }))
 }
 
@@ -475,10 +500,25 @@ struct CheckedMember {
     crc: Crc,
     expected_crc: u32,
     finished: bool,
+    /// Sticky: once a read failed, every later read fails too (never a late `Ok(0)`).
+    failed: bool,
 }
 
 impl Read for CheckedMember {
     fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
+        if self.failed {
+            return Err(corrupt("Zip member data is corrupt"));
+        }
+        let result = self.read_checked(out);
+        if matches!(&result, Err(error) if error.kind() != io::ErrorKind::Interrupted) {
+            self.failed = true;
+        }
+        result
+    }
+}
+
+impl CheckedMember {
+    fn read_checked(&mut self, out: &mut [u8]) -> io::Result<usize> {
         if self.finished || out.is_empty() {
             return Ok(0);
         }
@@ -538,4 +578,29 @@ pub(crate) fn archive_error_from_io(error: &io::Error) -> ArchiveError {
         return ArchiveError::Invalid(message.clone());
     }
     coded("E_SOURCE_IO", "Import source file cannot be read")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_member_read_error_is_sticky() {
+        // Declares 4 bytes but the stream carries 6: the overrun is an error, and so is every
+        // later read (a caller that keeps reading must never see a clean end of file).
+        let mut member = CheckedMember {
+            inner: Box::new(io::Cursor::new(b"abcdef".to_vec())),
+            remaining: 4,
+            crc: Crc::new(),
+            expected_crc: 0,
+            finished: false,
+            failed: false,
+        };
+        let mut buffer = [0u8; 16];
+        assert_eq!(member.read(&mut buffer).unwrap(), 4);
+        assert!(member.read(&mut buffer).is_err());
+        for _ in 0..3 {
+            assert!(member.read(&mut buffer).is_err());
+        }
+    }
 }

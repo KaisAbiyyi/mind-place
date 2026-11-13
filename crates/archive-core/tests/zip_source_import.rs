@@ -641,6 +641,8 @@ fn unsafe_member_names_are_refused() {
         "a/./b.json",
         "a//b.json",
         "bell\u{7}.json",
+        "invoice\u{202E}nosj.exe",
+        "a\u{2066}b.json",
     ] {
         let message = measure_error(&zip(&[file(name, b"[]")]));
         assert!(message.contains("E_SOURCE_NAME"), "{name}: {message}");
@@ -688,6 +690,18 @@ fn a_high_ratio_member_is_refused_as_a_bomb() {
     let path = home.path().join("ok.zip");
     std::fs::write(&path, zip(&[file("conversations.json", &zeros)])).unwrap();
     assert!(SourceManifest::measure(&path, limits).is_ok());
+}
+
+#[test]
+fn many_small_members_cannot_add_up_to_a_bomb() {
+    // Each 1 MiB member of zeros is exempt from the per-member ratio rule; together they
+    // expand far beyond the archive-wide ratio.
+    let zeros = vec![0u8; 1024 * 1024];
+    let members: Vec<Z> = (0..100)
+        .map(|i| file(&format!("part-{i:03}.json"), &zeros))
+        .collect();
+    let message = measure_error(&zip(&members));
+    assert!(message.contains("E_ZIP_BOMB"), "{message}");
 }
 
 #[test]

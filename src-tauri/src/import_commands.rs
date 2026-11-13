@@ -93,6 +93,14 @@ fn check_path(path: &str) -> Result<PathBuf, String> {
     if path.is_empty() || path.chars().count() > MAX_PATH_CHARS || path.contains('\0') {
         return Err(coded("E_IMPORT_PATH", "Invalid import source path"));
     }
+    // Network shares and device namespaces (`\\host\share`, `\\?\UNC\..`, `\\.\..`) are never a
+    // source: touching them could send the owner's network credentials to another host.
+    if path.starts_with("\\\\") || path.starts_with("//") {
+        return Err(coded(
+            "E_IMPORT_PATH",
+            "Import sources must be on this computer",
+        ));
+    }
     let path = PathBuf::from(path);
     if !path.is_absolute() {
         return Err(coded("E_IMPORT_PATH", "Invalid import source path"));
@@ -176,6 +184,10 @@ struct CommandProgress<'a> {
     cancel: &'a AtomicBool,
     sink: &'a dyn Fn(ProgressEvent),
     total: Cell<Option<u64>>,
+    /// Staging is not fenced by the capability (only publication is), so the lease is checked
+    /// at every safe point: Lock stops staging too.
+    gate: &'a SecurityGate,
+    lease: UnlockLease,
 }
 
 impl ImportProgress for CommandProgress<'_> {
@@ -184,6 +196,12 @@ impl ImportProgress for CommandProgress<'_> {
             point,
             ImportPoint::Staged { .. } | ImportPoint::Verified | ImportPoint::BeforeItem { .. }
         );
+        if cancellable && self.gate.validate_lease(self.lease).is_err() {
+            return Err(ArchiveError::Invalid(coded(
+                "E_AUTHORIZATION",
+                "The owner session was locked",
+            )));
+        }
         if cancellable && self.cancel.load(Ordering::Acquire) {
             return Err(ArchiveError::Invalid(coded(
                 "E_IMPORT_CANCELLED",
@@ -297,15 +315,21 @@ fn run_import_with_ttl(
             ttl,
         )
         .map_err(security_error)?;
+    // Revoked when this function returns or unwinds.
+    let _revoke = RevokeOnDrop {
+        gate,
+        job_id: capability.job_id(),
+    };
     let progress = CommandProgress {
         cancel,
         sink,
         total: Cell::new(None),
+        gate,
+        lease,
     };
     let mut job = SourceImportRequest::new(gate, lease, &capability, &members);
     job.progress = &progress;
     let result = store.import_authorized_source(&job);
-    let _ = gate.revoke_import_job(capability.job_id());
     result.map_err(|error| {
         let message = archive_error(error);
         // Still unlocked, so the capability itself ran out (it lives at most an hour) or was
@@ -319,6 +343,17 @@ fn run_import_with_ttl(
             message
         }
     })
+}
+
+struct RevokeOnDrop<'a> {
+    gate: &'a SecurityGate,
+    job_id: &'a str,
+}
+
+impl Drop for RevokeOnDrop<'_> {
+    fn drop(&mut self) {
+        let _ = self.gate.revoke_import_job(self.job_id);
+    }
 }
 
 /// Holds the process-wide import slot; released on drop.
@@ -825,6 +860,37 @@ mod tests {
     }
 
     #[test]
+    fn locking_while_staging_stops_before_anything_is_published() {
+        let fx = Fx::new();
+        let path = fx.write_zip(&[("conversations.json", &export(10))]);
+        let report = inspect_source("chatgpt", &path).unwrap();
+        let gate = fx.gate.clone();
+        let sink = |event: ProgressEvent| {
+            if event.phase == "staging" {
+                gate.lock();
+            }
+        };
+        let message = run_import(
+            &fx.store,
+            &fx.gate,
+            fx.gate.require_unlocked().unwrap(),
+            CRED,
+            StartRequest {
+                provider: "chatgpt",
+                path: &path,
+                source_token: &report.source_token,
+                members: None,
+            },
+            &sink,
+            &AtomicBool::new(false),
+        )
+        .unwrap_err();
+        assert!(message.starts_with("E_AUTHORIZATION"), "{message}");
+        assert_eq!(fx.conversations(), 0);
+        assert!(fx.store.incomplete_jobs().unwrap().is_empty());
+    }
+
+    #[test]
     fn locking_mid_import_stops_publication() {
         let fx = Fx::new();
         let path = fx.write_zip(&[("conversations.json", &export(200))]);
@@ -880,7 +946,15 @@ mod tests {
         assert!(inspect_source("claude", "/tmp/x.zip")
             .unwrap_err()
             .starts_with("E_IMPORT_PROVIDER"));
-        for path in ["", "relative/export.zip", "bad\0path"] {
+        for path in [
+            "",
+            "relative/export.zip",
+            "bad\0path",
+            r"\\attacker-host\share\export.zip",
+            r"\\?\UNC\attacker-host\share\export.zip",
+            r"\\.\pipe\export",
+            "//attacker-host/share/export.zip",
+        ] {
             assert!(
                 inspect_source("chatgpt", path)
                     .unwrap_err()
