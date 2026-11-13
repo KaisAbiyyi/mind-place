@@ -251,6 +251,29 @@ pub(crate) fn run_import(
     sink: &dyn Fn(ProgressEvent),
     cancel: &AtomicBool,
 ) -> Result<ImportJobReceipt, String> {
+    run_import_with_ttl(
+        store,
+        gate,
+        lease,
+        credential,
+        request,
+        sink,
+        cancel,
+        CAPABILITY_TTL,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_import_with_ttl(
+    store: &ArchiveStore,
+    gate: &SecurityGate,
+    lease: UnlockLease,
+    credential: &[u8],
+    request: StartRequest<'_>,
+    sink: &dyn Fn(ProgressEvent),
+    cancel: &AtomicBool,
+    ttl: Duration,
+) -> Result<ImportJobReceipt, String> {
     let kind = check_provider(request.provider)?;
     let path = check_path(request.path)?;
     // Verify the owner before reading the source again (fail fast, same backoff as unlock).
@@ -271,7 +294,7 @@ pub(crate) fn run_import(
             request.provider,
             &path,
             *manifest.sha256(),
-            CAPABILITY_TTL,
+            ttl,
         )
         .map_err(security_error)?;
     let progress = CommandProgress {
@@ -283,7 +306,19 @@ pub(crate) fn run_import(
     job.progress = &progress;
     let result = store.import_authorized_source(&job);
     let _ = gate.revoke_import_job(capability.job_id());
-    result.map_err(archive_error)
+    result.map_err(|error| {
+        let message = archive_error(error);
+        // Still unlocked, so the capability itself ran out (it lives at most an hour) or was
+        // revoked. Published items are kept; running the import again resumes the job.
+        if message.starts_with("E_AUTHORIZATION") && gate.validate_lease(lease).is_ok() {
+            coded(
+                "E_IMPORT_AUTH_EXPIRED",
+                "The import authorization ended before the job finished; run the import again to continue",
+            )
+        } else {
+            message
+        }
+    })
 }
 
 /// Holds the process-wide import slot; released on drop.
@@ -747,6 +782,49 @@ mod tests {
     }
 
     #[test]
+    fn an_authorization_that_ends_mid_job_asks_for_a_rerun_that_resumes() {
+        let fx = Fx::new();
+        let path = fx.write_zip(&[("conversations.json", &export(5))]);
+        let report = inspect_source("chatgpt", &path).unwrap();
+        // The capability expires while the owner waits between staging and publication.
+        let sink = |event: ProgressEvent| {
+            if event.phase == "publishing" && event.done == 0 {
+                std::thread::sleep(Duration::from_millis(1500));
+            }
+        };
+        let message = run_import_with_ttl(
+            &fx.store,
+            &fx.gate,
+            fx.gate.require_unlocked().unwrap(),
+            CRED,
+            StartRequest {
+                provider: "chatgpt",
+                path: &path,
+                source_token: &report.source_token,
+                members: None,
+            },
+            &sink,
+            &AtomicBool::new(false),
+            Duration::from_secs(1),
+        )
+        .unwrap_err();
+        assert!(message.starts_with("E_IMPORT_AUTH_EXPIRED"), "{message}");
+        assert_eq!(fx.store.incomplete_jobs().unwrap().len(), 1);
+        let receipt = fx
+            .start(
+                &path,
+                &report.source_token,
+                CRED,
+                None,
+                &AtomicBool::new(false),
+                &Mutex::new(Vec::new()),
+            )
+            .unwrap();
+        assert!(receipt.resumed);
+        assert_eq!(fx.conversations(), 5);
+    }
+
+    #[test]
     fn locking_mid_import_stops_publication() {
         let fx = Fx::new();
         let path = fx.write_zip(&[("conversations.json", &export(200))]);
@@ -757,10 +835,11 @@ mod tests {
                 gate.lock();
             }
         };
+        let lease = fx.gate.require_unlocked().unwrap();
         let message = run_import(
             &fx.store,
             &fx.gate,
-            fx.gate.require_unlocked().unwrap(),
+            lease,
             CRED,
             StartRequest {
                 provider: "chatgpt",
@@ -775,8 +854,25 @@ mod tests {
         assert!(message.starts_with("E_AUTHORIZATION"), "{message}");
         let published = fx.conversations();
         assert!(published < 200, "{published}");
-        // Locked: neither command can start again.
+        // Locked: no new lease, and the old lease cannot authorize another run.
         assert!(fx.gate.require_unlocked().is_err());
+        let stale = run_import(
+            &fx.store,
+            &fx.gate,
+            lease,
+            CRED,
+            StartRequest {
+                provider: "chatgpt",
+                path: &path,
+                source_token: &report.source_token,
+                members: None,
+            },
+            &|_| {},
+            &AtomicBool::new(false),
+        )
+        .unwrap_err();
+        assert!(stale.starts_with("MP_"), "{stale}");
+        assert_eq!(fx.conversations(), published);
     }
 
     #[test]

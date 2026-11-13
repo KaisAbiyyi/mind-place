@@ -971,15 +971,50 @@ fn large_synthetic_export_memory_probe() {
         started.elapsed()
     );
     let started = std::time::Instant::now();
-    let receipt = fx
-        .run_default(&path, &[chatgpt("conversations.json")])
-        .unwrap();
+    let manifest = SourceManifest::measure(&path, ManifestLimits::default()).unwrap();
+    println!("probe: measured in {:?}", started.elapsed());
+    let members = [chatgpt("conversations.json")];
+    let phase = std::cell::Cell::new(std::time::Instant::now());
+    let hook = Hook(|point| {
+        if point == ImportPoint::Verified {
+            println!("probe: staged and verified in {:?}", phase.get().elapsed());
+            phase.set(std::time::Instant::now());
+        }
+        Ok(())
+    });
+    // A capability lives at most an hour; a longer job resumes under a new authorization,
+    // exactly as the owner would by running the import again.
+    let mut runs = 0;
+    let receipt = loop {
+        runs += 1;
+        let cap = fx
+            .gate
+            .authorize_import_session(
+                fx.gate.require_unlocked().unwrap(),
+                CRED,
+                "chatgpt",
+                &path,
+                *manifest.sha256(),
+                Duration::from_secs(3600),
+            )
+            .unwrap();
+        phase.set(std::time::Instant::now());
+        match fx.run(&cap, &members, &hook) {
+            Ok(receipt) => break receipt,
+            Err(error) if error.to_string().contains("E_AUTHORIZATION") && runs < 5 => {
+                println!("probe: authorization expired, resuming (run {runs})");
+            }
+            Err(error) => panic!("{error}"),
+        }
+    };
     println!(
-        "probe: imported {} (raw-only {}, rejected {}) in {:?}",
+        "probe: published in {:?}; total import {:?} over {runs} run(s); imported {} (raw-only {}, rejected {}), resumed {}",
+        phase.get().elapsed(),
+        started.elapsed(),
         receipt.imported,
         receipt.raw_only,
         receipt.rejected,
-        started.elapsed()
+        receipt.resumed
     );
     assert_eq!(receipt.imported as usize, count);
 }

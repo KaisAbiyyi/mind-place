@@ -170,6 +170,9 @@ jobs:
     - name: Test hosted tunnel desktop boundaries
       run: cargo test -p mind-place --bin mind-place hosted_tunnel::tests -- --nocapture
       if: steps.slot.outputs.native == 'true'
+    - name: Test owner import commands (zip source, re-authentication, cancel, lock)
+      run: cargo test -p mind-place --bin mind-place import_commands::tests -- --nocapture
+      if: steps.slot.outputs.native == 'true'
     - name: Qualify native capture encrypted IPC and revoked owner epoch
       if: steps.slot.outputs.native == 'true' && hashFiles('.github/workflows/mp9b-sqlcipher-qualification.yml') != ''
       shell: pwsh
