@@ -60,7 +60,7 @@ Environment: Windows 11 x64, Rust 1.91.1, Node 24.21.0, local run by the impleme
 
 | Command | Result |
 | --- | --- |
-| `cargo test --locked -p mind-place-archive --tests` | PASS: 157 passed, 0 failed after review round 1 (57 unit, 19 archive, 5 generic, 8 historical-write authority, 3 sanitizer compat, 18 second-correction, 6 legacy, **30 raw-evidence publication**, 2 registration, 9 validation boundaries) |
+| `cargo test --locked -p mind-place-archive --tests` | PASS: 159 passed, 0 failed after review round 2 (57 unit, 19 archive, 5 generic, 8 historical-write authority, 3 sanitizer compat, 18 second-correction, 6 legacy, **32 raw-evidence publication**, 2 registration, 9 validation boundaries) |
 | `npm run test:rust` (archive, capture-host, security, state, index, integration, documents) | PASS, exit 0 |
 | `npm run test:web` | PASS: 333 tests, 329 passed, 0 failed, 4 skipped |
 | `cargo fmt --all -- --check`, `npm run verify:repo`, `npm run typecheck` | PASS |
@@ -93,3 +93,14 @@ Documented limits that follow from the review:
 - The whole-folder manifest claim is bounded: after staging only paths and sizes are re-checked, so a same-size change to an **unselected** file between job start and publication is not detected at publication time (member bytes are hash-bound while parsed, and the job-start measurement covers every file).
 - A job that was finished by an earlier build has no ledger; its replay fails with `E_PUBLISHED_MISMATCH` until a repair or deep verification is run (no such job exists outside tests).
 - The old public `save_authorized_historical_import` remains an open owner decision (unchanged). The archive import surface is **not** raw-evidence-enforced while that API exists.
+
+## Independent re-review, round 2 (exact head `b1c2795`) — fixes
+
+The review confirmed the three round-1 findings as fixed and found two new integrity gaps. Both are fixed; each regression test was checked against its defect (guard removed, test failed).
+
+| Finding | Correction | Regression test |
+| --- | --- | --- |
+| **P1** a missing, malformed or unrelated `receipt.json` bypassed the repair decision or was reported as a verified job | The finished-job check now starts from the receipt: it must exist and parse, describe this job (job key, manifest, importer version, provider, staged root, record count, members) and **equal what the ledger adds up to** (the same `tally` function builds both: outcome and blob/evidence counters, raw bytes, exceptions and omitted count). Any failure is a typed `E_PUBLISHED_MISMATCH`, which `repair = true` can recover (the old receipt, if any, is kept as `receipt.superseded-N.json`) | `a_missing_malformed_or_foreign_receipt_is_a_typed_mismatch_and_can_be_repaired` (missing, truncated, malformed, a valid receipt of another job, valid receipt with altered counts, valid receipt naming another manifest; each fails typed, then repairs to a disk equal to the original with a correct receipt) |
+| **P2** deep verification did not bind provenance and disposition | The ledger now records the SHA-256 of the evidence and link records as written. Deep mode requires both files to equal those hashes **and** checks them semantically: the evidence id is re-derived from its fields, and manifest, provider, payload hash and size, member (hash, size) and span must agree with the job; the link must agree with the ledger on evidence id, importer version, disposition, reason, archive id and snapshot id | `deep_verification_binds_evidence_and_links_to_the_ledger` (valid-JSON-but-wrong link: other snapshot, `raw-only`, invented reason, other evidence id, other importer; evidence: edited metadata with the payload hash kept, other source identifier, other member path, moved span, other manifest, other provider; each fails deep, passes shallow as documented, and is restored) |
+
+What the checks prove and do not prove: shallow = receipt/ledger consistency plus presence and size of raw, evidence, link and projection files. Deep = also byte equality of the raw blob, evidence and link with what the job wrote. Neither re-derives a projection from the raw bytes, and neither can prove the original source bytes were authentic (that is the manifest and member-hash binding at import time).

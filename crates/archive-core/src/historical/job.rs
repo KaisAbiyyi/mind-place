@@ -10,7 +10,7 @@
 //!    again repairs any crash.
 
 use super::manifest::{
-    coded, hex, open_regular_no_follow, HashingReader, ManifestLimits, SourceManifest,
+    coded, hex, open_regular_no_follow, unhex32, HashingReader, ManifestLimits, SourceManifest,
 };
 use crate::importers::chatgpt_export::{ChatGptExportParser, ConversationIdTracker};
 use crate::importers::gemini_takeout::{GeminiTakeoutParser, MAX_TAKEOUT_HTML_BYTES};
@@ -211,6 +211,9 @@ pub struct ItemReceipt {
     pub evidence_new: bool,
     pub evidence_id: String,
     pub payload_bytes: u64,
+    /// SHA-256 of the evidence and link records as written, so a deep check detects any change.
+    pub evidence_sha256: String,
+    pub link_sha256: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -387,6 +390,7 @@ struct Prepared {
     install: Option<tempfile::NamedTempFile>,
     evidence_path: PathBuf,
     evidence_bytes: Vec<u8>,
+    evidence_sha256: String,
     evidence_exists: bool,
     link_path: PathBuf,
 }
@@ -513,12 +517,7 @@ impl ArchiveStore {
         {
             // A stored receipt is a claim, not proof: check what it lists is still published.
             match self.verify_published(&job_dir, existing.as_ref().unwrap(), false) {
-                Ok(()) => {
-                    let mut receipt: ImportJobReceipt = serde_json::from_slice(&bounded_read(
-                        &job_dir.join(RECEIPT_FILE),
-                        MAX_STATE_BYTES,
-                    )?)
-                    .map_err(|_| coded("E_STATE_CORRUPT", "Import receipt is unreadable"))?;
+                Ok(mut receipt) => {
                     let _ = fs::remove_dir_all(job_dir.join("items"));
                     receipt.already_complete = true;
                     receipt.published_check = "presence-verified".into();
@@ -687,11 +686,49 @@ impl ArchiveStore {
         if state.phase != JobPhase::Complete {
             return Err(coded("E_JOB_INCOMPLETE", "The import job is not finished"));
         }
-        self.verify_published(&dir, &state, deep)
+        self.verify_published(&dir, &state, deep).map(|_| ())
     }
 
-    fn verify_published(&self, job_dir: &Path, state: &JobState, deep: bool) -> Result<()> {
+    /// Reconciles a finished job with the disk: the receipt must exist, describe this job and
+    /// equal what the ledger adds up to; every ledger item must still be published. Returns the
+    /// validated receipt. Missing, unreadable or foreign receipts are `E_PUBLISHED_MISMATCH`.
+    fn verify_published(
+        &self,
+        job_dir: &Path,
+        state: &JobState,
+        deep: bool,
+    ) -> Result<ImportJobReceipt> {
         let mismatch = |what: &str| coded("E_PUBLISHED_MISMATCH", what);
+        let receipt_path = job_dir.join(RECEIPT_FILE);
+        no_link(&receipt_path)?;
+        let receipt: ImportJobReceipt = serde_json::from_slice(
+            &bounded_read(&receipt_path, MAX_STATE_BYTES)
+                .map_err(|_| mismatch("The job receipt is missing"))?,
+        )
+        .map_err(|_| mismatch("The job receipt is unreadable"))?;
+        if receipt.job_key != state.job_key
+            || receipt.manifest_sha256 != state.manifest_sha256
+            || receipt.importer_version != state.importer_version
+            || receipt.provider != state.provider
+            || Some(&receipt.staged_root_sha256) != state.staged_root_sha256.as_ref()
+            || receipt.records_scanned != state.item_count
+            || receipt.members != state.members
+        {
+            return Err(mismatch("The job receipt does not describe this job"));
+        }
+
+        let mut expected = receipt.clone();
+        expected.imported = 0;
+        expected.deduplicated = 0;
+        expected.raw_only = 0;
+        expected.rejected = 0;
+        expected.raw_blobs_new = 0;
+        expected.raw_blobs_reused = 0;
+        expected.evidence_new = 0;
+        expected.evidence_existing = 0;
+        expected.exceptions = Vec::new();
+        expected.exceptions_omitted = 0;
+
         let ledger = job_dir.join(LEDGER_FILE);
         no_link(&ledger)?;
         let file = File::open(&ledger).map_err(|_| mismatch("The job ledger is missing"))?;
@@ -716,16 +753,36 @@ impl ArchiveStore {
             if item.seq != seen {
                 return Err(mismatch("The job ledger is out of order"));
             }
-            self.check_published_item(&item, deep)?;
+            self.check_published_item(&item, state, deep)?;
+            tally(&mut expected, &item);
             seen += 1;
         }
         if seen != state.item_count {
             return Err(mismatch("The job ledger is incomplete"));
         }
-        Ok(())
+        expected.raw_bytes_preserved = state.members.iter().map(|m| m.record_bytes).sum();
+        if receipt.imported != expected.imported
+            || receipt.deduplicated != expected.deduplicated
+            || receipt.raw_only != expected.raw_only
+            || receipt.rejected != expected.rejected
+            || receipt.raw_blobs_new != expected.raw_blobs_new
+            || receipt.raw_blobs_reused != expected.raw_blobs_reused
+            || receipt.evidence_new != expected.evidence_new
+            || receipt.evidence_existing != expected.evidence_existing
+            || receipt.raw_bytes_preserved != expected.raw_bytes_preserved
+            || receipt.exceptions != expected.exceptions
+            || receipt.exceptions_omitted != expected.exceptions_omitted
+        {
+            return Err(mismatch("The job receipt does not match its ledger"));
+        }
+        Ok(receipt)
     }
 
-    fn check_published_item(&self, item: &ItemReceipt, deep: bool) -> Result<()> {
+    /// Shallow: presence and size. Deep: the raw blob is re-hashed, and the evidence and link
+    /// records must equal the bytes the job wrote (hash recorded in the ledger) and agree with
+    /// the ledger and the job (evidence id re-derived from its fields, manifest, member span,
+    /// disposition, archive and snapshot ids).
+    fn check_published_item(&self, item: &ItemReceipt, state: &JobState, deep: bool) -> Result<()> {
         let mismatch = |what: &str| coded("E_PUBLISHED_MISMATCH", what);
         let raw = self.sharded("raw", &item.payload_sha256, "raw")?;
         no_link(&raw)?;
@@ -737,21 +794,10 @@ impl ArchiveStore {
                 ))
             }
         }
-        if deep && verify_blob(&raw, &item.payload_sha256, item.payload_bytes).is_err() {
-            return Err(mismatch("A published raw blob does not match its hash"));
-        }
         let evidence = self.sharded("evidence", &item.evidence_id, "json")?;
         no_link(&evidence)?;
         if !evidence.is_file() {
             return Err(mismatch("A provenance record is missing"));
-        }
-        if deep {
-            let record: serde_json::Value =
-                serde_json::from_slice(&bounded_read(&evidence, MAX_STATE_BYTES)?)
-                    .map_err(|_| mismatch("A provenance record is unreadable"))?;
-            if record["payload_sha256"] != item.payload_sha256.as_str() {
-                return Err(mismatch("A provenance record does not match its raw blob"));
-            }
         }
         let link = self.sharded("dispositions", &item.evidence_id, "json")?;
         no_link(&link)?;
@@ -771,6 +817,73 @@ impl ArchiveStore {
             {
                 return Err(mismatch("A projection is missing"));
             }
+        }
+        if !deep {
+            return Ok(());
+        }
+
+        if verify_blob(&raw, &item.payload_sha256, item.payload_bytes).is_err() {
+            return Err(mismatch("A published raw blob does not match its hash"));
+        }
+
+        let evidence_bytes = bounded_read(&evidence, MAX_STATE_BYTES)?;
+        if sha_hex(&evidence_bytes) != item.evidence_sha256 {
+            return Err(mismatch("A provenance record was altered"));
+        }
+        let record: serde_json::Value = serde_json::from_slice(&evidence_bytes)
+            .map_err(|_| mismatch("A provenance record is unreadable"))?;
+        let manifest_bytes = unhex32(&state.manifest_sha256)
+            .ok_or_else(|| mismatch("The job manifest hash is invalid"))?;
+        let member_path = record["member_path"].as_str().unwrap_or_default();
+        let (offset, length) = (
+            record["offset"].as_u64().unwrap_or(u64::MAX),
+            record["length"].as_u64().unwrap_or(u64::MAX),
+        );
+        let member = state.members.iter().find(|m| m.path == member_path);
+        let within_member = member.is_some_and(|m| {
+            record["member_sha256"] == m.sha256.as_str()
+                && record["member_bytes"].as_u64() == Some(m.bytes)
+                && offset.checked_add(length).is_some_and(|end| end <= m.bytes)
+        });
+        if record["evidence_id"] != item.evidence_id.as_str()
+            || record["payload_sha256"] != item.payload_sha256.as_str()
+            || record["payload_bytes"].as_u64() != Some(item.payload_bytes)
+            || length != item.payload_bytes
+            || record["manifest_sha256"] != state.manifest_sha256.as_str()
+            || record["provider"] != state.provider.as_str()
+            || !within_member
+            || evidence_id_from_parts(
+                &manifest_bytes,
+                member_path,
+                offset,
+                length,
+                &item.payload_sha256,
+            ) != item.evidence_id
+        {
+            return Err(mismatch("A provenance record does not match its job"));
+        }
+
+        let link_bytes = bounded_read(&link, MAX_STATE_BYTES)?;
+        if sha_hex(&link_bytes) != item.link_sha256 {
+            return Err(mismatch("A disposition link was altered"));
+        }
+        let value: serde_json::Value = serde_json::from_slice(&link_bytes)
+            .map_err(|_| mismatch("A disposition link is unreadable"))?;
+        let disposition = match item.outcome {
+            ItemOutcome::Imported | ItemOutcome::Deduplicated => "projected",
+            ItemOutcome::RawOnly => "raw-only",
+            ItemOutcome::Rejected => "rejected",
+        };
+        if value["evidence_id"] != item.evidence_id.as_str()
+            || value["importer_version"] != state.importer_version.as_str()
+            || value["disposition"] != disposition
+            || value["reason"] != serde_json::json!(item.reason)
+            || value["archive_id"] != serde_json::json!(item.archive_id)
+            || value["snapshot_id"] != serde_json::json!(item.snapshot_id)
+        {
+            return Err(mismatch(
+                "A disposition link does not match its ledger entry",
+            ));
         }
         Ok(())
     }
@@ -1022,6 +1135,7 @@ impl ArchiveStore {
             metadata_json: &item.metadata_json,
         };
         let evidence_bytes = serde_json::to_vec(&evidence)?;
+        let evidence_sha256 = sha_hex(&evidence_bytes);
         let evidence_path = self.sharded("evidence", &evidence_id, "json")?;
         let evidence_exists = if evidence_path.exists() {
             no_link(&evidence_path)?;
@@ -1044,6 +1158,7 @@ impl ArchiveStore {
             install,
             evidence_path,
             evidence_bytes,
+            evidence_sha256,
             evidence_exists,
             link_path,
         })
@@ -1064,6 +1179,7 @@ impl ArchiveStore {
             install,
             evidence_path,
             evidence_bytes,
+            evidence_sha256,
             evidence_exists,
             link_path,
         } = prepared;
@@ -1143,7 +1259,8 @@ impl ArchiveStore {
             archive_id: archive_id.as_deref(),
             snapshot_id: snapshot_id.as_deref(),
         };
-        atomic_write(&link_path, &serde_json::to_vec(&link)?, false)?;
+        let link_bytes = serde_json::to_vec(&link)?;
+        atomic_write(&link_path, &link_bytes, false)?;
         Ok(ItemReceipt {
             seq,
             outcome,
@@ -1155,6 +1272,8 @@ impl ArchiveStore {
             evidence_new,
             evidence_id,
             payload_bytes: item.payload_bytes,
+            evidence_sha256,
+            link_sha256: sha_hex(&link_bytes),
         })
     }
 
@@ -1200,29 +1319,7 @@ impl ArchiveStore {
             .map_err(|_| coded("E_STATE_CORRUPT", "An item result is unreadable"))?;
             ledger.write_all(&serde_json::to_vec(&done)?)?;
             ledger.write_all(b"\n")?;
-            match done.outcome {
-                ItemOutcome::Imported => receipt.imported += 1,
-                ItemOutcome::Deduplicated => receipt.deduplicated += 1,
-                ItemOutcome::RawOnly => receipt.raw_only += 1,
-                ItemOutcome::Rejected => receipt.rejected += 1,
-            }
-            if done.raw_blob_new {
-                receipt.raw_blobs_new += 1;
-            } else {
-                receipt.raw_blobs_reused += 1;
-            }
-            if done.evidence_new {
-                receipt.evidence_new += 1;
-            } else {
-                receipt.evidence_existing += 1;
-            }
-            if matches!(done.outcome, ItemOutcome::RawOnly | ItemOutcome::Rejected) {
-                if receipt.exceptions.len() < MAX_RECEIPT_EXCEPTIONS {
-                    receipt.exceptions.push(done);
-                } else {
-                    receipt.exceptions_omitted += 1;
-                }
-            }
+            tally(&mut receipt, &done);
         }
         receipt.raw_bytes_preserved = state.members.iter().map(|m| m.record_bytes).sum();
         ledger.flush()?;
@@ -1239,6 +1336,34 @@ impl ArchiveStore {
         write_state(job_dir, state)?;
         let _ = fs::remove_dir_all(&items_dir);
         Ok(receipt)
+    }
+}
+
+/// Adds one item's result to a receipt's counters. Used when a job finishes and again when a
+/// finished job is reconciled with its ledger, so both always agree on the rules.
+fn tally(receipt: &mut ImportJobReceipt, done: &ItemReceipt) {
+    match done.outcome {
+        ItemOutcome::Imported => receipt.imported += 1,
+        ItemOutcome::Deduplicated => receipt.deduplicated += 1,
+        ItemOutcome::RawOnly => receipt.raw_only += 1,
+        ItemOutcome::Rejected => receipt.rejected += 1,
+    }
+    if done.raw_blob_new {
+        receipt.raw_blobs_new += 1;
+    } else {
+        receipt.raw_blobs_reused += 1;
+    }
+    if done.evidence_new {
+        receipt.evidence_new += 1;
+    } else {
+        receipt.evidence_existing += 1;
+    }
+    if matches!(done.outcome, ItemOutcome::RawOnly | ItemOutcome::Rejected) {
+        if receipt.exceptions.len() < MAX_RECEIPT_EXCEPTIONS {
+            receipt.exceptions.push(done.clone());
+        } else {
+            receipt.exceptions_omitted += 1;
+        }
     }
 }
 
@@ -1431,13 +1556,29 @@ fn job_key_for(
 }
 
 fn evidence_id_for(manifest: &SourceManifest, item: &StagedItem) -> String {
+    evidence_id_from_parts(
+        manifest.sha256(),
+        &item.source.member_path,
+        item.source.span.offset,
+        item.source.span.length,
+        &item.payload_sha256,
+    )
+}
+
+fn evidence_id_from_parts(
+    manifest_sha256: &[u8; 32],
+    member_path: &str,
+    offset: u64,
+    length: u64,
+    payload_sha256: &str,
+) -> String {
     let mut hasher = Sha256::new();
     hasher.update(b"mind-place/import-evidence/v1\0");
-    hasher.update(manifest.sha256());
-    frame(&mut hasher, item.source.member_path.as_bytes());
-    hasher.update(item.source.span.offset.to_be_bytes());
-    hasher.update(item.source.span.length.to_be_bytes());
-    frame(&mut hasher, item.payload_sha256.as_bytes());
+    hasher.update(manifest_sha256);
+    frame(&mut hasher, member_path.as_bytes());
+    hasher.update(offset.to_be_bytes());
+    hasher.update(length.to_be_bytes());
+    frame(&mut hasher, payload_sha256.as_bytes());
     hex(&hasher.finalize())
 }
 

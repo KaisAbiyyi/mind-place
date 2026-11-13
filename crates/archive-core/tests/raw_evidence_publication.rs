@@ -1421,3 +1421,229 @@ fn resuming_with_a_different_raw_byte_cap_never_reuses_the_old_spool() {
     assert_eq!(receipt.job_key, original);
     assert!(receipt.resumed);
 }
+
+// ---------- reviewer findings (round 2 on PR #168) ----------
+
+fn job_dir_of(fx: &Fx) -> PathBuf {
+    job_dirs(fx)[0].clone()
+}
+
+fn repair(fx: &Fx, dir: &Path) -> Result<ImportJobReceipt> {
+    let members = [chatgpt("conversations.json")];
+    let cap = fx.authorize(dir);
+    let mut request = SourceImportRequest::new(
+        &fx.gate,
+        fx.gate.require_unlocked().unwrap(),
+        &cap,
+        &members,
+    );
+    request.repair = true;
+    fx.store.import_authorized_source(&request)
+}
+
+#[test]
+fn a_missing_malformed_or_foreign_receipt_is_a_typed_mismatch_and_can_be_repaired() {
+    let foreign_receipt = {
+        let other = Fx::new("chatgpt");
+        let bytes = export(&[conv(A, "Other", "other question")]);
+        let dir = other.source("export", &[("conversations.json", &bytes)]);
+        other
+            .run_default(&dir, &[chatgpt("conversations.json")])
+            .unwrap();
+        std::fs::read_to_string(job_dir_of(&other).join("receipt.json")).unwrap()
+    };
+    let foreign: &'static str = Box::leak(foreign_receipt.into_boxed_str());
+    let cases: Vec<(&str, Box<dyn Fn(&Path)>)> = vec![
+        (
+            "missing",
+            Box::new(|job| std::fs::remove_file(job.join("receipt.json")).unwrap()),
+        ),
+        (
+            "truncated",
+            Box::new(|job| {
+                let text = std::fs::read(job.join("receipt.json")).unwrap();
+                std::fs::write(job.join("receipt.json"), &text[..text.len() / 2]).unwrap();
+            }),
+        ),
+        (
+            "malformed",
+            Box::new(|job| std::fs::write(job.join("receipt.json"), b"not json").unwrap()),
+        ),
+        (
+            "valid receipt of another job",
+            Box::new(move |job| std::fs::write(job.join("receipt.json"), foreign).unwrap()),
+        ),
+        (
+            "valid but with altered counts",
+            Box::new(|job| {
+                let mut value: serde_json::Value =
+                    serde_json::from_slice(&std::fs::read(job.join("receipt.json")).unwrap())
+                        .unwrap();
+                value["imported"] = serde_json::json!(99);
+                std::fs::write(
+                    job.join("receipt.json"),
+                    serde_json::to_vec(&value).unwrap(),
+                )
+                .unwrap();
+            }),
+        ),
+        (
+            "valid but claiming another manifest",
+            Box::new(|job| {
+                let mut value: serde_json::Value =
+                    serde_json::from_slice(&std::fs::read(job.join("receipt.json")).unwrap())
+                        .unwrap();
+                value["manifest_sha256"] = serde_json::json!("0".repeat(64));
+                std::fs::write(
+                    job.join("receipt.json"),
+                    serde_json::to_vec(&value).unwrap(),
+                )
+                .unwrap();
+            }),
+        ),
+    ];
+    for (name, tamper) in cases {
+        let fx = Fx::new("chatgpt");
+        let (dir, receipt) = finished_job(&fx);
+        let expected = published_digest(&fx);
+        let job = job_dir_of(&fx);
+        let had_receipt = name != "missing";
+        tamper(&job);
+
+        // Never reported as a verified finished job; typed, and the same with or without a check.
+        let message = error_text(fx.run_default(&dir, &[chatgpt("conversations.json")]));
+        assert!(
+            message.contains("E_PUBLISHED_MISMATCH"),
+            "{name}: {message}"
+        );
+        assert!(fx
+            .store
+            .verify_published_job(&receipt.job_key, false)
+            .unwrap_err()
+            .to_string()
+            .contains("E_PUBLISHED_MISMATCH"));
+
+        // Explicit repair: a correct receipt again, the old audit files kept, nothing lost.
+        let repaired = repair(&fx, &dir).unwrap();
+        assert!(!repaired.already_complete, "{name}");
+        assert_eq!(repaired.job_key, receipt.job_key);
+        assert_eq!(published_digest(&fx), expected, "{name}");
+        fx.store
+            .verify_published_job(&receipt.job_key, true)
+            .unwrap();
+        let again = fx
+            .run_default(&dir, &[chatgpt("conversations.json")])
+            .unwrap();
+        assert!(again.already_complete && again.published_check == "presence-verified");
+        let superseded = std::fs::read_dir(&job)
+            .unwrap()
+            .filter(|e| {
+                e.as_ref()
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("receipt.superseded-")
+            })
+            .count();
+        assert_eq!(superseded, had_receipt as usize, "{name}");
+    }
+}
+
+#[test]
+fn deep_verification_binds_evidence_and_links_to_the_ledger() {
+    let fx = Fx::new("chatgpt");
+    let (_, receipt) = finished_job(&fx);
+    let key = receipt.job_key.clone();
+    let link_path = files_under(&fx.archive().join("imports/dispositions"))[0].clone();
+    let evidence_path = files_under(&fx.archive().join("imports/evidence"))[0].clone();
+    let link_original = std::fs::read(&link_path).unwrap();
+    let evidence_original = std::fs::read(&evidence_path).unwrap();
+    fx.store.verify_published_job(&key, true).unwrap();
+
+    let edit = |path: &Path, original: &[u8], change: &dyn Fn(&mut serde_json::Value)| {
+        let mut value: serde_json::Value = serde_json::from_slice(original).unwrap();
+        change(&mut value);
+        std::fs::write(path, serde_json::to_vec(&value).unwrap()).unwrap();
+    };
+    type Change = Box<dyn Fn(&mut serde_json::Value)>;
+    let link_changes: Vec<(&str, Change)> = vec![
+        (
+            "link points at another snapshot",
+            Box::new(|v| v["snapshot_id"] = serde_json::json!("f".repeat(64))),
+        ),
+        (
+            "link says raw-only",
+            Box::new(|v| v["disposition"] = serde_json::json!("raw-only")),
+        ),
+        (
+            "link carries a reason",
+            Box::new(|v| v["reason"] = serde_json::json!("invented")),
+        ),
+        (
+            "link names another evidence record",
+            Box::new(|v| v["evidence_id"] = serde_json::json!("a".repeat(64))),
+        ),
+        (
+            "link names another importer",
+            Box::new(|v| v["importer_version"] = serde_json::json!("other/9")),
+        ),
+    ];
+    for (name, change) in link_changes {
+        edit(&link_path, &link_original, change.as_ref());
+        // Valid JSON, same file name: only the deep check sees it (documented).
+        fx.store.verify_published_job(&key, false).unwrap();
+        let message = fx
+            .store
+            .verify_published_job(&key, true)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            message.contains("E_PUBLISHED_MISMATCH"),
+            "{name}: {message}"
+        );
+        std::fs::write(&link_path, &link_original).unwrap();
+        fx.store.verify_published_job(&key, true).unwrap();
+    }
+
+    let evidence_changes: Vec<(&str, Change)> = vec![
+        (
+            "metadata changed, payload hash kept",
+            Box::new(|v| v["metadata_json"] = serde_json::json!("{\"edited\":true}")),
+        ),
+        (
+            "source identifier changed",
+            Box::new(|v| v["source_identifier"] = serde_json::json!("another-conversation")),
+        ),
+        (
+            "member path changed",
+            Box::new(|v| v["member_path"] = serde_json::json!("other.json")),
+        ),
+        (
+            "span moved",
+            Box::new(|v| v["offset"] = serde_json::json!(1)),
+        ),
+        (
+            "manifest changed",
+            Box::new(|v| v["manifest_sha256"] = serde_json::json!("0".repeat(64))),
+        ),
+        (
+            "provider changed",
+            Box::new(|v| v["provider"] = serde_json::json!("gemini")),
+        ),
+    ];
+    for (name, change) in evidence_changes {
+        edit(&evidence_path, &evidence_original, change.as_ref());
+        fx.store.verify_published_job(&key, false).unwrap();
+        let message = fx
+            .store
+            .verify_published_job(&key, true)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            message.contains("E_PUBLISHED_MISMATCH"),
+            "{name}: {message}"
+        );
+        std::fs::write(&evidence_path, &evidence_original).unwrap();
+        fx.store.verify_published_job(&key, true).unwrap();
+    }
+}
