@@ -943,3 +943,164 @@ fn a_zip_source_reached_through_a_symlink_is_refused() {
         .to_string();
     assert!(message.contains("E_SOURCE_ROOT"), "{message}");
 }
+
+// ---------- large synthetic export (memory probe, run by hand) ----------
+
+/// Streams a large synthetic ChatGPT export zip to disk without holding it in memory, then
+/// imports it. Run with `cargo test --release -p mind-place-archive --test zip_source_import --
+/// --ignored --nocapture large_synthetic` while sampling the process's peak working set.
+/// `MP_IMPORT_PROBE_CONVERSATIONS` (default 20000) and `MP_IMPORT_PROBE_TEXT_BYTES` (default
+/// 16384) size the export.
+#[test]
+#[ignore]
+fn large_synthetic_export_memory_probe() {
+    let count: usize = std::env::var("MP_IMPORT_PROBE_CONVERSATIONS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(20_000);
+    let text_bytes: usize = std::env::var("MP_IMPORT_PROBE_TEXT_BYTES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(16_384);
+    let fx = Fx::new("chatgpt");
+    let path = fx.home.path().join("large-export.zip");
+    let started = std::time::Instant::now();
+    let (uncompressed, compressed) = write_streamed_export(&path, count, text_bytes);
+    println!(
+        "probe: wrote {count} conversations, {uncompressed} bytes uncompressed, {compressed} bytes zipped in {:?}",
+        started.elapsed()
+    );
+    let started = std::time::Instant::now();
+    let receipt = fx
+        .run_default(&path, &[chatgpt("conversations.json")])
+        .unwrap();
+    println!(
+        "probe: imported {} (raw-only {}, rejected {}) in {:?}",
+        receipt.imported,
+        receipt.raw_only,
+        receipt.rejected,
+        started.elapsed()
+    );
+    assert_eq!(receipt.imported as usize, count);
+}
+
+/// Pseudo-random lowercase text, so the export compresses like prose rather than like zeros.
+fn filler(seed: u64, len: usize) -> String {
+    let mut state = seed
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(1442695040888963407);
+    let mut out = String::with_capacity(len);
+    while out.len() < len {
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        let word = (state >> 33) as usize % 9 + 2;
+        for i in 0..word {
+            out.push((b'a' + ((state >> (i * 5 % 40)) as u8 % 26)) as char);
+        }
+        out.push(' ');
+    }
+    out.truncate(len);
+    out
+}
+
+fn write_streamed_export(path: &Path, count: usize, text_bytes: usize) -> (u64, u64) {
+    struct Counting<W: Write> {
+        inner: W,
+        bytes: u64,
+    }
+    impl<W: Write> Write for Counting<W> {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            let n = self.inner.write(buf)?;
+            self.bytes += n as u64;
+            Ok(n)
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            self.inner.flush()
+        }
+    }
+    let name = b"conversations.json";
+    let file = std::io::BufWriter::new(std::fs::File::create(path).unwrap());
+    let mut out = Counting {
+        inner: file,
+        bytes: 0,
+    };
+    // Local header with a data descriptor (flag bit 3): sizes and CRC follow the data.
+    let mut header = Vec::new();
+    put32(&mut header, 0x0403_4b50);
+    put16(&mut header, 20);
+    put16(&mut header, (1 << 11) | (1 << 3));
+    put16(&mut header, 8);
+    put16(&mut header, 0);
+    put16(&mut header, 0x5b21);
+    put32(&mut header, 0);
+    put32(&mut header, 0);
+    put32(&mut header, 0);
+    put16(&mut header, name.len() as u16);
+    put16(&mut header, 0);
+    header.extend_from_slice(name);
+    out.write_all(&header).unwrap();
+    let data_start = out.bytes;
+    let mut crc = Crc::new();
+    let mut uncompressed = 0u64;
+    let mut encoder = DeflateEncoder::new(out, Compression::fast());
+    let mut emit = |encoder: &mut DeflateEncoder<Counting<_>>, bytes: &[u8]| {
+        crc.update(bytes);
+        uncompressed += bytes.len() as u64;
+        encoder.write_all(bytes).unwrap();
+    };
+    emit(&mut encoder, b"[\n");
+    for i in 0..count {
+        let id = format!("{:08x}-0000-4000-8000-{:012x}", i, i);
+        let record = conv(
+            &id,
+            &format!("Conversation {i}"),
+            &filler(i as u64, text_bytes),
+        );
+        if i > 0 {
+            emit(&mut encoder, b",\n");
+        }
+        emit(&mut encoder, record.as_bytes());
+    }
+    emit(&mut encoder, b"\n]\n");
+    let mut out = encoder.finish().unwrap();
+    let compressed = out.bytes - data_start;
+    assert!(compressed < u32::MAX as u64 && uncompressed < u32::MAX as u64);
+    let crc = crc.sum();
+    let mut tail = Vec::new();
+    put32(&mut tail, 0x0807_4b50);
+    put32(&mut tail, crc);
+    put32(&mut tail, compressed as u32);
+    put32(&mut tail, uncompressed as u32);
+    let cd_offset = out.bytes + tail.len() as u64;
+    put32(&mut tail, 0x0201_4b50);
+    put16(&mut tail, 0x031e);
+    put16(&mut tail, 20);
+    put16(&mut tail, (1 << 11) | (1 << 3));
+    put16(&mut tail, 8);
+    put16(&mut tail, 0);
+    put16(&mut tail, 0x5b21);
+    put32(&mut tail, crc);
+    put32(&mut tail, compressed as u32);
+    put32(&mut tail, uncompressed as u32);
+    put16(&mut tail, name.len() as u16);
+    put16(&mut tail, 0);
+    put16(&mut tail, 0);
+    put16(&mut tail, 0);
+    put16(&mut tail, 0);
+    put32(&mut tail, 0);
+    put32(&mut tail, 0);
+    tail.extend_from_slice(name);
+    let cd_size = 46 + name.len() as u32;
+    put32(&mut tail, 0x0605_4b50);
+    put16(&mut tail, 0);
+    put16(&mut tail, 0);
+    put16(&mut tail, 1);
+    put16(&mut tail, 1);
+    put32(&mut tail, cd_size);
+    put32(&mut tail, cd_offset as u32);
+    put16(&mut tail, 0);
+    out.write_all(&tail).unwrap();
+    out.flush().unwrap();
+    (uncompressed, compressed)
+}
