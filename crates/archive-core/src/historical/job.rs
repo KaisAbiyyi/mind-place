@@ -350,7 +350,10 @@ struct LinkRecord<'a> {
     schema_version: u32,
     evidence_id: &'a str,
     importer_version: &'a str,
-    outcome: ItemOutcome,
+    /// `projected`, `raw-only` or `rejected`. Not imported-versus-deduplicated: that distinction
+    /// depends on whether this run or an earlier one first published the snapshot, so it would
+    /// differ between a clean run and a resumed one. It lives in the per-job receipt.
+    disposition: &'static str,
     reason: Option<&'a str>,
     archive_id: Option<&'a str>,
     snapshot_id: Option<&'a str>,
@@ -978,7 +981,11 @@ impl ArchiveStore {
             schema_version: 1,
             evidence_id: &evidence_id,
             importer_version: IMPORTER_VERSION,
-            outcome,
+            disposition: match outcome {
+                ItemOutcome::Imported | ItemOutcome::Deduplicated => "projected",
+                ItemOutcome::RawOnly => "raw-only",
+                ItemOutcome::Rejected => "rejected",
+            },
             reason: reason.as_deref(),
             archive_id: archive_id.as_deref(),
             snapshot_id: snapshot_id.as_deref(),
@@ -1323,4 +1330,126 @@ fn verify_blob(path: &Path, sha256: &str, length: u64) -> Result<()> {
         return Err(coded("E_BLOB", "Blob does not match its hash"));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Attachment, Message};
+
+    fn capture(attachment: Option<Attachment>) -> Capture {
+        Capture {
+            schema_version: 1,
+            provider: "chatgpt".into(),
+            conversation_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".into(),
+            source_url: "mindplace-import://chatgpt-export/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+                .into(),
+            title: "t".into(),
+            conversation_created_at: None,
+            conversation_updated_at: None,
+            captured_at: "2026-11-13T00:00:00Z".into(),
+            capture_method: "export-import".into(),
+            completeness: "partial".into(),
+            warnings: vec!["w".into()],
+            messages: vec![Message {
+                id: "m".into(),
+                role: "user".into(),
+                text: "hello".into(),
+                format: "plain".into(),
+                authored_at: None,
+                model: None,
+                attachments: attachment.into_iter().collect(),
+            }],
+        }
+    }
+
+    fn attachment(data_url: Option<&str>, asset_path: Option<&str>) -> Attachment {
+        Attachment {
+            id: "a".into(),
+            name: "n".into(),
+            mime_type: "image/png".into(),
+            source_url: None,
+            data_url: data_url.map(Into::into),
+            asset_path: asset_path.map(Into::into),
+            unavailable_reason: None,
+        }
+    }
+
+    #[test]
+    fn captures_that_would_store_assets_are_rejected_with_a_generic_reason() {
+        assert!(classify_capture(capture(None), "chatgpt").is_ok());
+        for bad in [
+            attachment(Some("data:image/png;base64,AAAA"), None),
+            attachment(None, Some("x.png")),
+        ] {
+            let reason = classify_capture(capture(Some(bad)), "chatgpt").unwrap_err();
+            assert!(reason.starts_with("projection rejected"));
+            assert!(!reason.contains("AAAA") && !reason.contains("x.png"));
+        }
+        // A provider mismatch is a rejection too, never a silent re-labelling.
+        assert!(classify_capture(capture(None), "gemini").is_err());
+    }
+
+    #[test]
+    fn the_snapshot_id_is_the_one_the_store_computes_and_ignores_the_observation_time() {
+        let (_, one, archive_one) = classify_capture(capture(None), "chatgpt").unwrap();
+        let mut later = capture(None);
+        later.captured_at = "2030-01-01T00:00:00Z".into();
+        let (_, two, archive_two) = classify_capture(later, "chatgpt").unwrap();
+        assert_eq!(one, two);
+        assert_eq!(archive_one, archive_two);
+        let mut changed = capture(None);
+        changed.title = "different".into();
+        assert_ne!(one, classify_capture(changed, "chatgpt").unwrap().1);
+    }
+
+    #[test]
+    fn job_keys_depend_on_provider_manifest_members_and_limits() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("c.json"), b"[]").unwrap();
+        let manifest = SourceManifest::measure(dir.path(), ManifestLimits::default()).unwrap();
+        let member = |kind| {
+            vec![ImportMember {
+                path: "c.json".into(),
+                kind,
+            }]
+        };
+        let limits = ImportJobLimits::default();
+        let base = job_key_for(
+            "chatgpt",
+            &manifest,
+            &member(MemberKind::ChatgptConversations),
+            &limits,
+        );
+        assert_eq!(base.len(), 64);
+        assert_ne!(
+            base,
+            job_key_for(
+                "gemini",
+                &manifest,
+                &member(MemberKind::ChatgptConversations),
+                &limits
+            )
+        );
+        assert_ne!(
+            base,
+            job_key_for(
+                "chatgpt",
+                &manifest,
+                &member(MemberKind::GeminiTakeoutHtml),
+                &limits
+            )
+        );
+        let mut other = limits;
+        other.max_items = 7;
+        assert_ne!(
+            base,
+            job_key_for(
+                "chatgpt",
+                &manifest,
+                &member(MemberKind::ChatgptConversations),
+                &other
+            )
+        );
+    }
 }

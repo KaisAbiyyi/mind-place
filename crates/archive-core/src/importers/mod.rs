@@ -467,6 +467,41 @@ mod tests {
     }
 
     #[test]
+    fn spanned_stream_reports_the_exact_offset_of_every_record_for_any_read_chunking() {
+        struct Chunked<'a>(&'a [u8], usize);
+        impl std::io::Read for Chunked<'_> {
+            fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+                let n = self.0.len().min(self.1).min(out.len());
+                out[..n].copy_from_slice(&self.0[..n]);
+                self.0 = &self.0[n..];
+                Ok(n)
+            }
+        }
+        let input: &[u8] = b" [ {\"a\" : 1,\"b\":[1, 2]} ,\"x,]\\\"y\" , 42 , null,[ ]]
+";
+        for chunk in [1usize, 2, 3, 7, 1000] {
+            let mut seen = Vec::new();
+            stream_bounded_top_level_array_spanned(
+                Chunked(input, chunk),
+                LIMITS,
+                |offset, record| {
+                    assert_eq!(
+                        &input[offset as usize..offset as usize + record.len()],
+                        record
+                    );
+                    seen.push((offset, record.len()));
+                    Ok(())
+                },
+            )
+            .unwrap();
+            assert_eq!(seen.len(), 5, "chunk {chunk}");
+            let span = RecordSpan::of(seen[0].0, &input[seen[0].0 as usize..][..seen[0].1]);
+            assert_eq!(span.length as usize, seen[0].1);
+            assert_eq!(span.sha256.len(), 64);
+        }
+    }
+
+    #[test]
     fn bounded_stream_rejects_an_oversized_record_before_buffering_it() {
         // Exactly at the limit passes; one byte more fails.
         let at_limit = format!("[\"{}\"]", "a".repeat(LIMITS.max_record_bytes - 2));
