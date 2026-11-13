@@ -1,0 +1,78 @@
+# MP-IMPORT-RAW-01 — atomic raw-evidence and projection publication with an independent source manifest
+
+Status: **READY FOR INDEPENDENT SECURITY RE-REVIEW** (draft PR). Neither acceptance nor a merge request. Only the repository owner merges. Synthetic fixtures only; no real export, archive or corpus content was read.
+
+- Repository: `KaisAbiyyi/mind-place`. Branch `work/mp-import-raw-01/atomic-raw-publication`, base `main` `8350f8e` (after PR #166 and PR #167 merged). Draft [PR #168](https://github.com/KaisAbiyyi/mind-place/pull/168).
+- Design note (with the review decisions in section 9, which supersede earlier text): [`docs/implementation-plan/2026-11-13-mp-import-raw-01-design.md`](../implementation-plan/2026-11-13-mp-import-raw-01-design.md). The design was reviewed by an **independent AI reviewer (advisory, read-only)**; that is not the owner's design approval and not the card's "independent security re-review", which is still required.
+- Claim: single writer on `archive-core historical write path` and `security-core import authorization` (no `security-core` source change was needed). No claim controller exists; exclusivity is by owner assignment.
+
+## What was built
+
+`ArchiveStore::import_authorized_source(&SourceImportRequest)` in `crates/archive-core/src/historical/`:
+
+| Piece | File | Role |
+| --- | --- | --- |
+| Independent manifest | `manifest.rs` | `SourceManifest::measure` walks the source folder and hashes every regular file (path, size, SHA-256); the hash is domain-separated and length-framed. Fields are private, so a caller cannot supply a manifest or a hash. Typed `E_SOURCE_*` errors, hard limits, no-follow opens, size/mtime checks while hashing |
+| Journaled job | `job.rs` | measure and pin, stage in a private spool while hashing the parsed bytes, record a root hash, publish item by item, per-item done markers, receipt |
+| Parser spans | `importers/*` | additive: record offset, length and SHA-256 from the extraction layer; a job-wide, case-insensitive duplicate-ID tracker; an unparseable ChatGPT record is kept raw-only with a generic reason instead of aborting the job; a Gemini card cap |
+| Store refactor | `store.rs` | shared `snapshot_identity` and `archive_id_for`; shared `require_same_owner`; a provider export never displaces a live (manual or automatic) latest capture |
+
+### How the owner flow uses it (for MP-IMPORT-APP-01)
+
+1. `SourceManifest::measure(root, limits)` (show the owner the file count and bytes).
+2. `gate.authorize_import_session(lease, credential, provider, root, *manifest.sha256(), ttl)` pins that hash.
+3. `store.import_authorized_source(&SourceImportRequest::new(&gate, lease, &capability, &members))`. The import **takes no inventory and no hash from the caller**: the root, provider and hash come from the capability, and the import re-measures the folder itself and refuses (`E_SOURCE_CHANGED`) when it differs from what was authorized.
+4. A failed publication is repeated by calling the same function (new authorization is fine: the job key is derived from provider, manifest, members, importer version and limits, not from the gate's job id). `incomplete_jobs()` lists unfinished jobs; `discard_staged_job(key)` removes a spool and never touches published data.
+
+Choosing the members (`conversations*.json`, the Takeout HTML) from the real export layout is MP-IMPORT-APP-01's job; the layout is still unverified (real exports: `NOT_RUN`).
+
+### Storage layout and order
+
+`imports/raw/<aa>/<sha256>.raw` immutable content-addressed bytes; `imports/evidence/<aa>/<id>.json` immutable provenance (provider, domain, source identifier, payload hash and length, member path and hash, offset, length, manifest hash, opaque metadata; no job, time or disposition); `imports/dispositions/<aa>/<id>.json` replaceable link (`projected` / `raw-only` / `rejected`, reason, archive and snapshot id); `imports/jobs/<job_key>/` state, manifest, spool, done markers, receipt. Per item, inside the archive lock and the gate action: raw blob, evidence, projection (`meta.json` last), link, then the done marker. A projection is never visible without a durable raw blob and an evidence record.
+
+## Acceptance and scope mapping
+
+| Card item | Evidence |
+| --- | --- |
+| P1-3 raw persistence of `RawEvidenceEnvelope` and `PreservedRawOnly` (full ChatGPT DAG with alternate branches, raw-only Gemini cards, rejected projections) | `publishes_raw_evidence_and_projections_and_the_receipt_equals_the_disk`, `raw_blobs_are_byte_identical_to_the_independently_read_source_slices` (alternate branch and unparseable record are in the raw bytes), `gemini_cards_are_preserved_with_their_exact_bytes_and_non_card_bytes_are_counted` |
+| Atomic, crash-safe, idempotent, deduplicated, recoverable, per-job receipt | `a_crash_at_any_publication_step_is_repaired_by_running_the_import_again` (seven crash points; the repaired disk equals a clean run byte for byte), `a_crash_while_staging_...`, `reimport_of_the_same_source_is_idempotent_and_writes_nothing`, `a_new_export_with_the_same_content_reuses_raw_blobs_and_adds_provenance`, `identical_records_in_one_job_store_the_bytes_once_...` |
+| Bounded memory, streaming, oversized/abusive input | `oversized_and_abusive_sources_are_bounded_and_leave_nothing`, `the_manifest_measurement_is_bounded`, and the existing bounded-stream tests |
+| P1-2 independent manifest, substitution and TOCTOU defense, binding to verified bytes | `a_source_changed_after_authorization_is_refused_before_anything_is_written` (5 mutations), `a_member_changed_while_it_is_parsed_...`, `a_file_added_while_staging_...`, `changing_the_source_after_verification_cannot_alter_what_is_stored`, `a_source_that_is_itself_truncated_...`, `the_gate_manifest_hash_must_be_the_measured_one`, `the_manifest_hash_is_deterministic_...` |
+| Owner authorization, lock/revoke serialization, vault fence kept | `locking_the_gate_mid_job_...`, `revoking_the_authorization_mid_job_...`, `a_foreign_gate_a_wrong_provider_and_a_vault_marker_write_nothing`; the historical-write ledger test now classifies the new entry point and the third `save_under_lock` call site |
+| No raw replacement | `existing_raw_evidence_is_never_replaced` |
+| Receipts match the disk | first test above counts raw, evidence, link files and projections against the receipt |
+
+## Residual risks and limits (read before acceptance)
+
+1. **The old `save_authorized_historical_import` is unchanged.** It is public, takes a caller-built inventory (the P1-2 self-comparison) and projects without raw evidence. The review rated this P1. Removing or demoting it means rewriting its callers and tests, so it was left as a documented capture-only primitive. **MP-IMPORT-APP-01 must use `import_authorized_source`**; the owner should decide whether to retire the old entry point.
+2. **Path-based source walk.** Defense in depth only (lstat, no-follow open, handle checks, Unix identity). Not defended: swapped intermediate directories, a FIFO swapped in before the handle check on Unix, hard links, NTFS alternate streams. These need write access to the source folder. Content binding bounds what is read only **after** a hash is pinned; the first measurement pins whatever it read.
+3. **Windows crash durability is not claimed.** Data files are fsynced; directory fsync exists only on Unix. Windows behaviour (true reparse points, NTFS locking, sharing violations from antivirus) is `NOT_RUN` until the Windows qualification.
+4. **Gate lock held across the projection write** (the same I/O the existing authorized entry already does inside the gate). Hashing, spool reads and raw temp-file writes happen before it.
+5. **After a resume**, the one item that was in flight may be counted `deduplicated` instead of `imported` in the receipt (`resumed = true`). The link records are unaffected (they hold only `projected` / `raw-only` / `rejected`).
+6. **Receipts never over-claim lossless:** each member lists `unpreserved_bytes` (array framing, whitespace, text between Takeout cards). Gemini invalid UTF-8, tracker overflow and over-limit records still abort the job. Assets (images) are not ingested; a parser item that carries assets fails the job, and a capture with attachment storage paths is rejected (raw kept).
+7. Order of two exports of the same conversation is the owner's choice: a newer import becomes the latest snapshot, except that a live capture is never displaced.
+8. Capability TTL is at most 3600 s; very large exports are expected to resume under a new authorization. No performance numbers were measured (staging fsyncs every item); a 10k-conversation run is not measured.
+9. Spool temp files from a hard crash (`.tmp*` in `imports/raw/..`) are not swept yet.
+
+## Verification
+
+Environment: Windows 11 x64, Rust 1.91.1, Node 24.21.0, local run by the implementing session on the branch head before the docs-only commit. Synthetic data only. Self-reported; **not** exact-head hosted CI and **not** an owner Windows requalification.
+
+| Command | Result |
+| --- | --- |
+| `cargo test --locked -p mind-place-archive --tests` | PASS: 152 passed, 0 failed (57 unit, 19 archive, 5 generic, 8 historical-write authority, 3 sanitizer compat, 18 second-correction, 6 legacy, **25 raw-evidence publication**, 2 registration, 9 validation boundaries) |
+| `npm run test:rust` (archive, capture-host, security, state, index, integration, documents) | PASS, exit 0 |
+| `npm run test:web` | PASS: 333 tests, 329 passed, 0 failed, 4 skipped |
+| `cargo fmt --all -- --check`, `npm run verify:repo`, `npm run typecheck` | PASS |
+| `npm run build` | PASS (release build, `mind-place.exe` produced). A first attempt failed only because the shared Cargo target directory was outside the checkout; re-run through a directory link |
+| Mutation check | With the member hash comparison disabled, `a_member_changed_while_it_is_parsed_...` fails; restored |
+| True symlink member refusal (`a_symlink_in_the_source_is_refused`) | **BLOCKED locally** (this runner cannot create symlinks; the test prints `BLOCKED` and returns). Runs for real on Linux hosted CI. Junction/reparse behaviour on Windows: `NOT_RUN` |
+| Hosted CI on the exact head | see PR #168 checks; not claimed here |
+| Windows native qualification (NTFS locking, antivirus sharing violations, reparse points, directory durability) | **NOT_RUN** |
+| Real ChatGPT or Gemini export | **NOT_RUN** (private; the layout and member selection are MP-IMPORT-APP-01) |
+| Independent security re-review of the implementation | **NOT_RUN** (required by the card; the design review was an AI reviewer and advisory) |
+| Throughput with a large export (10k+ conversations, staging fsyncs) | **NOT_RUN** |
+
+## Handoff
+
+`TASK_ID` MP-IMPORT-RAW-01 · `CLAIM` claimed by a Claude Code local session; no fencing generation · `BASE_SHA` `8350f8e` · `BRANCH` `work/mp-import-raw-01/atomic-raw-publication` · `PR` #168 (draft) · `LOCAL_REQUIRED` Windows qualification of the new tests and of crash/locking behaviour (NOT_RUN) · `HUMAN_REQUIRED` independent security re-review, then the owner's manual merge decision.
