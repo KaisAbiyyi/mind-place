@@ -4,7 +4,8 @@ use std::collections::{HashMap, HashSet};
 use std::io::Read;
 
 use crate::importers::{
-    stream_bounded_top_level_array, BoundedArrayLimits, RawEvidenceEnvelope, ReconciledItem,
+    stream_bounded_top_level_array_spanned, BoundedArrayLimits, RawEvidenceEnvelope,
+    ReconciledItem, RecordSpan,
 };
 use crate::{Attachment, Capture, Message};
 
@@ -30,8 +31,10 @@ const STREAM_LIMITS: BoundedArrayLimits = BoundedArrayLimits {
     max_separator_bytes: MAX_CHATGPT_SEPARATOR_BYTES,
 };
 
-/// Tracks how many times each conversation ID occurred, with a hard bound on memory.
-struct ConversationIdTracker {
+/// Tracks how many times each conversation ID occurred (case-insensitively, because the stored
+/// identity is lowercased), with a hard bound on memory. One tracker should span every member of
+/// an export so duplicates across `conversations-*.json` shards are disambiguated too.
+pub struct ConversationIdTracker {
     seen: HashMap<String, usize>,
     limit: usize,
 }
@@ -43,7 +46,7 @@ impl Default for ConversationIdTracker {
 }
 
 impl ConversationIdTracker {
-    fn with_limit(limit: usize) -> Self {
+    pub fn with_limit(limit: usize) -> Self {
         Self {
             seen: HashMap::new(),
             limit,
@@ -51,6 +54,7 @@ impl ConversationIdTracker {
     }
 
     fn observe(&mut self, id: &str) -> Result<usize, Box<dyn std::error::Error>> {
+        let id = &id.to_ascii_lowercase();
         if let Some(count) = self.seen.get_mut(id) {
             *count += 1;
             return Ok(*count);
@@ -125,10 +129,40 @@ impl ChatGptExportParser {
         reader: R,
         mut callback: F,
     ) -> Result<usize, Box<dyn std::error::Error>> {
+        Self::stream_conversations_json_spanned(reader, STREAM_LIMITS, |_span, item| callback(item))
+    }
+
+    /// Streams every record together with the span (offset, length, SHA-256) of the exact source
+    /// bytes it was cut from, under caller-supplied limits. The span is measured by the stream
+    /// layer from the sliced bytes, so it is independent of what the parser reports.
+    pub fn stream_conversations_json_spanned<
+        R: Read,
+        F: FnMut(RecordSpan, ReconciledItem) -> Result<(), Box<dyn std::error::Error>>,
+    >(
+        reader: R,
+        limits: BoundedArrayLimits,
+        callback: F,
+    ) -> Result<usize, Box<dyn std::error::Error>> {
         let mut seen_ids = ConversationIdTracker::default();
-        stream_bounded_top_level_array(reader, STREAM_LIMITS, |record| {
-            let item = Self::reconcile_conversation_raw(record.to_vec(), &mut seen_ids)?;
-            callback(item)
+        Self::stream_conversations_json_tracked(reader, limits, &mut seen_ids, callback)
+    }
+
+    /// As [`Self::stream_conversations_json_spanned`] with a caller-owned tracker, so duplicate
+    /// conversation IDs are disambiguated across several members of one export. A record that is
+    /// not a valid conversation object is kept as raw-only with a generic reason.
+    pub fn stream_conversations_json_tracked<
+        R: Read,
+        F: FnMut(RecordSpan, ReconciledItem) -> Result<(), Box<dyn std::error::Error>>,
+    >(
+        reader: R,
+        limits: BoundedArrayLimits,
+        seen_ids: &mut ConversationIdTracker,
+        mut callback: F,
+    ) -> Result<usize, Box<dyn std::error::Error>> {
+        stream_bounded_top_level_array_spanned(reader, limits, |offset, record| {
+            let span = RecordSpan::of(offset, record);
+            let item = Self::reconcile_conversation_raw(record.to_vec(), seen_ids)?;
+            callback(span, item)
         })
     }
 
@@ -174,7 +208,26 @@ impl ChatGptExportParser {
         seen_ids: &mut ConversationIdTracker,
     ) -> Result<ReconciledItem, Box<dyn std::error::Error>> {
         let raw_sha256 = format!("{:x}", Sha256::digest(&raw_bytes));
-        let conv: ChatGptExportConversation = serde_json::from_slice(&raw_bytes)?;
+        let conv: ChatGptExportConversation = match serde_json::from_slice(&raw_bytes) {
+            Ok(conv) => conv,
+            Err(_) => {
+                // The bytes are in hand: keep them. The reason never echoes record content.
+                return Ok(ReconciledItem::PreservedRawOnly {
+                    evidence: RawEvidenceEnvelope {
+                        provider: "chatgpt".into(),
+                        source_identifier: String::new(),
+                        envelope_domain: "chatgpt-export-dag".into(),
+                        payload_bytes: raw_bytes,
+                        payload_sha256: raw_sha256,
+                        metadata_json: serde_json::json!({"parse_failed": true}).to_string(),
+                    },
+                    disposition_reason:
+                        "ChatGPT record is not a valid conversation object; raw record preserved"
+                            .into(),
+                    assets: vec![],
+                });
+            }
+        };
 
         let raw_evidence = RawEvidenceEnvelope {
             provider: "chatgpt".into(),

@@ -101,6 +101,20 @@ pub(crate) fn atomic_write(path: &Path, bytes: &[u8], immutable: bool) -> Result
     Ok(())
 }
 
+/// Stable archive identity of a conversation (`provider:conversation_id`).
+pub(crate) fn archive_id_for(provider: &str, conversation_id: &str) -> String {
+    digest(format!("{provider}:{conversation_id}").as_bytes())
+}
+
+/// Snapshot identity of a capture: the observation time does not make an otherwise identical
+/// capture a new revision. Shared by the store and the import publisher so a link recorded
+/// before a projection is the id the store will compute.
+pub(crate) fn snapshot_identity(capture: &Capture) -> Result<String> {
+    let mut identity = capture.clone();
+    identity.captured_at = String::new();
+    Ok(digest(&serde_json::to_vec(&identity)?))
+}
+
 fn uuid(id: &str) -> bool {
     id.len() == 36
         && id.bytes().enumerate().all(|(i, c)| {
@@ -673,15 +687,7 @@ impl ArchiveStore {
         authorization: &HistoricalImportAuthorization<'_>,
     ) -> Result<SaveReceipt> {
         let auth = authorization;
-        // An unlocked gate for another profile must never authorize this archive.
-        let expected_config = self
-            .root
-            .parent()
-            .ok_or_else(|| invalid("Missing archive owner root"))?
-            .join("security-v1.json");
-        if fs::canonicalize(auth.gate.config_path())? != fs::canonicalize(expected_config)? {
-            return Err(invalid("Import authority belongs to another archive owner"));
-        }
+        self.require_same_owner(auth.gate)?;
         let verify = || {
             auth.gate
                 .verify_import_capability_bound(
@@ -710,12 +716,28 @@ impl ArchiveStore {
             .map_err(|_| invalid("Owner import authorization is invalid or revoked"))?
     }
 
+    /// An unlocked gate for another profile must never authorize this archive.
+    pub(crate) fn require_same_owner(
+        &self,
+        gate: &mind_place_security::SecurityGate,
+    ) -> Result<()> {
+        let expected_config = self
+            .root
+            .parent()
+            .ok_or_else(|| invalid("Missing archive owner root"))?
+            .join("security-v1.json");
+        if fs::canonicalize(gate.config_path())? != fs::canonicalize(expected_config)? {
+            return Err(invalid("Import authority belongs to another archive owner"));
+        }
+        Ok(())
+    }
+
     fn save_validated(&self, capture: Capture) -> Result<SaveReceipt> {
         let _lock = self.lock()?;
         self.save_under_lock(capture)
     }
 
-    fn save_under_lock(&self, mut capture: Capture) -> Result<SaveReceipt> {
+    pub(crate) fn save_under_lock(&self, mut capture: Capture) -> Result<SaveReceipt> {
         if capture.provider == "generic" {
             // A generic locator is meaningful only when its immutable raw source exists.
             // Do not accept a fabricated generic capture without preserved evidence.
@@ -733,7 +755,7 @@ impl ArchiveStore {
                 ));
             }
         }
-        let id = digest(format!("{}:{}", capture.provider, capture.conversation_id).as_bytes());
+        let id = archive_id_for(&capture.provider, &capture.conversation_id);
         let dir = self.conversation_dir(&id)?;
         checked_dir(&dir)?;
         checked_dir(&dir.join("assets"))?;
@@ -781,9 +803,7 @@ impl ArchiveStore {
             }
         }
         // The observation time does not make an otherwise identical manual capture a new revision.
-        let mut identity = capture.clone();
-        identity.captured_at = String::new();
-        let snapshot_id = digest(&serde_json::to_vec(&identity)?);
+        let snapshot_id = snapshot_identity(&capture)?;
         let raw_path = dir.join("captures").join(format!("{snapshot_id}.jsonl"));
         let unchanged = raw_path.exists();
         if unchanged {
@@ -794,16 +814,27 @@ impl ArchiveStore {
             atomic_write(&raw_path, &raw, true)?;
         }
         // Importing old evidence must not replace the current manual capture in the reader.
-        let prior = if capture.capture_method == "legacy-import" && dir.join("meta.json").exists() {
+        let historical_export = matches!(
+            capture.capture_method.as_str(),
+            "export-import" | "takeout-import"
+        );
+        let prior = if (capture.capture_method == "legacy-import" || historical_export)
+            && dir.join("meta.json").exists()
+        {
             Some(self.read(&id, None)?)
         } else {
             None
         };
         let keep_prior = prior.as_ref().is_some_and(|p| {
-            matches!(
+            let live = matches!(
                 p.capture.capture_method.as_str(),
                 "manual-dom" | "automatic-dom"
-            ) || observation_time(&p.capture.captured_at) >= observation_time(&capture.captured_at)
+            );
+            // A provider export never displaces a live capture. A newer export of the same
+            // conversation still becomes the latest snapshot (its time is not an observation).
+            live || (!historical_export
+                && observation_time(&p.capture.captured_at)
+                    >= observation_time(&capture.captured_at))
         });
         let (current, current_snapshot) = if keep_prior {
             let p = prior.unwrap();

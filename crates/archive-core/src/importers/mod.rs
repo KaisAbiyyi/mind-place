@@ -52,6 +52,26 @@ pub enum ReconciledItem {
     },
 }
 
+/// Where a raw record sits in the source member it was cut from. `sha256` is computed by the
+/// extraction layer from the bytes it actually sliced, independently of the parser's own claims.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RecordSpan {
+    pub offset: u64,
+    pub length: u64,
+    pub sha256: String,
+}
+
+impl RecordSpan {
+    pub fn of(offset: u64, bytes: &[u8]) -> Self {
+        use sha2::{Digest, Sha256};
+        Self {
+            offset,
+            length: bytes.len() as u64,
+            sha256: format!("{:x}", Sha256::digest(bytes)),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct BatchImportReceipt {
     pub total_records_scanned: usize,
@@ -83,13 +103,28 @@ pub struct BoundedArrayLimits {
 /// after the closing bracket) and size. It does not validate the element contents; the
 /// caller parses each record with `serde_json`, which also rejects mismatched brackets.
 pub fn stream_bounded_top_level_array<R, F>(
-    mut reader: R,
+    reader: R,
     limits: BoundedArrayLimits,
     mut callback: F,
 ) -> Result<usize, Box<dyn std::error::Error>>
 where
     R: std::io::Read,
     F: FnMut(&[u8]) -> Result<(), Box<dyn std::error::Error>>,
+{
+    stream_bounded_top_level_array_spanned(reader, limits, |_offset, record| callback(record))
+}
+
+/// Like [`stream_bounded_top_level_array`], and additionally reports the absolute byte offset
+/// of each element's first byte in the stream. The offset and the element's length let a caller
+/// bind a record to the exact source bytes it was cut from.
+pub fn stream_bounded_top_level_array_spanned<R, F>(
+    mut reader: R,
+    limits: BoundedArrayLimits,
+    mut callback: F,
+) -> Result<usize, Box<dyn std::error::Error>>
+where
+    R: std::io::Read,
+    F: FnMut(u64, &[u8]) -> Result<(), Box<dyn std::error::Error>>,
 {
     #[derive(Clone, Copy, PartialEq, Eq)]
     enum Phase {
@@ -119,8 +154,11 @@ where
     let mut escaped = false;
     let mut separator_run = 0usize;
     let mut record = Vec::new();
+    let mut record_start = 0u64;
     let mut count = 0usize;
     let mut chunk = vec![0u8; 64 * 1024];
+    // Bytes consumed before the current chunk.
+    let mut base = 0u64;
 
     loop {
         let read = match reader.read(&mut chunk) {
@@ -130,6 +168,8 @@ where
             Err(error) => return Err(Box::new(error)),
         };
         let mut index = 0;
+        let chunk_base = base;
+        base += read as u64;
         while index < read {
             let byte = chunk[index];
             let is_space = byte.is_ascii_whitespace();
@@ -140,7 +180,7 @@ where
             {
                 // A scalar has no closing token: a delimiter ends it and is then re-read
                 // under the next phase.
-                callback(&record)?;
+                callback(record_start, &record)?;
                 count += 1;
                 record.clear();
                 phase = Phase::AfterElement;
@@ -202,6 +242,8 @@ where
                         in_string = false;
                         escaped = false;
                         record.clear();
+                        // `index` was already advanced past this element's first byte.
+                        record_start = chunk_base + index as u64 - 1;
                     }
                     if record.len() >= limits.max_record_bytes {
                         return Err(format!(
@@ -235,7 +277,7 @@ where
                         }
                     }
                     if finished {
-                        callback(&record)?;
+                        callback(record_start, &record)?;
                         count += 1;
                         record.clear();
                         phase = Phase::AfterElement;
