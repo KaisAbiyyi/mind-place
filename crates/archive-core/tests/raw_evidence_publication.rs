@@ -1647,3 +1647,229 @@ fn deep_verification_binds_evidence_and_links_to_the_ledger() {
         fx.store.verify_published_job(&key, true).unwrap();
     }
 }
+
+// ---------- Windows qualification findings F1 and F2 ----------
+
+fn plant(path: &Path) {
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, b"leftover of a killed writer").unwrap();
+}
+
+fn temp_leftovers(fx: &Fx) -> Vec<PathBuf> {
+    files_under(fx.archive())
+        .into_iter()
+        .filter(|path| {
+            path.file_name().is_some_and(|name| {
+                let name = name.to_string_lossy();
+                name.len() == 10
+                    && name.starts_with(".tmp")
+                    && name[4..].bytes().all(|b| b.is_ascii_alphanumeric())
+            })
+        })
+        .collect()
+}
+
+#[test]
+fn leftover_temp_files_are_swept_and_nothing_else_is_touched() {
+    let fx = Fx::new("chatgpt");
+    let (_, receipt) = finished_job(&fx);
+    let before = published_digest(&fx);
+    let job = job_dir_of(&fx);
+    let conversation = std::fs::read_dir(fx.archive().join("conversations"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let shard = |kind: &str| {
+        std::fs::read_dir(fx.archive().join("imports").join(kind))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path()
+    };
+    let orphans = [
+        conversation.join(".tmpAbC123"),
+        shard("raw").join(".tmpRAW001"),
+        shard("evidence").join(".tmpEVI002"),
+        shard("dispositions").join(".tmpLNK003"),
+        job.join(".tmpJOB004"),
+        job.join("items").join(".tmpITM005"),
+    ];
+    // Names that merely look similar, and a directory with the exact name, must survive.
+    let keepers = [
+        conversation.join(".tmpAbC12"),
+        conversation.join(".tmpAbC1234"),
+        conversation.join("tmpAbC123"),
+        conversation.join(".tmp-bad12"),
+        conversation.join("x.tmpAbC123"),
+        conversation.join(".tmpDir123").join("inside.txt"),
+    ];
+    for path in orphans.iter().chain(keepers.iter()) {
+        plant(path);
+    }
+    assert_eq!(fx.store.sweep_orphaned_temp_files().unwrap(), orphans.len());
+    for path in &orphans {
+        assert!(!path.exists(), "{path:?} should have been swept");
+    }
+    for path in &keepers {
+        assert!(path.exists(), "{path:?} must not be touched");
+    }
+    // Published data and the finished job are untouched, and a second sweep removes nothing.
+    for path in &keepers {
+        let _ = std::fs::remove_file(path);
+    }
+    let _ = std::fs::remove_dir_all(conversation.join(".tmpDir123"));
+    assert_eq!(published_digest(&fx), before);
+    assert_eq!(fx.store.sweep_orphaned_temp_files().unwrap(), 0);
+    fx.store
+        .verify_published_job(&receipt.job_key, true)
+        .unwrap();
+}
+
+#[test]
+fn a_restarted_import_removes_the_temp_files_a_killed_run_left_behind() {
+    let fx = Fx::new("chatgpt");
+    let bytes = three_conversations();
+    let dir = fx.source("export", &[("conversations.json", &bytes)]);
+    let members = [chatgpt("conversations.json")];
+    let cap = fx.authorize(&dir);
+    // The second conversation (seq 1) is the one in flight when the run dies.
+    fx.run(
+        &cap,
+        &members,
+        &crash_at(ImportPoint::AfterProjection { seq: 1 }),
+        ImportJobLimits::default(),
+    )
+    .unwrap_err();
+    let archive_id = |id: &str| format!("{:x}", Sha256::digest(format!("chatgpt:{id}").as_bytes()));
+    let job = job_dir_of(&fx);
+    let in_flight = fx.archive().join("conversations").join(archive_id(B));
+    let finished_earlier = fx.archive().join("conversations").join(archive_id(A));
+    assert!(in_flight.exists() && finished_earlier.exists());
+    let raw_shard = std::fs::read_dir(fx.archive().join("imports/raw"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    plant(&in_flight.join(".tmpFLT001"));
+    plant(&finished_earlier.join(".tmpOLD002"));
+    plant(&job.join(".tmpJOB003"));
+    plant(&raw_shard.join(".tmpRAW004"));
+
+    let receipt = fx.run_default(&dir, &members).unwrap();
+    assert!(receipt.resumed);
+    // Swept by the restart: the job directory, the shards and the in-flight conversation.
+    assert!(!in_flight.join(".tmpFLT001").exists());
+    assert!(!job.join(".tmpJOB003").exists());
+    assert!(!raw_shard.join(".tmpRAW004").exists());
+    // A conversation that was already finished is not revisited by an import; the maintenance
+    // sweep removes its leftover.
+    assert!(finished_earlier.join(".tmpOLD002").exists());
+    assert_eq!(fx.store.sweep_orphaned_temp_files().unwrap(), 1);
+    assert!(temp_leftovers(&fx).is_empty());
+    assert_eq!(receipt.imported + receipt.deduplicated, 3);
+    fx.store
+        .verify_published_job(&receipt.job_key, true)
+        .unwrap();
+}
+
+#[cfg(windows)]
+fn hold_open(path: PathBuf, millis: u64) -> std::thread::JoinHandle<()> {
+    use std::os::windows::fs::OpenOptionsExt;
+    let (ready, started) = std::sync::mpsc::channel();
+    let handle = std::thread::spawn(move || {
+        // Like a virus scanner: readable by others, but no write or delete sharing.
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(1)
+            .open(&path)
+            .unwrap();
+        ready.send(()).unwrap();
+        std::thread::sleep(Duration::from_millis(millis));
+        drop(file);
+    });
+    started.recv().unwrap();
+    handle
+}
+
+#[cfg(windows)]
+#[test]
+fn a_file_held_open_briefly_by_another_program_is_retried_and_the_import_completes() {
+    let fx = Fx::new("chatgpt");
+    let bytes = three_conversations();
+    let dir = fx.source("export", &[("conversations.json", &bytes)]);
+    let members = [chatgpt("conversations.json")];
+    let cap = fx.authorize(&dir);
+    fx.run(
+        &cap,
+        &members,
+        &crash_at(ImportPoint::Verified),
+        ImportJobLimits::default(),
+    )
+    .unwrap_err();
+    let state = job_dir_of(&fx).join("state.json");
+    // Authorize first (the credential check is slow), then hold state.json for 1.2 s while the
+    // resume rewrites it: without the retry the very first write fails.
+    let cap = fx.authorize(&dir);
+    let holder = hold_open(state, 1200);
+    let started = std::time::Instant::now();
+    let receipt = fx
+        .run(
+            &cap,
+            &members,
+            &mind_place_archive::historical::NoProgress,
+            ImportJobLimits::default(),
+        )
+        .unwrap();
+    holder.join().unwrap();
+    assert!(
+        started.elapsed() >= Duration::from_millis(900),
+        "the retry must have waited for the holder ({:?})",
+        started.elapsed()
+    );
+    assert!(receipt.resumed);
+    assert_eq!(receipt.imported + receipt.deduplicated, 3);
+    fx.store
+        .verify_published_job(&receipt.job_key, true)
+        .unwrap();
+}
+
+#[cfg(windows)]
+#[test]
+fn a_file_held_open_for_long_fails_with_a_stable_code_and_the_job_is_recoverable() {
+    let fx = Fx::new("chatgpt");
+    let bytes = three_conversations();
+    let dir = fx.source("export", &[("conversations.json", &bytes)]);
+    let members = [chatgpt("conversations.json")];
+    let cap = fx.authorize(&dir);
+    fx.run(
+        &cap,
+        &members,
+        &crash_at(ImportPoint::Verified),
+        ImportJobLimits::default(),
+    )
+    .unwrap_err();
+    let state = job_dir_of(&fx).join("state.json");
+    let cap = fx.authorize(&dir);
+    let holder = hold_open(state, 8000);
+    let message = error_text(fx.run(
+        &cap,
+        &members,
+        &mind_place_archive::historical::NoProgress,
+        ImportJobLimits::default(),
+    ));
+    assert!(message.contains("E_STORAGE_BUSY"), "{message}");
+    assert!(
+        !message.contains("os error") && !message.contains("Access is denied"),
+        "the raw OS error must not leak: {message}"
+    );
+    assert_eq!(conversations(&fx), 0);
+    holder.join().unwrap();
+    // Same job, nothing lost: the rerun finishes it.
+    let receipt = fx.run_default(&dir, &members).unwrap();
+    assert!(receipt.resumed);
+    assert_eq!(receipt.imported + receipt.deduplicated, 3);
+}

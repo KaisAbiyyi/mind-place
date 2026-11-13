@@ -16,7 +16,8 @@ use crate::importers::chatgpt_export::{ChatGptExportParser, ConversationIdTracke
 use crate::importers::gemini_takeout::{GeminiTakeoutParser, MAX_TAKEOUT_HTML_BYTES};
 use crate::importers::{BoundedArrayLimits, ReconciledItem, RecordSpan};
 use crate::store::{
-    archive_id_for, atomic_write, bounded_read, checked_dir, hex_id, no_link, snapshot_identity,
+    archive_id_for, atomic_write, bounded_read, checked_dir, hex_id, is_transient_sharing, no_link,
+    persist_retry, retry_transient, snapshot_identity, sweep_temp_files,
 };
 use crate::{ArchiveError, ArchiveStore, Capture, Result, MAX_CAPTURE_BYTES};
 use fs2::FileExt;
@@ -472,6 +473,18 @@ impl ArchiveStore {
         &self,
         request: &SourceImportRequest<'_>,
     ) -> Result<ImportJobReceipt> {
+        self.run_authorized_import(request).map_err(|error| match error {
+            // A file held open by a virus scanner or similar outlasted the retries: a stable,
+            // content-free code instead of a raw OS error. The job stays recoverable.
+            ArchiveError::Io(io) if is_transient_sharing(&io) => coded(
+                "E_STORAGE_BUSY",
+                "A file is in use by another program (for example a virus scanner); run the import again",
+            ),
+            other => other,
+        })
+    }
+
+    fn run_authorized_import(&self, request: &SourceImportRequest<'_>) -> Result<ImportJobReceipt> {
         let cap = request.capability;
         let limits = request.limits;
         self.ensure_not_encrypted_vault()?;
@@ -500,6 +513,9 @@ impl ArchiveStore {
         let job_key = job_key_for(cap.provider(), &manifest, &members, &limits);
         let job_dir = self.job_dir(&job_key)?;
         no_link(&job_dir)?;
+        // A process killed between creating a temporary file and moving it into place leaves it
+        // behind: remove those before this run writes anything.
+        self.sweep_import_temp_files(&job_dir)?;
 
         let mut existing = if job_dir.exists() {
             Some(read_state(&job_dir)?)
@@ -596,6 +612,58 @@ impl ArchiveStore {
         request.progress.checkpoint(ImportPoint::BeforeComplete)?;
         let receipt = self.finish_job(&job_dir, &mut state, cap.job_id())?;
         Ok(receipt)
+    }
+
+    /// Removes leftover temporary files of this job's directories and of the raw, evidence and
+    /// disposition shards. Holds the archive lock, so no writer has a live temporary file there.
+    fn sweep_import_temp_files(&self, job_dir: &Path) -> Result<usize> {
+        let _archive_lock = self.lock()?;
+        let mut removed = sweep_temp_files(job_dir) + sweep_temp_files(&job_dir.join("items"));
+        for kind in ["raw", "evidence", "dispositions"] {
+            let Ok(shards) = fs::read_dir(self.imports_dir().join(kind)) else {
+                continue;
+            };
+            for shard in shards.flatten() {
+                if shard.file_type().is_ok_and(|kind| kind.is_dir()) {
+                    removed += sweep_temp_files(&shard.path());
+                }
+            }
+        }
+        Ok(removed)
+    }
+
+    /// Maintenance: removes leftover temporary files (named exactly like the ones this crate
+    /// creates: `.tmp` plus six letters or digits; regular files only) that a killed process left
+    /// in conversation directories, the raw/evidence/disposition shards and job directories.
+    /// Returns how many were removed. Fails with `E_JOB_BUSY` while an import runs, and waits for
+    /// the archive lock like any writer, so it never races a live write.
+    pub fn sweep_orphaned_temp_files(&self) -> Result<usize> {
+        self.ensure_not_encrypted_vault()?;
+        let _jobs_lock = self.jobs_lock()?;
+        let _archive_lock = self.lock()?;
+        let mut removed = 0;
+        let mut directories = Vec::new();
+        if let Ok(entries) = fs::read_dir(self.root.join("conversations")) {
+            directories.extend(entries.flatten().map(|entry| entry.path()));
+        }
+        let imports = self.imports_dir();
+        for kind in ["raw", "evidence", "dispositions"] {
+            if let Ok(shards) = fs::read_dir(imports.join(kind)) {
+                directories.extend(shards.flatten().map(|entry| entry.path()));
+            }
+        }
+        if let Ok(jobs) = fs::read_dir(imports.join("jobs")) {
+            for job in jobs.flatten() {
+                directories.push(job.path());
+                directories.push(job.path().join("items"));
+            }
+        }
+        for directory in directories {
+            if fs::symlink_metadata(&directory).is_ok_and(|meta| meta.is_dir()) {
+                removed += sweep_temp_files(&directory);
+            }
+        }
+        Ok(removed)
     }
 
     /// Lists jobs that were staged or partly published and not finished.
@@ -1081,6 +1149,11 @@ impl ArchiveStore {
                 "A staged import item does not match",
             ));
         }
+        // A kill during this item's projection write may have left a temporary file in its
+        // conversation directory. The caller holds the archive lock, so no writer owns one.
+        if let StagedDisposition::Projected { archive_id, .. } = &item.disposition {
+            sweep_temp_files(&self.conversation_dir(archive_id)?);
+        }
         let evidence_id = evidence_id_for(manifest, &item);
         let final_raw = self.sharded("raw", &item.payload_sha256, "raw")?;
         let spool_raw = items_dir.join(format!("{seq:08}.raw"));
@@ -1185,7 +1258,7 @@ impl ArchiveStore {
         } = prepared;
         let raw_blob_new = match install {
             Some(temp) => {
-                temp.persist_noclobber(&final_raw).map_err(|e| e.error)?;
+                persist_retry(temp, &final_raw, true)?;
                 #[cfg(unix)]
                 if let Some(parent) = final_raw.parent() {
                     File::open(parent)?.sync_all()?;
@@ -1324,9 +1397,7 @@ impl ArchiveStore {
         receipt.raw_bytes_preserved = state.members.iter().map(|m| m.record_bytes).sum();
         ledger.flush()?;
         ledger.as_file().sync_all()?;
-        ledger
-            .persist(job_dir.join(LEDGER_FILE))
-            .map_err(|e| e.error)?;
+        persist_retry(ledger, &job_dir.join(LEDGER_FILE), false)?;
         atomic_write(
             &job_dir.join(RECEIPT_FILE),
             &serde_json::to_vec(&receipt)?,
@@ -1592,9 +1663,9 @@ fn reset_job_dir(job_dir: &Path) -> Result<()> {
         }
         let path = entry.path();
         if entry.file_type()?.is_dir() {
-            fs::remove_dir_all(path)?;
+            retry_transient(|| fs::remove_dir_all(&path))?;
         } else {
-            fs::remove_file(path)?;
+            retry_transient(|| fs::remove_file(&path))?;
         }
     }
     Ok(())
@@ -1629,7 +1700,7 @@ fn supersede_receipt(job_dir: &Path) -> Result<()> {
         ),
     ] {
         if job_dir.join(&from).exists() {
-            fs::rename(job_dir.join(&from), job_dir.join(to))?;
+            retry_transient(|| fs::rename(job_dir.join(&from), job_dir.join(&to)))?;
         }
     }
     Ok(())
