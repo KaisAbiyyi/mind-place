@@ -144,6 +144,12 @@ pub trait ImportProgress {
     /// Called once before publication starts with the number of staged items, so a progress
     /// display can show `seq / total`. Informational; never fails the job.
     fn items_total(&self, _total: u64) {}
+    /// Polled while the job measures the source at its start (between entries and about once
+    /// per MiB hashed or decompressed). An `Err` stops the measurement, and the job, with
+    /// nothing written. Default: never interrupts.
+    fn measuring(&self) -> Result<()> {
+        Ok(())
+    }
 }
 
 pub struct NoProgress;
@@ -498,7 +504,10 @@ impl ArchiveStore {
         let _job_lock = self.jobs_lock()?;
 
         // Independent measurement at job start, pinned against the capability.
-        let manifest = SourceManifest::measure(cap.source_root(), limits.manifest)?;
+        let manifest =
+            SourceManifest::measure_interruptible(cap.source_root(), limits.manifest, &|| {
+                request.progress.measuring()
+            })?;
         if manifest.sha256() != cap.manifest_hash() {
             return Err(coded(
                 "E_SOURCE_CHANGED",

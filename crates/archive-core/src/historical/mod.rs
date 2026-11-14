@@ -17,6 +17,6 @@ pub use job::{
     IMPORTER_VERSION,
 };
 pub use manifest::{
-    entry_matches_provider_layout, member_extension_allowed, ManifestEntry, ManifestLimits,
-    SourceManifest,
+    entry_matches_provider_layout, member_extension_allowed, Interrupt, ManifestEntry,
+    ManifestLimits, SourceManifest,
 };

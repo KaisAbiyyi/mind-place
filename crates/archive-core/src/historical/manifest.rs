@@ -80,6 +80,18 @@ enum SourceKind {
     Zip(ZipSource),
 }
 
+/// Polled while a source is measured: between entries and about once per MiB read or
+/// decompressed. An `Err` stops the measurement and is returned unchanged, so a caller can stop
+/// a long scan (cancel, lock, deadline) instead of waiting for it to finish.
+pub type Interrupt<'a> = &'a dyn Fn() -> Result<()>;
+
+/// How many bytes are hashed between two [`Interrupt`] polls.
+const INTERRUPT_EVERY_BYTES: u64 = 1024 * 1024;
+
+fn never_interrupt() -> Result<()> {
+    Ok(())
+}
+
 /// A measured source folder or zip file. Constructed only by [`SourceManifest::measure`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SourceManifest {
@@ -96,6 +108,16 @@ impl SourceManifest {
     /// devices, non-UTF-8 or unsafe names, unsupported zip features and anything beyond
     /// `limits` are typed errors, not skipped.
     pub fn measure(source_root: &Path, limits: ManifestLimits) -> Result<Self> {
+        Self::measure_interruptible(source_root, limits, &never_interrupt)
+    }
+
+    /// [`Self::measure`] that polls `interrupt` between entries and about once per MiB of
+    /// content, so a long scan of a large folder or archive can be stopped.
+    pub fn measure_interruptible(
+        source_root: &Path,
+        limits: ManifestLimits,
+        interrupt: Interrupt<'_>,
+    ) -> Result<Self> {
         mind_place_security::vault_import_auth::validate_import_source(source_root).map_err(
             |_| {
                 coded(
@@ -107,9 +129,9 @@ impl SourceManifest {
         let meta = fs::symlink_metadata(source_root)
             .map_err(|_| coded("E_SOURCE_ROOT", "Import source cannot be inspected"))?;
         if meta.is_file() {
-            Self::measure_zip(source_root, limits, true)
+            Self::measure_zip(source_root, limits, true, interrupt)
         } else {
-            Self::walk(source_root, limits, true)
+            Self::walk(source_root, limits, true, interrupt)
         }
     }
 
@@ -119,8 +141,8 @@ impl SourceManifest {
     /// while they are parsed.
     pub fn verify_layout_unchanged(&self, limits: ManifestLimits) -> Result<()> {
         let again = match &self.kind {
-            SourceKind::Folder => Self::walk(&self.root, limits, false)?,
-            SourceKind::Zip(_) => Self::measure_zip(&self.root, limits, false)?,
+            SourceKind::Folder => Self::walk(&self.root, limits, false, &never_interrupt)?,
+            SourceKind::Zip(_) => Self::measure_zip(&self.root, limits, false, &never_interrupt)?,
         };
         let same_archive = match (&self.kind, &again.kind) {
             (SourceKind::Folder, SourceKind::Folder) => true,
@@ -145,7 +167,12 @@ impl SourceManifest {
         Ok(())
     }
 
-    fn walk(source_root: &Path, limits: ManifestLimits, hash_files: bool) -> Result<Self> {
+    fn walk(
+        source_root: &Path,
+        limits: ManifestLimits,
+        hash_files: bool,
+        interrupt: Interrupt<'_>,
+    ) -> Result<Self> {
         mind_place_security::vault_import_auth::validate_source_directory(source_root).map_err(
             |_| {
                 coded(
@@ -177,6 +204,7 @@ impl SourceManifest {
             for entry in listing {
                 let entry = entry
                     .map_err(|_| coded("E_SOURCE_IO", "Import source folder cannot be listed"))?;
+                interrupt()?;
                 visited += 1;
                 if visited > limits.max_entries {
                     return Err(coded(
@@ -211,7 +239,7 @@ impl SourceManifest {
                         return Err(coded("E_SOURCE_LIMIT", "Import source is too large"));
                     }
                     let (size, sha256) = if hash_files {
-                        let (size, digest) = hash_regular_file(&path, &meta)?;
+                        let (size, digest) = hash_regular_file(&path, &meta, interrupt)?;
                         (size, hex(&digest))
                     } else {
                         (meta.len(), String::new())
@@ -243,12 +271,17 @@ impl SourceManifest {
 
     /// Measures a zip file. With `hash`, every member is decompressed and hashed; without it
     /// only the directory is read (layout re-checks).
-    fn measure_zip(source: &Path, limits: ManifestLimits, hash: bool) -> Result<Self> {
+    fn measure_zip(
+        source: &Path,
+        limits: ManifestLimits,
+        hash: bool,
+        interrupt: Interrupt<'_>,
+    ) -> Result<Self> {
         let root = fs::canonicalize(source)
             .map_err(|_| coded("E_SOURCE_ROOT", "Import source file cannot be resolved"))?;
         let (mut file, before) = open_regular_no_follow(&root)?;
         let archive_sha256 = if hash {
-            hash_open_file(&mut file, &before)?.1
+            hash_open_file(&mut file, &before, interrupt)?.1
         } else {
             [0u8; 32]
         };
@@ -258,13 +291,14 @@ impl SourceManifest {
         let mut entries = Vec::with_capacity(members.len());
         let mut total_bytes = 0u64;
         for member in &members {
+            interrupt()?;
             let sha256 = if hash {
                 let handle = file
                     .try_clone()
                     .map_err(|_| coded("E_SOURCE_IO", "Import source file cannot be read"))?;
                 let reader = HashingReader::new(zip::member_reader(handle, member)?);
                 let (bytes, digest) = reader
-                    .finish_to_eof()
+                    .finish_to_eof_with(interrupt)
                     .map_err(|error| zip::archive_error_from_io(&error))?;
                 if bytes != member.uncompressed {
                     return Err(coded("E_ZIP_CORRUPT", "Zip member sizes disagree"));
@@ -335,7 +369,7 @@ impl SourceManifest {
                         "The import archive differs from its measured size",
                     ));
                 }
-                if zip::local_data_offset(&mut file, member)? != member.data_offset {
+                if zip::local_data_offset(&mut file, member)?.0 != member.data_offset {
                     return Err(coded(
                         "E_SOURCE_MISMATCH",
                         "The import archive differs from what was measured",
@@ -533,15 +567,24 @@ pub(crate) fn open_regular_no_follow(path: &Path) -> Result<(File, fs::Metadata)
 
 /// Hashes a regular file in fixed chunks. The size and modification time must not change while
 /// it is read.
-fn hash_regular_file(path: &Path, _inspected: &fs::Metadata) -> Result<(u64, [u8; 32])> {
+fn hash_regular_file(
+    path: &Path,
+    _inspected: &fs::Metadata,
+    interrupt: Interrupt<'_>,
+) -> Result<(u64, [u8; 32])> {
     let (mut file, before) = open_regular_no_follow(path)?;
-    hash_open_file(&mut file, &before)
+    hash_open_file(&mut file, &before, interrupt)
 }
 
-fn hash_open_file(file: &mut File, before: &fs::Metadata) -> Result<(u64, [u8; 32])> {
+fn hash_open_file(
+    file: &mut File,
+    before: &fs::Metadata,
+    interrupt: Interrupt<'_>,
+) -> Result<(u64, [u8; 32])> {
     let mut hasher = Sha256::new();
     let mut buffer = vec![0u8; 64 * 1024];
     let mut read_total = 0u64;
+    let mut since_poll = 0u64;
     loop {
         let read = match file.read(&mut buffer) {
             Ok(0) => break,
@@ -551,6 +594,11 @@ fn hash_open_file(file: &mut File, before: &fs::Metadata) -> Result<(u64, [u8; 3
         };
         hasher.update(&buffer[..read]);
         read_total += read as u64;
+        since_poll += read as u64;
+        if since_poll >= INTERRUPT_EVERY_BYTES {
+            since_poll = 0;
+            interrupt()?;
+        }
         if read_total > before.len() {
             return Err(coded(
                 "E_SOURCE_CHANGING",
@@ -644,12 +692,29 @@ impl<R: Read> HashingReader<R> {
 
     /// Reads whatever the parser left unread (bounded by the stream itself) and returns the
     /// total byte count and the SHA-256 of the whole stream.
-    pub(crate) fn finish_to_eof(mut self) -> std::io::Result<(u64, [u8; 32])> {
+    pub(crate) fn finish_to_eof(self) -> std::io::Result<(u64, [u8; 32])> {
+        self.finish_to_eof_with(&never_interrupt)
+    }
+
+    /// [`Self::finish_to_eof`] that polls `interrupt` about once per MiB read. An interrupt
+    /// error comes back as an `io::Error` wrapping the coded error (see
+    /// `zip::archive_error_from_io`).
+    pub(crate) fn finish_to_eof_with(
+        mut self,
+        interrupt: Interrupt<'_>,
+    ) -> std::io::Result<(u64, [u8; 32])> {
         let mut buffer = vec![0u8; 64 * 1024];
+        let mut since_poll = 0u64;
         loop {
             match self.read(&mut buffer) {
                 Ok(0) => break,
-                Ok(_) => {}
+                Ok(read) => {
+                    since_poll += read as u64;
+                    if since_poll >= INTERRUPT_EVERY_BYTES {
+                        since_poll = 0;
+                        interrupt().map_err(|error| std::io::Error::other(error))?;
+                    }
+                }
                 Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
                 Err(error) => return Err(error),
             }

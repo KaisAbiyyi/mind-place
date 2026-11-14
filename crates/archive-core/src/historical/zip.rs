@@ -8,7 +8,13 @@
 //! member names are identifiers only (validated, never joined to a disk path), exact duplicate
 //! names are refused, local entries may not overlap each other or the central directory, the
 //! declared total and the per-member ratio are bounded, and the central directory must end
-//! exactly where the end records begin (no prepended or appended data).
+//! exactly where the end records begin (no appended data). The members must also tile the file:
+//! the first local header is at byte zero, each next one starts where the previous member (plus
+//! its data descriptor, if it declares one and the descriptor agrees with the directory) ends,
+//! and the last one ends where the central directory begins. Bytes before, between or after the
+//! members (a self-extractor stub, a polyglot prefix with rebased offsets, hidden padding) are
+//! `E_ZIP_MALFORMED`, so every byte of the archive is either a measured member or a record this
+//! reader parsed.
 
 use super::manifest::{check_component, coded, ManifestLimits};
 use crate::{ArchiveError, Result};
@@ -23,6 +29,7 @@ const SIG_CENTRAL: u32 = 0x0201_4b50;
 const SIG_EOCD: u32 = 0x0605_4b50;
 const SIG_ZIP64_EOCD: u32 = 0x0606_4b50;
 const SIG_ZIP64_LOCATOR: u32 = 0x0706_4b50;
+const SIG_DESCRIPTOR: u32 = 0x0807_4b50;
 const EOCD_LEN: u64 = 22;
 const MAX_COMMENT: u64 = 0xFFFF;
 const LOCAL_LEN: u64 = 30;
@@ -407,12 +414,17 @@ pub(crate) fn read_directory(
     drop(cd);
 
     entries.sort_by_key(|entry| entry.local_offset);
-    let mut previous_end = 0u64;
+    // Members tile the file exactly: see the module documentation.
+    let mut expected = 0u64;
     for entry in &mut entries {
-        if entry.local_offset < previous_end {
+        if entry.local_offset < expected {
             return Err(coded("E_ZIP_BOMB", "Zip members overlap"));
         }
-        entry.data_offset = local_data_offset(file, entry)?;
+        if entry.local_offset > expected {
+            return Err(malformed("Zip archive has bytes outside its members"));
+        }
+        let (data_offset, has_descriptor) = local_data_offset(file, entry)?;
+        entry.data_offset = data_offset;
         let data_end = entry
             .data_offset
             .checked_add(entry.compressed)
@@ -423,14 +435,52 @@ pub(crate) fn read_directory(
                 "Zip member overlaps the central directory",
             ));
         }
-        previous_end = data_end;
+        expected = data_end;
+        if has_descriptor {
+            expected += descriptor_len(file, entry, data_end, end.cd_offset)?;
+        }
+    }
+    if expected != end.cd_offset {
+        return Err(malformed("Zip archive has bytes outside its members"));
     }
     Ok(entries)
 }
 
+/// Length of the data descriptor that follows a member whose local header sets bit 3. Its CRC-32
+/// and sizes (32 or 64 bit, with or without the optional signature) must equal the central
+/// directory's, so it cannot carry anything else.
+fn descriptor_len(file: &mut File, entry: &ZipEntry, at: u64, limit: u64) -> Result<u64> {
+    let mut buffer = [0u8; 24];
+    let available = limit.saturating_sub(at).min(buffer.len() as u64) as usize;
+    read_at(file, at, &mut buffer[..available])?;
+    let bytes = &buffer[..available];
+    let signed = available >= 4 && le32(bytes, 0) == SIG_DESCRIPTOR;
+    let skips: &[usize] = if signed { &[4, 0] } else { &[0] };
+    for &skip in skips {
+        for wide in [false, true] {
+            let len = skip + 4 + if wide { 16 } else { 8 };
+            if available < len || le32(bytes, skip) != entry.crc32 {
+                continue;
+            }
+            let (compressed, uncompressed) = if wide {
+                (le64(bytes, skip + 4), le64(bytes, skip + 12))
+            } else {
+                (le32(bytes, skip + 4) as u64, le32(bytes, skip + 8) as u64)
+            };
+            if compressed == entry.compressed && uncompressed == entry.uncompressed {
+                return Ok(len as u64);
+            }
+        }
+    }
+    Err(coded(
+        "E_ZIP_CORRUPT",
+        "Zip data descriptor disagrees with the directory",
+    ))
+}
+
 /// Reads the local header of `entry`, requires it to agree with the central directory, and
-/// returns where the member data starts.
-pub(crate) fn local_data_offset(file: &mut File, entry: &ZipEntry) -> Result<u64> {
+/// returns where the member data starts and whether a data descriptor follows the data.
+pub(crate) fn local_data_offset(file: &mut File, entry: &ZipEntry) -> Result<(u64, bool)> {
     let mut header = [0u8; LOCAL_LEN as usize];
     read_at(file, entry.local_offset, &mut header)?;
     if le32(&header, 0) != SIG_LOCAL {
@@ -460,7 +510,10 @@ pub(crate) fn local_data_offset(file: &mut File, entry: &ZipEntry) -> Result<u64
             "Zip local header disagrees with the directory",
         ));
     }
-    Ok(entry.local_offset + LOCAL_LEN + name_len + extra_len)
+    Ok((
+        entry.local_offset + LOCAL_LEN + name_len + extra_len,
+        flags & (1 << 3) != 0,
+    ))
 }
 
 /// Streams one member's decompressed bytes. Errors while reading are `io::Error`s that wrap a
