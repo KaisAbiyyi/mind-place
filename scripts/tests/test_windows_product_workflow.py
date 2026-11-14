@@ -186,6 +186,38 @@ class WorkflowTests(unittest.TestCase):
                     # substitute exercises qualification control flow only.
                     self.assertEqual(commands[-1], "test -p mind-place --bin mind-place native_capture_ipc::qualification --nocapture")
 
+    def test_import_command_step_cannot_pass_with_zero_missing_or_failing_tests(self):
+        # MP-IMPORT-APP-01: the owner import command tests run on Windows, guarded the same way.
+        step = next(step for step in self.steps if step["name"] == "Test owner import commands")
+        self.assertIn("cargo test -p mind-place --bin mind-place import_commands::tests -- --list", step["run"])
+        self.assertIn("cargo test -p mind-place --bin mind-place import_commands::tests -- --nocapture", step["run"])
+        names = [line.strip().strip(",").strip("'") for line in step["run"].splitlines()
+                 if line.strip().startswith("'import_commands::tests::")]
+        self.assertGreaterEqual(len(names), 14)
+        stub = '''function cargo {
+          [IO.File]::AppendAllText($env:IPC_COMMAND_LOG, ($args -join ' ') + "`n")
+          if ($args -contains '--list') {
+            $env:IPC_LIST_JSON | ConvertFrom-Json | Write-Output
+            $global:LASTEXITCODE = [int]$env:IPC_LIST_EXIT
+          } else { $global:LASTEXITCODE = [int]$env:IPC_TEST_EXIT }
+        }
+        '''
+        for listing, list_exit, test_exit, passed, count in [
+            (names, 0, 0, True, 2), (names[:-1], 0, 0, False, 1), ([], 0, 0, False, 1),
+            (names, 1, 0, False, 1), (names, 0, 1, False, 2)]:
+            with self.subTest(listed=len(listing), list_exit=list_exit, test_exit=test_exit), tempfile.TemporaryDirectory() as directory:
+                script, log = Path(directory) / "import.ps1", Path(directory) / "commands.log"
+                script.write_text("$ErrorActionPreference = 'Stop'\n" + stub + step["run"] + "\nexit $LASTEXITCODE\n")
+                env = {**os.environ, "IPC_COMMAND_LOG": str(log), "IPC_LIST_JSON": json.dumps(listing),
+                       "IPC_LIST_EXIT": str(list_exit), "IPC_TEST_EXIT": str(test_exit)}
+                result = subprocess.run(["pwsh", "-NoProfile", "-NonInteractive", "-File", str(script)],
+                                        env=env, capture_output=True, text=True, timeout=30)
+                self.assertEqual(result.returncode == 0, passed, result.stdout + result.stderr)
+                commands = log.read_text().splitlines()
+                self.assertEqual(len(commands), count)
+                if count == 2:
+                    self.assertEqual(commands[-1], "test -p mind-place --bin mind-place import_commands::tests --nocapture")
+
 
 if __name__ == "__main__":
     unittest.main()
