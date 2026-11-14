@@ -1,0 +1,228 @@
+{
+  "generatedAt": "2026-11-14T18:53:48.545Z",
+  "totalCaptures": 16,
+  "coreMatrix": [
+    {
+      "filename": "gallery-light-en-wide.png",
+      "theme": "light",
+      "locale": "en",
+      "viewport": {
+        "name": "wide",
+        "width": 1280,
+        "height": 840
+      },
+      "audit": {
+        "overflowPx": 0,
+        "missingA11yNames": [],
+        "openTechDetailsCount": 0,
+        "anyTechCodeVisibleOutsideOpen": [],
+        "minContrast": 4.86,
+        "contrastFailures": []
+      }
+    },
+    {
+      "filename": "gallery-light-en-laptop.png",
+      "theme": "light",
+      "locale": "en",
+      "viewport": {
+        "name": "laptop",
+        "width": 1024,
+        "height": 768
+      },
+      "audit": {
+        "overflowPx": 0,
+        "missingA11yNames": [],
+        "openTechDetailsCount": 0,
+        "anyTechCodeVisibleOutsideOpen": [],
+        "minContrast": 4.86,
+        "contrastFailures": []
+      }
+    },
+    {
+      "filename": "gallery-light-en-narrow.png",
+      "theme": "light",
+      "locale": "en",
+      "viewport": {
+        "name": "narrow",
+        "width": 760,
+        "height": 768
+      },
+      "audit": {
+        "overflowPx": 0,
+        "missingA11yNames": [],
+        "openTechDetailsCount": 0,
+        "anyTechCodeVisibleOutsideOpen": [],
+        "minContrast": 4.86,
+        "contrastFailures": []
+      }
+    },
+    {
+      "filename": "gallery-light-id-wide.png",
+      "theme": "light",
+      "locale": "id",
+      "viewport": {
+        "name": "wide",
+        "width": 1280,
+        "height": 840
+      },
+      "audit": {
+        "overflowPx": 0,
+        "missingA11yNames": [],
+        "openTechDetailsCount": 0,
+        "anyTechCodeVisibleOutsideOpen": [],
+        "minContrast": 4.86,
+        "contrastFailures": []
+      }
+    },
+    {
+      "filename": "gallery-light-id-laptop.png",
+      "theme": "light",
+      "locale": "id",
+      "viewport": {
+        "name": "laptop",
+        "width": 1024,
+        "height": 768
+      },
+      "audit": {
+        "overflowPx": 0,
+        "missingA11yNames": [],
+        "openTechDetailsCount": 0,
+        "anyTechCodeVisibleOutsideOpen": [],
+        "minContrast": 4.86,
+        "contrastFailures": []
+      }
+    },
+    {
+      "filename": "gallery-light-id-narrow.png",
+      "theme": "light",
+      "locale": "id",
+      "viewport": {
+        "name": "narrow",
+        "width": 760,
+        "height": 768
+      },
+      "audit": {
+        "overflowPx": 0,
+        "missingA11yNames": [],
+        "openTechDetailsCount": 0,
+        "anyTechCodeVisibleOutsideOpen": [],
+        "minContrast": 4.86,
+        "contrastFailures": []
+      }
+    },
+    {
+      "filename": "gallery-dark-en-wide.png",
+      "theme": "dark",
+      "locale": "en",
+      "viewport": {
+        "name": "wide",
+        "width": 1280,
+        "height": 840
+      },
+      "audit": {
+        "overflowPx": 0,
+        "missingA11yNames": [],
+        "openTechDetailsCount": 0,
+        "anyTechCodeVisibleOutsideOpen": [],
+        "minContrast": 6.91,
+        "contrastFailures": []
+      }
+    },
+    {
+      "filename": "gallery-dark-en-laptop.png",
+      "theme": "dark",
+      "locale": "en",
+      "viewport": {
+        "name": "laptop",
+        "width": 1024,
+        "height": 768
+      },
+      "audit": {
+        "overflowPx": 0,
+        "missingA11yNames": [],
+        "openTechDetailsCount": 0,
+        "anyTechCodeVisibleOutsideOpen": [],
+        "minContrast": 6.91,
+        "contrastFailures": []
+      }
+    },
+    {
+      "filename": "gallery-dark-en-narrow.png",
+      "theme": "dark",
+      "locale": "en",
+      "viewport": {
+        "name": "narrow",
+        "width": 760,
+        "height": 768
+      },
+      "audit": {
+        "overflowPx": 0,
+        "missingA11yNames": [],
+        "openTechDetailsCount": 0,
+        "anyTechCodeVisibleOutsideOpen": [],
+        "minContrast": 6.91,
+        "contrastFailures": []
+      }
+    },
+    {
+      "filename": "gallery-dark-id-wide.png",
+      "theme": "dark",
+      "locale": "id",
+      "viewport": {
+        "name": "wide",
+        "width": 1280,
+        "height": 840
+      },
+      "audit": {
+        "overflowPx": 0,
+        "missingA11yNames": [],
+        "openTechDetailsCount": 0,
+        "anyTechCodeVisibleOutsideOpen": [],
+        "minContrast": 6.91,
+        "contrastFailures": []
+      }
+    },
+    {
+      "filename": "gallery-dark-id-laptop.png",
+      "theme": "dark",
+      "locale": "id",
+      "viewport": {
+        "name": "laptop",
+        "width": 1024,
+        "height": 768
+      },
+      "audit": {
+        "overflowPx": 0,
+        "missingA11yNames": [],
+        "openTechDetailsCount": 0,
+        "anyTechCodeVisibleOutsideOpen": [],
+        "minContrast": 6.91,
+        "contrastFailures": []
+      }
+    },
+    {
+      "filename": "gallery-dark-id-narrow.png",
+      "theme": "dark",
+      "locale": "id",
+      "viewport": {
+        "name": "narrow",
+        "width": 760,
+        "height": 768
+      },
+      "audit": {
+        "overflowPx": 0,
+        "missingA11yNames": [],
+        "openTechDetailsCount": 0,
+        "anyTechCodeVisibleOutsideOpen": [],
+        "minContrast": 6.91,
+        "contrastFailures": []
+      }
+    }
+  ],
+  "interactiveStates": [
+    "gallery-state-dialog-light-en-wide.png",
+    "gallery-state-aside-light-en-wide.png",
+    "gallery-state-details-light-en-wide.png",
+    "gallery-state-pseudo-light-wide.png"
+  ]
+}

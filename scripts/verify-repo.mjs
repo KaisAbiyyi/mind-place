@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { verifyUiRules } from './verify-ui-rules.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const readJson = (relativePath) => JSON.parse(fs.readFileSync(path.join(root, relativePath), 'utf8'));
@@ -59,4 +60,13 @@ const forbidden = trackedFiles.filter((file) =>
 );
 if (forbidden.length) throw new Error(`Repository contains generated or legacy tracked paths: ${forbidden.join(', ')}`);
 
-console.log(`Repository contract OK — Mind Place ${product.version}, extension ${extension.version}`);
+const uiRules = verifyUiRules({ rootDir: root });
+if (!uiRules.ok) {
+  const summary = uiRules.violations
+    .slice(0, 10)
+    .map((v) => `${v.code} ${v.file}:${v.line} (${v.detail})`)
+    .join('; ');
+  throw new Error(`UI2 design rules check failed (${uiRules.violations.length} violation(s)): ${summary}`);
+}
+
+console.log(`Repository contract OK — Mind Place ${product.version}, extension ${extension.version}, UI2 checked (${uiRules.checkedFiles} files)`);
