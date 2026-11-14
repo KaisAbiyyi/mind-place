@@ -1257,9 +1257,9 @@ class SeparatedProductPrerequisiteTests(unittest.TestCase):
         self.assertEqual(state, "pending")
         self.assertIn("windows-product.yml", reason)
 
-    def _mp_ci_win_01_fixture(self):
+    def _mp_ci_win_01_fixture(self, pr_number=131):
         cand = candidate(
-            131, head_repo=REPO, base_repo=REPO,
+            pr_number, head_repo=REPO, base_repo=REPO,
             head_repo_id=99, base_repo_id=99,
         )
         ci_run = native_run(cand, run_id=401)
@@ -1296,6 +1296,33 @@ class SeparatedProductPrerequisiteTests(unittest.TestCase):
             coordinator.required_paths(False, True),
             (native_contract.CI_WORKFLOW, native_contract.PRODUCT_WORKFLOW),
         )
+
+    def test_mp_7mcp_01_post_main_requires_exact_separated_windows_product(self):
+        # Regression for PR #153 run 42647364432: ci.yml no longer contains
+        # "Verify Windows product"; treating #153 as an inline-CI candidate
+        # failed immediately while the real Windows native job was running.
+        cand, ci_run, product_run, jobs_by_run, sources, evidence, fetch_jobs = (
+            self._mp_ci_win_01_fixture(pr_number=153))
+        self.assertTrue(native_contract.requires_separated_product(REPO, 153))
+        self.assertEqual(
+            coordinator.required_paths(False, True),
+            (native_contract.CI_WORKFLOW, native_contract.PRODUCT_WORKFLOW),
+        )
+        state, reason = coordinator.classify(
+            [ci_run, product_run], cand, REPO, False, CONTRACT,
+            fetch_jobs, lambda run: evidence, workflow_sources=sources)
+        self.assertEqual(state, "ready", reason)
+        active_product = dict(product_run, status="in_progress", conclusion=None)
+        state, reason = coordinator.classify(
+            [ci_run, active_product], cand, REPO, False, CONTRACT,
+            fetch_jobs, lambda run: evidence, workflow_sources=sources)
+        self.assertEqual(state, "pending", reason)
+        self.assertIn("windows-product.yml", reason)
+        state, reason = coordinator.classify(
+            [ci_run], cand, REPO, False, CONTRACT,
+            fetch_jobs, lambda run: evidence, workflow_sources=sources)
+        self.assertEqual(state, "pending", reason)
+        self.assertIn("windows-product.yml", reason)
 
     def test_mp_ci_win_01_missing_windows_product_source_fails_closed(self):
         cand, ci_run, product_run, jobs_by_run, sources, evidence, fetch_jobs = (

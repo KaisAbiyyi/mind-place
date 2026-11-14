@@ -31,6 +31,9 @@ SEPARATED_PRODUCT_CANDIDATES = {
     ("KaisAbiyyi/mind-place", 131),
     ("KaisAbiyyi/mind-place", 132),
     ("KaisAbiyyi/mind-place", 141),
+    # MP-7MCP-01 is on post-#161 main: the Windows product job is separate,
+    # even though this PR itself changes only the reference model/CI policy.
+    ("KaisAbiyyi/mind-place", 153),
 }
 DEFAULT_REQUIREMENT = ("ordinary-non-vault-pr", False)
 
