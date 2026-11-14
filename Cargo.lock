@@ -1993,6 +1993,7 @@ version = "0.2.5"
 dependencies = [
  "base64 0.22.1",
  "chrono",
+ "flate2",
  "fs2",
  "html5gum",
  "mind-place-security",
