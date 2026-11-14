@@ -1,8 +1,8 @@
 # Mind Place UI principles — the "soul" of the interface
 
-Status: **draft for owner approval (2026-11-11)**. Once approved this file is binding for every UI task, human or agent. It exists because a recurring failure happened: an HTML design guide was incomplete, an agent implemented capabilities the guide never showed, improvised new layouts, and the product turned ugly again. This file tells agents what to do **when the guide is silent**.
+Status: **PROPOSED FOR OWNER GATE SIGN-OFF (MP-UI2-00 / PR #172; initial human-first direction merged 2026-11-11 in PR #165)**. The 2026-11-11 human-first direction is owner-approved; the `MP-UI2-00` additions in PR #172 become the locked binding contract upon final owner approval and manual merge of PR #172 (`MP-UI2-01..03` remain `Blocked` until then). It exists because a recurring failure happened: an HTML design guide was incomplete, an agent implemented capabilities the guide never showed, improvised new layouts, and the product turned ugly again. This file tells agents what to do **when the guide is silent**.
 
-Related: [MP-UI2 migration plan](MP-UI2-redesign-migration-plan.md), the signed-off HTML guide (see "Ground truth" below), `docs/ui/MP-UI-09-feature-coverage-matrix.md`.
+Related: [MP-UI2 migration plan](MP-UI2-redesign-migration-plan.md), [MP-UI2 placement matrix](MP-UI2-placement-matrix.md), the signed-off HTML guide (see "Ground truth" below), `docs/ui/MP-UI-09-feature-coverage-matrix.md`.
 
 ## 1. Who the UI is for
 
@@ -63,7 +63,7 @@ Seven destinations, in this order: **Home, Memory, Archive, Constellation, Sourc
 
 - **Home**: latest memories first, recent chats, and the setup checklist **only until it is complete** (then it disappears; Settings can bring it back).
 - **Memory**: the tidy, curated knowledge. Topics, Projects, People. Read-first.
-- **Archive** (formerly "Chats"): the raw, untouched conversations: saved from the browser or imported from ChatGPT/Gemini exports and transcript files. Reader, saved copies, export. The **Import** button lives here. It is the "messy place" that Memory tidies.
+- **Archive** (formerly "Chats"): the raw, untouched conversations: saved from the browser or imported from ChatGPT/Gemini exports (other formats such as standalone transcript files remain deferred until a backend command exists). Reader, saved copies, export. The **Import** button lives here. It is the "messy place" that Memory tidies.
 - **Constellation**: graph of curated memory only; empty state when there is no memory; no seed input.
 - **Sources**: folders and files Mind Place may read; add via native pickers.
 - **Connections**: how chats get in (browser capture, automatic save, registration) and which AI apps may read memory. Advanced hosted connection is collapsed here.
@@ -102,6 +102,42 @@ When a new capability fits two places, choose the one where a person would look 
 | provenance | where this came from | asalnya dari mana |
 | partial capture | this copy may be missing messages | salinan ini mungkin kehilangan pesan |
 | vault mode | encryption | enkripsi |
+
+Canonical EN/ID navigation, action, and state glossary (proposed in `MP-UI2-00` / PR #172; becomes binding for `MP-UI2-02` i18n catalogs and `MP-UI2-04..11` upon owner approval and merge):
+
+| Group | English (EN) | Indonesian (ID) | Notes |
+| --- | --- | --- | --- |
+| Destinations | Home | Beranda | Breadcrumb root |
+| Destinations | Memory | Memori | Curated knowledge |
+| Destinations | Archive | Arsip | Formerly Chats; browser-saved + imports |
+| Destinations | Constellation | Constellation | Proper noun; user-selectable name in Settings |
+| Destinations | Sources | Sumber | Approved folders & files |
+| Destinations | Connections | Koneksi | Capture & AI app access |
+| Destinations | Settings | Pengaturan | Preferences, privacy, maintenance, recovery |
+| Top bar & shell | Search | Cari | `Ctrl+K` / `Meta+K` trigger |
+| Top bar & shell | Lock | Kunci | Destroys reader, fences late work |
+| Top bar & shell | Info | Info | Opens grouped metadata aside |
+| Top bar & shell | Technical details | Detail teknis | Collapsed disclosure inside Info aside |
+| Top bar & shell | Advanced | Lanjutan | Prefix for collapsed `Advanced: ...` disclosures |
+| Memory tabs & views | Topics | Topik | Taxonomy lens tab |
+| Memory tabs & views | Projects | Proyek | Taxonomy lens tab |
+| Memory tabs & views | People | Orang | Taxonomy lens tab |
+| Memory tabs & views | List | Daftar | View mode toggle |
+| Memory tabs & views | Cards | Kartu | View mode toggle |
+| Memory tabs & views | Translated from {lang} | Diterjemahkan dari {lang} | Shown only when app language differs from original |
+| Memory tabs & views | View original | Lihat asli | Preserves and toggles original AI-written text |
+| Memory tabs & views | Chats behind this | Percakapan di balik ini | Shown only where exact mapping exists (G2) |
+| Archive & import | Import | Impor | Entry on Archive page for exports/transcripts |
+| Archive & import | Saved copies | Salinan tersimpan | Immutable revision selector inside Info aside |
+| Archive & import | Copy for an AI | Salin untuk AI | Select-to-share context bar action in Search |
+| Sources & permissions | Add folder | Tambah folder | Native picker + path fallback step |
+| Sources & permissions | Add files | Tambah file | Native file picker step |
+| Sources & permissions | Remove access | Hapus akses | Inline two-step revoke |
+| Sources & permissions | Your files are never deleted. | File Anda tidak pernah dihapus. | Mandatory reassurance on revoke confirmation |
+| Statuses | Connected | Terhubung | Plain connection status |
+| Statuses | Needs setup | Perlu disiapkan | Plain unconfigured status |
+| Statuses | Search is up to date | Pencarian sudah mutakhir | Plain maintenance/index status |
+| Statuses | Unknown | Tidak diketahui | Never displayed as zero or healthy |
 
 ## 9. Accessibility and states
 
