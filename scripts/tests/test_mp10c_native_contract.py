@@ -1257,9 +1257,9 @@ class SeparatedProductPrerequisiteTests(unittest.TestCase):
         self.assertEqual(state, "pending")
         self.assertIn("windows-product.yml", reason)
 
-    def _mp_ci_win_01_fixture(self):
+    def _mp_ci_win_01_fixture(self, pr=131):
         cand = candidate(
-            131, head_repo=REPO, base_repo=REPO,
+            pr, head_repo=REPO, base_repo=REPO,
             head_repo_id=99, base_repo_id=99,
         )
         ci_run = native_run(cand, run_id=401)
@@ -1280,6 +1280,47 @@ class SeparatedProductPrerequisiteTests(unittest.TestCase):
             return {"total_count": len(jobs), "jobs": jobs}
 
         return cand, ci_run, product_run, jobs_by_run, sources, evidence, fetch_jobs
+
+    def test_mp_import_app_01_backend_is_registered_for_the_separated_windows_product(self):
+        # PR 169 (MP-IMPORT-APP-01) runs its native proof in windows-product.yml, like 131/132/141.
+        # Left unregistered, the coordinator looked for "Verify Windows product" in ci.yml and
+        # failed a green candidate ("Workflow job name is missing or ambiguous").
+        self.assertEqual(
+            native_contract.candidate_requirement(REPO, 169), ("mp-import-app-backend", False))
+        self.assertTrue(native_contract.requires_separated_product(REPO, 169))
+        self.assertFalse(native_contract.requires_sqlcipher(REPO, 169))
+        cand, ci_run, product_run, jobs_by_run, sources, evidence, fetch_jobs = (
+            self._mp_ci_win_01_fixture(169))
+        state, reason = coordinator.classify(
+            [ci_run, product_run], cand, REPO, False, CONTRACT,
+            fetch_jobs, lambda run: evidence, workflow_sources=sources)
+        self.assertEqual(state, "ready", reason)
+        # No weakening: without the exact Windows Product run the candidate is not ready.
+        state, reason = coordinator.classify(
+            [ci_run], cand, REPO, False, CONTRACT,
+            fetch_jobs, lambda run: evidence, workflow_sources=sources)
+        self.assertEqual(state, "pending", reason)
+        self.assertIn("windows-product.yml", reason)
+        # A failed Windows Product job still fails the candidate.
+        for job in jobs_by_run[product_run["id"]]:
+            if job["name"] == "Verify Windows product":
+                job["conclusion"] = "failure"
+        state, _ = coordinator.classify(
+            [ci_run, product_run], cand, REPO, False, CONTRACT,
+            fetch_jobs, lambda run: evidence, workflow_sources=sources)
+        self.assertEqual(state, "failed")
+
+    def test_an_unregistered_pr_with_separated_product_runs_still_fails_closed(self):
+        # Registration is explicit per candidate: an unregistered PR number keeps the legacy
+        # in-CI contract and is NOT accepted just because windows-product.yml succeeded.
+        self.assertFalse(native_contract.requires_separated_product(REPO, 9001))
+        cand, ci_run, product_run, jobs_by_run, sources, evidence, fetch_jobs = (
+            self._mp_ci_win_01_fixture(9001))
+        state, reason = coordinator.classify(
+            [ci_run, product_run], cand, REPO, False, CONTRACT,
+            fetch_jobs, lambda run: evidence, workflow_sources=sources)
+        self.assertEqual(state, "failed", reason)
+        self.assertIn("Verify Windows product", reason)
 
     def test_mp_ci_win_01_uses_separate_authoritative_windows_product_source(self):
         cand, ci_run, product_run, jobs_by_run, sources, evidence, fetch_jobs = (

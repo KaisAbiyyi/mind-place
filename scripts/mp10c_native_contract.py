@@ -26,11 +26,13 @@ CANDIDATE_REQUIREMENTS = {
     ("KaisAbiyyi/mind-place", 131): ("mp-ci-win-policy", False),
     ("KaisAbiyyi/mind-place", 132): ("mp-p0-integration", True),
     ("KaisAbiyyi/mind-place", 141): ("mp-governance-integrated-workflows", True),
+    ("KaisAbiyyi/mind-place", 169): ("mp-import-app-backend", False),
 }
 SEPARATED_PRODUCT_CANDIDATES = {
     ("KaisAbiyyi/mind-place", 131),
     ("KaisAbiyyi/mind-place", 132),
     ("KaisAbiyyi/mind-place", 141),
+    ("KaisAbiyyi/mind-place", 169),
 }
 DEFAULT_REQUIREMENT = ("ordinary-non-vault-pr", False)
 
