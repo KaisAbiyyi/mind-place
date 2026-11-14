@@ -1,6 +1,6 @@
 # Mind Place UI principles — the "soul" of the interface
 
-Status: **LOCKED — binding design contract (MP-UI2-00 design lock, 2026-11-14; initial draft merged 2026-11-11 in PR #165)**. This file is binding for every UI task, human or agent. It exists because a recurring failure happened: an HTML design guide was incomplete, an agent implemented capabilities the guide never showed, improvised new layouts, and the product turned ugly again. This file tells agents what to do **when the guide is silent**.
+Status: **PROPOSED FOR OWNER GATE SIGN-OFF (MP-UI2-00 / PR #172; initial human-first direction merged 2026-11-11 in PR #165)**. The 2026-11-11 human-first direction is owner-approved; the `MP-UI2-00` additions in PR #172 become the locked binding contract upon final owner approval and manual merge of PR #172 (`MP-UI2-01..03` remain `Blocked` until then). It exists because a recurring failure happened: an HTML design guide was incomplete, an agent implemented capabilities the guide never showed, improvised new layouts, and the product turned ugly again. This file tells agents what to do **when the guide is silent**.
 
 Related: [MP-UI2 migration plan](MP-UI2-redesign-migration-plan.md), [MP-UI2 placement matrix](MP-UI2-placement-matrix.md), the signed-off HTML guide (see "Ground truth" below), `docs/ui/MP-UI-09-feature-coverage-matrix.md`.
 
@@ -63,7 +63,7 @@ Seven destinations, in this order: **Home, Memory, Archive, Constellation, Sourc
 
 - **Home**: latest memories first, recent chats, and the setup checklist **only until it is complete** (then it disappears; Settings can bring it back).
 - **Memory**: the tidy, curated knowledge. Topics, Projects, People. Read-first.
-- **Archive** (formerly "Chats"): the raw, untouched conversations: saved from the browser or imported from ChatGPT/Gemini exports and transcript files. Reader, saved copies, export. The **Import** button lives here. It is the "messy place" that Memory tidies.
+- **Archive** (formerly "Chats"): the raw, untouched conversations: saved from the browser or imported from ChatGPT/Gemini exports (other formats such as standalone transcript files remain deferred until a backend command exists). Reader, saved copies, export. The **Import** button lives here. It is the "messy place" that Memory tidies.
 - **Constellation**: graph of curated memory only; empty state when there is no memory; no seed input.
 - **Sources**: folders and files Mind Place may read; add via native pickers.
 - **Connections**: how chats get in (browser capture, automatic save, registration) and which AI apps may read memory. Advanced hosted connection is collapsed here.
@@ -103,7 +103,7 @@ When a new capability fits two places, choose the one where a person would look 
 | partial capture | this copy may be missing messages | salinan ini mungkin kehilangan pesan |
 | vault mode | encryption | enkripsi |
 
-Canonical EN/ID navigation, action, and state glossary (binding for `MP-UI2-02` i18n catalogs and `MP-UI2-04..11`):
+Canonical EN/ID navigation, action, and state glossary (proposed in `MP-UI2-00` / PR #172; becomes binding for `MP-UI2-02` i18n catalogs and `MP-UI2-04..11` upon owner approval and merge):
 
 | Group | English (EN) | Indonesian (ID) | Notes |
 | --- | --- | --- | --- |

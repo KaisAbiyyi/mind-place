@@ -1,6 +1,6 @@
 # MP-UI2 feature placement matrix
 
-Status: **LOCKED — MP-UI2-00 design contract (2026-11-14; initial draft merged 2026-11-11 in PR #165).** Maps every row of [`MP-UI-09-feature-coverage-matrix.md`](MP-UI-09-feature-coverage-matrix.md) to its home in the human-first UI, using only the pattern classes in [`UI-PRINCIPLES.md`](UI-PRINCIPLES.md). Anything marked **Gap** is not drawn in `wireframe-v1.html` and must follow the Section 4 gap protocol and the Initial Design Gap Register below when implemented.
+Status: **PROPOSED FOR OWNER GATE SIGN-OFF (MP-UI2-00 / PR #172; initial human-first direction merged 2026-11-11 in PR #165).** Maps every row of [`MP-UI-09-feature-coverage-matrix.md`](MP-UI-09-feature-coverage-matrix.md) to its home in the human-first UI, using only the pattern classes in [`UI-PRINCIPLES.md`](UI-PRINCIPLES.md). Anything marked **Gap** is not drawn in `wireframe-v1.html` and must follow the Section 4 gap protocol and the Initial Design Gap Register below when implemented. Becomes the locked `MP-UI2-00` contract upon owner approval and manual merge of PR #172 (`MP-UI2-01..03` remain `Blocked` until then).
 
 Destinations: **Home, Memory, Archive, Constellation (name chosen in Settings), Sources, Connections, Settings**, plus the global **Search** (Ctrl K) and **Lock** in the top bar. Breadcrumb always starts at Home.
 
@@ -26,10 +26,10 @@ Legend: **WF** = shown in `wireframe-v1.html`. **Gap** = not shown, needs a ledg
 | 16 | File search and exact preview | Search (Files scope) result opens a preview aside | Search, Detail | **Gap** | File preview aside not drawn. |
 | 17 | Revoke document root | Sources row > Remove access (inline two-step) | Danger | WF | States that files are never deleted. |
 | 18 | Vault state | Settings > Encryption row | Status | WF | |
-| 19 | Folder selection | Sources dialog: native picker, paste a path as fallback; Add files | Add | WF | Needs G3 (security review). |
+| 19 | Folder selection | Sources dialog: native picker, paste a path as fallback; Add files | Add | WF | Needs `G3` (Sources path picker security review; distinct from Archive Import's `grant_selection` picker `G6`). |
 | 20 | Providers and capabilities | Connections > Save chats from your browser | Connect | WF | Capability matrix wording must stay honest (capture is not a handshake). |
 | 21 | Browser capture and registration | Connections > Saving options (automatic save, Browsers) | Configure, Connect | WF (rows) / **Gap** (setup dialog) | The Browser setup dialog steps are not drawn. |
-| 22 | Provider / generic import | **Archive > Import** (ChatGPT export, Gemini Takeout, transcript file) | Add | WF | Placement decided by the owner. Backend import core and owner zip/app commands landed on main (#166, #167, #168, #169, #170); UI wiring owned by MP-UI2-06. |
+| 22 | Provider / generic import | **Archive > Import** (ChatGPT export folder/zip, Gemini Takeout folder/zip; arbitrary transcript files excluded — see §3) | Add | WF + Gap | Placement decided by owner. `src-tauri/src/import_commands.rs` (`inspect_import_source`, `start_import`, `cancel_import`, landed on `main`) supports only `chatgpt` and `gemini` folders/zips on `legacy_archive` plaintext vaults, refuses encrypted vaults, requires a backend-minted 128-bit `selection` grant (`grant_selection`, 10m TTL, max 4, forgotten on Lock), and fails closed (`E_IMPORT_SELECTION`) until `MP-UI2-06` adds the `G6` native dialog grant picker. Arbitrary transcript-file import is unsupported by `MP-IMPORT-APP-01` (deferred in §3). |
 | 23 | MCP start/stop, issue, revoke | Connections > Let an AI app read your memory | Connect, Danger | WF | Named "AI app access" in UI. |
 | 24 | Hosted tunnel lifecycle | Connections > Advanced: connect hosted ChatGPT (collapsed) | Advanced | WF | Explicit consent kept. |
 | 25 | Global command palette | Top bar Search (Ctrl K) | Search | WF (search) / **Gap** ("Go to" commands) | Add a "Go to" group for pages and secondary commands. |
@@ -53,14 +53,14 @@ Legend: **WF** = shown in `wireframe-v1.html`. **Gap** = not shown, needs a ledg
 | N3 | Memory text in the app language | Memory detail note "Translated from English" and "View original" | Detail | WF | New. Stored once, per-language versions or translation at display time. |
 | N4 | Breadcrumb | Top bar, starting at Home | Shell | WF | New. |
 
-## 1. Signed-off deviation ledger (MP-UI2-00)
+## 1. Deviation ledger proposed for owner sign-off (MP-UI2-00)
 
-| ID | Capability row(s) | Earlier UI (MP-UI-09) | Human-first UI (MP-UI2) | Rationale & verification |
-| --- | --- | --- | --- | --- |
-| DEV-01 | 6 | Quick Peek slide-over drawer on Memory list | Replaced by full Memory detail page (`Home > Memory > ...`) and Constellation node aside | Owner-confirmed layout keeps reading calm and uncrowded (`MP-UI2-05`). |
-| DEV-02 | 11, 12 | Archive/revision nodes, seed ID input, and layer/origin/revision filters in Hive | Removed from default view; Constellation renders curated memory only (or honest empty state) with one "Find a topic" field | Removes technical/raw graph noise from default view; awaits G1 (`MP-UI2-07`). |
-| DEV-03 | 4, 8, 30 | Opaque evidence/proof IDs, hashes, revision IDs, canonical keys, and protocol names shown in default cards/rows | Hidden from default views; disclosed only inside `Info` aside or collapsed `Technical details` | Prevents machine-oriented identifiers from cluttering user workflows (`MP-UI2-03` UI rules lint enforces). |
-| DEV-04 | 2 | Overview runtime health tiles on Home | Removed from Home; operational status ("Search is up to date" + tag, rebuild search, and technical diagnostics) moves to `Settings > Maintenance` | Keeps Home memory-first without telemetry clutter (`MP-UI2-10`, `MP-UI2-11`). |
+| ID | Capability row(s) | Earlier UI (MP-UI-09) | Human-first UI (MP-UI2) | Rationale & verification | Sign-off status |
+| --- | --- | --- | --- | --- | --- |
+| DEV-01 | 6 | Quick Peek slide-over drawer on Memory list | Replaced by full Memory detail page (`Home > Memory > ...`) and Constellation node aside | Owner-confirmed layout keeps reading calm and uncrowded (`MP-UI2-05`). | Pending owner gate (PR #172) |
+| DEV-02 | 11, 12 | Archive/revision nodes, seed ID input, and layer/origin/revision filters in Hive | Removed from default view; Constellation renders curated memory only (or honest empty state) with one "Find a topic" field | Removes technical/raw graph noise from default view; awaits G1 (`MP-UI2-07`). | Pending owner gate (PR #172) |
+| DEV-03 | 4, 8, 30 | Opaque evidence/proof IDs, hashes, revision IDs, canonical keys, and protocol names shown in default cards/rows | Hidden from default views; disclosed only inside `Info` aside or collapsed `Technical details` | Prevents machine-oriented identifiers from cluttering user workflows (`MP-UI2-03` UI rules lint enforces). | Pending owner gate (PR #172) |
+| DEV-04 | 2 | Overview runtime health tiles on Home | Removed from Home; operational status ("Search is up to date" + tag, rebuild search, and technical diagnostics) moves to `Settings > Maintenance` | Keeps Home memory-first without telemetry clutter (`MP-UI2-10`, `MP-UI2-11`). | Pending owner gate (PR #172) |
 
 ## 2. Initial design gap register (for Gap Protocol execution in MP-UI2-03..11)
 
@@ -73,6 +73,7 @@ Every row marked **Gap** above is not drawn in `wireframe-v1.html`. Implementing
 | 15 | Document index status, pause, resume | Pause or resume indexing on a shared folder when I need my machine quiet. | Status, Configure | Sources (folder row) | `MP-UI2-08` |
 | 16 | File search and verified excerpt preview | Open a matching file result and read the exact verified excerpt with a link to its folder. | Search, Detail | Global Search (`Files` scope preview aside) | `MP-UI2-11` |
 | 21 | Browser capture setup dialog steps | Connect Chrome, Edge, or Brave to save chats from my browser step by step. | Connect, Add | Connections (`Saving options` dialog) | `MP-UI2-09` |
+| 22 | Archive Import native selection-grant picker (`G6`), encrypted-vault notice, and transcript-file boundary | Choose a ChatGPT or Gemini export folder or `.zip` safely via native picker, see an honest notice if the vault is encrypted, and never hit unsupported import paths. | Add, Warning, Progress | Archive (`Import` dialog) | `MP-UI2-06` |
 | 25 | Command-palette "Go to" navigation/actions | Jump to any page or common action straight from the keyboard search dialog. | Search | Global Search (`Ctrl+K`) | `MP-UI2-11` |
 | 28 | Multi-query, policy presets, date, token budget | Tune search range or context size only when a basic search is not enough. | Search, Advanced | Global Search (`Advanced` disclosure) | `MP-UI2-11` |
 | 30 | Retrieval inspector / score trace | Check why a search returned those results when debugging search behavior. | Advanced | Global Search (`Details` aside) & Settings (`Maintenance` technical mode) | `MP-UI2-10`, `MP-UI2-11` |
@@ -85,5 +86,7 @@ Every row marked **Gap** above is not drawn in `wireframe-v1.html`. Implementing
 | --- | --- | --- |
 | Memory create, edit, pin, and forget UI | Memory write primitives are not registered as Tauri/MCP tools; awaits accepted write-authority contract. | Disabled "Suggest a correction (coming later)" control on Memory detail; no fake writes or pin persistence. |
 | AI write-access scope controls | External MCP catalog is read-only (`memory_search`, `memory_fetch`, `context_build`); awaits `MP-7MCP-01` and write tasks. | Plain read-only "AI app access" list and key management only. |
+| Encrypted-vault Archive Import | `src-tauri/src/import_commands.rs` calls `legacy_archive(&state)?`, rejecting encrypted vaults (`legacy_archive` plaintext vaults only); encrypted vault export-import requires a dedicated post-`MP-IMPORT-APP-01` contract. | Show plain notice in `Archive > Import` when the vault is encrypted; do not start an unsupported import job. |
+| Arbitrary transcript-file import via `MP-IMPORT-APP-01` | Backend `check_provider` accepts only `"chatgpt"` and `"gemini"` export folders/zips (`E_IMPORT_PROVIDER`); standalone transcript files have no backend import command. | Either keep `"Transcript file (coming later)"` disabled with a plain explanation, or defer until a separately specified and security-reviewed backend command lands. |
 | Backup restore & graphical legacy migration UI | Offline maintenance command only per `MP-9B`; awaits `MP-9E`/`MP-9F` UI enablement. | Online backup row shown in Settings (disabled unless encrypted and unlocked); no fabricated restore UI. |
-| Native UI (GPUI) port | Current presentation migration targets Tauri + WebView2. | Reopens only with `MP-UI2-L1` evidence if a locked performance budget is missed. |
+| Native UI (GPUI) port | Current presentation migration targets Tauri + WebView2. | Reopens only with owner decision on measured `MP-UI2-L1` receipts against owner-approved thresholds (`> 2 GB` hard failure or unresolved `> 1 GB` warning). |
