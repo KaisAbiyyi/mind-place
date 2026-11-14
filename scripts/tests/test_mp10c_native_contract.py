@@ -1289,10 +1289,13 @@ class SeparatedProductPrerequisiteTests(unittest.TestCase):
         # failed a green candidate ("Workflow job name is missing or ambiguous").
         self.assertEqual(
             native_contract.candidate_requirement(REPO, 169), ("mp-import-app-backend", False))
-        self.assertTrue(native_contract.requires_separated_product(REPO, 169))
-        self.assertFalse(native_contract.requires_sqlcipher(REPO, 169))
+        self.assertEqual(
+            native_contract.candidate_requirement(REPO, 170), ("mp-import-app-windows-ci", False))
+        for pr in (169, 170):
+            self.assertTrue(native_contract.requires_separated_product(REPO, pr))
+            self.assertFalse(native_contract.requires_sqlcipher(REPO, pr))
         cand, ci_run, product_run, jobs_by_run, sources, evidence, fetch_jobs = (
-            self._mp_ci_win_01_fixture(169))
+            self._mp_ci_win_01_fixture(170))
         state, reason = coordinator.classify(
             [ci_run, product_run], cand, REPO, False, CONTRACT,
             fetch_jobs, lambda run: evidence, workflow_sources=sources)
