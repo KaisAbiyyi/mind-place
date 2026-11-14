@@ -1,6 +1,6 @@
 # MP-IMPORT-APP-01 — import in the app: zip source, Tauri commands, owner re-authentication and progress
 
-Status: **READY FOR SECURITY REVIEW** (draft PR). Neither acceptance nor a merge request. Only the repository owner merges. Synthetic fixtures only; no real export, archive or corpus content was read.
+Status: **REVIEW ROUND 1 ADDRESSED, READY FOR SECURITY RE-REVIEW** (draft PR; round 1 was the owner's independent review of `fc1bbc8`, see below). Neither acceptance nor a merge request. Only the repository owner merges. Synthetic fixtures only; no real export, archive or corpus content was read.
 
 - Repository `KaisAbiyyi/mind-place`, branch `work/mp-import-app-01/zip-source-and-commands`, base `main` `5290753` (after PR #166, #167 and #168).
 - Design note: [`docs/implementation-plan/2026-11-14-mp-import-app-01-design.md`](../implementation-plan/2026-11-14-mp-import-app-01-design.md).
@@ -16,7 +16,7 @@ Status: **READY FOR SECURITY REVIEW** (draft PR). Neither acceptance nor a merge
 
 | Piece | File | Role |
 | --- | --- | --- |
-| Zip reader | `crates/archive-core/src/historical/zip.rs` | Strict, read-only. Stored and deflate members, zip64, single disk. Typed errors for traversal names, duplicates, encryption, unknown methods, overlapping entries, ratio bombs, lying sizes or CRC, multi-disk, data before/after the archive. Built on `flate2` (already pinned through document-core); no new crate |
+| Zip reader | `crates/archive-core/src/historical/zip.rs` | Strict, read-only. Stored and deflate members, zip64, single disk. Typed errors for traversal names, duplicates, encryption, unknown methods, overlapping entries, ratio bombs, lying sizes or CRC, multi-disk, and any byte that is not a measured member, a descriptor that agrees with the directory, or a parsed record (prefix, gaps, trailing data). Built on `flate2` (already pinned through document-core); no new crate |
 | Zip source in the manifest | `crates/archive-core/src/historical/manifest.rs` | `SourceManifest::measure` accepts a folder or a zip. A zip is measured by hashing the archive and every decompressed member; `open_member` streams one member with size and CRC enforced; `verify_layout_unchanged` re-reads the directory and archive length/mtime. Separate manifest-hash domain that binds the archive length and SHA-256 |
 | Job | `crates/archive-core/src/historical/job.rs` | Staging opens members through `open_member` (the folder path is unchanged); zip corruption surfaces as its coded error; new default `ImportProgress::items_total` hook |
 | Member selection | `manifest.rs` | `candidate_members(provider)` from the documented layout; `member_extension_allowed` for an owner-chosen list |
@@ -28,8 +28,8 @@ Status: **READY FOR SECURITY REVIEW** (draft PR). Neither acceptance nor a merge
 
 | Command | Gate | Does |
 | --- | --- | --- |
-| `inspect_import_source { provider, path }` | unlocked owner session, legacy plaintext archive | measures the source (read-only); returns kind, file count, bytes, candidate members and an opaque `sourceToken` |
-| `start_import { provider, path, sourceToken, credential, members? }` | unlocked session + owner credential (gate backoff) | verifies the credential, re-measures, refuses if the token differs (`E_SOURCE_CHANGED`), chooses members, authorizes a capability bound to the measured hash (TTL ≤ 1 h), runs `import_authorized_source` with `import-progress` events and cancel, revokes the capability, returns the receipt |
+| `inspect_import_source { provider, selection }` | unlocked owner session, legacy plaintext archive, a live selection grant | takes the import slot and measures the source (read-only; Cancel and Lock stop it); returns kind, file count, bytes, candidate members and an opaque `sourceToken` |
+| `start_import { provider, selection, sourceToken, credential, members? }` | unlocked session + live selection grant + owner credential (gate backoff) | verifies the credential, re-measures, refuses if the token differs (`E_SOURCE_CHANGED`), chooses members, authorizes a capability bound to the measured hash (TTL ≤ 1 h), runs `import_authorized_source` with `import-progress` events and cancel, revokes the capability, returns the receipt |
 | `cancel_import` | none (sets a flag) | stops the running import at its next safe point |
 
 Progress events are `{ phase, done, total }` (`staging`, `verified`, `publishing`, `finishing`), throttled to one per 64 records; they carry counts only. Errors are coded strings; an OS error text is never forwarded (it may name a path). The credential is wrapped in `Zeroizing` on arrival and never logged or echoed.
@@ -48,6 +48,18 @@ Progress events are `{ phase, done, total }` (`staging`, `verified`, `publishing
 
 Mutation checks: with each guard disabled the named test fails, then the guard was restored: overlap rule, central-directory-end rule, CRC check, per-member ratio rule, archive-wide ratio rule, drive-prefix rule, duplicate rule, staging lease check.
 
+## Independent review round 1 (owner, PR #169 comment on `fc1bbc8`) and response
+
+Disposition was CHANGES REQUESTED / merge hold; no P0 or P1. All three P2 findings were reproduced against the code before acting.
+
+| Finding | Action | Evidence |
+| --- | --- | --- |
+| P2 prefix/gap rejection not enforced; the existing prefix test did not rebase offsets, so it passed for the wrong reason | **Fixed.** The reader now requires the members to tile the file (first local header at 0, each next at the previous end plus its descriptor, last ending at the central directory). Data-descriptor policy defined: bit 3 declared, exactly one descriptor, CRC and sizes equal to the directory | `a_prefix_with_rebased_offsets_is_refused` (classic and zip64; builds a consistent archive, with a control that the helper changes nothing when the prefix is empty), `unaccounted_bytes_between_members_or_before_the_directory_are_refused`, `a_data_descriptor_that_agrees_with_the_directory_is_accepted` (signed/unsigned, 32/64 bit), `a_data_descriptor_that_disagrees_or_is_misplaced_is_refused`. Mutation: with the first-header guard disabled the prefix and gap tests fail; with the end guard disabled the gap and descriptor tests fail |
+| P2 Cancel and Lock cannot interrupt source measurement; inspect has no slot or cancel route | **Fixed.** `SourceManifest::measure_interruptible` polls between entries and about once per MiB (archive hash, member inflate, folder walk); `ImportProgress::measuring` covers the job's own start-of-run measurement; `inspect_import_source` now holds the import slot, so Cancel and Lock reach it and it never overlaps an import | `a_long_measurement_polls_the_interrupt_and_stops_on_its_error` (folder and zip, 5 MiB, stops at the second poll), `the_jobs_own_measurement_at_start_can_be_stopped_and_writes_nothing`, `cancel_and_lock_stop_the_measurement_of_a_large_source` (cancel before, cancel mid-read, Lock), `inspection_and_import_never_run_at_the_same_time` (`E_IMPORT_BUSY`, `retire` reaches the holder). A stale lease now stops at the first poll with `E_AUTHORIZATION` (the old assertion expected the gate's `MP_` code from a later step) |
+| P2 / security acceptance: arbitrary local path inspection exposed to the webview | **Fenced now, picker deferred.** Commands take a backend-minted selection grant (`selection`), not a path. No command mints one yet, so until MP-UI2-06 adds the native picker the two commands refuse every request (`E_IMPORT_SELECTION`). Tracked as a security dependency of MP-UI2-06 (design note, residual 5) | `a_source_must_be_named_by_a_backend_grant_and_grants_expire` (typed paths and unknown tokens refused, UNC/relative refused at mint, cap, expiry, Lock forgets grants) |
+
+Owner call worth confirming: the command signature changed from `path` to `selection`. If a path-based dev entry point is wanted before MP-UI2-06, that is a deliberate, separate decision.
+
 ## Advisory review (AI, read-only, not the card's security review)
 
 A read-only advisory reviewer (Claude Sonnet subagent) read `5290753..8943d30` and reported no P0 or P1. Every finding was checked against the code before acting:
@@ -65,14 +77,14 @@ A read-only advisory reviewer (Claude Sonnet subagent) read `5290753..8943d30` a
 ## Residual risks and limits (read before acceptance)
 
 1. **Real export layouts are unverified** (owner decision 1). Candidate selection may miss localized or renamed members; `members` in `start_import` is the escape hatch. MP-IMPORT-L1 must record the real layout.
-2. **`inspect_import_source` reads a path supplied by the webview** with only an unlocked session (no credential). It returns no content (counts, candidate names, a hash token) and is not reachable from MCP or the extension, but it can confirm that a file exists, its size, and (through the token) a guessed exact content. Network shares and device paths are refused. It is not serialized through the one-import slot and cannot be cancelled. `start_import` requires the credential. Recommendation for MP-UI2-06: choose the source with a native dialog in the backend so the renderer never supplies a path.
+2. **Source selection by native picker is not built.** The commands accept only a backend-minted selection grant, and nothing mints one until MP-UI2-06 adds the native dialog; that card must not add a renderer-path-to-grant command. Until then the commands are unusable from the webview (fail closed). Network shares and device paths are still refused at mint and at use. Inspection returns no content (counts, candidate names, a hash token).
 3. The old `save_authorized_historical_import` (RAW-01 residual 1) is still public and unchanged; the new commands use only `import_authorized_source`.
 4. A zip is read three times (inspect, job-start measurement, staging), like a folder. Large-export throughput is only the probe below, not the owner's machine.
 5. Windows-native behaviour (antivirus holding the zip, very long paths, reparse points on the zip path) is **NOT_RUN** until MP-IMPORT-L1.
-6. A non-zip64 archive whose bytes just before the end record happen to look like a zip64 locator is refused (fail closed). Archives with data descriptors are accepted (sizes come from the central directory).
+6. A non-zip64 archive whose bytes just before the end record happen to look like a zip64 locator is refused (fail closed). Archives with data descriptors are accepted only when the descriptor agrees with the central directory and is the only thing between the member and the next record. Archives with other padding or extra records are refused (`E_ZIP_MALFORMED`).
 7. Images and other assets in an export are measured but not ingested (RAW-01 behaviour).
 8. Encrypted vault profiles cannot import (RAW-01 refuses an encrypted vault); the commands return `MP_VAULT_NOT_READY`.
-9. **Measurement cannot be cancelled.** Inspect, the command's re-measure and the job-start measure each decompress and hash the whole source with no cancel or lease check; Lock and Cancel take effect at the next staging checkpoint. The archive-wide ratio limit bounds a hostile zip to `200 x archive length + 64 MiB` of work per pass (and `max_total_bytes`).
+9. **Measurement is cancellable at about 1 MiB granularity** (was: not cancellable). Parsing the central directory is not polled; it is bounded by `max_entries` and the directory size. A single `read` of the decoder is not interrupted, but it is bounded by the buffer. The archive-wide ratio limit still bounds a hostile zip to `200 x archive length + 64 MiB` of work per pass.
 10. **Long jobs outlive the capability.** A capability lives at most one hour. In the probe, publication ran at roughly 12 items per second on this machine, so an export far beyond ~40 000 conversations ends with `E_IMPORT_AUTH_EXPIRED` and needs one more `start_import` to resume (tested).
 
 ## Verification
@@ -81,14 +93,14 @@ Environment: Windows 11 x64, Rust 1.91.1 (workspace MSRV 1.90), Node 24.21.0; lo
 
 | Command | Result |
 | --- | --- |
-| `cargo test -p mind-place-archive --test zip_source_import` and `--lib` | PASS: 19 passed, 1 ignored (the memory probe); lib 63 passed (incl. the sticky-error unit test) |
-| `cargo test -p mind-place --bin mind-place import_commands` | PASS: 11 passed |
-| `npm run test:rust` (archive, capture-host, security, state, index, integration, documents) | PASS: 432 passed, 0 failed, 3 ignored, exit 0 (run with `CARGO_BUILD_JOBS=2`; a first attempt stopped while *compiling* `integration-core` tests because `rustc` ran out of memory next to the running probe, not a test failure) |
-| `npm run test:web` | PASS: 333 tests, 333 passed, 0 failed |
+| `cargo test -p mind-place-archive` (round 1 fixes, re-run) | PASS: `zip_source_import` 25 passed, 1 ignored (the memory probe); lib 63 passed; every other archive suite passed |
+| `cargo test -p mind-place --bin mind-place import_commands::tests` (round 1 fixes, re-run) | PASS: 14 passed (11 before; three new tests) |
+| `npm run test:rust` (archive, capture-host, security, state, index, integration, documents) | PASS: 432 passed, 0 failed, 3 ignored before round 1; **re-run after the round 1 fixes: 440 passed, 0 failed, 3 ignored, exit 0** (run with `CARGO_BUILD_JOBS=2`; a first attempt stopped while *compiling* `integration-core` tests because `rustc` ran out of memory next to the running probe, not a test failure) |
+| `npm run test:web` | PASS before round 1 (333/333); not re-run, no web or TypeScript file changed in round 1 |
 | `cargo fmt --all -- --check`, `npm run verify:repo`, `npm run typecheck`, `node scripts/verify-workflow-security.mjs` | PASS |
 | `npm run build` | PASS (release build, `mind-place.exe` produced; only pre-existing warnings) |
 | `cargo clippy -p mind-place-archive -p mind-place-security --tests` | no warning in the changed files |
-| Mutation checks (8 guards) | each named test failed with its guard disabled; restored |
+| Mutation checks | 8 guards before round 1 and 2 more for it (first-local-header-at-zero, last-member-ends-at-directory): each named test failed with its guard disabled; restored |
 | Large synthetic export memory probe (release, 20 000 conversations, 997 MB decompressed JSON in a 384 MB zip) | PASS: peak working set **71.1 MB** for the whole process (sampled every 300 ms; owner thresholds 1 GB warning, 2 GB failure). Measure 5.0 s, stage and verify 174 s, publish 1713 s (about 12 items per second; other builds and test suites ran on the machine during part of it), 20 000 imported in one run. An earlier run with a 300 s test capability stopped with `E_AUTHORIZATION` at about 6 minutes, peak 70.9 MB: that is why residual 10 exists. Throughput is indicative only |
 | True symlink tests (`a_zip_source_reached_through_a_symlink_is_refused`, security-core symlink cases) | **unix only**; run on Linux hosted CI, not on this Windows runner |
 | Hosted CI on the exact head | see the PR checks; not claimed here. A head that added an `import_commands` step to `windows-product.yml` (`8943d30`) failed `Fast developer feedback` on the native-step contract test; the step was reverted. `import_commands::tests` are local only (**PARTIAL** for card acceptance 4) |

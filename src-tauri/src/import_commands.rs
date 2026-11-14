@@ -5,6 +5,13 @@
 //!
 //! - Every command needs an unlocked owner session and the legacy plaintext archive; the RAW-01
 //!   import path refuses an encrypted vault. None of them is reachable from MCP or the extension.
+//! - A source is named by a **selection grant**, never by a path the webview typed: the backend
+//!   mints a short-lived opaque token for a path the owner picked in a native dialog
+//!   ([`grant_selection`]; the picker command arrives with MP-UI2-06, so until then no command
+//!   can mint one and the commands below refuse every request: fail closed).
+//! - Measuring the source (hashing, decompressing) is part of the running operation: Cancel and
+//!   Lock stop it within about a MiB of reading, for `inspect_import_source` and `start_import`
+//!   alike. Inspecting and importing share one slot, so they never run at the same time.
 //! - `start_import` re-authenticates the owner, authorizes a capability bound to the measured
 //!   source, and always revokes it when the job ends.
 //! - The credential is wrapped in `Zeroizing` on arrival and is never logged or echoed. Events
@@ -23,7 +30,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, State};
 use zeroize::Zeroizing;
 
@@ -36,6 +43,71 @@ const MAX_PATH_CHARS: usize = 4096;
 const MAX_EXPLICIT_MEMBERS: usize = 1000;
 /// Emit at most one staging/publishing event per this many records.
 const EVENT_EVERY: u64 = 64;
+/// A source grant is valid this long after it was minted.
+const SELECTION_TTL: Duration = Duration::from_secs(600);
+/// At most this many grants are held; the oldest is dropped first.
+const MAX_SELECTIONS: usize = 4;
+
+struct Selection {
+    token: String,
+    path: String,
+    expires: Instant,
+}
+
+/// Grants minted by the backend for sources the owner picked. Process-wide and in memory only:
+/// a restart or a lock forgets them.
+static SELECTIONS: Mutex<Vec<Selection>> = Mutex::new(Vec::new());
+
+fn selections() -> std::sync::MutexGuard<'static, Vec<Selection>> {
+    SELECTIONS.lock().unwrap_or_else(|error| error.into_inner())
+}
+
+/// Mints an opaque, short-lived grant for one source path the owner chose through a native
+/// dialog. Backend code only: it is deliberately not a command, so a webview cannot name a path
+/// by itself. The path is checked like a command path (absolute, on this computer).
+#[cfg_attr(not(test), allow(dead_code))] // first caller: the picker command in MP-UI2-06
+pub(crate) fn grant_selection(path: &Path) -> Result<String, String> {
+    let text = path
+        .to_str()
+        .ok_or_else(|| coded("E_IMPORT_PATH", "Invalid import source path"))?;
+    check_path(text)?;
+    let mut raw = [0u8; 16];
+    getrandom::fill(&mut raw)
+        .map_err(|_| coded("E_IMPORT_ENTROPY", "Could not create an import selection"))?;
+    let token: String = raw.iter().map(|byte| format!("{byte:02x}")).collect();
+    let mut held = selections();
+    held.retain(|grant| grant.expires > Instant::now());
+    while held.len() >= MAX_SELECTIONS {
+        held.remove(0);
+    }
+    held.push(Selection {
+        token: token.clone(),
+        path: text.to_owned(),
+        expires: Instant::now() + SELECTION_TTL,
+    });
+    Ok(token)
+}
+
+/// The path a live grant names. The grant is not consumed: the owner inspects first and then
+/// imports the same selection, within its lifetime.
+fn resolve_selection(token: &str) -> Result<String, String> {
+    let mut held = selections();
+    held.retain(|grant| grant.expires > Instant::now());
+    held.iter()
+        .find(|grant| grant.token == token)
+        .map(|grant| grant.path.clone())
+        .ok_or_else(|| {
+            coded(
+                "E_IMPORT_SELECTION",
+                "Choose the export again; the selection is missing or expired",
+            )
+        })
+}
+
+/// Forgets every grant (the owner session ended).
+fn clear_selections() {
+    selections().clear();
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -108,13 +180,49 @@ fn check_path(path: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-fn measure(path: &Path) -> Result<SourceManifest, String> {
-    SourceManifest::measure(path, ManifestLimits::default()).map_err(archive_error)
+/// Why the running operation must stop, if it must: the owner session ended, or Cancel.
+fn stop_reason(
+    gate: &SecurityGate,
+    lease: UnlockLease,
+    cancel: &AtomicBool,
+) -> mind_place_archive::Result<()> {
+    if gate.validate_lease(lease).is_err() {
+        return Err(ArchiveError::Invalid(coded(
+            "E_AUTHORIZATION",
+            "The owner session was locked",
+        )));
+    }
+    if cancel.load(Ordering::Acquire) {
+        return Err(ArchiveError::Invalid(coded(
+            "E_IMPORT_CANCELLED",
+            "Import stopped by the owner",
+        )));
+    }
+    Ok(())
 }
 
-pub(crate) fn inspect_source(provider: &str, path: &str) -> Result<SourceInspection, String> {
+/// Measures the source, polling Cancel and the lease while it reads.
+fn measure(
+    path: &Path,
+    gate: &SecurityGate,
+    lease: UnlockLease,
+    cancel: &AtomicBool,
+) -> Result<SourceManifest, String> {
+    SourceManifest::measure_interruptible(path, ManifestLimits::default(), &|| {
+        stop_reason(gate, lease, cancel)
+    })
+    .map_err(archive_error)
+}
+
+pub(crate) fn inspect_source(
+    gate: &SecurityGate,
+    lease: UnlockLease,
+    cancel: &AtomicBool,
+    provider: &str,
+    path: &str,
+) -> Result<SourceInspection, String> {
     check_provider(provider)?;
-    let manifest = measure(&check_path(path)?)?;
+    let manifest = measure(&check_path(path)?, gate, lease, cancel)?;
     Ok(SourceInspection {
         provider: provider.to_owned(),
         kind: manifest.source_kind().to_owned(),
@@ -196,17 +304,8 @@ impl ImportProgress for CommandProgress<'_> {
             point,
             ImportPoint::Staged { .. } | ImportPoint::Verified | ImportPoint::BeforeItem { .. }
         );
-        if cancellable && self.gate.validate_lease(self.lease).is_err() {
-            return Err(ArchiveError::Invalid(coded(
-                "E_AUTHORIZATION",
-                "The owner session was locked",
-            )));
-        }
-        if cancellable && self.cancel.load(Ordering::Acquire) {
-            return Err(ArchiveError::Invalid(coded(
-                "E_IMPORT_CANCELLED",
-                "Import stopped by the owner",
-            )));
+        if cancellable {
+            stop_reason(self.gate, self.lease, self.cancel)?;
         }
         let event = match point {
             ImportPoint::Staged { seq } if seq % EVENT_EVERY == 0 => Some(ProgressEvent {
@@ -239,6 +338,10 @@ impl ImportProgress for CommandProgress<'_> {
             (self.sink)(event);
         }
         Ok(())
+    }
+
+    fn measuring(&self) -> mind_place_archive::Result<()> {
+        stop_reason(self.gate, self.lease, self.cancel)
     }
 
     fn items_total(&self, total: u64) {
@@ -297,7 +400,7 @@ fn run_import_with_ttl(
     // Verify the owner before reading the source again (fail fast, same backoff as unlock).
     gate.verify_owner_credential(credential)
         .map_err(security_error)?;
-    let manifest = measure(&path)?;
+    let manifest = measure(&path, gate, lease, cancel)?;
     if manifest.sha256_hex() != request.source_token {
         return Err(coded(
             "E_SOURCE_CHANGED",
@@ -377,6 +480,12 @@ fn claim_slot(slot: &RunningImport) -> Result<(SlotGuard, Arc<AtomicBool>), Stri
     Ok((SlotGuard { slot: slot.clone() }, flag))
 }
 
+/// The owner session ended: stop the running operation and forget every source grant.
+pub(super) fn retire(slot: &RunningImport) {
+    cancel_running(slot);
+    clear_selections();
+}
+
 /// Asks the running import, if any, to stop at its next safe point. Returns whether one ran.
 pub(super) fn cancel_running(slot: &RunningImport) -> bool {
     match slot
@@ -392,18 +501,37 @@ pub(super) fn cancel_running(slot: &RunningImport) -> bool {
     }
 }
 
-/// Measures an export folder or zip so the owner can review it. Read-only.
+/// Resolves the grant, takes the import slot (so Cancel and Lock reach the read, and no import
+/// runs at the same time) and measures the selected source.
+fn inspect_selection(
+    slot: &RunningImport,
+    gate: &SecurityGate,
+    lease: UnlockLease,
+    provider: &str,
+    selection: &str,
+) -> Result<SourceInspection, String> {
+    let path = resolve_selection(selection)?;
+    let (_guard, cancel) = claim_slot(slot)?;
+    inspect_source(gate, lease, &cancel, provider, &path)
+}
+
+/// Measures the export the owner selected (a folder or a zip) so they can review it. Read-only.
+/// Holds the import slot while it reads, so `cancel_import` and Lock stop it.
 #[tauri::command]
 pub(super) async fn inspect_import_source(
     state: State<'_, AppState>,
     provider: String,
-    path: String,
+    selection: String,
 ) -> Result<SourceInspection, String> {
     legacy_archive(&state)?;
     let lease = begin_unlocked(&state)?;
-    let report = tauri::async_runtime::spawn_blocking(move || inspect_source(&provider, &path))
-        .await
-        .map_err(|_| "E_IMPORT_WORKER: import worker failed".to_owned())??;
+    let slot = state.running_import.clone();
+    let security = state.security.clone();
+    let report = tauri::async_runtime::spawn_blocking(move || {
+        inspect_selection(&slot, &security, lease, &provider, &selection)
+    })
+    .await
+    .map_err(|_| "E_IMPORT_WORKER: import worker failed".to_owned())??;
     finish_unlocked(&state, lease)?;
     Ok(report)
 }
@@ -414,7 +542,7 @@ pub(super) async fn start_import(
     app: AppHandle,
     state: State<'_, AppState>,
     provider: String,
-    path: String,
+    selection: String,
     source_token: String,
     credential: String,
     members: Option<Vec<String>>,
@@ -422,6 +550,7 @@ pub(super) async fn start_import(
     let credential = Zeroizing::new(credential);
     let store = legacy_archive(&state)?;
     let lease = begin_unlocked(&state)?;
+    let path = resolve_selection(&selection)?;
     let (guard, cancel) = claim_slot(&state.running_import)?;
     let security = state.security.clone();
     let receipt = tauri::async_runtime::spawn_blocking(move || {
@@ -589,6 +718,16 @@ mod tests {
             path.to_string_lossy().into_owned()
         }
 
+        fn inspect(&self, path: &str) -> Result<SourceInspection, String> {
+            inspect_source(
+                &self.gate,
+                self.gate.require_unlocked().unwrap(),
+                &AtomicBool::new(false),
+                "chatgpt",
+                path,
+            )
+        }
+
         fn start(
             &self,
             path: &str,
@@ -630,7 +769,7 @@ mod tests {
         let fx = Fx::new();
         let json = export(3);
         let path = fx.write_zip(&[("conversations.json", &json), ("chat.html", b"<html/>")]);
-        let report = inspect_source("chatgpt", &path).unwrap();
+        let report = fx.inspect(&path).unwrap();
         assert_eq!(report.kind, "zip");
         assert_eq!(report.files, 2);
         assert_eq!(
@@ -681,7 +820,7 @@ mod tests {
     fn a_wrong_credential_writes_nothing_and_backs_off() {
         let fx = Fx::new();
         let path = fx.write_zip(&[("conversations.json", &export(2))]);
-        let report = inspect_source("chatgpt", &path).unwrap();
+        let report = fx.inspect(&path).unwrap();
         let message = fx
             .start(
                 &path,
@@ -701,7 +840,7 @@ mod tests {
     fn a_source_changed_since_inspection_is_refused() {
         let fx = Fx::new();
         let path = fx.write_zip(&[("conversations.json", &export(2))]);
-        let report = inspect_source("chatgpt", &path).unwrap();
+        let report = fx.inspect(&path).unwrap();
         fx.write_zip(&[("conversations.json", &export(3))]);
         let message = fx
             .start(
@@ -722,7 +861,7 @@ mod tests {
         let fx = Fx::new();
         let json = export(1);
         let path = fx.write_zip(&[("renamed-by-owner.json", &json), ("chat.html", b"<html/>")]);
-        let report = inspect_source("chatgpt", &path).unwrap();
+        let report = fx.inspect(&path).unwrap();
         assert!(report.candidates.is_empty());
         let run = |members: Option<&[String]>| {
             fx.start(
@@ -757,7 +896,7 @@ mod tests {
     fn cancel_while_staging_leaves_nothing_and_cancel_while_publishing_resumes() {
         let fx = Fx::new();
         let path = fx.write_zip(&[("conversations.json", &export(200))]);
-        let report = inspect_source("chatgpt", &path).unwrap();
+        let report = fx.inspect(&path).unwrap();
         // Cancelled before the first record is staged: nothing visible, no job left.
         let message = fx
             .start(
@@ -820,7 +959,7 @@ mod tests {
     fn an_authorization_that_ends_mid_job_asks_for_a_rerun_that_resumes() {
         let fx = Fx::new();
         let path = fx.write_zip(&[("conversations.json", &export(5))]);
-        let report = inspect_source("chatgpt", &path).unwrap();
+        let report = fx.inspect(&path).unwrap();
         // The capability expires while the owner waits between staging and publication.
         let sink = |event: ProgressEvent| {
             if event.phase == "publishing" && event.done == 0 {
@@ -863,7 +1002,7 @@ mod tests {
     fn locking_while_staging_stops_before_anything_is_published() {
         let fx = Fx::new();
         let path = fx.write_zip(&[("conversations.json", &export(10))]);
-        let report = inspect_source("chatgpt", &path).unwrap();
+        let report = fx.inspect(&path).unwrap();
         let gate = fx.gate.clone();
         let sink = |event: ProgressEvent| {
             if event.phase == "staging" {
@@ -894,7 +1033,7 @@ mod tests {
     fn locking_mid_import_stops_publication() {
         let fx = Fx::new();
         let path = fx.write_zip(&[("conversations.json", &export(200))]);
-        let report = inspect_source("chatgpt", &path).unwrap();
+        let report = fx.inspect(&path).unwrap();
         let gate = fx.gate.clone();
         let sink = |event: ProgressEvent| {
             if event.phase == "publishing" && event.done >= 65 {
@@ -937,13 +1076,24 @@ mod tests {
             &AtomicBool::new(false),
         )
         .unwrap_err();
-        assert!(stale.starts_with("MP_"), "{stale}");
+        // The measurement polls the lease before anything is read, so a stale lease stops there.
+        assert!(stale.starts_with("E_AUTHORIZATION"), "{stale}");
         assert_eq!(fx.conversations(), published);
     }
 
     #[test]
     fn inputs_are_validated_before_any_read() {
-        assert!(inspect_source("claude", "/tmp/x.zip")
+        let fx = Fx::new();
+        let inspect = |provider: &str, path: &str| {
+            inspect_source(
+                &fx.gate,
+                fx.gate.require_unlocked().unwrap(),
+                &AtomicBool::new(false),
+                provider,
+                path,
+            )
+        };
+        assert!(inspect("claude", "/tmp/x.zip")
             .unwrap_err()
             .starts_with("E_IMPORT_PROVIDER"));
         for path in [
@@ -956,16 +1106,145 @@ mod tests {
             "//attacker-host/share/export.zip",
         ] {
             assert!(
-                inspect_source("chatgpt", path)
+                inspect("chatgpt", path)
                     .unwrap_err()
                     .starts_with("E_IMPORT_PATH"),
                 "{path:?}"
             );
         }
         let long = format!("/{}", "a".repeat(MAX_PATH_CHARS + 1));
-        assert!(inspect_source("chatgpt", &long)
+        assert!(inspect("chatgpt", &long)
             .unwrap_err()
             .starts_with("E_IMPORT_PATH"));
+    }
+
+    #[test]
+    fn cancel_and_lock_stop_the_measurement_of_a_large_source() {
+        let fx = Fx::new();
+        // Several MiB of stored content: measuring it polls Cancel and the lease repeatedly.
+        let big = vec![b'x'; 6 * 1024 * 1024];
+        let path = fx.write_zip(&[("conversations.json", &export(2)), ("big.bin", &big)]);
+        let lease = fx.gate.require_unlocked().unwrap();
+
+        // Cancelled before the read starts: nothing is read to the end.
+        let cancel = AtomicBool::new(true);
+        let message = inspect_source(&fx.gate, lease, &cancel, "chatgpt", &path).unwrap_err();
+        assert!(message.starts_with("E_IMPORT_CANCELLED"), "{message}");
+
+        // Cancelled while it is reading: the flag is raised by the second poll.
+        let polls = std::cell::Cell::new(0u32);
+        let cancel = AtomicBool::new(false);
+        let result = SourceManifest::measure_interruptible(
+            Path::new(&path),
+            ManifestLimits::default(),
+            &|| {
+                polls.set(polls.get() + 1);
+                if polls.get() >= 3 {
+                    cancel.store(true, Ordering::Release);
+                }
+                stop_reason(&fx.gate, lease, &cancel)
+            },
+        );
+        let message = archive_error(result.unwrap_err());
+        assert!(message.starts_with("E_IMPORT_CANCELLED"), "{message}");
+        // The 6 MiB member was not read to its end (a poll about every MiB, and one per member).
+        assert!(polls.get() <= 4, "{}", polls.get());
+
+        // Locked: the same read is refused as unauthorized.
+        fx.gate.lock();
+        let message =
+            inspect_source(&fx.gate, lease, &AtomicBool::new(false), "chatgpt", &path).unwrap_err();
+        assert!(message.starts_with("E_AUTHORIZATION"), "{message}");
+    }
+
+    /// Selection grants live in one process-wide list; tests that touch it run one at a time.
+    static SELECTION_TESTS: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn a_source_must_be_named_by_a_backend_grant_and_grants_expire() {
+        let _serial = SELECTION_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        clear_selections();
+        let fx = Fx::new();
+        let path = fx.write_zip(&[("conversations.json", &export(1))]);
+        let slot: RunningImport = Arc::new(Mutex::new(None));
+        let lease = fx.gate.require_unlocked().unwrap();
+        let inspect =
+            |selection: &str| inspect_selection(&slot, &fx.gate, lease, "chatgpt", selection);
+
+        // A path typed by the webview is not a grant; neither is an unknown token.
+        for bogus in [path.as_str(), "", "00000000000000000000000000000000"] {
+            let message = inspect(bogus).unwrap_err();
+            assert!(message.starts_with("E_IMPORT_SELECTION"), "{message}");
+        }
+        // A grant must still name a local absolute path.
+        assert!(
+            grant_selection(Path::new(r"\\attacker-host\share\export.zip"))
+                .unwrap_err()
+                .starts_with("E_IMPORT_PATH")
+        );
+        assert!(grant_selection(Path::new("relative.zip"))
+            .unwrap_err()
+            .starts_with("E_IMPORT_PATH"));
+
+        let token = grant_selection(Path::new(&path)).unwrap();
+        assert_eq!(token.len(), 32);
+        assert_ne!(token, grant_selection(Path::new(&path)).unwrap());
+        // Inspect and import both resolve it; resolving does not consume it.
+        assert_eq!(inspect(&token).unwrap().files, 1);
+        assert_eq!(resolve_selection(&token).unwrap(), path);
+        assert_eq!(inspect(&token).unwrap().files, 1);
+
+        // The oldest grant is dropped beyond the cap.
+        for _ in 0..MAX_SELECTIONS {
+            grant_selection(Path::new(&path)).unwrap();
+        }
+        assert!(resolve_selection(&token)
+            .unwrap_err()
+            .starts_with("E_IMPORT_SELECTION"));
+
+        // An expired grant is refused, and Lock (retire) forgets every grant.
+        let expired = grant_selection(Path::new(&path)).unwrap();
+        for grant in selections().iter_mut() {
+            if grant.token == expired {
+                grant.expires = Instant::now() - Duration::from_secs(1);
+            }
+        }
+        assert!(resolve_selection(&expired)
+            .unwrap_err()
+            .starts_with("E_IMPORT_SELECTION"));
+        let live = grant_selection(Path::new(&path)).unwrap();
+        retire(&slot);
+        assert!(resolve_selection(&live)
+            .unwrap_err()
+            .starts_with("E_IMPORT_SELECTION"));
+    }
+
+    #[test]
+    fn inspection_and_import_never_run_at_the_same_time() {
+        let _serial = SELECTION_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        clear_selections();
+        let fx = Fx::new();
+        let path = fx.write_zip(&[("conversations.json", &export(1))]);
+        let token = grant_selection(Path::new(&path)).unwrap();
+        let slot: RunningImport = Arc::new(Mutex::new(None));
+        let lease = fx.gate.require_unlocked().unwrap();
+        // An import (or another inspection) holds the slot: inspection is refused, not queued.
+        let (guard, flag) = claim_slot(&slot).unwrap();
+        let message = inspect_selection(&slot, &fx.gate, lease, "chatgpt", &token).unwrap_err();
+        assert!(message.starts_with("E_IMPORT_BUSY"), "{message}");
+        // Lock/Cancel reach whatever holds the slot.
+        retire(&slot);
+        assert!(flag.load(Ordering::Acquire));
+        drop(guard);
+        // Free again: the inspection runs and releases the slot when it ends.
+        let token = grant_selection(Path::new(&path)).unwrap();
+        assert_eq!(
+            inspect_selection(&slot, &fx.gate, lease, "chatgpt", &token)
+                .unwrap()
+                .files,
+            1
+        );
+        assert!(claim_slot(&slot).is_ok());
     }
 
     #[test]

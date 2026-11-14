@@ -910,7 +910,7 @@ async fn unlock_security(
 fn retire_owner_handles(state: &AppState) {
     // A running import also stops at its next safe point; the revoked lease already fences
     // every further publication (E_AUTHORIZATION).
-    import_commands::cancel_running(&state.running_import);
+    import_commands::retire(&state.running_import);
     state.document_refresh.deactivate_all();
     state
         .vault

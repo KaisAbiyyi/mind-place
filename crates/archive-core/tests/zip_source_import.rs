@@ -788,6 +788,315 @@ fn malformed_truncated_split_and_padded_archives_are_refused() {
     assert!(measure_error(&bad64).contains("E_ZIP_MALFORMED"));
 }
 
+// ---------- layout: every byte is a member or a parsed record ----------
+
+/// Inserts `gap` immediately before the local header of entry `at` (before the central directory
+/// when `at == names.len()`), and fixes every offset that moves: the central directory entries'
+/// local offsets (classic or zip64), the end record and, for zip64, the zip64 end record and its
+/// locator. The result is an internally consistent archive: only the layout rule can refuse it.
+fn insert_before(built: &Built, names: &[&str], at: usize, gap: &[u8], zip64: bool) -> Vec<u8> {
+    let cd_offset = built.centrals[0];
+    let position = if at < built.locals.len() {
+        built.locals[at]
+    } else {
+        cd_offset
+    };
+    let shift = gap.len();
+    let mut bytes = built.bytes[..position].to_vec();
+    bytes.extend_from_slice(gap);
+    bytes.extend_from_slice(&built.bytes[position..]);
+    let moved = |old: usize| if old >= position { old + shift } else { old };
+    for (index, central) in built.centrals.iter().enumerate() {
+        let central = central + shift;
+        if zip64 {
+            let local = central + 46 + names[index].len() + 4 + 16;
+            let old = u64::from_le_bytes(bytes[local..local + 8].try_into().unwrap()) as usize;
+            bytes[local..local + 8].copy_from_slice(&(moved(old) as u64).to_le_bytes());
+        } else {
+            let local = central + 42;
+            let old = u32::from_le_bytes(bytes[local..local + 4].try_into().unwrap()) as usize;
+            bytes[local..local + 4].copy_from_slice(&(moved(old) as u32).to_le_bytes());
+        }
+    }
+    let eocd = built.eocd + shift;
+    if zip64 {
+        let z64 = eocd - 20 - 56;
+        let offset = u64::from_le_bytes(bytes[z64 + 48..z64 + 56].try_into().unwrap());
+        bytes[z64 + 48..z64 + 56].copy_from_slice(&(offset + shift as u64).to_le_bytes());
+        let locator = eocd - 20 + 8;
+        let at_z64 = u64::from_le_bytes(bytes[locator..locator + 8].try_into().unwrap());
+        bytes[locator..locator + 8].copy_from_slice(&(at_z64 + shift as u64).to_le_bytes());
+    } else {
+        let offset = u32::from_le_bytes(bytes[eocd + 16..eocd + 20].try_into().unwrap());
+        bytes[eocd + 16..eocd + 20].copy_from_slice(&(offset + shift as u32).to_le_bytes());
+    }
+    bytes
+}
+
+/// Sets general purpose bit 3 (a data descriptor follows the data) on entry `index`, in its
+/// local and central headers.
+fn declare_descriptor(bytes: &mut [u8], local: usize, central: usize) {
+    bytes[local + 6] |= 8;
+    bytes[central + 8] |= 8;
+}
+
+fn two_members() -> (Built, [&'static str; 2], Vec<u8>) {
+    let json = three_conversations();
+    let built = build(
+        &[
+            stored("conversations.json", &json),
+            stored("notes.txt", b"synthetic"),
+        ],
+        false,
+    );
+    (built, ["conversations.json", "notes.txt"], json)
+}
+
+#[test]
+fn a_prefix_with_rebased_offsets_is_refused() {
+    // A polyglot: arbitrary bytes in front of an otherwise valid archive, with every local
+    // offset and the directory offset rebased so each header still checks out. Only the rule
+    // "the first local header is at byte zero" refuses it.
+    for zip64 in [false, true] {
+        let json = three_conversations();
+        let names = ["conversations.json", "notes.txt"];
+        let built = build(
+            &[
+                file("conversations.json", &json),
+                stored("notes.txt", b"synthetic"),
+            ],
+            zip64,
+        );
+        // Control: shifting by nothing yields the original archive, which is accepted, so the
+        // helper itself does not corrupt anything.
+        let unchanged = insert_before(&built, &names, 0, &[], zip64);
+        assert_eq!(unchanged, built.bytes);
+        measure_ok(&unchanged);
+        let prefixed = insert_before(&built, &names, 0, b"MZ-polyglot-prefix-bytes", zip64);
+        let message = measure_error(&prefixed);
+        assert!(
+            message.contains("E_ZIP_MALFORMED"),
+            "zip64={zip64}: {message}"
+        );
+        assert!(message.contains("outside its members"), "{message}");
+    }
+}
+
+#[test]
+fn unaccounted_bytes_between_members_or_before_the_directory_are_refused() {
+    for zip64 in [false, true] {
+        let json = three_conversations();
+        let names = ["conversations.json", "notes.txt"];
+        let built = build(
+            &[
+                stored("conversations.json", &json),
+                stored("notes.txt", b"synthetic"),
+            ],
+            zip64,
+        );
+        for (at, label) in [(1, "between members"), (2, "before the directory")] {
+            let bytes = insert_before(&built, &names, at, b"HIDDEN-GAP", zip64);
+            let message = measure_error(&bytes);
+            assert!(
+                message.contains("E_ZIP_MALFORMED") && message.contains("outside its members"),
+                "{label} zip64={zip64}: {message}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_data_descriptor_that_agrees_with_the_directory_is_accepted() {
+    let (built, names, json) = two_members();
+    let crc_of = |index: usize| {
+        let at = built.centrals[index] + 16;
+        u32::from_le_bytes(built.bytes[at..at + 4].try_into().unwrap())
+    };
+    let size_of = |index: usize| {
+        let at = built.centrals[index] + 20;
+        u32::from_le_bytes(built.bytes[at..at + 4].try_into().unwrap())
+    };
+    let descriptor = |index: usize, signed: bool, wide: bool| {
+        let mut out = Vec::new();
+        if signed {
+            put32(&mut out, 0x0807_4b50);
+        }
+        put32(&mut out, crc_of(index));
+        if wide {
+            put64(&mut out, size_of(index) as u64);
+            put64(&mut out, size_of(index) as u64);
+        } else {
+            put32(&mut out, size_of(index));
+            put32(&mut out, size_of(index));
+        }
+        out
+    };
+    // Signed or unsigned, 32 or 64 bit sizes, after the first member and after the last one.
+    for (signed, wide) in [(true, false), (false, false), (true, true), (false, true)] {
+        // After the last member first (nothing after it moves), then after the first.
+        let last = insert_before(&built, &names, 2, &descriptor(1, signed, wide), false);
+        let mut both = insert_before(
+            &Built {
+                bytes: last,
+                locals: built.locals.clone(),
+                centrals: built
+                    .centrals
+                    .iter()
+                    .map(|c| c + descriptor(1, signed, wide).len())
+                    .collect(),
+                eocd: built.eocd + descriptor(1, signed, wide).len(),
+            },
+            &names,
+            1,
+            &descriptor(0, signed, wide),
+            false,
+        );
+        let first_len = descriptor(0, signed, wide).len();
+        let second_local = built.locals[1] + first_len;
+        let central0 = built.centrals[0] + first_len + descriptor(1, signed, wide).len();
+        let central1 = built.centrals[1] + first_len + descriptor(1, signed, wide).len();
+        declare_descriptor(&mut both, built.locals[0], central0);
+        declare_descriptor(&mut both, second_local, central1);
+        let manifest = measure_ok(&both);
+        assert_eq!(
+            manifest.entry("conversations.json").unwrap().size,
+            json.len() as u64,
+            "signed={signed} wide={wide}"
+        );
+    }
+}
+
+#[test]
+fn a_data_descriptor_that_disagrees_or_is_misplaced_is_refused() {
+    let (built, names, _json) = two_members();
+    let crc = {
+        let at = built.centrals[1] + 16;
+        u32::from_le_bytes(built.bytes[at..at + 4].try_into().unwrap())
+    };
+    let size = 9u32;
+    let mut good = Vec::new();
+    put32(&mut good, 0x0807_4b50);
+    put32(&mut good, crc);
+    put32(&mut good, size);
+    put32(&mut good, size);
+    let with_descriptor = |descriptor: &[u8], declare: bool| {
+        let mut bytes = insert_before(&built, &names, 2, descriptor, false);
+        if declare {
+            let shift = descriptor.len();
+            declare_descriptor(&mut bytes, built.locals[1], built.centrals[1] + shift);
+        }
+        bytes
+    };
+    // Control: the matching, declared descriptor passes.
+    measure_ok(&with_descriptor(&good, true));
+    // Declared but absent: the next record is the directory, not a descriptor.
+    let message = measure_error(&with_descriptor(&[], true));
+    assert!(message.contains("E_ZIP_CORRUPT"), "{message}");
+    // Declared, but the sizes or the checksum disagree with the directory.
+    let mut wrong_size = good.clone();
+    wrong_size[8] ^= 1;
+    let message = measure_error(&with_descriptor(&wrong_size, true));
+    assert!(message.contains("E_ZIP_CORRUPT"), "{message}");
+    let mut wrong_crc = good.clone();
+    wrong_crc[4] ^= 1;
+    let message = measure_error(&with_descriptor(&wrong_crc, true));
+    assert!(message.contains("E_ZIP_CORRUPT"), "{message}");
+    // The same bytes without the declaration are hidden data, not a descriptor.
+    let message = measure_error(&with_descriptor(&good, false));
+    assert!(
+        message.contains("E_ZIP_MALFORMED") && message.contains("outside its members"),
+        "{message}"
+    );
+    // A descriptor followed by extra bytes: only the descriptor itself is accounted for.
+    let mut padded = good.clone();
+    padded.extend_from_slice(b"EXTRA");
+    let message = measure_error(&with_descriptor(&padded, true));
+    assert!(
+        message.contains("E_ZIP_MALFORMED") && message.contains("outside its members"),
+        "{message}"
+    );
+}
+
+fn measure_ok(bytes: &[u8]) -> SourceManifest {
+    let home = tempfile::tempdir().unwrap();
+    let path = home.path().join("export.zip");
+    std::fs::write(&path, bytes).unwrap();
+    SourceManifest::measure(&path, ManifestLimits::default())
+        .expect("the archive should be accepted")
+}
+
+// ---------- stopping a long measurement ----------
+
+#[test]
+fn a_long_measurement_polls_the_interrupt_and_stops_on_its_error() {
+    let big = vec![b'z'; 5 * 1024 * 1024];
+    let home = tempfile::tempdir().unwrap();
+    let folder = home.path().join("export");
+    std::fs::create_dir(&folder).unwrap();
+    std::fs::write(folder.join("big.bin"), &big).unwrap();
+    std::fs::write(folder.join("a.json"), b"[]").unwrap();
+    let zip_path = home.path().join("export.zip");
+    std::fs::write(
+        &zip_path,
+        zip(&[stored("big.bin", &big), file("a.json", b"[]")]),
+    )
+    .unwrap();
+
+    for source in [&folder, &zip_path] {
+        // Never interrupted: the poll count shows the hook is reached about once per MiB.
+        let polls = std::cell::Cell::new(0u32);
+        SourceManifest::measure_interruptible(source, ManifestLimits::default(), &|| {
+            polls.set(polls.get() + 1);
+            Ok(())
+        })
+        .unwrap();
+        assert!(polls.get() >= 5, "{source:?}: {}", polls.get());
+
+        // Stopped at the second poll: the error is returned as is and the 5 MiB is not finished.
+        let seen = std::cell::Cell::new(0u32);
+        let error =
+            SourceManifest::measure_interruptible(source, ManifestLimits::default(), &|| {
+                seen.set(seen.get() + 1);
+                if seen.get() >= 2 {
+                    Err(ArchiveError::Invalid("E_IMPORT_CANCELLED: stop".into()))
+                } else {
+                    Ok(())
+                }
+            })
+            .expect_err("the interrupt should stop the measurement");
+        assert!(error.to_string().contains("E_IMPORT_CANCELLED"), "{error}");
+        assert_eq!(seen.get(), 2, "{source:?}");
+    }
+}
+
+struct StopWhileMeasuring;
+
+impl ImportProgress for StopWhileMeasuring {
+    fn checkpoint(&self, _point: ImportPoint) -> Result<()> {
+        Ok(())
+    }
+    fn measuring(&self) -> Result<()> {
+        Err(ArchiveError::Invalid(
+            "E_IMPORT_CANCELLED: Import stopped by the owner".into(),
+        ))
+    }
+}
+
+#[test]
+fn the_jobs_own_measurement_at_start_can_be_stopped_and_writes_nothing() {
+    let fx = Fx::new("chatgpt");
+    let source = fx.write(
+        "export.zip",
+        &zip(&[file("conversations.json", &three_conversations())]),
+    );
+    let cap = fx.authorize(&source);
+    let error = fx
+        .run(&cap, &[chatgpt("conversations.json")], &StopWhileMeasuring)
+        .expect_err("the measurement should be stopped");
+    assert!(error.to_string().contains("E_IMPORT_CANCELLED"), "{error}");
+    assert_nothing_written(&fx);
+}
+
 #[test]
 fn archive_limits_are_enforced() {
     let many: Vec<Z> = (0..20)
