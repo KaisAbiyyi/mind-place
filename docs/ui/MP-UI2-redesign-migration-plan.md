@@ -1,6 +1,6 @@
-# MP-UI2 — Human-first UI redesign: migration plan (DRAFT for owner approval)
+# MP-UI2 — Human-first UI redesign: migration plan
 
-Status: **draft, not claimed, no task created, no code changed.** Written 2026-11-11 after the owner review of the UI-09 preview (MP-UI-U1 = Changes Required, 4/10).
+Status: **LOCKED — MP-UI2-00 design contract (2026-11-14; initial draft merged 2026-11-11 in PR #165).** Written after the owner review of the UI-09 preview (`MP-UI-U1 = Changes Required`, 4/10) and locked as the binding execution contract for `MP-UI2-01..U1`.
 
 Inputs: owner feedback (`MP-UI-U1-owner-feedback.md`), the clickable wireframe (published as an artifact, v1 with the owner's answers), the UI-09 feature coverage matrix, and a read-only look at the frozen source `77abfa45`.
 
@@ -55,7 +55,7 @@ Scope: redesign and re-implement the presentation layer **on the current stack (
 | G2 | **Memory to source chats** resolution (opaque evidence ID to archive conversation/snapshot). | Memory detail "Chats behind this", Constellation node panel | If it cannot be built now, the UI shows that section only where a mapping exists and hides it otherwise. It must never guess. |
 | G3 | **Native folder and file picker** command + minimal capability. | Sources | Returns paths only; selection still goes through Stage, Approve, Index; revoke semantics unchanged. Needs a security review task. |
 | G4 | **Language preference** storage. | i18n | Small; frontend storage is probably enough, audit confirms. |
-| G5 | **Memory creation path** (product). **Owner decision 2026-11-11:** import ChatGPT/Gemini exports first, then Codex/Claude Code create curated memory; empty states are fine meanwhile. | Whole redesign feels empty without it | Chain: (1) import core, which exists on branch `feat/mp-import-core-01` (lossless ChatGPT export streaming, Gemini Takeout parser; 10 commits ahead of `main`, no PR when checked on 2026-11-11); (2) scoped MCP write authority (MP-7MCP-01, PR #153, Review/HOLD on the board). Neither is a UI task, both gate real memory. |
+| G5 | **Memory creation path** (product). **Owner decision 2026-11-11:** import ChatGPT/Gemini exports first, then Codex/Claude Code create curated memory; empty states are fine meanwhile. | Whole redesign feels empty without it | Chain: (1) import core and app commands are now merged on `main` (PRs #166, #167, #168, #169, #170 at `1212990`); (2) scoped MCP write authority (MP-7MCP-01, PR #153, Review/HOLD on the board) remains separate. Neither is a UI task; both gate real memory. |
 
 ## 5. Strategy
 
@@ -92,20 +92,32 @@ Backend tasks from the audit (G1 to G4) are separate cards with their own review
 
 Dependency picture: `00 -> 01`; `00 -> 02, 03 -> 04 -> (05, 06, 07, 08, 09, 10) -> 11 -> 12 -> L0 -> L1 -> U1`. After the shell lands, pages 05 to 10 are parallelizable (separate modules); 07 waits on G1, 08 waits on G3. The shell, the route table and the i18n/ui-kit folders are single-writer.
 
-### 6a. Performance budgets (owner-given and proposed; measured in UI2-L1)
+### 6a. Performance budgets (locked in MP-UI2-00; measured in UI2-L1)
 
 Measured as the **Memory** shown in Task Manager for the whole app (the Mind Place process plus its WebView2 child processes). Reference from the owner's earlier experiment: WebView2 idle about 392 MB across 6 processes, about 525 MB peak in a 1,000-node graph test.
 
 | Budget | Value | Source |
 | --- | --- | --- |
-| Idle (unlocked, Home) | target at most 500 MB | proposed, from the reference above |
+| Idle (unlocked, Home) | target at most 500 MB | locked in MP-UI2-00 (2026-11-14; from WebView2 reference) |
 | Warning | above 1 GB: investigate | **owner** ("more than 1 GB is already crazy") |
 | Failure | above 2 GB, even in the largest scenario (large synthetic corpus, many memories, a very long transcript open) | **owner** |
-| Cold start | lock screen visible within 2 seconds | proposed, owner to confirm |
-| Long transcript | a 10,000-message chat shows its first screen within 1 second and scrolls smoothly | proposed, owner to confirm |
-| Constellation | at least 60 FPS pan/zoom at 120 nodes (the current bound) | proposed, owner to confirm |
+| Cold start | lock screen visible within 2 seconds | locked in MP-UI2-00 (2026-11-14) |
+| Long transcript | a 10,000-message chat shows its first screen within 1 second and scrolls smoothly | locked in MP-UI2-00 (2026-11-14) |
+| Constellation | at least 60 FPS pan/zoom at 120 nodes (the current bound) | locked in MP-UI2-00 (2026-11-14) |
 
 If a budget is missed on the WebView2 build, the native-UI (GPUI) question reopens with that evidence.
+
+### 6b. Per-page acceptance criteria (locked in MP-UI2-00)
+
+- **Shell & Top Bar (`UI2-04`)**: Logo-only sidebar header; top-bar sidebar toggle, Home-rooted breadcrumb (`Home > ...`), global Search trigger (`Ctrl+K` / `Meta+K`), EN/ID language switch, and Lock button; 7 destinations in exact order (`Home`, `Memory`, `Archive`, `Constellation`, `Sources`, `Connections`, `Settings`); responsive at 1120px / 780px; dev/owner v2 flag switches cleanly without breaking lock fences.
+- **Home (`UI2-11`)**: Memory-first layout with real counts (never demo data), recent memories and recent archive chats, and the setup checklist that folds in and hides itself once complete (with "verified first result" rule preserved and re-openable from Settings).
+- **Memory (`UI2-05`)**: Both list and card views; Topics, Projects, and People tabs; full Memory detail page with breadcrumb, collapsed History disclosure, Related items, "Chats behind this" (shown only when an exact mapping exists per G2, never guessed), AI-language translation note ("Translated from ...") + "View original", and Technical details collapsed inside the Info aside; honest empty state when zero memories exist.
+- **Archive & Chat Reader (`UI2-06`)**: Provider filter chips, paged/virtualized conversation list, prominent **Import** entry (ChatGPT export, Gemini Takeout, transcript file wired to owner import commands), chat-app-style thread (user bubble right, assistant left, DOMPurify + asset validation intact), and grouped **Info** aside holding saved copies (revision selector), copy/export actions, partial-capture warning banner ("Why?" opens Info aside), and collapsed Technical details.
+- **Constellation (`UI2-07`)**: Immediate render from curated memory only (via G1 read-only contract) with no seed input; honest empty state when no curated memory exists; single "Find a topic" field; clicking a node opens the node aside with memory summary and "Chats behind this" (when mapped); accessible keyboard node list; >= 60 FPS pan/zoom at 120 nodes; page name defaults to Constellation and reflects the user's choice in Settings.
+- **Sources (`UI2-08`)**: Approved folders and files list with plain status tags, inline Pause/Resume action, inline two-step "Remove access" confirmation stating "Your files are never deleted.", and single-column stepped Add dialog (Choose via native picker or path fallback -> Review -> Progress) that feeds the existing `Stage -> Approve -> Index` boundary without granting filesystem authority on picker selection alone.
+- **Connections (`UI2-09`)**: Browser capture setup (ChatGPT, Claude, Gemini capability honesty; ChatGPT opt-in automatic save; Chrome/Edge/Brave registration), "Let an AI app read your memory" (local MCP start/stop, one-time access key issue/copy, active/revoked client groups with inline two-step revoke), and collapsed "Advanced: connect hosted ChatGPT" disclosure preserving explicit remote-access consent.
+- **Settings (`UI2-10`)**: Grouped Configure cards (max ~7 rows/card) for Appearance (theme, density, technical mode, language EN/ID, map page name), Privacy & Lock, Encryption & Backup (factual vault state, online backup when encrypted/unlocked), Maintenance ("Search is up to date" status tag, single-confirmation rebuild search, technical diagnostics), and Recovery (launches on locked security gate with safe cancel path).
+- **Global Search (`UI2-11`)**: Command-palette dialog (`Ctrl+K`) with scope chips (`Everything`, `Memory`, `Archive`, `Files`), grouped results with **Memory first**, "Go to" navigation/action group, "Copy for an AI" context bar, and collapsed "Advanced" disclosure for multi-query/policy presets/token budgets and technical trace.
 
 ## 7. Verification baseline for every UI2 task
 
@@ -136,6 +148,6 @@ Not part of this plan. The owner has an existing GPUI experiment (`gemini-rust-g
 
 ## 10. Immediate next steps
 
-1. Owner approves the placement matrix, confirms the remaining budgets (section 6a) and merges this PR. Decided on 2026-11-11: Constellation (user-selectable), Archive, Import in the Archive, Home in the breadcrumb, memory text translatable, empty memory acceptable.
-2. Record UI2-00 as the design-lock gate; then create UI2-01..U1 cards on the execution board following the Now / Up Next rules (only direct successors of Now are shown).
-3. Cloud agents claim UI2-01 first (read-only audit), then UI2-02 and UI2-03 in parallel.
+1. `MP-UI2-00` is locked as the binding design contract (2026-11-14), incorporating the owner's decisions (Constellation user-selectable, Archive, Import in the Archive, Home-rooted breadcrumb, translatable memory text, empty memory acceptable), the signed-off placement matrix + deviations (`DEV-01..DEV-04`), EN/ID glossary, Section 6a budgets, and Section 6b per-page acceptance criteria.
+2. Once the `MP-UI2-00` PR is reviewed and merged by the owner, promote `MP-UI2-01`, `MP-UI2-02`, and `MP-UI2-03` from `03 · Up Next` to `02 · Now` (`Ready`).
+3. Cloud agents claim `MP-UI2-01` (read-only backend audit), `MP-UI2-02` (i18n foundation), and `MP-UI2-03` (design system v2 + `scripts/verify-ui-rules.mjs`) under their disjoint locks.

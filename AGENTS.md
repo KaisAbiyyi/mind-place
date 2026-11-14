@@ -61,11 +61,11 @@ Low-level Rust, compact binary derived formats, mmap, zero-copy parsing, SIMD/pa
 - Keep extension permissions minimal. Required checks reject unconditional host access and content scripts.
 - Preserve unrelated working-tree changes and local user archives.
 
-## UI work rules (owner-approved direction, 2026-11-11; binding once `docs/ui/UI-PRINCIPLES.md` is approved)
+## UI work rules (MP-UI2-00 design lock, 2026-11-14; binding)
 
 The engineering priority list above governs code, contracts and storage. **It does not govern what the user sees:** the visible UI is **human-first** (calm, plain, tidy), never a console for agents. Machine-oriented detail belongs in APIs, MCP and Details/Info panels.
 
-Before any UI task read `docs/ui/UI-PRINCIPLES.md`, the signed-off in-repo HTML guide it names, and `docs/ui/MP-UI-09-feature-coverage-matrix.md`. Authority order: owner's explicit decision, then the guide for what it shows, then `UI-PRINCIPLES.md` plus tokens for everything else. Existing code is never evidence of intended design.
+Before any UI task read `docs/ui/UI-PRINCIPLES.md`, `docs/ui/MP-UI2-placement-matrix.md`, the signed-off in-repo HTML guide it names (`docs/ui/evidence/mp-ui2/wireframe-v1.html`), and `docs/ui/MP-UI-09-feature-coverage-matrix.md`. Authority order: owner's explicit decision, then the guide for what it shows, then `UI-PRINCIPLES.md` plus tokens for everything else. Existing code is never evidence of intended design.
 
 When a capability is **not shown in the guide** (the guide is intentionally incomplete) do **not** improvise or "extend the closest pattern". Follow the gap protocol:
 

@@ -5,7 +5,9 @@
   "file": "wireframe-v1.html",
   "sha256": "2b4bbce50a079516e7db2326345cfd0bd227ff7b6a5dd347616fc9c790bc3a8c",
   "bytes": 84173,
-  "status": "DRAFT - overall direction approved by the owner; final sign-off is MP-UI2-00. Revision 2 (2026-11-11) applies the owner decisions: Archive, Home-rooted breadcrumb, Import in the Archive, translatable memory text, user-selectable map name.",
+  "status": "LOCKED — MP-UI2-00 design contract (2026-11-14). Binding ground-truth wireframe for MP-UI2-01..12. Revision 2 (2026-11-11) applies owner decisions: Archive, Home-rooted breadcrumb, Import in the Archive, translatable memory text, user-selectable map name.",
+  "design_lock_task": "MP-UI2-00",
+  "locked_at": "2026-11-14",
   "covers": [
     "shell (top bar toggle, breadcrumb, logo-only sidebar)",
     "Home with self-hiding setup",

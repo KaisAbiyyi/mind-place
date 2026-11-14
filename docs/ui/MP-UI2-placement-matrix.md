@@ -1,6 +1,6 @@
-# MP-UI2 feature placement matrix (DRAFT for owner approval)
+# MP-UI2 feature placement matrix
 
-Status: **draft, 2026-11-11.** Part of the `MP-UI2-00` design lock. It maps every row of [`MP-UI-09-feature-coverage-matrix.md`](MP-UI-09-feature-coverage-matrix.md) to its new home in the human-first UI, using only the pattern classes in [`UI-PRINCIPLES.md`](UI-PRINCIPLES.md). The owner approves it by merging or by replying; anything marked **Gap** is not shown in the wireframe and must go through the gap protocol (design gap ledger) when implemented.
+Status: **LOCKED — MP-UI2-00 design contract (2026-11-14; initial draft merged 2026-11-11 in PR #165).** Maps every row of [`MP-UI-09-feature-coverage-matrix.md`](MP-UI-09-feature-coverage-matrix.md) to its home in the human-first UI, using only the pattern classes in [`UI-PRINCIPLES.md`](UI-PRINCIPLES.md). Anything marked **Gap** is not drawn in `wireframe-v1.html` and must follow the Section 4 gap protocol and the Initial Design Gap Register below when implemented.
 
 Destinations: **Home, Memory, Archive, Constellation (name chosen in Settings), Sources, Connections, Settings**, plus the global **Search** (Ctrl K) and **Lock** in the top bar. Breadcrumb always starts at Home.
 
@@ -29,7 +29,7 @@ Legend: **WF** = shown in `wireframe-v1.html`. **Gap** = not shown, needs a ledg
 | 19 | Folder selection | Sources dialog: native picker, paste a path as fallback; Add files | Add | WF | Needs G3 (security review). |
 | 20 | Providers and capabilities | Connections > Save chats from your browser | Connect | WF | Capability matrix wording must stay honest (capture is not a handshake). |
 | 21 | Browser capture and registration | Connections > Saving options (automatic save, Browsers) | Configure, Connect | WF (rows) / **Gap** (setup dialog) | The Browser setup dialog steps are not drawn. |
-| 22 | Provider / generic import | **Archive > Import** (ChatGPT export, Gemini Takeout, transcript file) | Add | WF | Placement decided by the owner. Depends on the import branch landing. |
+| 22 | Provider / generic import | **Archive > Import** (ChatGPT export, Gemini Takeout, transcript file) | Add | WF | Placement decided by the owner. Backend import core and owner zip/app commands landed on main (#166, #167, #168, #169, #170); UI wiring owned by MP-UI2-06. |
 | 23 | MCP start/stop, issue, revoke | Connections > Let an AI app read your memory | Connect, Danger | WF | Named "AI app access" in UI. |
 | 24 | Hosted tunnel lifecycle | Connections > Advanced: connect hosted ChatGPT (collapsed) | Advanced | WF | Explicit consent kept. |
 | 25 | Global command palette | Top bar Search (Ctrl K) | Search | WF (search) / **Gap** ("Go to" commands) | Add a "Go to" group for pages and secondary commands. |
@@ -53,8 +53,37 @@ Legend: **WF** = shown in `wireframe-v1.html`. **Gap** = not shown, needs a ledg
 | N3 | Memory text in the app language | Memory detail note "Translated from English" and "View original" | Detail | WF | New. Stored once, per-language versions or translation at display time. |
 | N4 | Breadcrumb | Top bar, starting at Home | Shell | WF | New. |
 
-## Summary for the owner
+## 1. Signed-off deviation ledger (MP-UI2-00)
 
-- Shown in the wireframe: most rows. **Gap rows to draw before implementation: 7, 12, 15, 16, 21 (setup dialog), 25 (Go to), 28, 30, 37, and the loading/error/stale states in 39.**
-- Deviations that need an explicit yes: (a) the Quick Peek drawer becomes a detail page; (b) archive/revision nodes and the layer/origin/revision controls leave the graph; (c) opaque evidence IDs are hidden by default; (d) Overview health tiles leave Home.
-- Deferred, not built: memory edit/pin/forget, AI write access, backup restore and legacy migration UI.
+| ID | Capability row(s) | Earlier UI (MP-UI-09) | Human-first UI (MP-UI2) | Rationale & verification |
+| --- | --- | --- | --- | --- |
+| DEV-01 | 6 | Quick Peek slide-over drawer on Memory list | Replaced by full Memory detail page (`Home > Memory > ...`) and Constellation node aside | Owner-confirmed layout keeps reading calm and uncrowded (`MP-UI2-05`). |
+| DEV-02 | 11, 12 | Archive/revision nodes, seed ID input, and layer/origin/revision filters in Hive | Removed from default view; Constellation renders curated memory only (or honest empty state) with one "Find a topic" field | Removes technical/raw graph noise from default view; awaits G1 (`MP-UI2-07`). |
+| DEV-03 | 4, 8, 30 | Opaque evidence/proof IDs, hashes, revision IDs, canonical keys, and protocol names shown in default cards/rows | Hidden from default views; disclosed only inside `Info` aside or collapsed `Technical details` | Prevents machine-oriented identifiers from cluttering user workflows (`MP-UI2-03` UI rules lint enforces). |
+| DEV-04 | 2 | Overview runtime health tiles on Home | Removed from Home; operational status ("Search is up to date" + tag, rebuild search, and technical diagnostics) moves to `Settings > Maintenance` | Keeps Home memory-first without telemetry clutter (`MP-UI2-10`, `MP-UI2-11`). |
+
+## 2. Initial design gap register (for Gap Protocol execution in MP-UI2-03..11)
+
+Every row marked **Gap** above is not drawn in `wireframe-v1.html`. Implementing lanes must build these exclusively from the `UI-PRINCIPLES.md` Section 5 pattern catalog and Section 7 tokens, supply EN + ID copy, and attach light/dark, EN/ID, three-width screenshots in their PR design gap ledger:
+
+| Row # | Capability | Person's job (plain sentence) | Pattern class (`UI-PRINCIPLES` §5) | Destination (§6) | Owning task |
+| --- | --- | --- | --- | --- | --- |
+| 7 | Memory history and as-of state | See how a curated memory changed over time without cluttering the main note. | Detail, Advanced | Memory (`Home > Memory > detail`) | `MP-UI2-05` |
+| 12 | Constellation topic filtering beyond default | Narrow a busy memory map to one topic by typing its name. | Search, Advanced | Constellation | `MP-UI2-07` |
+| 15 | Document index status, pause, resume | Pause or resume indexing on a shared folder when I need my machine quiet. | Status, Configure | Sources (folder row) | `MP-UI2-08` |
+| 16 | File search and verified excerpt preview | Open a matching file result and read the exact verified excerpt with a link to its folder. | Search, Detail | Global Search (`Files` scope preview aside) | `MP-UI2-11` |
+| 21 | Browser capture setup dialog steps | Connect Chrome, Edge, or Brave to save chats from my browser step by step. | Connect, Add | Connections (`Saving options` dialog) | `MP-UI2-09` |
+| 25 | Command-palette "Go to" navigation/actions | Jump to any page or common action straight from the keyboard search dialog. | Search | Global Search (`Ctrl+K`) | `MP-UI2-11` |
+| 28 | Multi-query, policy presets, date, token budget | Tune search range or context size only when a basic search is not enough. | Search, Advanced | Global Search (`Advanced` disclosure) | `MP-UI2-11` |
+| 30 | Retrieval inspector / score trace | Check why a search returned those results when debugging search behavior. | Advanced | Global Search (`Details` aside) & Settings (`Maintenance` technical mode) | `MP-UI2-10`, `MP-UI2-11` |
+| 37 | Home onboarding checklist step dialogs | Complete each setup step (vault, optional browser capture, first search/read) in a guided flow. | Add, Progress | Home (checklist dialogs) | `MP-UI2-11` |
+| 39 | Loading, empty, error, partial, and stale states | Understand when data is loading, empty, partially saved, stale, or failed, and know what to do next. | Empty, Warning, Progress | All 7 destinations (primitives in UI-kit) | `MP-UI2-03`, `MP-UI2-04..11` |
+
+## 3. Explicitly deferred capabilities (out of scope for MP-UI2)
+
+| Capability | Reason & prerequisite | Current UI behavior |
+| --- | --- | --- |
+| Memory create, edit, pin, and forget UI | Memory write primitives are not registered as Tauri/MCP tools; awaits accepted write-authority contract. | Disabled "Suggest a correction (coming later)" control on Memory detail; no fake writes or pin persistence. |
+| AI write-access scope controls | External MCP catalog is read-only (`memory_search`, `memory_fetch`, `context_build`); awaits `MP-7MCP-01` and write tasks. | Plain read-only "AI app access" list and key management only. |
+| Backup restore & graphical legacy migration UI | Offline maintenance command only per `MP-9B`; awaits `MP-9E`/`MP-9F` UI enablement. | Online backup row shown in Settings (disabled unless encrypted and unlocked); no fabricated restore UI. |
+| Native UI (GPUI) port | Current presentation migration targets Tauri + WebView2. | Reopens only with `MP-UI2-L1` evidence if a locked performance budget is missed. |
