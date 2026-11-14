@@ -193,7 +193,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("cargo test -p mind-place --bin mind-place import_commands::tests -- --nocapture", step["run"])
         names = [line.strip().strip(",").strip("'") for line in step["run"].splitlines()
                  if line.strip().startswith("'import_commands::tests::")]
-        self.assertGreaterEqual(len(names), 11)
+        self.assertGreaterEqual(len(names), 14)
         stub = '''function cargo {
           [IO.File]::AppendAllText($env:IPC_COMMAND_LOG, ($args -join ' ') + "`n")
           if ($args -contains '--list') {

@@ -180,12 +180,15 @@ jobs:
         if ($LASTEXITCODE -ne 0) { throw 'Cannot enumerate owner import command tests' }
         foreach ($required in @(
           'import_commands::tests::a_source_changed_since_inspection_is_refused: test',
+          'import_commands::tests::a_source_must_be_named_by_a_backend_grant_and_grants_expire: test',
           'import_commands::tests::a_wrong_credential_writes_nothing_and_backs_off: test',
           'import_commands::tests::an_authorization_that_ends_mid_job_asks_for_a_rerun_that_resumes: test',
+          'import_commands::tests::cancel_and_lock_stop_the_measurement_of_a_large_source: test',
           'import_commands::tests::cancel_while_staging_leaves_nothing_and_cancel_while_publishing_resumes: test',
           'import_commands::tests::explicit_members_must_be_measured_files_of_the_provider: test',
           'import_commands::tests::inputs_are_validated_before_any_read: test',
           'import_commands::tests::inspect_then_start_imports_a_zip_and_reports_count_only_progress: test',
+          'import_commands::tests::inspection_and_import_never_run_at_the_same_time: test',
           'import_commands::tests::locking_mid_import_stops_publication: test',
           'import_commands::tests::locking_while_staging_stops_before_anything_is_published: test',
           'import_commands::tests::only_one_import_runs_at_a_time_and_cancel_reaches_it: test',
