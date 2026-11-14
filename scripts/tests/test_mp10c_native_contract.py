@@ -1091,6 +1091,7 @@ class SeparatedProductPrerequisiteTests(unittest.TestCase):
       - name: Stage capture sidecar for native desktop tests
       - name: Qualify Phase 3E simulated MCP and revocation boundary
       - name: Test hosted tunnel desktop boundaries
+      - name: Test owner import commands
       - name: Build desktop app
       - name: Verify portable MIT license and third-party notices
       - name: Qualify native capture encrypted IPC and revoked owner epoch
@@ -1161,7 +1162,8 @@ class SeparatedProductPrerequisiteTests(unittest.TestCase):
                 "Qualify bundled SQLite runtime", "Test",
                 "Stage capture sidecar for native desktop tests",
                 "Qualify Phase 3E simulated MCP and revocation boundary",
-                "Test hosted tunnel desktop boundaries", "Build desktop app",
+                "Test hosted tunnel desktop boundaries", "Test owner import commands",
+                "Build desktop app",
                 "Verify portable MIT license and third-party notices",
                 "Qualify native capture encrypted IPC and revoked owner epoch",
                 "Record native proof", "Upload native proof"),
