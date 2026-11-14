@@ -4,6 +4,7 @@
 mod browser_registration;
 mod document_refresh;
 mod hosted_tunnel;
+mod import_commands;
 mod mcp_commands;
 mod native_capture_ipc;
 mod vault_commands;
@@ -62,6 +63,8 @@ struct AppState {
     document_refresh: Arc<DocumentRefreshRegistry>,
     mcp: Arc<Mutex<Option<LocalMcpServer>>>,
     hosted: Arc<Mutex<Option<hosted_tunnel::HostedTunnel>>>,
+    // Cancel flag of the owner import running in this process (MP-IMPORT-APP-01).
+    running_import: import_commands::RunningImport,
     extension_path: PathBuf,
     host_path: PathBuf,
     legacy_path: PathBuf,
@@ -905,6 +908,9 @@ async fn unlock_security(
 // invokes its identity-checked descriptor cleanup; never unlink a session
 // descriptor directly from a window or process exit handler.
 fn retire_owner_handles(state: &AppState) {
+    // A running import also stops at its next safe point; the revoked lease already fences
+    // every further publication (E_AUTHORIZATION).
+    import_commands::retire(&state.running_import);
     state.document_refresh.deactivate_all();
     state
         .vault
@@ -1432,6 +1438,7 @@ fn main() {
                 document_refresh: Arc::new(DocumentRefreshRegistry::default()),
                 mcp: Arc::new(Mutex::new(None)),
                 hosted: Arc::new(Mutex::new(None)),
+                running_import: Arc::new(Mutex::new(None)),
                 extension_path,
                 host_path,
                 legacy_path,
@@ -1496,6 +1503,9 @@ fn main() {
             register_extension,
             import_legacy,
             import_generic_text,
+            import_commands::inspect_import_source,
+            import_commands::start_import,
+            import_commands::cancel_import,
             refresh_archive_index,
             rebuild_archive_index,
             get_archive_index_stats,
@@ -1678,6 +1688,7 @@ mod shutdown_race_regression_tests {
                 document_refresh: Arc::new(DocumentRefreshRegistry::default()),
                 mcp: Arc::new(Mutex::new(None)),
                 hosted: Arc::new(Mutex::new(None)),
+                running_import: Arc::new(Mutex::new(None)),
                 extension_path: PathBuf::new(),
                 host_path: PathBuf::new(),
                 legacy_path: home.path().join("sessions"),

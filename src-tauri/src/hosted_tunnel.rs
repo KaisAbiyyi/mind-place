@@ -652,6 +652,7 @@ mod tests {
                 client_id: id,
                 tunnel_id: format!("tunnel_{}", "c".repeat(32)),
             }))),
+            running_import: std::sync::Arc::new(std::sync::Mutex::new(None)),
             extension_path: dir.path().join("extension"),
             host_path: dir.path().join("host"),
             legacy_path: dir.path().join("legacy"),
