@@ -1,0 +1,33 @@
+name: MP-7MCP-02 Claude read cloud qualification
+on:
+  push:
+    branches:
+      - feat/mp-7mcp-02-claude-read-20261106
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mcp-contract:
+    name: Claude synthetic MCP read and revocation tests (not live client)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact cloud source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - name: Install pinned Rust 1.90
+        run: |
+          rustup toolchain install 1.90.0 --profile minimal --component rustfmt --no-self-update
+          rustup default 1.90.0
+      - name: Rust formatting
+        run: cargo fmt --all -- --check
+      - name: Exercise actual MCP Rust integration suite
+        run: cargo test --locked -p mind-place-integration --test mcp -- --nocapture
+      - name: Record truthful qualification boundary
+        if: always()
+        run: |
+          echo "Synthetic MCP tests only. No actual Claude account/client or owner vault was connected." >> "$GITHUB_STEP_SUMMARY"
+          echo "MP-7MCP-02 full acceptance remains blocked by real client and per-collection grants." >> "$GITHUB_STEP_SUMMARY"
