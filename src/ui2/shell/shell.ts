@@ -31,8 +31,7 @@ export function fenceUi2EpochInvoke(invoke: Invoke, isCurrent: () => boolean): I
 
 export function mountUi2Shell(root: HTMLElement, options: Ui2ShellOptions): Ui2ShellHandle {
   const doc = root.ownerDocument;
-  const win = doc.defaultView;
-  if (!win) throw new Error("MP_UI2_DOCUMENT_WINDOW_MISSING");
+  const win = doc.defaultView ?? (() => { throw new Error("MP_UI2_DOCUMENT_WINDOW_MISSING"); })();
   ensureUi2IconSprite(doc);
   let storage: Storage | undefined;
   try { storage = win.localStorage; } catch { storage = undefined; }
