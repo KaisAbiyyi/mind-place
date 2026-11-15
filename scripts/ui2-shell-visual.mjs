@@ -63,6 +63,7 @@ async function audit(page) {
       nonemptyPreview: Boolean(document.querySelector(".ui2-shell-placeholder .ui2-empty-body")?.textContent?.trim()),
       documentLanguage: document.documentElement.lang,
       styleLoaded: getComputedStyle(shell).display === "grid",
+      sidebarHiddenToAssistiveTech: document.querySelector(".ui2-shell-sidebar")?.getAttribute("aria-hidden") === "true",
     };
   });
 }
@@ -101,6 +102,7 @@ async function main() {
           assert.equal(result.technicalStringVisible, false);
           assert.equal(result.unavailableState && result.nonemptyPreview && result.styleLoaded, true);
           assert.equal(result.documentLanguage, locale === "id" ? "id" : "en");
+          assert.equal(result.sidebarHiddenToAssistiveTech, viewport.name === "narrow", "closed drawer a11y");
           const filename = `shell-${theme}-${locale}-${viewport.name}.png`;
           await page.screenshot({ path: path.join(outDir, filename), fullPage: true });
           matrix.push({ filename, theme, locale, viewport, audit: result });
