@@ -45,10 +45,10 @@ Legend: **WF** = shown in `wireframe-v1.html`. **Gap** = not shown, needs a ledg
 | 35 | Rebuild and diagnostics | Settings > Maintenance | Configure, Status | WF | Single-use confirmation kept. |
 | 36 | Onboarding first run and returning | Home checklist (hides when done); first-run security gate | Status | WF | Settings can bring the guide back. |
 | 37 | Welcome, Vault, optional providers, useful result wizard | Home checklist steps, each opening the matching dialog | Add, Progress | **Gap** | Inner step screens not drawn; "verified first result" rule is kept. |
-| 38 | Keyboard, focus, modal lifetime | Shell and primitives (UI2-03 and UI2-04) | n/a | n/a | Tested, not drawn. |
-| 39 | Loading, empty, error, partial, stale states | Every page | Empty, Warning, Progress | WF (empty, partial) / **Gap** (loading, error, stale) | Designed in UI2-03 and filled by each page task. |
+| 38 | Keyboard, focus, modal lifetime | Shell and primitives (`src/ui2/ui-kit/primitives.ts`, UI2-03 and UI2-04) | n/a | n/a | Primitives implemented & tested in UI2-03 (`test/ui2-ui-kit.test.ts`); shell wired in UI2-04. |
+| 39 | Loading, empty, error, partial, stale states | Every page | Empty, Warning, Progress | WF (empty, partial) / Primitives in `src/ui2/ui-kit/` | Primitives designed & verified in UI2-03 (`gallery.ts`); filled by UI2-04..11. |
 | 40 | Large-data boundaries | Archive pagination, Constellation bounds | Browse | n/a | Measured in UI2-L1 against the owner's budgets. |
-| N1 | Language (EN/ID) | Top bar toggle and Settings | Configure | WF | New. Catalog per language. |
+| N1 | Language (EN/ID) | Top bar toggle and Settings (`src/ui2/i18n/`) | Configure | WF | Catalogs (`catalog-en.ts`, `catalog-id.ts`), Intl plurals/dates/numbers, persistence & parity checks enforced in UI2-02 + `scripts/verify-ui-rules.mjs`. |
 | N2 | Constellation name | Settings > Name of the map page | Configure | WF | New. User-selectable; default Constellation. |
 | N3 | Memory text in the app language | Memory detail note "Translated from English" and "View original" | Detail | WF | New. Stored once, per-language versions or translation at display time. |
 | N4 | Breadcrumb | Top bar, starting at Home | Shell | WF | New. |
@@ -78,7 +78,7 @@ Every row marked **Gap** above is not drawn in `wireframe-v1.html`. Implementing
 | 28 | Multi-query, policy presets, date, token budget | Tune search range or context size only when a basic search is not enough. | Search, Advanced | Global Search (`Advanced` disclosure) | `MP-UI2-11` |
 | 30 | Retrieval inspector / score trace | Check why a search returned those results when debugging search behavior. | Advanced | Global Search (`Details` aside) & Settings (`Maintenance` technical mode) | `MP-UI2-10`, `MP-UI2-11` |
 | 37 | Home onboarding checklist step dialogs | Complete each setup step (vault, optional browser capture, first search/read) in a guided flow. | Add, Progress | Home (checklist dialogs) | `MP-UI2-11` |
-| 39 | Loading, empty, error, partial, and stale states | Understand when data is loading, empty, partially saved, stale, or failed, and know what to do next. | Empty, Warning, Progress | All 7 destinations (primitives in UI-kit) | `MP-UI2-03`, `MP-UI2-04..11` |
+| 39 | Loading, empty, error, partial, and stale states | Understand when data is loading, empty, partially saved, stale, or failed, and know what to do next. | Empty, Warning, Progress | All 7 destinations (primitives implemented in `src/ui2/ui-kit/primitives.ts` & enforced by `scripts/verify-ui-rules.mjs`) | `MP-UI2-03` (primitives implemented), `MP-UI2-04..11` |
 
 ## 3. Explicitly deferred capabilities (out of scope for MP-UI2)
 
