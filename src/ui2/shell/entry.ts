@@ -1,9 +1,11 @@
-// This module is imported after native unlock only for the owner-enabled v2 preview.
-// Vite injects these stylesheet chunks in the browser; Node unit tests can import
-// the shell without attempting to load CSS as a Node module.
-if (import.meta.env) {
-  void import("../ui-kit/tokens.css");
-  void import("../ui-kit/primitives.css");
-  void import("./shell.css");
+// CSS is an opt-in browser chunk. Never load these global UI2 tokens into v1.
+export async function ensureUi2Styles(): Promise<void> {
+  if (import.meta.env) {
+    await Promise.all([
+      import("../ui-kit/tokens.css"),
+      import("../ui-kit/primitives.css"),
+      import("./shell.css"),
+    ]);
+  }
 }
 export { mountUi2Shell } from "./shell.js";
