@@ -21,12 +21,18 @@ if ($rust -notmatch '^rustc 1\.90\.0 ' -or $nodeVersion -notmatch '^v24\.') { th
 
 function Run-Native([string]$Command, [string[]]$Arguments) {
     Write-Output ('COMMAND: ' + $Command + ' ' + ($Arguments -join ' '))
-    & $Command @Arguments
-    if ($LASTEXITCODE -ne 0) { throw "$Command failed with exit code $LASTEXITCODE" }
+    # Windows PowerShell 5 turns ordinary native stderr (including Cargo's
+    # progress/warnings) into ErrorRecords. The native exit code is decisive.
+    $previousPreference = $ErrorActionPreference
+    try { $ErrorActionPreference = 'Continue'; & $Command @Arguments; $code = $LASTEXITCODE }
+    finally { $ErrorActionPreference = $previousPreference }
+    if ($code -ne 0) { throw "$Command failed with exit code $code" }
 }
 function Require-Tests([string[]]$Arguments, [string]$Prefix, [int]$Minimum) {
-    $listing = @(& cargo @Arguments -- --list 2>&1)
-    if ($LASTEXITCODE -ne 0) { throw 'Required test enumeration failed' }
+    $previousPreference = $ErrorActionPreference
+    try { $ErrorActionPreference = 'Continue'; $listing = @(& cargo @Arguments -- --list 2>&1); $code = $LASTEXITCODE }
+    finally { $ErrorActionPreference = $previousPreference }
+    if ($code -ne 0) { throw 'Required test enumeration failed' }
     $count = @($listing | Select-String -Pattern ([regex]::Escape($Prefix) + '.+: test$')).Count
     if ($count -lt $Minimum) { throw "Required $Prefix test inventory missing: $count < $Minimum" }
     Write-Output "REQUIRED TEST INVENTORY: $Prefix $count"
@@ -89,17 +95,30 @@ $steps = @(
 )
 if ($steps.Count -ne 28) { throw 'Qualification inventory must contain all 28 groups' }
 $results = @()
+$startedUtc = (Get-Date).ToUniversalTime().ToString('o')
 foreach ($step in $steps) {
     $watch = [Diagnostics.Stopwatch]::StartNew()
     $log = Join-Path $EvidenceDirectory ($step.Id + '.log')
     $outcome = 'PASS'
     $errorText = $null
-    try { & $step.Run *> $log } catch { $outcome = 'FAIL'; $errorText = $_.Exception.Message; Add-Content -LiteralPath $log -Value $errorText }
+    $headBefore = (& git rev-parse HEAD).Trim()
+    $treeBefore = (& git rev-parse 'HEAD^{tree}').Trim()
+    $changesBefore = @(& git status --porcelain --untracked-files=no)
+    $sourceValidBefore = $headBefore -eq $sourceSha -and $treeBefore -eq $sourceTree -and $changesBefore.Count -eq 0
+    try {
+        if (-not $sourceValidBefore) { throw 'Source HEAD/tree or tracked bytes drifted before this group' }
+        & $step.Run *> $log
+    } catch { $outcome = 'FAIL'; $errorText = $_.Exception.Message; Add-Content -LiteralPath $log -Value $errorText }
     $watch.Stop()
-    $results += [pscustomobject]@{ id=$step.Id; name=$step.Name; status=$outcome; seconds=[Math]::Round($watch.Elapsed.TotalSeconds,3); log=($step.Id + '.log'); error=$errorText }
     $after = @(& git status --porcelain --untracked-files=no)
-    $receipt = @{ source_sha=$sourceSha; source_tree=$sourceTree; rust=$rust; node=$nodeVersion; platform='Windows native synthetic'; started_utc=(Get-Date).ToUniversalTime().ToString('o'); tracked_changes_before=$before; tracked_changes_after=$after; results=$results }
+    $headAfter = (& git rev-parse HEAD).Trim()
+    $treeAfter = (& git rev-parse 'HEAD^{tree}').Trim()
+    $sourceValidAfter = $headAfter -eq $sourceSha -and $treeAfter -eq $sourceTree -and $after.Count -eq 0
+    if (-not $sourceValidAfter) { $outcome = 'FAIL'; $errorText = 'Source HEAD/tree or tracked bytes drifted during this group' }
+    $results += [pscustomobject]@{ id=$step.Id; name=$step.Name; status=$outcome; seconds=[Math]::Round($watch.Elapsed.TotalSeconds,3); log=($step.Id + '.log'); error=$errorText; head_before=$headBefore; head_after=$headAfter; tree_before=$treeBefore; tree_after=$treeAfter }
+    $receipt = @{ source_sha=$sourceSha; source_tree=$sourceTree; rust=$rust; node=$nodeVersion; platform='Windows native synthetic'; started_utc=$startedUtc; tracked_changes_before=$before; tracked_changes_after=$after; results=$results }
     $receipt | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $EvidenceDirectory 'results.json') -Encoding utf8
     Write-Output "$($step.Id) $outcome $($watch.Elapsed.TotalSeconds.ToString('F1'))s - $($step.Name)"
+    if (-not $sourceValidBefore -or -not $sourceValidAfter) { throw 'Qualification stopped: source drift invalidates exact-HEAD evidence' }
 }
 if (@($results | Where-Object status -ne 'PASS').Count -ne 0 -or $after.Count -ne 0) { exit 1 }

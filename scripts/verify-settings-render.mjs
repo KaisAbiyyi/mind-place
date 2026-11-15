@@ -7,8 +7,9 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 
 const viewports = [[1180, 820], [1180, 600], [800, 520], [590, 410], [390, 700], [360, 520]];
-const output = resolve(process.env.MP_SETTINGS_EVIDENCE_DIR || 'outputs/settings-render');
-await mkdir(output, { recursive: true });
+const outputRoot = resolve(process.env.MP_SETTINGS_EVIDENCE_DIR || 'outputs/settings-render');
+await mkdir(outputRoot, { recursive: true });
+const output = await mkdtemp(join(outputRoot, 'run-'));
 // Each invocation keeps its own cache and evidence; never erase another run's
 // Vite state or turn an unrelated scan/launch failure into a product PASS.
 const cacheDir = await mkdtemp(join(output, 'vite-cache-'));
@@ -113,8 +114,15 @@ try {
   failure = String(error.stack || error);
   throw error;
 } finally {
-  await context?.tracing.stop({ path: join(output, 'trace.zip') });
-  await browser?.close();
-  await vite.close();
-  await writeFile(join(output, 'evidence.json'), JSON.stringify({ stage, failure, node: process.version, platform: process.platform, cacheDir, results, errors, consoleErrors, requestFailures, serverLog }, null, 2));
+  const cleanupErrors = [];
+  for (const [name, cleanup] of [
+    ['trace', () => context?.tracing.stop({ path: join(output, 'trace.zip') })],
+    ['browser', () => browser?.close()],
+    ['server', () => vite.close()],
+  ]) {
+    try { await cleanup(); } catch (error) { cleanupErrors.push({ name, error: String(error.stack || error) }); }
+  }
+  await writeFile(join(output, 'evidence.json'), JSON.stringify({ stage, failure, node: process.version, platform: process.platform, cacheDir, results, errors, consoleErrors, requestFailures, serverLog, cleanupErrors }, null, 2));
+  console.log(`Settings evidence: ${output}`);
+  if (!failure && cleanupErrors.length) throw new Error('Settings harness cleanup failed; see evidence.json');
 }
