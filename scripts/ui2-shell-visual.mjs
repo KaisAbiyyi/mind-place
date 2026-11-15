@@ -15,7 +15,8 @@ const HTML = `<!doctype html>
 <body><div id="app"></div>
 <script type="module">
   import { createI18nController } from "/src/ui2/i18n/index.ts";
-  import { mountUi2Shell } from "/src/ui2/shell/entry.ts";
+  import { mountUi2Shell, ensureUi2Styles } from "/src/ui2/shell/entry.ts";
+  await ensureUi2Styles();
   const params = new URLSearchParams(location.search);
   document.documentElement.dataset.theme = params.get("theme") || "light";
   const locale = params.get("locale") || "en";
