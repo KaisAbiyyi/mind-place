@@ -6,24 +6,65 @@ import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import { spawnSync } from 'node:child_process';
 import { stageProduct } from '../scripts/tauri.mjs';
-import { downloadPinnedAsset, resolvePinnedAssetUrl, verifyPinnedFile } from '../scripts/tunnel-helper.mjs';
+import { downloadPinnedAsset, readVerifiedRegularFile, resolvePinnedAssetUrl, verifyHelperBundle, verifyPinnedFile } from '../scripts/tunnel-helper.mjs';
 
 test('pinned downloads reject corruption/oversize and never trust a stale cache', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mp-helper-download-'));
   try {
-    const destination = path.join(root, 'helper.zip');
+    const rejected = path.join(root, 'rejected.zip');
     const payload = Buffer.from('verified fixture');
     const pin = { bytes: payload.length, sha256: createHash('sha256').update(payload).digest('hex') };
     const url = 'https://github.com/openai/tunnel-client/releases/download/fixture/helper.zip';
-    await assert.rejects(downloadPinnedAsset(url, destination, pin, async () => new Response('corrupt fixture')), /checksum|size/);
-    assert.equal(fs.existsSync(destination), false);
-    await assert.rejects(downloadPinnedAsset(url, destination, pin, async () => new Response(Buffer.alloc(100))), /exceeds/);
-    fs.writeFileSync(destination, 'stale');
+    await assert.rejects(downloadPinnedAsset(url, rejected, pin, async () => new Response('corrupt fixture')), /checksum|size/);
+    assert.deepEqual(fs.readdirSync(root), []);
+    await assert.rejects(downloadPinnedAsset(url, rejected, pin, async () => new Response(Buffer.alloc(100))), /exceeds/);
+    assert.deepEqual(fs.readdirSync(root), []);
+    const destination = path.join(root, 'helper.zip');
+    fs.writeFileSync(destination, 'stale', { flag: 'wx' });
     let downloads = 0;
     await downloadPinnedAsset(url, destination, pin, async () => { downloads++; return new Response(payload); });
     verifyPinnedFile(destination, pin.sha256, pin.bytes);
     await downloadPinnedAsset(url, destination, pin, async () => assert.fail('valid cache should work offline'));
     assert.equal(downloads, 1);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('descriptor-bound verification enforces regular files, size bounds and non-symlinks', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mp-helper-fd-'));
+  try {
+    const sample = path.join(root, 'notice.txt');
+    fs.writeFileSync(sample, 'ok-bytes');
+    assert.equal(readVerifiedRegularFile(sample, { maxBytes: 8 }).toString('utf8'), 'ok-bytes');
+    assert.throws(() => readVerifiedRegularFile(sample, { maxBytes: 7, sizeTypeError: 'License file too large: sample' }), /License file too large/);
+    assert.throws(() => readVerifiedRegularFile(root, { maxBytes: 1024 }), /Invalid tunnel helper/);
+    const exeDir = path.join(root, 'bundle');
+    fs.mkdirSync(path.join(exeDir, 'resources'), { recursive: true });
+    const exeBytes = Buffer.from('helper-bin');
+    const noticeBytes = Buffer.from('notice-text');
+    const pin = {
+      repository: 'https://github.com/openai/tunnel-client',
+      version: 'fixture',
+      platform: 'win32-x64',
+      archive: { name: 'helper.zip', bytes: 1, sha256: 'a'.repeat(64) },
+      executable: { name: 'tunnel-client.exe', bytes: exeBytes.length, sha256: createHash('sha256').update(exeBytes).digest('hex') },
+      resources: { 'LICENSES.txt': createHash('sha256').update(noticeBytes).digest('hex') },
+      excluded_archive_members: [],
+    };
+    fs.writeFileSync(path.join(exeDir, 'tunnel-client.exe'), exeBytes);
+    fs.writeFileSync(path.join(exeDir, 'resources', 'LICENSES.txt'), noticeBytes);
+    fs.writeFileSync(path.join(exeDir, 'resources', 'receipt.json'), 'not matching');
+    assert.throws(() => verifyHelperBundle(exeDir, pin), /Invalid helper receipt/);
+    const symlinkPath = path.join(root, 'notice-link.txt');
+    let symlinkCreated = false;
+    try {
+      fs.symlinkSync(sample, symlinkPath, 'file');
+      symlinkCreated = true;
+    } catch {
+      symlinkCreated = false;
+    }
+    if (symlinkCreated) {
+      assert.throws(() => verifyPinnedFile(symlinkPath, createHash('sha256').update('ok-bytes').digest('hex'), 8), /ELOOP|Invalid tunnel helper/);
+    }
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
