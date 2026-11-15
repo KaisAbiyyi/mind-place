@@ -8,10 +8,49 @@ import { setTimeout as delay } from 'node:timers/promises';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const helperPin = JSON.parse(fs.readFileSync(path.join(root, 'scripts/tunnel-client.lock.json'), 'utf8'));
 export const helperDirectory = path.join(root, 'target/tunnel-helper/windows-x64');
+const HELPER_FILE_MAX_BYTES = 64 * 1024 * 1024;
+const RECEIPT_MAX_BYTES = 1024 * 1024;
+
+function sameFileIdentity(left, right) {
+  return left.isFile() && right.isFile() && !right.isSymbolicLink()
+    && ((left.dev === right.dev && left.ino === right.ino) || (left.ino === 0n && right.ino === 0n));
+}
+
+export function readVerifiedRegularFile(file, {
+  maxBytes,
+  exactBytes,
+  sizeTypeError = 'Invalid tunnel helper file size/type',
+  overflowError = sizeTypeError,
+}) {
+  const flags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0);
+  const fd = fs.openSync(file, flags);
+  try {
+    const stat = fs.fstatSync(fd, { bigint: true });
+    const leaf = fs.lstatSync(file, { bigint: true });
+    if (!sameFileIdentity(stat, leaf)) throw new Error(sizeTypeError);
+    if (stat.size > BigInt(maxBytes) || (exactBytes !== undefined && stat.size !== BigInt(exactBytes))) {
+      throw new Error(sizeTypeError);
+    }
+    const chunks = [];
+    let total = 0;
+    const scratch = Buffer.allocUnsafe(64 * 1024);
+    while (true) {
+      const bytesRead = fs.readSync(fd, scratch, 0, scratch.length, total);
+      if (bytesRead === 0) break;
+      total += bytesRead;
+      if (total > maxBytes) throw new Error(overflowError);
+      chunks.push(Buffer.from(scratch.subarray(0, bytesRead)));
+    }
+    if (exactBytes !== undefined && total !== exactBytes) throw new Error(sizeTypeError);
+    return Buffer.concat(chunks, total);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 export function verifyPinnedFile(file, digest, bytes) {
-  const stat = fs.lstatSync(file);
-  if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 64 * 1024 * 1024 || (bytes !== undefined && stat.size !== bytes)) throw new Error('Invalid tunnel helper file size/type');
-  if (createHash('sha256').update(fs.readFileSync(file)).digest('hex') !== digest) throw new Error('Tunnel helper checksum mismatch');
+  const data = readVerifiedRegularFile(file, { maxBytes: HELPER_FILE_MAX_BYTES, exactBytes: bytes });
+  if (createHash('sha256').update(data).digest('hex') !== digest) throw new Error('Tunnel helper checksum mismatch');
 }
 function receipt(pin) {
   return JSON.stringify({ repository: pin.repository, version: pin.version, platform: pin.platform, archive: pin.archive, executable: pin.executable, resources: pin.resources, excluded_archive_members: pin.excluded_archive_members }, null, 2) + '\n';
@@ -24,7 +63,12 @@ export function verifyHelperBundle(directory, pin = helperPin) {
   if (JSON.stringify(fs.readdirSync(resources).sort()) !== JSON.stringify(expected)) throw new Error('Unexpected tunnel helper resource payload');
   for (const [name, hash] of Object.entries(pin.resources)) verifyPinnedFile(path.join(resources, name), hash);
   const receiptPath = path.join(resources, 'receipt.json');
-  if (!fs.lstatSync(receiptPath).isFile() || fs.lstatSync(receiptPath).isSymbolicLink() || fs.readFileSync(receiptPath, 'utf8') !== receipt(pin)) throw new Error('Invalid helper receipt');
+  const actualReceipt = readVerifiedRegularFile(receiptPath, {
+    maxBytes: RECEIPT_MAX_BYTES,
+    sizeTypeError: 'Invalid helper receipt',
+    overflowError: 'Invalid helper receipt',
+  }).toString('utf8');
+  if (actualReceipt !== receipt(pin)) throw new Error('Invalid helper receipt');
 }
 // Retry transport failures only. Bad metadata, oversized bodies and pin mismatches
 // are terminal; no unverified bytes are ever published to the download cache.
