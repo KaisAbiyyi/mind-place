@@ -11,6 +11,15 @@ def run(root, output):
     command = ["cargo", "deny", "--locked", "--format", "json", "check", "--disable-fetch", "advisories", "licenses", "sources"]
     result = subprocess.run(command, cwd=root, capture_output=True, text=True, timeout=600)
     output.write_text(result.stdout + result.stderr)
+    print(f"=== {output.name}: cargo-deny exit {result.returncode} ===", flush=True)
+    for line in (result.stdout + result.stderr).splitlines():
+        try:
+            diagnostic = json.loads(line)
+            if diagnostic.get("level") == "error" or diagnostic.get("type") == "diagnostic":
+                print(json.dumps(diagnostic), flush=True)
+        except json.JSONDecodeError:
+            if "error" in line.lower():
+                print(line, flush=True)
     return {"status": "PASS" if result.returncode == 0 else "FAIL", "exitCode": result.returncode,
             "advisories": sorted(set(re.findall(r"RUSTSEC-\d{4}-\d{4}", result.stdout + result.stderr)))}
 

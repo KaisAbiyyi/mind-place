@@ -24,7 +24,7 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     original_locks = {name: (root / name).read_bytes() for name in ["Cargo.lock", "package-lock.json"]}
     metadata = json.loads(subprocess.check_output(["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"]))
-    subprocess.run(["cargo", "cyclonedx", "--format", "json", "--spec-version", "1.5", "--target", "x86_64-pc-windows-msvc"], check=True, timeout=600)
+    subprocess.run(["cargo", "cyclonedx", "--format", "json", "--spec-version", "1.5", "--override-filename", "bom", "--target", "x86_64-pc-windows-msvc"], check=True, timeout=600)
     files = []
     for package in metadata["packages"]:
         source = Path(package["manifest_path"]).with_name("bom.json")

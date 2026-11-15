@@ -34,6 +34,7 @@ jobs:
         run: |
           mkdir -p evidence
           scorecard --repo=github.com/KaisAbiyyi/mind-place --format=json --show-details > evidence/scorecard.json
+          python3 -c 'import json; r=json.load(open("evidence/scorecard.json")); print(json.dumps({"repo":r.get("repo"),"checks":[{"name":c.get("name"),"score":c.get("score"),"reason":c.get("reason")} for c in r.get("checks",[])]},indent=2))'
       - name: Record assessment boundary
         if: always()
         run: |
