@@ -225,12 +225,169 @@ async function main() {
     const mobileCtx = await browser.newContext({ viewport: { width: 760, height: 768 } });
     const mobile = await mobileCtx.newPage();
     await mobile.goto(`${url}?theme=dark&locale=id`, { waitUntil: "networkidle" });
+
+    async function measureMobileDrawer(targetPage) {
+      return targetPage.evaluate(() => {
+        const shell = document.querySelector(".ui2-shell");
+        const sidebar = document.querySelector(".ui2-shell-sidebar");
+        const scrim = document.querySelector(".ui2-shell-scrim");
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        const sidebarStyle = sidebar ? getComputedStyle(sidebar) : null;
+        const sidebarRect = sidebar ? sidebar.getBoundingClientRect() : null;
+        const scrimStyle = scrim ? getComputedStyle(scrim) : null;
+        const navButtons = [...document.querySelectorAll(".ui2-shell-nav-button")].map((button) => {
+          const rect = button.getBoundingClientRect();
+          const btnStyle = getComputedStyle(button);
+          const label = button.querySelector(".ui2-shell-nav-label");
+          const labelRect = label ? label.getBoundingClientRect() : null;
+          const labelStyle = label ? getComputedStyle(label) : null;
+          const inViewport = rect.width > 0
+            && rect.height > 0
+            && rect.left >= 0
+            && rect.top >= 0
+            && rect.right <= vw
+            && rect.bottom <= vh;
+          const cx = rect.left + rect.width / 2;
+          const cy = rect.top + rect.height / 2;
+          const hit = (inViewport && cx >= 0 && cy >= 0 && cx < vw && cy < vh)
+            ? document.elementFromPoint(cx, cy)
+            : null;
+          const hitByPointer = Boolean(hit && (hit === button || button.contains(hit)));
+          const labelVisible = Boolean(
+            label
+            && label.textContent?.trim()
+            && labelStyle
+            && labelStyle.display !== "none"
+            && labelStyle.visibility !== "hidden"
+            && labelRect
+            && labelRect.width > 0
+            && labelRect.height > 0
+            && labelRect.left >= 0
+            && labelRect.right <= vw,
+          );
+          const focusable = button.tabIndex >= 0
+            && !button.disabled
+            && btnStyle.display !== "none"
+            && btnStyle.visibility !== "hidden"
+            && !sidebar?.inert;
+          return {
+            route: button.dataset.ui2Route || "",
+            label: label?.textContent?.trim() || "",
+            rect: { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height },
+            inViewport,
+            hitByPointer,
+            labelVisible,
+            focusable,
+          };
+        });
+        const transform = sidebarStyle?.transform || "";
+        return {
+          mobileOpen: shell?.getAttribute("data-mobile-open") === "true",
+          sidebarInert: Boolean(sidebar?.inert),
+          sidebarAriaHidden: sidebar?.getAttribute("aria-hidden"),
+          scrimVisible: Boolean(scrim && !scrim.hidden && scrimStyle?.display !== "none"),
+          transform,
+          transformIdentity: transform === "none" || transform === "matrix(1, 0, 0, 1, 0, 0)",
+          viewport: { width: vw, height: vh },
+          sidebarRect: sidebarRect
+            ? {
+              left: sidebarRect.left,
+              right: sidebarRect.right,
+              top: sidebarRect.top,
+              bottom: sidebarRect.bottom,
+              width: sidebarRect.width,
+              height: sidebarRect.height,
+            }
+            : null,
+          navButtons,
+        };
+      });
+    }
+
+    function assertMobileDrawerVisible(report, expectedDestinations = 7) {
+      assert.equal(report.mobileOpen, true, "drawer not visually open: data-mobile-open must be true");
+      assert.equal(report.sidebarInert, false, "drawer not visually open: sidebar must not be inert");
+      assert.notEqual(report.sidebarAriaHidden, "true", "drawer not visually open: sidebar aria-hidden must not be true");
+      assert.equal(report.scrimVisible, true, "drawer not visually open: mobile scrim should be visible");
+      assert.equal(report.transformIdentity, true, `drawer transition incomplete: transform=${report.transform}`);
+      assert.ok(report.sidebarRect, "sidebar element missing");
+      const intersectsViewport = report.sidebarRect.right > 0
+        && report.sidebarRect.left < report.viewport.width
+        && report.sidebarRect.bottom > 0
+        && report.sidebarRect.top < report.viewport.height
+        && report.sidebarRect.left >= 0
+        && report.sidebarRect.width >= 150;
+      assert.equal(intersectsViewport, true,
+        `sidebar offscreen or collapsed: ${JSON.stringify(report.sidebarRect)}`);
+      assert.equal(report.navButtons.length, expectedDestinations, "expected seven nav buttons in mobile drawer");
+      for (const nav of report.navButtons) {
+        assert.equal(nav.inViewport, true, `nav button offscreen: ${nav.route} ${JSON.stringify(nav.rect)}`);
+        assert.equal(nav.hitByPointer, true, `nav button occluded (e.g. scrim only): ${nav.route}`);
+        assert.equal(nav.labelVisible, true, `nav label hidden: ${nav.route}`);
+        assert.equal(nav.focusable, true, `nav button not focusable: ${nav.route}`);
+      }
+    }
+
+    // Negative assertion: if only the scrim is shown while the sidebar remains offscreen, drawer visibility must fail.
+    const scrimOnlyProbe = await mobileCtx.newPage();
+    await scrimOnlyProbe.goto(`${url}?theme=dark&locale=id`, { waitUntil: "networkidle" });
+    await scrimOnlyProbe.evaluate(() => {
+      const scrim = document.querySelector(".ui2-shell-scrim");
+      if (scrim) scrim.hidden = false;
+    });
+    const scrimOnlyReport = await measureMobileDrawer(scrimOnlyProbe);
+    assert.equal(scrimOnlyReport.scrimVisible, true, "scrim-only probe must show scrim");
+    assert.throws(
+      () => assertMobileDrawerVisible(scrimOnlyReport, 7),
+      /drawer not visually open|sidebar offscreen|nav button|transition incomplete/i,
+      "opening only the scrim must never pass mobile drawer verification",
+    );
+    await scrimOnlyProbe.evaluate(() => {
+      const shell = document.querySelector(".ui2-shell");
+      const sidebar = document.querySelector(".ui2-shell-sidebar");
+      if (shell) shell.setAttribute("data-mobile-open", "true");
+      if (sidebar) {
+        sidebar.inert = false;
+        sidebar.removeAttribute("aria-hidden");
+        sidebar.style.transform = "translateX(-100%)";
+      }
+    });
+    const scrimWithOpenAttrReport = await measureMobileDrawer(scrimOnlyProbe);
+    assert.throws(
+      () => assertMobileDrawerVisible(scrimWithOpenAttrReport, 7),
+      /transition incomplete|sidebar offscreen|nav button/i,
+      "data-mobile-open=true with an offscreen sidebar must never pass mobile drawer verification",
+    );
+    await scrimOnlyProbe.close();
+
     const mobileToggle = mobile.locator('[data-ui2-control="sidebar"]');
     await mobileToggle.click();
-    assert.equal(await mobile.locator(".ui2-shell").getAttribute("data-mobile-open"), "true");
+    await mobile.waitForFunction(() => {
+      const shell = document.querySelector(".ui2-shell");
+      const sidebar = document.querySelector(".ui2-shell-sidebar");
+      if (!shell || !sidebar || shell.getAttribute("data-mobile-open") !== "true") return false;
+      const transform = getComputedStyle(sidebar).transform;
+      const rect = sidebar.getBoundingClientRect();
+      return (transform === "none" || transform === "matrix(1, 0, 0, 1, 0, 0)")
+        && rect.width >= 150
+        && rect.left >= 0
+        && rect.right > 0;
+    });
+    await mobile.evaluate(() => new Promise(resolve => {
+      requestAnimationFrame(() => requestAnimationFrame(resolve));
+    }));
+    const drawerReport = await measureMobileDrawer(mobile);
+    assertMobileDrawerVisible(drawerReport, 7);
+
     const filenameMobile = "shell-state-mobile-nav-dark-id-narrow.png";
     await mobile.screenshot({ path: path.join(outDir, filenameMobile) });
     interactions.push(filenameMobile);
+
+    const lastMobileNav = mobile.locator(".ui2-shell-nav-button").last();
+    await lastMobileNav.focus();
+    assert.equal(await lastMobileNav.evaluate(el => document.activeElement === el), true,
+      "opened drawer navigation buttons must accept focus");
     await mobile.keyboard.press("Escape");
     assert.equal(await mobile.locator(".ui2-shell").getAttribute("data-mobile-open"), "false");
     assert.equal(await mobileToggle.evaluate(el => document.activeElement === el), true);
@@ -247,6 +404,11 @@ async function main() {
       ctrlKAndEscapeFocusReturn: "PASS",
       ENIDSwitch: "PASS",
       mobileOverlayEscapeFocusReturn: "PASS",
+      mobileDrawerVisibility: {
+        sidebarRect: drawerReport.sidebarRect,
+        visibleDestinations: drawerReport.navButtons.length,
+        scrimOnlyNegativeCheck: "PASS",
+      },
       contrastAudit: "PASS (automated WCAG 2.1 >= 4.5:1 on .ui2-shell-shortcut and shell text in light and dark; manual UX/screen-reader review remains owner gate)",
       nativeWindowsWebView2: "NOT_RUN (owner gate)",
     };
