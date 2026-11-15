@@ -1,0 +1,50 @@
+name: Release source SBOM
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths:
+      - '.github/workflows/release-sbom.yml'
+      - 'scripts/supply-chain/**'
+      - 'rust-toolchain.toml'
+      - '**/Cargo.toml'
+      - 'Cargo.lock'
+      - 'package*.json'
+      - 'scripts/tunnel-client.lock.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sbom:
+    name: CycloneDX Windows release-source inventories
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 24
+      - name: Install existing production Rust pin
+        run: rustup toolchain install 1.90.0 --profile minimal --component rustfmt --no-self-update
+      - name: Validate release tag version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          node --input-type=module -e 'import fs from "node:fs"; if (process.env.GITHUB_REF_NAME !== "v" + JSON.parse(fs.readFileSync("package.json")).version) throw new Error("Release tag/version mismatch");'
+      - name: Install checksum-pinned CycloneDX generator
+        run: |
+          python3 scripts/supply-chain/install-tool.py cargo-cyclonedx --destination "$RUNNER_TEMP/sbom-tools"
+          echo "$RUNNER_TEMP/sbom-tools" >> "$GITHUB_PATH"
+      - name: Generate and validate inventories and source manifest
+        run: python3 scripts/supply-chain/sbom.py evidence/sbom
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-source-sbom-${{ github.event.pull_request.head.sha || github.sha }}
+          path: evidence/sbom/
+          if-no-files-found: error
+          retention-days: 90
