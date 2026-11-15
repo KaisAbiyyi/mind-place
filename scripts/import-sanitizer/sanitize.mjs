@@ -18,7 +18,7 @@ import { boundedLines } from './text-stream.mjs';
 import { HtmlError, rewriteHtml } from './html-stream.mjs';
 import { JsonError, rewriteJson } from './json-stream.mjs';
 import { HTML_MEMBER, JSON_MEMBER, neutralizeText, Rules, TEXT_MEMBER } from './rules.mjs';
-import { openZip, READER_LIMITS, ZipError, ZipWriter } from './zip.mjs';
+import { openZipHandle, READER_LIMITS, ZipError, ZipWriter } from './zip.mjs';
 
 export const TOOL = 'mind-place-import-sanitizer';
 export const TOOL_VERSION = 1;
@@ -55,16 +55,19 @@ const sizeClass = bytes => (bytes <= 0 ? 0 : 2 ** Math.ceil(Math.log2(bytes)));
 
 // ---------------------------------------------------------------- sources
 
-async function walk(root, maxMembers) {
+async function walk(root, maxMembers, rootDirHandle = null) {
   const out = [];
   const skipped = { symlinks: 0 };
   let enumerated = 0; // every name seen (files, directories, links) counts against the member budget
-  async function visit(dir, depth) {
-    if (depth > 64) throw new SanitizerError('E_DEPTH', 'Directory nesting is too deep');
+  async function visit(dir, depth, preopened = null) {
+    if (depth > 64) {
+      if (preopened) await preopened.close().catch(() => {});
+      throw new SanitizerError('E_DEPTH', 'Directory nesting is too deep');
+    }
     // Enumerate incrementally with a hard cap BEFORE sorting: a directory with millions of entries
     // is refused after maxMembers names, never materialized (readdir would build the whole array).
     const names = [];
-    const handle = await fs.promises.opendir(dir);
+    const handle = preopened ?? await fs.promises.opendir(dir);
     try {
       for await (const dirent of handle) {
         if (++enumerated > maxMembers) throw new BudgetError('maxMembers', maxMembers);
@@ -85,40 +88,86 @@ async function walk(root, maxMembers) {
       }
     }
   }
-  await visit(root, 0);
+  await visit(root, 0, rootDirHandle);
   return { entries: out, skipped };
 }
 
+function sameFileIdentity(left, right) {
+  return (left.dev === right.dev && left.ino === right.ino) || (left.ino === 0n && right.ino === 0n);
+}
+
+function streamRegularHandle(handle, chunkSize = READ_CHUNK) {
+  return Readable.from((async function* () {
+    let offset = 0;
+    const scratch = Buffer.allocUnsafe(chunkSize);
+    while (true) {
+      const { bytesRead } = await handle.read(scratch, 0, scratch.length, offset);
+      if (bytesRead === 0) break;
+      offset += bytesRead;
+      yield Buffer.from(scratch.subarray(0, bytesRead));
+    }
+  })(), { objectMode: false });
+}
+
 export async function openSource(input, budgets = resolveBudgets()) {
-  const stat = await fs.promises.lstat(input).catch(() => null);
-  if (!stat) throw new SanitizerError('E_INPUT_MISSING', 'Input path does not exist');
-  if (stat.isSymbolicLink()) throw new SanitizerError('E_INPUT_SYMLINK', 'Input path must not be a symbolic link');
-  if (stat.isDirectory()) {
-    const { entries, skipped } = await walk(input, budgets.maxMembers);
-    return { kind: 'dir', entries, skipped, close: async () => {} };
+  const openFlags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0);
+  let handle;
+  try {
+    handle = await fs.promises.open(input, openFlags);
+  } catch (error) {
+    if (error?.code === 'ENOENT') throw new SanitizerError('E_INPUT_MISSING', 'Input path does not exist');
+    if (error?.code === 'ELOOP') throw new SanitizerError('E_INPUT_SYMLINK', 'Input path must not be a symbolic link');
+    throw error;
   }
-  if (!stat.isFile()) throw new SanitizerError('E_INPUT_TYPE', 'Input must be a file or directory');
-  const head = Buffer.alloc(4);
-  const handle = await fs.promises.open(input, 'r');
-  await handle.read(head, 0, 4, 0);
-  await handle.close();
-  if (head.readUInt32LE(0) === 0x04034b50 || head.readUInt32LE(0) === 0x06054b50) {
-    const zip = await openZip(input, { ...READER_LIMITS, maxEntries: budgets.maxMembers, maxCentralDirectoryBytes: Math.min(READER_LIMITS.maxCentralDirectoryBytes, budgets.maxMembers * 1024) })
-      .catch(error => { throw error?.code === 'E_ZIP_LIMIT' ? new BudgetError('maxMembers', budgets.maxMembers) : error; });
-    const entries = zip.entries.map(entry => ({
-      name: entry.name,
-      size: entry.uncompressedSize,
-      isDirectory: entry.isDirectory,
-      open: () => zip.openEntry(entry),
-    }));
-    return { kind: 'zip', entries, skipped: { symlinks: 0 }, close: () => zip.close() };
+  let transferred = false;
+  try {
+    const fdStat = await handle.stat({ bigint: true });
+    if (fdStat.isDirectory()) {
+      const rootDir = await fs.promises.opendir(input);
+      const leafStat = await fs.promises.lstat(input, { bigint: true }).catch(() => null);
+      if (leafStat?.isSymbolicLink() || (leafStat && !sameFileIdentity(fdStat, leafStat))) {
+        await rootDir.close().catch(() => {});
+        throw new SanitizerError('E_INPUT_SYMLINK', 'Input path must not be a symbolic link');
+      }
+      if (!leafStat || !leafStat.isDirectory()) {
+        await rootDir.close().catch(() => {});
+        throw new SanitizerError('E_INPUT_TYPE', 'Input must be a file or directory');
+      }
+      const { entries, skipped } = await walk(input, budgets.maxMembers, rootDir);
+      return { kind: 'dir', entries, skipped, close: async () => {} };
+    }
+    if (!fdStat.isFile()) throw new SanitizerError('E_INPUT_TYPE', 'Input must be a file or directory');
+    const leafStat = await fs.promises.lstat(input, { bigint: true }).catch(() => null);
+    if (leafStat?.isSymbolicLink() || (leafStat && !sameFileIdentity(fdStat, leafStat))) {
+      throw new SanitizerError('E_INPUT_SYMLINK', 'Input path must not be a symbolic link');
+    }
+    if (!leafStat || !leafStat.isFile()) {
+      throw new SanitizerError('E_INPUT_TYPE', 'Input must be a file or directory');
+    }
+    const head = Buffer.alloc(4);
+    await handle.read(head, 0, 4, 0);
+    if (head.readUInt32LE(0) === 0x04034b50 || head.readUInt32LE(0) === 0x06054b50) {
+      const zip = await openZipHandle(handle, { ...READER_LIMITS, maxEntries: budgets.maxMembers, maxCentralDirectoryBytes: Math.min(READER_LIMITS.maxCentralDirectoryBytes, budgets.maxMembers * 1024) })
+        .catch(error => { throw error?.code === 'E_ZIP_LIMIT' ? new BudgetError('maxMembers', budgets.maxMembers) : error; });
+      transferred = true;
+      const entries = zip.entries.map(entry => ({
+        name: entry.name,
+        size: entry.uncompressedSize,
+        isDirectory: entry.isDirectory,
+        open: () => zip.openEntry(entry),
+      }));
+      return { kind: 'zip', entries, skipped: { symlinks: 0 }, close: () => zip.close() };
+    }
+    transferred = true;
+    return {
+      kind: 'file',
+      entries: [{ name: path.basename(input), size: Number(fdStat.size), open: async () => streamRegularHandle(handle) }],
+      skipped: { symlinks: 0 },
+      close: () => handle.close(),
+    };
+  } finally {
+    if (!transferred) await handle.close().catch(() => {});
   }
-  return {
-    kind: 'file',
-    entries: [{ name: path.basename(input), size: stat.size, open: async () => fs.createReadStream(input, { highWaterMark: READ_CHUNK }) }],
-    skipped: { symlinks: 0 },
-    close: async () => {},
-  };
 }
 
 // ---------------------------------------------------------------- member processing
@@ -479,35 +528,38 @@ export async function sanitize({
     // ---- verification pass over the bytes that will actually be shared
     const verify = await openSource(sink.partial, budgets);
     const checks = { structure: 'PASS', leak: 'PASS', structureDifferences: [], leakCount: 0 };
-    const byName = new Map(members.map(member => [member.name, member]));
-    for (const entry of verify.entries) {
-      const outName = verify.kind === 'file' ? path.basename(outputPath) : entry.name.replace(/\/$/, '');
-      const member = byName.get(outName);
-      if (!member) continue;
-      checks.leakCount += leak.countLeaks(outName.split('/').join(' '));
-      for (const segment of outName.split('/')) checks.leakCount += leak.countLeaks(segment);
-      if (member.kind === 'json' && member.inputSummary) {
-        const after = await analyzeJson(await entry.open(), { multiRoot: /\.(?:jsonl|ndjson)$/i.test(outName), budgets });
-        const before = member.inputSummary;
-        const afterSummary = after.summary();
-        if (!structuresEqual(before, afterSummary)) {
-          checks.structure = 'FAIL';
-          checks.structureDifferences.push({ member: outName, differences: structureDifferences(before, afterSummary) });
+    try {
+      const byName = new Map(members.map(member => [member.name, member]));
+      for (const entry of verify.entries) {
+        const outName = verify.kind === 'file' ? path.basename(outputPath) : entry.name.replace(/\/$/, '');
+        const member = byName.get(outName);
+        if (!member) continue;
+        checks.leakCount += leak.countLeaks(outName.split('/').join(' '));
+        for (const segment of outName.split('/')) checks.leakCount += leak.countLeaks(segment);
+        if (member.kind === 'json' && member.inputSummary) {
+          const after = await analyzeJson(await entry.open(), { multiRoot: /\.(?:jsonl|ndjson)$/i.test(outName), budgets });
+          const before = member.inputSummary;
+          const afterSummary = after.summary();
+          if (!structuresEqual(before, afterSummary)) {
+            checks.structure = 'FAIL';
+            checks.structureDifferences.push({ member: outName, differences: structureDifferences(before, afterSummary) });
+          }
+          member.output = afterSummary;
+        } else if (member.kind === 'html' && member.inputSummary) {
+          const after = await analyzeHtml(await entry.open(), rules.keepLabels, budgets);
+          const before = member.inputSummary;
+          const afterSummary = after.summary();
+          if (!structuresEqual(before, afterSummary)) {
+            checks.structure = 'FAIL';
+            checks.structureDifferences.push({ member: outName, differences: structureDifferences(before, afterSummary) });
+          }
+          member.output = afterSummary;
         }
-        member.output = afterSummary;
-      } else if (member.kind === 'html' && member.inputSummary) {
-        const after = await analyzeHtml(await entry.open(), rules.keepLabels, budgets);
-        const before = member.inputSummary;
-        const afterSummary = after.summary();
-        if (!structuresEqual(before, afterSummary)) {
-          checks.structure = 'FAIL';
-          checks.structureDifferences.push({ member: outName, differences: structureDifferences(before, afterSummary) });
-        }
-        member.output = afterSummary;
+        if (member.kind !== 'media') checks.leakCount += await scanForLeaks(member.kind, await entry.open(), leak, budgets);
       }
-      if (member.kind !== 'media') checks.leakCount += await scanForLeaks(member.kind, await entry.open(), leak, budgets);
+    } finally {
+      await verify.close();
     }
-    await verify.close();
     if (checks.leakCount > 0) {
       checks.leak = 'FAIL';
       throw Object.assign(new LeakError(checks.leakCount), { exitCode: 3, checks });

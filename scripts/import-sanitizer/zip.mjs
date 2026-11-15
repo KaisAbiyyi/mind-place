@@ -86,75 +86,95 @@ function parseExtra(extra, entry, need) {
   }
 }
 
+function readableRangeFromHandle(handle, start, endInclusive, chunkSize = 1 << 20) {
+  let offset = start;
+  return Readable.from((async function* () {
+    const scratch = Buffer.allocUnsafe(Math.min(chunkSize, endInclusive - start + 1));
+    while (offset <= endInclusive) {
+      const want = Math.min(scratch.length, endInclusive - offset + 1);
+      const { bytesRead } = await handle.read(scratch, 0, want, offset);
+      if (bytesRead === 0) throw new ZipError('E_ZIP_TRUNCATED');
+      offset += bytesRead;
+      yield Buffer.from(scratch.subarray(0, bytesRead));
+    }
+  })(), { objectMode: false });
+}
+
+/** Opens a zip archive from an already-opened FileHandle without re-opening by path. */
+export async function openZipHandle(handle, limits = READER_LIMITS) {
+  const { size } = await handle.stat();
+  if (size < 22) throw new ZipError('E_ZIP_NOT_A_ZIP');
+  const tailLength = Math.min(size, 22 + 0xffff + 20 + 56);
+  const tail = await readAt(handle, size - tailLength, tailLength);
+  let eocd = -1;
+  for (let i = tail.length - 22; i >= 0; i--) {
+    if (tail.readUInt32LE(i) === SIG_EOCD && i + 22 + tail.readUInt16LE(i + 20) === tail.length) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new ZipError('E_ZIP_NOT_A_ZIP');
+  let count = tail.readUInt16LE(eocd + 10);
+  let cdSize = tail.readUInt32LE(eocd + 12);
+  let cdOffset = tail.readUInt32LE(eocd + 16);
+  if (count === 0xffff || cdSize === 0xffffffff || cdOffset === 0xffffffff) {
+    const locator = eocd - 20;
+    if (locator < 0 || tail.readUInt32LE(locator) !== SIG_LOCATOR64) throw new ZipError('E_ZIP_BAD_ZIP64');
+    const recordAt = safeNumber(tail.readBigUInt64LE(locator + 8));
+    const record = await readAt(handle, recordAt, 56);
+    if (record.readUInt32LE(0) !== SIG_EOCD64) throw new ZipError('E_ZIP_BAD_ZIP64');
+    count = safeNumber(record.readBigUInt64LE(32));
+    cdSize = safeNumber(record.readBigUInt64LE(40));
+    cdOffset = safeNumber(record.readBigUInt64LE(48));
+  }
+  if (count > limits.maxEntries || cdSize > limits.maxCentralDirectoryBytes) throw new ZipError('E_ZIP_LIMIT');
+  const directory = await readAt(handle, cdOffset, cdSize);
+  const entries = [];
+  let at = 0;
+  for (let n = 0; n < count; n++) {
+    if (at + 46 > directory.length || directory.readUInt32LE(at) !== SIG_CENTRAL) throw new ZipError('E_ZIP_BAD_DIRECTORY');
+    const flags = directory.readUInt16LE(at + 8);
+    const nameLength = directory.readUInt16LE(at + 28);
+    const extraLength = directory.readUInt16LE(at + 30);
+    const commentLength = directory.readUInt16LE(at + 32);
+    const entry = {
+      flags,
+      method: directory.readUInt16LE(at + 10),
+      crc: directory.readUInt32LE(at + 16),
+      compressedSize: directory.readUInt32LE(at + 20),
+      uncompressedSize: directory.readUInt32LE(at + 24),
+      offset: directory.readUInt32LE(at + 42),
+    };
+    const end = at + 46 + nameLength + extraLength + commentLength;
+    if (end > directory.length) throw new ZipError('E_ZIP_BAD_DIRECTORY');
+    entry.name = directory.toString(flags & 0x800 ? 'utf8' : 'latin1', at + 46, at + 46 + nameLength);
+    parseExtra(directory.subarray(at + 46 + nameLength, at + 46 + nameLength + extraLength), entry, {
+      uncompressed: entry.uncompressedSize === 0xffffffff,
+      compressed: entry.compressedSize === 0xffffffff,
+      offset: entry.offset === 0xffffffff,
+    });
+    entry.isDirectory = entry.name.endsWith('/');
+    entries.push(entry);
+    at = end;
+  }
+  return {
+    entries,
+    size,
+    openEntry: entry => openEntry(handle, entry, limits),
+    close: () => handle.close(),
+  };
+}
+
 /** Opens a zip file. Returns { entries, openEntry(entry) -> Readable, close() }. */
 export async function openZip(file, limits = READER_LIMITS) {
-  const handle = await fs.promises.open(file, 'r');
+  const flags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0);
+  const handle = await fs.promises.open(file, flags);
   try {
-    const { size } = await handle.stat();
-    if (size < 22) throw new ZipError('E_ZIP_NOT_A_ZIP');
-    const tailLength = Math.min(size, 22 + 0xffff + 20 + 56);
-    const tail = await readAt(handle, size - tailLength, tailLength);
-    let eocd = -1;
-    for (let i = tail.length - 22; i >= 0; i--) {
-      if (tail.readUInt32LE(i) === SIG_EOCD && i + 22 + tail.readUInt16LE(i + 20) === tail.length) { eocd = i; break; }
-    }
-    if (eocd < 0) throw new ZipError('E_ZIP_NOT_A_ZIP');
-    let count = tail.readUInt16LE(eocd + 10);
-    let cdSize = tail.readUInt32LE(eocd + 12);
-    let cdOffset = tail.readUInt32LE(eocd + 16);
-    if (count === 0xffff || cdSize === 0xffffffff || cdOffset === 0xffffffff) {
-      const locator = eocd - 20;
-      if (locator < 0 || tail.readUInt32LE(locator) !== SIG_LOCATOR64) throw new ZipError('E_ZIP_BAD_ZIP64');
-      const recordAt = safeNumber(tail.readBigUInt64LE(locator + 8));
-      const record = await readAt(handle, recordAt, 56);
-      if (record.readUInt32LE(0) !== SIG_EOCD64) throw new ZipError('E_ZIP_BAD_ZIP64');
-      count = safeNumber(record.readBigUInt64LE(32));
-      cdSize = safeNumber(record.readBigUInt64LE(40));
-      cdOffset = safeNumber(record.readBigUInt64LE(48));
-    }
-    if (count > limits.maxEntries || cdSize > limits.maxCentralDirectoryBytes) throw new ZipError('E_ZIP_LIMIT');
-    const directory = await readAt(handle, cdOffset, cdSize);
-    const entries = [];
-    let at = 0;
-    for (let n = 0; n < count; n++) {
-      if (at + 46 > directory.length || directory.readUInt32LE(at) !== SIG_CENTRAL) throw new ZipError('E_ZIP_BAD_DIRECTORY');
-      const flags = directory.readUInt16LE(at + 8);
-      const nameLength = directory.readUInt16LE(at + 28);
-      const extraLength = directory.readUInt16LE(at + 30);
-      const commentLength = directory.readUInt16LE(at + 32);
-      const entry = {
-        flags,
-        method: directory.readUInt16LE(at + 10),
-        crc: directory.readUInt32LE(at + 16),
-        compressedSize: directory.readUInt32LE(at + 20),
-        uncompressedSize: directory.readUInt32LE(at + 24),
-        offset: directory.readUInt32LE(at + 42),
-      };
-      const end = at + 46 + nameLength + extraLength + commentLength;
-      if (end > directory.length) throw new ZipError('E_ZIP_BAD_DIRECTORY');
-      entry.name = directory.toString(flags & 0x800 ? 'utf8' : 'latin1', at + 46, at + 46 + nameLength);
-      parseExtra(directory.subarray(at + 46 + nameLength, at + 46 + nameLength + extraLength), entry, {
-        uncompressed: entry.uncompressedSize === 0xffffffff,
-        compressed: entry.compressedSize === 0xffffffff,
-        offset: entry.offset === 0xffffffff,
-      });
-      entry.isDirectory = entry.name.endsWith('/');
-      entries.push(entry);
-      at = end;
-    }
-    return {
-      entries,
-      size,
-      openEntry: entry => openEntry(file, handle, entry, limits),
-      close: () => handle.close(),
-    };
+    return await openZipHandle(handle, limits);
   } catch (error) {
-    await handle.close();
+    await handle.close().catch(() => {});
     throw error;
   }
 }
 
-async function openEntry(file, handle, entry, limits) {
+async function openEntry(handle, entry, limits) {
   if (entry.flags & 0x1) throw new ZipError('E_ZIP_ENCRYPTED');
   if (entry.method !== 0 && entry.method !== 8) throw new ZipError('E_ZIP_METHOD');
   if (entry.uncompressedSize > limits.maxEntryBytes) throw new ZipError('E_ZIP_LIMIT');
@@ -166,7 +186,7 @@ async function openEntry(file, handle, entry, limits) {
       if (entry.uncompressedSize !== 0) throw new ZipError('E_ZIP_SIZE_MISMATCH');
       return;
     }
-    const raw = fs.createReadStream(file, { start, end: start + entry.compressedSize - 1 });
+    const raw = readableRangeFromHandle(handle, start, start + entry.compressedSize - 1);
     const source = entry.method === 8 ? raw.pipe(zlib.createInflateRaw()) : raw;
     raw.on('error', error => source.destroy(error));
     const crc = new Crc32();

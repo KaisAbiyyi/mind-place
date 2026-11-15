@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 import { Readable } from 'node:stream';
 import { test } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { sanitize } from '../scripts/import-sanitizer/sanitize.mjs';
+import { openSource, sanitize } from '../scripts/import-sanitizer/sanitize.mjs';
 import { DEFAULT_BUDGETS, totalStructureEstimateBytes } from '../scripts/import-sanitizer/budgets.mjs';
 import { DistinctCounter, LeakRegistry } from '../scripts/import-sanitizer/leak-check.mjs';
 import { rewriteHtml, scanHtml } from '../scripts/import-sanitizer/html-stream.mjs';
@@ -836,7 +836,7 @@ test('SAN-F05: the report separates structure fidelity from privacy and lists th
     assert.equal(chat.report.keptValues, undefined);
 
     const gemini = await sanitize({ input: path.join(t.dir, 'gemini'), output: path.join(t.dir, 'o2') });
-    assert.ok(gemini.report.residualMetadata.linkHosts.includes('gemini.google.com'));
+    assert.ok(gemini.report.residualMetadata.linkHosts.some(host => host === 'gemini.google.com'));
     assert.ok(gemini.report.residualMetadata.htmlClassTokens.includes('outer-cell'));
     assert.ok(gemini.report.residualMetadata.memberNames.includes('MyActivity.html'));
 
@@ -1387,10 +1387,8 @@ test('SAN-F09-A: a report that fails mid-write leaves no staged file and no outp
       return true;
     });
     restore();
-    assert.equal(fs.existsSync(staged), false, 'the partially written staged report was removed');
-    assert.equal(fs.existsSync(report), false);
-    assert.equal(fs.existsSync(out), false);
     assert.deepEqual(fs.readdirSync(t.dir).sort(), rootBefore);
+    assert.equal(fs.readdirSync(t.dir).includes(path.basename(staged)), false, 'the partially written staged report was removed');
     assert.deepEqual(fs.readdirSync(path.dirname(out)), [], 'no output, partial or spool left');
 
     // API, previous output and previous report with --force: both intact, byte for byte.
@@ -1409,7 +1407,7 @@ test('SAN-F09-A: a report that fails mid-write leaves no staged file and no outp
     fs.rmSync(report);
 
     // A file that already has the staging name is not ours: it is refused and left untouched.
-    fs.writeFileSync(staged, 'OWNER FILE');
+    fs.writeFileSync(staged, 'OWNER FILE', { flag: 'wx' });
     await assert.rejects(sanitize({ input, output: out, report }), { code: 'E_REPORT_WRITE' });
     assert.equal(fs.readFileSync(staged, 'utf8'), 'OWNER FILE');
     assert.equal(fs.existsSync(out), false);
@@ -1484,10 +1482,12 @@ test('SAN-F09-B: if cleaning the staged name fails after the report was linked, 
  * stream errors with `code` (EBUSY for a locked file, EACCES, EIO). Returns the function that undoes it.
  */
 function failReads(target, { afterBytes, code }) {
+  const resolvedTarget = path.resolve(target);
   const real = fs.createReadStream;
+  const realOpen = fs.promises.open;
   fs.createReadStream = (file, options) => {
     const source = real(file, options);
-    if (path.resolve(String(file)) !== path.resolve(target)) return source;
+    if (path.resolve(String(file)) !== resolvedTarget) return source;
     return Readable.from((async function* () {
       let seen = 0;
       for await (const chunk of source) {
@@ -1499,7 +1499,32 @@ function failReads(target, { afterBytes, code }) {
       throw Object.assign(new Error(`${code}: injected`), { code }); // failure exactly at the end of the data
     })());
   };
-  return () => { fs.createReadStream = real; };
+  fs.promises.open = async (file, ...rest) => {
+    const handle = await realOpen.call(fs.promises, file, ...rest);
+    if (path.resolve(String(file)) !== resolvedTarget) return handle;
+    const realRead = handle.read.bind(handle);
+    let bodySeen = 0;
+    let sniffed = false;
+    handle.read = async (buffer, offset = 0, length = buffer.length, position = null) => {
+      if (!sniffed && position === 0 && length === 4) {
+        sniffed = true;
+        return realRead(buffer, offset, length, position);
+      }
+      const room = Math.max(0, afterBytes - bodySeen);
+      if (room === 0) throw Object.assign(new Error(`${code}: injected`), { code });
+      const res = await realRead(buffer, offset, Math.min(length, room), position);
+      bodySeen += res.bytesRead;
+      if (bodySeen >= afterBytes) {
+        handle.read = async () => { throw Object.assign(new Error(`${code}: injected`), { code }); };
+      }
+      return res;
+    };
+    return handle;
+  };
+  return () => {
+    fs.createReadStream = real;
+    fs.promises.open = realOpen;
+  };
 }
 
 function leftoverNames(dir) {
@@ -1650,4 +1675,42 @@ test('WIN-SAN-F03: a staging directory that cannot be created is a stable, conte
       }
     }
   } finally { fs.promises.mkdtemp = realMkdtemp; t.done(); }
+});
+
+test('descriptor-bound openSource handles regular files, valid zips, and closes handles on zip rejection', async () => {
+  const t = scratch('open-source-handle');
+  try {
+    const regularFile = path.join(t.dir, 'conversations.json');
+    fs.writeFileSync(regularFile, '[{"id":"a"}]\n', 'utf8');
+    const regular = await openSource(regularFile);
+    try {
+      assert.equal(regular.kind, 'file');
+      assert.equal(regular.entries.length, 1);
+      // Positioned reads from the same descriptor remain repeatable across analysis + leak passes.
+      assert.equal(await collect(await regular.entries[0].open()), '[{"id":"a"}]\n');
+      assert.equal(await collect(await regular.entries[0].open()), '[{"id":"a"}]\n');
+    } finally {
+      await regular.close();
+    }
+
+    const zipPath = path.join(t.dir, 'export.zip');
+    const writer = new ZipWriter(zipPath);
+    await writer.addFile('notes.txt', Buffer.from('hello from zip\n', 'utf8'));
+    await writer.finish();
+    const openedZip = await openSource(zipPath);
+    try {
+      assert.equal(openedZip.kind, 'zip');
+      assert.equal(openedZip.entries.length, 1);
+      assert.equal(await collect(await openedZip.entries[0].open()), 'hello from zip\n');
+    } finally {
+      await openedZip.close();
+    }
+
+    const badZipPath = path.join(t.dir, 'truncated.zip');
+    fs.writeFileSync(badZipPath, Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00]));
+    await assert.rejects(openSource(badZipPath), error => /^E_ZIP_/.test(error?.code ?? ''));
+    // Descriptor must already be closed in finally so immediate unlink succeeds on Windows.
+    fs.unlinkSync(badZipPath);
+    assert.equal(fs.existsSync(badZipPath), false);
+  } finally { t.done(); }
 });
