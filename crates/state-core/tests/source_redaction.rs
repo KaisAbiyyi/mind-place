@@ -1,3 +1,55 @@
+#![cfg(feature = "sqlcipher-preview")]
+//! MP-9C: source redaction/forget is refused on plaintext state, so these
+//! regressions run against SQLCipher-encrypted vault state (synthetic keys).
+mod encrypted {
+    use mind_place_security::{SecurityGate, UnlockLease};
+    use mind_place_state::StateStore;
+    use std::{
+        collections::HashMap,
+        path::{Path, PathBuf},
+        sync::{Mutex, OnceLock},
+    };
+
+    pub const KEY: [u8; 32] = [0x51; 32];
+
+    fn gates() -> &'static Mutex<HashMap<PathBuf, (SecurityGate, UnlockLease)>> {
+        static GATES: OnceLock<Mutex<HashMap<PathBuf, (SecurityGate, UnlockLease)>>> =
+            OnceLock::new();
+        GATES.get_or_init(|| Mutex::new(HashMap::new()))
+    }
+
+    /// Open (or reopen) encrypted state at `path`; the first open provisions
+    /// a synthetic gate beside it (the privacy fence itself is covered by the
+    /// vault-level index-core regressions).
+    pub fn open_state(path: impl AsRef<Path>) -> StateStore {
+        let path = path.as_ref().to_path_buf();
+        let (gate, lease) = {
+            let mut gates = gates().lock().unwrap_or_else(|e| e.into_inner());
+            gates
+                .entry(path.clone())
+                .or_insert_with(|| {
+                    let root = path.parent().unwrap();
+                    let gate = SecurityGate::open(root.join("security.json")).unwrap();
+                    gate.initialize(b"synthetic-mp9c-test-secret").unwrap();
+                    let lease = gate.require_unlocked().unwrap();
+                    (gate, lease)
+                })
+                .clone()
+        };
+        StateStore::open_encrypted(&path, KEY, &gate, lease).unwrap()
+    }
+
+    /// Raw keyed connection for adversarial tampering.
+    pub fn raw(path: &Path) -> rusqlite::Connection {
+        let db = rusqlite::Connection::open(path).unwrap();
+        let hex: String = KEY.iter().map(|b| format!("{b:02x}")).collect();
+        db.execute_batch(&format!("PRAGMA key = \"x'{hex}'\";"))
+            .unwrap();
+        db
+    }
+}
+use encrypted::open_state;
+
 use mind_place_state::{
     ClaimEvidence, ClientCapability as Cap, MemoryClaim, MemoryWrite, RankingMode, RankingPolicy,
     SourceDescriptor, SourceKey, StateError, StateStore,
@@ -26,7 +78,7 @@ fn claim(id: &str, statement: &str) -> MemoryClaim {
 #[test]
 fn owner_source_redaction_is_durable_hides_memory_and_blocks_reimport() {
     let temp = tempfile::tempdir().unwrap();
-    let db = StateStore::open(temp.path().join("state.sqlite3")).unwrap();
+    let db = open_state(temp.path().join("state.sqlite3"));
     let owner = "a".repeat(64);
     let reader = "b".repeat(64);
     db.issue_client("client:v1:owner", "Owner", &owner, &[Cap::Admin])
@@ -112,7 +164,7 @@ fn owner_source_redaction_is_durable_hides_memory_and_blocks_reimport() {
     assert_eq!(db.source(&public).unwrap().unwrap().id, public);
 
     // Existing state v9 remains readable without an automatic schema change.
-    let reopened = StateStore::open(db.path()).unwrap();
+    let reopened = open_state(db.path());
     assert!(reopened.source_is_redacted(&secret).unwrap());
     assert!(reopened.claim_history("claim:secret").unwrap().is_none());
     assert!(reopened.claim_history("claim:public").unwrap().is_some());
@@ -127,7 +179,7 @@ fn owner_source_redaction_is_durable_hides_memory_and_blocks_reimport() {
 #[test]
 fn redacted_sources_reject_late_authenticated_memory_writes() {
     let temp = tempfile::tempdir().unwrap();
-    let db = StateStore::open(temp.path().join("state.sqlite3")).unwrap();
+    let db = open_state(temp.path().join("state.sqlite3"));
     let owner = "a".repeat(64);
     let writer = "b".repeat(64);
     db.issue_client("client:v1:owner", "Owner", &owner, &[Cap::Admin])
