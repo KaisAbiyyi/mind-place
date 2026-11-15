@@ -29,3 +29,7 @@ libc = "0.2.190"
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Networking_WinSock"] }
+
+[dev-dependencies]
+# Test-only raw access for MP-9C tamper regressions (same pinned version as state-core).
+rusqlite = "=0.41.0"

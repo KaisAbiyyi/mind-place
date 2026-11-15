@@ -300,6 +300,10 @@ impl<'a> IntegrationCore<'a> {
         if encoded.len() > MAX_REQUEST_BYTES {
             return Err(IntegrationError::ResourceLimit);
         }
+        // Held until the complete response is returned (re-entrant when the
+        // credentialed caller already holds it), so no redaction can commit
+        // between a visibility decision and the emitted result.
+        let _privacy = self.disclosure_fence()?;
         let lease = self.security.require_unlocked()?;
         self.check(lease, &mut authorize_read)?;
         let mut results = Vec::with_capacity(batch.calls.len());
@@ -364,6 +368,22 @@ impl<'a> IntegrationCore<'a> {
             schema_version: CONTRACT_VERSION,
             results,
         })
+    }
+
+    /// MP-9C shared privacy disclosure fence for the vault source. The legacy
+    /// plaintext source cannot hold tombstones (redaction requires the vault)
+    /// and its transport refuses to serve if one is ever found.
+    pub fn disclosure_fence(
+        &self,
+    ) -> Result<Option<mind_place_security::vault_fence::PrivacyReadGuard>> {
+        match self.archive {
+            ArchiveSource::Legacy(_) => Ok(None),
+            #[cfg(feature = "vault-mcp")]
+            ArchiveSource::Vault(archive) => archive
+                .disclosure_fence()
+                .map(Some)
+                .map_err(|_| IntegrationError::AccessDenied),
+        }
     }
 
     fn check(

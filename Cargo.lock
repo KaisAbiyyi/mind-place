@@ -1976,6 +1976,7 @@ dependencies = [
  "mind-place-integration",
  "mind-place-security",
  "mind-place-state",
+ "rusqlite",
  "serde",
  "serde_json",
  "sha2",

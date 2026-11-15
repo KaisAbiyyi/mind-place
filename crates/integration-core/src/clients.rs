@@ -158,6 +158,12 @@ impl IntegrationCore<'_> {
         credential: &str,
         batch: &ToolBatch,
     ) -> Result<ToolBatchResponse> {
+        // MP-9C: one shared privacy disclosure fence spans the argument
+        // pre-check, every tool call, the post-result authority check and the
+        // returned response. A redaction commit (exclusive) therefore either
+        // completes before this batch's first visibility decision or waits
+        // until its response exists. Acquired before any state connection.
+        let _privacy = self.disclosure_fence()?;
         self.security.require_unlocked()?;
         let hash = credential_hash(credential)?;
         let client = match state.authorize_client_hash(&hash, ClientCapability::Read)? {

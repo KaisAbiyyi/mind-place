@@ -9,10 +9,59 @@
 use crate::{Result, SecurityError};
 use fs2::FileExt;
 use std::{
+    cell::RefCell,
+    collections::HashMap,
     fs::{self, File, OpenOptions},
     io::ErrorKind,
-    path::Path,
+    marker::PhantomData,
+    path::{Path, PathBuf},
 };
+
+thread_local! {
+    /// Privacy disclosure fences held by THIS thread, per lock file. A
+    /// disclosure that spans a whole command (query -> response) nests the
+    /// archive's own read fence; re-entry is counted here instead of asking
+    /// the OS for a second shared lock, so nesting never depends on platform
+    /// lock fairness and can never queue behind a waiting redaction.
+    /// The OS lock file lives here, so it is released only when the LAST
+    /// guard on this thread drops, whatever order nested guards drop in.
+    static HELD_PRIVACY_READERS: RefCell<HashMap<PathBuf, (usize, File)>> = RefCell::new(HashMap::new());
+}
+
+/// Shared privacy disclosure guard. Thread-bound (`!Send`): it must be
+/// released on the thread that acquired it, because re-entry is tracked per
+/// thread. While any guard for a vault is alive on any thread, a source
+/// redaction (exclusive `privacy`) for that vault cannot commit.
+pub struct PrivacyReadGuard {
+    path: PathBuf,
+    _thread_bound: PhantomData<*const ()>,
+}
+
+impl Drop for PrivacyReadGuard {
+    fn drop(&mut self) {
+        let released = HELD_PRIVACY_READERS.with(|held| {
+            let mut held = held.borrow_mut();
+            let last = match held.get_mut(&self.path) {
+                Some((count, _)) => {
+                    *count -= 1;
+                    *count == 0
+                }
+                None => false,
+            };
+            if last {
+                held.remove(&self.path)
+            } else {
+                None
+            }
+        });
+        // Dropping the File of the last guard releases the shared OS lock.
+        drop(released);
+    }
+}
+
+fn holds_privacy_reader(path: &Path) -> bool {
+    HELD_PRIVACY_READERS.with(|held| held.borrow().contains_key(path))
+}
 
 pub const WRITER_LOCK_NAME: &str = ".vault-writer.lock";
 /// Independent privacy serialization: capture and source redaction acquire
@@ -41,19 +90,50 @@ impl VaultWriterFence {
     /// Shared disclosure fence. A source-redaction commit holds the matching
     /// EXCLUSIVE fence, so a reader which checked visibility cannot overlap a
     /// committed tombstone. Acquire before opening state or writer connections.
-    pub fn privacy_reader(vault_root: &Path) -> Result<Self> {
-        let file = privacy_file(vault_root)?;
-        FileExt::lock_shared(&file)?;
-        Ok(Self { _file: file })
+    /// Re-entrant on the same thread (see `PrivacyReadGuard`).
+    pub fn privacy_reader(vault_root: &Path) -> Result<PrivacyReadGuard> {
+        let path = privacy_path(vault_root)?;
+        let nested = HELD_PRIVACY_READERS.with(|held| {
+            let mut held = held.borrow_mut();
+            match held.get_mut(&path) {
+                Some((count, _)) => {
+                    *count += 1;
+                    true
+                }
+                None => false,
+            }
+        });
+        if !nested {
+            let file = privacy_file(vault_root)?;
+            FileExt::lock_shared(&file)?;
+            HELD_PRIVACY_READERS.with(|held| held.borrow_mut().insert(path.clone(), (1, file)));
+        }
+        Ok(PrivacyReadGuard {
+            path,
+            _thread_bound: PhantomData,
+        })
     }
 
     /// Exclusive source mutation fence; always acquire before shared writer,
     /// SQLCipher and immutable storage locks (never upgrade a shared lock).
+    /// A thread that still holds a disclosure guard for this vault would
+    /// deadlock on itself; that is refused instead.
     pub fn privacy(vault_root: &Path) -> Result<Self> {
+        if holds_privacy_reader(&privacy_path(vault_root)?) {
+            return Err(SecurityError::InvalidConfig);
+        }
         let file = privacy_file(vault_root)?;
         FileExt::lock_exclusive(&file)?;
         Ok(Self { _file: file })
     }
+}
+
+fn privacy_path(vault_root: &Path) -> Result<PathBuf> {
+    if !vault_root.is_dir() {
+        return Err(SecurityError::InvalidConfig);
+    }
+    let parent = vault_root.parent().ok_or(SecurityError::InvalidConfig)?;
+    Ok(parent.join(PRIVACY_LOCK_NAME))
 }
 
 fn privacy_file(vault_root: &Path) -> Result<File> {
@@ -155,6 +235,50 @@ mod tests {
         FileExt::try_lock_exclusive(&competing).unwrap();
         FileExt::unlock(&competing).unwrap();
         let _privacy = VaultWriterFence::privacy(&root).unwrap();
+    }
+
+    #[test]
+    fn nested_disclosure_guard_is_reentrant_and_blocks_redaction_until_outermost_drop() {
+        let home = tempfile::tempdir().unwrap();
+        let root = home.path().join("vault");
+        fs::create_dir(&root).unwrap();
+        let outer = VaultWriterFence::privacy_reader(&root).unwrap();
+        let inner = VaultWriterFence::privacy_reader(&root).unwrap();
+        let competing = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(home.path().join(PRIVACY_LOCK_NAME))
+            .unwrap();
+        // Same-thread exclusive acquisition is refused, not self-deadlocked.
+        assert!(VaultWriterFence::privacy(&root).is_err());
+        drop(inner);
+        assert!(FileExt::try_lock_exclusive(&competing).is_err());
+        drop(outer);
+        FileExt::try_lock_exclusive(&competing).unwrap();
+        FileExt::unlock(&competing).unwrap();
+        let _privacy = VaultWriterFence::privacy(&root).unwrap();
+    }
+
+    #[test]
+    fn redaction_on_another_thread_waits_for_the_outermost_disclosure_guard() {
+        use std::{sync::mpsc, thread, time::Duration};
+        let home = tempfile::tempdir().unwrap();
+        let root = home.path().join("vault");
+        fs::create_dir(&root).unwrap();
+        let outer = VaultWriterFence::privacy_reader(&root).unwrap();
+        let inner = VaultWriterFence::privacy_reader(&root).unwrap();
+        let (tx, rx) = mpsc::channel();
+        let redactor_root = root.clone();
+        let redactor = thread::spawn(move || {
+            let _exclusive = VaultWriterFence::privacy(&redactor_root).unwrap();
+            tx.send(()).unwrap();
+        });
+        assert!(rx.recv_timeout(Duration::from_millis(150)).is_err());
+        drop(inner);
+        assert!(rx.recv_timeout(Duration::from_millis(150)).is_err());
+        drop(outer);
+        rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        redactor.join().unwrap();
     }
 
     #[test]

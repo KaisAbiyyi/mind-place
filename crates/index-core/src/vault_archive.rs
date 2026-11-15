@@ -131,6 +131,15 @@ impl VaultCaptureStore {
         Ok(raw)
     }
 
+    /// MP-9C disclosure fence for a whole command (query -> materialized
+    /// response): shared with every other reader, exclusive against source
+    /// redaction commits. Acquire FIRST, before opening state/index (lock
+    /// order: privacy -> writer -> SQLite), and keep it on the same thread
+    /// until the response value is complete. Nested archive reads re-enter it.
+    pub fn disclosure_fence(&self) -> Result<mind_place_security::vault_fence::PrivacyReadGuard> {
+        VaultWriterFence::privacy_reader(&self.root).map_err(|_| IndexError::Revoked)
+    }
+
     pub fn open_state_store(&self) -> Result<StateStore> {
         Ok(StateStore::open_encrypted(
             self.root.join("state.sqlite3"),
@@ -1670,5 +1679,111 @@ mod privacy_capture_race_tests {
         assert!(reopened.snapshots(&first.id).is_err());
         assert!(reopened.list("").unwrap().is_empty());
         assert!(file_count(&home.path().join("vault")) >= files_before);
+    }
+
+    /// Review P1 (desktop path): a command holds `disclosure_fence` from its
+    /// first authority read to its materialized result, exactly as the
+    /// desktop retrieval/inspection/graph/archive commands now do. Ordering A:
+    /// a concurrent redaction waits for the in-flight command, and a NESTED
+    /// archive read made while that redaction is already waiting neither
+    /// deadlocks nor lets it in. Ordering B: later commands hide the source.
+    #[test]
+    fn desktop_disclosure_command_serializes_against_redaction_without_deadlock() {
+        let (_home, _gate, _lease, _manifest, _recovery, archive, admin, secret) = fixture();
+        let receipt = archive
+            .save(capture_with(
+                "123e4567-e89b-12d3-a456-426614174099",
+                "Secret forgotten title",
+                "zebracorn secret evidence",
+            ))
+            .unwrap();
+        archive
+            .save(capture_with(
+                "123e4567-e89b-12d3-a456-426614174098",
+                "Visible title",
+                "zebracorn kept",
+            ))
+            .unwrap();
+        let state = archive.open_state_store().unwrap();
+        let index = archive.open_index_store().unwrap();
+        index
+            .sync_vault_with_check(&archive, &state, || Ok(()))
+            .unwrap();
+        drop(state);
+
+        let (decided_tx, decided_rx) = mpsc::channel();
+        let (nested_tx, nested_rx) = mpsc::channel::<()>();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let (redacted_tx, redacted_rx) = mpsc::channel();
+        let command_archive = archive.clone();
+        let archive_id = receipt.id.clone();
+        let command = thread::spawn(move || {
+            // == desktop command body ==
+            let _privacy = command_archive.disclosure_fence().unwrap();
+            let authority = command_archive.open_state_store().unwrap();
+            let index = command_archive.open_index_store().unwrap();
+            let mut paused = false;
+            let hits = index
+                .retrieve_filtered(&zebra(20), |id| {
+                    let visible = !authority.source_is_redacted(id)?;
+                    if !paused {
+                        paused = true;
+                        decided_tx.send(()).unwrap();
+                        // Wait until the redactor is blocked on the fence,
+                        // then perform a nested archive read (re-entrant).
+                        let _ = nested_rx.recv_timeout(Duration::from_secs(20));
+                        let nested = command_archive.read(&archive_id, None);
+                        assert!(nested.is_ok(), "nested read under the fence failed");
+                        let _ = release_rx.recv_timeout(Duration::from_secs(20));
+                    }
+                    Ok(visible)
+                })
+                .unwrap();
+            hits
+        });
+        decided_rx.recv_timeout(Duration::from_secs(30)).unwrap();
+        let redactor_archive = archive.clone();
+        let (admin_hash, source) = (admin.clone(), secret.clone());
+        let redactor = thread::spawn(move || {
+            let result = redactor_archive.open_state_store().unwrap().redact_source(
+                &admin_hash,
+                &source,
+                "Concurrent owner redaction",
+            );
+            redacted_tx.send(()).unwrap();
+            result
+        });
+        assert!(
+            redacted_rx
+                .recv_timeout(Duration::from_millis(300))
+                .is_err(),
+            "redaction committed during an in-flight desktop disclosure"
+        );
+        nested_tx.send(()).unwrap();
+        assert!(
+            redacted_rx
+                .recv_timeout(Duration::from_millis(300))
+                .is_err(),
+            "nested read released the fence early"
+        );
+        release_tx.send(()).unwrap();
+        let hits = command.join().unwrap();
+        // Linearized before the redaction commit.
+        assert!(hits.hits.iter().any(|hit| hit.source_id == secret));
+        redacted_rx.recv_timeout(Duration::from_secs(30)).unwrap();
+        redactor.join().unwrap().unwrap();
+
+        // Ordering B: a command starting after the commit sees no trace.
+        let _privacy = archive.disclosure_fence().unwrap();
+        let authority = archive.open_state_store().unwrap();
+        let after = archive
+            .open_index_store()
+            .unwrap()
+            .retrieve_filtered(&zebra(20), |id| Ok(!authority.source_is_redacted(id)?))
+            .unwrap();
+        assert!(!after.hits.is_empty());
+        assert!(after.hits.iter().all(|hit| hit.source_id != secret));
+        assert_eq!(after.candidate_count, after.hits.len());
+        assert!(archive.read(&receipt.id, None).is_err());
     }
 }

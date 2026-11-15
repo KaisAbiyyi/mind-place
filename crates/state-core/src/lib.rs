@@ -89,6 +89,8 @@ pub enum StateError {
     SqliteTooOld,
     #[error("invalid durable identifier or value")]
     InvalidValue,
+    #[error("source redaction requires the encrypted vault")]
+    VaultRequired,
 }
 impl StateError {
     pub fn code(&self) -> &'static str {
@@ -107,6 +109,7 @@ impl StateError {
             Self::Busy => "MP_STATE_BUSY",
             Self::SqliteTooOld => "MP_STATE_SQLITE_TOO_OLD",
             Self::InvalidValue => "MP_STATE_INVALID_VALUE",
+            Self::VaultRequired => "MP_PRIVACY_REQUIRES_VAULT",
         }
     }
 }

@@ -7,7 +7,7 @@
 use crate::{
     source_record, source_redaction, verify_source_record, Result, StateError, StateStore,
 };
-use mind_place_security::vault_fence::VaultWriterFence;
+use mind_place_security::{vault_fence::VaultWriterFence, OwnerReauthentication};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -172,6 +172,39 @@ fn impact(db: &Connection, id: &str, actor_id: &str) -> Result<(usize, usize, St
     Ok((ids.len(), shared, sha(&bytes)))
 }
 
+/// Stable actor ID recorded for the local, re-authenticated desktop owner.
+pub const LOCAL_OWNER_ACTOR: &str = "owner:local";
+
+/// Who authorizes a forget step. `Owner` consumes a fresh re-authentication
+/// proof bound to the store's current unlock epoch; `Admin` is the existing
+/// trusted admin-credential path. Neither is reachable from MCP clients.
+enum Actor<'a> {
+    Admin(&'a str),
+    Owner(OwnerReauthentication),
+}
+
+/// MP-9C (review P1/P2): logical redaction is enforced per source only by the
+/// encrypted vault. Plaintext legacy state has no disclosure fence, so a
+/// tombstone committed there could race a long legacy read. Refuse instead.
+pub(crate) fn require_vault(store: &StateStore) -> Result<()> {
+    if store.cipher_key.is_none() {
+        return Err(StateError::VaultRequired);
+    }
+    Ok(())
+}
+
+fn resolve(store: &StateStore, db: &Connection, actor: Actor<'_>) -> Result<String> {
+    match actor {
+        Actor::Admin(token) => owner(db, token),
+        Actor::Owner(proof) => {
+            if store.cipher_key.is_none() || proof.lease_epoch() != unlock_epoch(store) {
+                return Err(StateError::MemoryDenied);
+            }
+            Ok(LOCAL_OWNER_ACTOR.to_owned())
+        }
+    }
+}
+
 fn fence(store: &StateStore) -> Result<Option<VaultWriterFence>> {
     let root = store.path.parent().ok_or(StateError::UnsafePath)?;
     if store.cipher_key.is_some() && root.join("vault-v1.json").exists() {
@@ -193,13 +226,34 @@ impl StateStore {
         source_id: &str,
         reason: &str,
     ) -> Result<SourceForgetPreview> {
+        self.preview_forget(Actor::Admin(admin_token_sha256), source_id, reason)
+    }
+
+    /// Trusted desktop path: the local owner, freshly re-authenticated in the
+    /// current unlock epoch. The returned token must stay in native memory.
+    pub fn preview_source_forget_as_owner(
+        &self,
+        owner: OwnerReauthentication,
+        source_id: &str,
+        reason: &str,
+    ) -> Result<SourceForgetPreview> {
+        self.preview_forget(Actor::Owner(owner), source_id, reason)
+    }
+
+    fn preview_forget(
+        &self,
+        actor: Actor<'_>,
+        source_id: &str,
+        reason: &str,
+    ) -> Result<SourceForgetPreview> {
+        require_vault(self)?;
         if reason.trim().is_empty() || reason.len() > 4096 {
             return Err(StateError::InvalidValue);
         }
         let _privacy = fence(self)?;
         let mut db = self.connection()?;
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let actor = owner(&tx, admin_token_sha256)?;
+        let actor = resolve(self, &tx, actor)?;
         source_exists(&tx, source_id)?;
         if source_redaction::source_is_redacted(&tx, source_id)? {
             return Err(StateError::MemoryDenied);
@@ -253,6 +307,39 @@ impl StateStore {
         one_time_token: &str,
         preview_sha256: &str,
     ) -> Result<SourceForgetProgress> {
+        self.confirm_forget(
+            Actor::Admin(admin_token_sha256),
+            source_id,
+            one_time_token,
+            preview_sha256,
+        )
+    }
+
+    /// Trusted desktop path; requires a NEW owner re-authentication (the
+    /// preview's proof was consumed) in the same unlock epoch as the preview.
+    pub fn confirm_source_forget_as_owner(
+        &self,
+        owner: OwnerReauthentication,
+        source_id: &str,
+        one_time_token: &str,
+        preview_sha256: &str,
+    ) -> Result<SourceForgetProgress> {
+        self.confirm_forget(
+            Actor::Owner(owner),
+            source_id,
+            one_time_token,
+            preview_sha256,
+        )
+    }
+
+    fn confirm_forget(
+        &self,
+        actor: Actor<'_>,
+        source_id: &str,
+        one_time_token: &str,
+        preview_sha256: &str,
+    ) -> Result<SourceForgetProgress> {
+        require_vault(self)?;
         if !source_id_valid(source_id)
             || one_time_token.len() != 64
             || one_time_token.bytes().any(|b| !b.is_ascii_hexdigit())
@@ -262,7 +349,7 @@ impl StateStore {
         let _privacy = fence(self)?;
         let mut db = self.connection()?;
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let actor = owner(&tx, admin_token_sha256)?;
+        let actor = resolve(self, &tx, actor)?;
         source_exists(&tx, source_id)?;
         if source_redaction::source_is_redacted(&tx, source_id)? {
             return Err(StateError::MemoryDenied);
@@ -322,6 +409,28 @@ impl StateStore {
         }
         let db = self.read_connection()?;
         let actor = owner(&db, admin_token_sha256)?;
+        Self::read_progress(&db, &actor, source_id)
+    }
+
+    /// Trusted desktop status read for the local owner (encrypted vault only;
+    /// the encrypted connection itself re-validates the unlock lease).
+    pub fn source_forget_progress_as_owner(
+        &self,
+        source_id: &str,
+    ) -> Result<Option<SourceForgetProgress>> {
+        require_vault(self)?;
+        if !source_id_valid(source_id) {
+            return Err(StateError::InvalidValue);
+        }
+        let db = self.read_connection()?;
+        Self::read_progress(&db, LOCAL_OWNER_ACTOR, source_id)
+    }
+
+    fn read_progress(
+        db: &Connection,
+        actor: &str,
+        source_id: &str,
+    ) -> Result<Option<SourceForgetProgress>> {
         let value: Option<String> = db
             .query_row(
                 "SELECT value_json FROM settings WHERE key=?1",
@@ -337,7 +446,7 @@ impl StateStore {
             || progress.physical_erase_verified
             || progress.confirmed_at_ms <= 0
             || progress.stage != "pending_independent_backup_reconciliation"
-            || !source_redaction::source_is_redacted(&db, source_id)?
+            || !source_redaction::source_is_redacted(db, source_id)?
         {
             return Err(StateError::Corrupt);
         }

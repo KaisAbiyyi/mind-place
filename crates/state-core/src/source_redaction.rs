@@ -150,6 +150,7 @@ impl StateStore {
         source_id: &str,
         reason: &str,
     ) -> Result<SourceRedactionReceipt> {
+        crate::source_forget::require_vault(self)?;
         if !valid_sha256(admin_token_sha256) || !valid_source_id(source_id) {
             return Err(StateError::InvalidValue);
         }

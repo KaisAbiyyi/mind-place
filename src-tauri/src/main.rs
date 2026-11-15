@@ -3,6 +3,7 @@
 #[cfg(windows)]
 mod browser_registration;
 mod document_refresh;
+mod forget_commands;
 mod hosted_tunnel;
 mod import_commands;
 mod mcp_commands;
@@ -65,6 +66,8 @@ struct AppState {
     hosted: Arc<Mutex<Option<hosted_tunnel::HostedTunnel>>>,
     // Cancel flag of the owner import running in this process (MP-IMPORT-APP-01).
     running_import: import_commands::RunningImport,
+    // MP-9C one-time owner forget tokens; native memory only, cleared on Lock.
+    forget_intents: forget_commands::ForgetIntents,
     extension_path: PathBuf,
     host_path: PathBuf,
     legacy_path: PathBuf,
@@ -152,6 +155,19 @@ fn open_owner_document_index(
     }
 }
 
+/// MP-9C: shared privacy disclosure fence for an owner command in vault mode.
+/// Acquire first inside the blocking task (before state/index connections)
+/// and hold until the command's result value is complete. Re-entrant with the
+/// archive's own read fence; a source redaction cannot commit meanwhile.
+fn disclosure_fence(
+    vault: &Option<Arc<VaultCaptureStore>>,
+) -> mind_place_index::Result<Option<mind_place_security::vault_fence::PrivacyReadGuard>> {
+    vault
+        .as_ref()
+        .map(|vault| vault.disclosure_fence())
+        .transpose()
+}
+
 fn security_error(error: SecurityError) -> String {
     match error.retry_after_ms() {
         Some(retry_after_ms) => format!("{}:{retry_after_ms}:{}", error.code(), error),
@@ -226,10 +242,14 @@ async fn vaulted_blocking<T: Send + 'static>(
         return Ok(None);
     };
     let lease = begin_unlocked(state)?;
-    let result = tauri::async_runtime::spawn_blocking(move || operation(adapter))
-        .await
-        .map_err(|error| error.to_string())?
-        .map_err(|error| format!("{}:{}", error.code(), error))?;
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        // MP-9C: the whole archive command, not just the inner read.
+        let _privacy = adapter.disclosure_fence()?;
+        operation(adapter)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(|error| format!("{}:{}", error.code(), error))?;
     finish_unlocked(state, lease)?;
     Ok(Some(result))
 }
@@ -301,9 +321,29 @@ mod legacy_redaction_gate_tests {
                 key: SourceKey::External("legacy-source"),
             })
             .unwrap();
-        state
+        // Primary control: plaintext state cannot record a tombstone at all,
+        // so none can appear under an in-flight legacy read.
+        let denied = state
             .redact_source(&admin, &source, "Owner redaction")
-            .unwrap();
+            .unwrap_err();
+        assert_eq!(denied.code(), "MP_PRIVACY_REQUIRES_VAULT");
+        assert!(refuse_legacy_with_redactions(&path).is_ok());
+        // Defence in depth: a tombstone that nonetheless exists (tampering,
+        // older build) still makes every legacy archive surface refuse.
+        let raw = rusqlite::Connection::open(&path).unwrap();
+        raw.execute(
+            "INSERT INTO settings(key,value_json) VALUES(?1,?2)",
+            [
+                format!("privacy:source-redaction:v1:{source}"),
+                format!(
+                    "{{\"version\":1,\"source_id\":\"{source}\",\"actor_id\":\"client:v1:owner\",\
+                     \"reason_sha256\":\"{}\",\"recorded_at_ms\":1}}",
+                    "0".repeat(64)
+                ),
+            ],
+        )
+        .unwrap();
+        drop(raw);
         let refused = refuse_legacy_with_redactions(&path).unwrap_err();
         assert!(refused.starts_with("MP_PRIVACY_REQUIRES_VAULT:"));
         assert!(!refused.contains(&source));
@@ -359,6 +399,7 @@ async fn read_memory_authority<T: Send + 'static>(
     let state_path = state.state_path.clone();
     let vault = owner_vault(state);
     let output = tauri::async_runtime::spawn_blocking(move || {
+        let _privacy = disclosure_fence(&vault)?;
         let authority = open_owner_state(&vault, &state_path)?;
         operation(authority).map_err(IndexError::from)
     })
@@ -475,6 +516,7 @@ async fn read_archive_hive(
     let state_path = state.state_path.clone();
     let vault = owner_vault(&state);
     index_task(&state, move |lease, security| {
+        let _privacy = disclosure_fence(&vault)?;
         let authority = open_owner_state(&vault, &state_path)?;
         let query = GraphNeighborhoodRequest {
             scope: "archive:chatgpt".into(),
@@ -556,6 +598,7 @@ async fn search_archive_index(
     let state_path = state.state_path.clone();
     let vault = owner_vault(&state);
     index_task(&state, move |_, _| {
+        let _privacy = disclosure_fence(&vault)?;
         let authority = open_owner_state(&vault, &state_path)?;
         let hits = open_owner_index(&vault, &index_path)?.search(
             &query,
@@ -582,6 +625,7 @@ async fn search_retrieval(
     let state_path = state.state_path.clone();
     let vault = owner_vault(&state);
     index_task(&state, move |_, _| {
+        let _privacy = disclosure_fence(&vault)?;
         let authority = open_owner_state(&vault, &state_path)?;
         // Filter before ranking truncation so counts/flags exclude hidden sources.
         open_owner_index(&vault, &index_path)?.retrieve_filtered(&request, |source_id| {
@@ -604,6 +648,7 @@ async fn fetch_retrieval(
     };
     let index_path = state.index_path.clone();
     index_task(&state, move |lease, security| {
+        let _privacy = disclosure_fence(&vault)?;
         let index = open_owner_index(&vault, &index_path)?;
         let check = || {
             security
@@ -632,6 +677,7 @@ async fn build_retrieval_context(
     };
     let index_path = state.index_path.clone();
     index_task(&state, move |lease, security| {
+        let _privacy = disclosure_fence(&vault)?;
         let index = open_owner_index(&vault, &index_path)?;
         let check = || {
             security
@@ -656,6 +702,7 @@ async fn inspect_retrieval(
     let state_path = state.state_path.clone();
     let vault = owner_vault(&state);
     index_task(&state, move |lease, security| {
+        let _privacy = disclosure_fence(&vault)?;
         // MP-9C: inspection carries snippets; apply current source authority.
         let authority = open_owner_state(&vault, &state_path)?;
         open_owner_index(&vault, &index_path)?.inspect_retrieval_filtered_with_check(
@@ -684,6 +731,7 @@ async fn inspect_retrieval_context(
     };
     let index_path = state.index_path.clone();
     index_task(&state, move |lease, security| {
+        let _privacy = disclosure_fence(&vault)?;
         let index = open_owner_index(&vault, &index_path)?;
         let check = || {
             security
@@ -712,6 +760,7 @@ async fn inspect_retrieval_fetch(
     };
     let index_path = state.index_path.clone();
     index_task(&state, move |lease, security| {
+        let _privacy = disclosure_fence(&vault)?;
         let index = open_owner_index(&vault, &index_path)?;
         let check = || {
             security
@@ -1001,6 +1050,7 @@ fn retire_owner_handles(state: &AppState) {
     // A running import also stops at its next safe point; the revoked lease already fences
     // every further publication (E_AUTHORIZATION).
     import_commands::retire(&state.running_import);
+    forget_commands::clear_intents(&state.forget_intents);
     state.document_refresh.deactivate_all();
     state
         .vault
@@ -1529,6 +1579,7 @@ fn main() {
                 mcp: Arc::new(Mutex::new(None)),
                 hosted: Arc::new(Mutex::new(None)),
                 running_import: Arc::new(Mutex::new(None)),
+                forget_intents: forget_commands::ForgetIntents::default(),
                 extension_path,
                 host_path,
                 legacy_path,
@@ -1593,6 +1644,9 @@ fn main() {
             register_extension,
             import_legacy,
             import_generic_text,
+            forget_commands::preview_source_forget,
+            forget_commands::confirm_source_forget,
+            forget_commands::get_source_forget_progress,
             import_commands::inspect_import_source,
             import_commands::start_import,
             import_commands::cancel_import,
@@ -1779,6 +1833,7 @@ mod shutdown_race_regression_tests {
                 mcp: Arc::new(Mutex::new(None)),
                 hosted: Arc::new(Mutex::new(None)),
                 running_import: Arc::new(Mutex::new(None)),
+                forget_intents: forget_commands::ForgetIntents::default(),
                 extension_path: PathBuf::new(),
                 host_path: PathBuf::new(),
                 legacy_path: home.path().join("sessions"),

@@ -7,7 +7,7 @@ pub mod vault_import_auth;
 pub mod vault_migration;
 pub mod vault_storage;
 
-pub use vault_import_auth::ImportAuthorizationCapability;
+pub use vault_import_auth::{ImportAuthorizationCapability, OwnerReauthentication};
 
 use argon2::{
     password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
