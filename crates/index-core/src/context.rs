@@ -281,11 +281,17 @@ impl IndexStore {
         }
         let filters = apply_policy(request)?;
         check()?;
-        let search = self.retrieve(&RetrievalRequest {
-            queries: request.queries.clone(),
-            filters,
-            limit: SEARCH_POOL,
-        })?;
+        // MP-9C: a stale index hit for a redacted source is skipped here, not
+        // fetched; fetching it would fail and turn the match into an oracle.
+        let authority = archive.source_authority()?;
+        let search = self.retrieve_filtered(
+            &RetrievalRequest {
+                queries: request.queries.clone(),
+                filters,
+                limit: SEARCH_POOL,
+            },
+            crate::authority_visible(&authority),
+        )?;
         check()?;
 
         let mut groups: Vec<ContextGroup> = Vec::new();
@@ -361,7 +367,20 @@ impl IndexStore {
             };
             // Phase 2B checks canonical identity, exact snapshot, raw digest
             // and match against index metadata before any text is emitted.
-            let fetched = self.fetch_generic_with_check(archive, &fetch_request, &mut check)?;
+            let fetched = match self.fetch_generic_with_check(archive, &fetch_request, &mut check) {
+                Ok(fetched) => fetched,
+                // A redaction that committed after retrieval surfaces as
+                // Revoked from the archive's own visibility gate. Skip it
+                // silently (no reason code) only when current authority
+                // confirms the tombstone; lease revocation still propagates
+                // because re-reading authority then fails.
+                Err(IndexError::Revoked)
+                    if !crate::authority_visible(&authority)(&hit.source_id)? =>
+                {
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
             let key = (fetched.source_id.clone(), fetched.snapshot_id.clone());
             let group_at = groups.iter().position(|g| {
                 (g.source_id.as_str(), g.snapshot_id.as_str()) == (key.0.as_str(), key.1.as_str())

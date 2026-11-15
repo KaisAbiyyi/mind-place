@@ -220,6 +220,21 @@ impl IndexStore {
     /// and check its unlock lease before disclosing the returned snippets.
     /// Later source adapters must apply root revocation before this point.
     pub fn retrieve(&self, request: &RetrievalRequest) -> Result<RetrievalResponse> {
+        self.retrieve_filtered(request, |_| Ok(true))
+    }
+
+    /// MP-9C: retrieval with current source authority. `visible` is asked once
+    /// per distinct source and hidden candidates are removed BEFORE
+    /// `candidate_count`, ranking truncation and `truncated` are computed, so a
+    /// stale FTS generation cannot disclose a redacted snippet, title or count,
+    /// and never turns a match into an error. Residual: the bounded SQL
+    /// shortlist (limit x 8) is still drawn from the stale generation, so a
+    /// page may be shorter than `limit` until sync/rebuild prunes the rows.
+    pub fn retrieve_filtered(
+        &self,
+        request: &RetrievalRequest,
+        mut visible: impl FnMut(&str) -> Result<bool>,
+    ) -> Result<RetrievalResponse> {
         if request.queries.is_empty()
             || request.queries.len() > MAX_QUERIES
             || request.limit == 0
@@ -349,8 +364,22 @@ impl IndexStore {
                 }
             }
         }
-        let candidate_count = candidates.len();
-        let mut hits: Vec<_> = candidates.into_values().collect();
+        let mut decisions: BTreeMap<String, bool> = BTreeMap::new();
+        let mut hits = Vec::with_capacity(candidates.len());
+        for hit in candidates.into_values() {
+            let shown = match decisions.get(&hit.source_id) {
+                Some(shown) => *shown,
+                None => {
+                    let shown = visible(&hit.source_id)?;
+                    decisions.insert(hit.source_id.clone(), shown);
+                    shown
+                }
+            };
+            if shown {
+                hits.push(hit);
+            }
+        }
+        let candidate_count = hits.len();
         hits.sort_by(|a, b| {
             b.score
                 .total_cmp(&a.score)

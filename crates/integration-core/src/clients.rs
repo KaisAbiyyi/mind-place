@@ -172,19 +172,25 @@ impl IntegrationCore<'_> {
         for call in &batch.calls {
             reject_redacted_sources(state, &call.arguments)?;
         }
-        let result = self.execute_batch(batch, || {
-            if state
-                .authorize_client_hash(&hash, ClientCapability::Read)?
-                .as_deref()
-                == Some(client.as_str())
-            {
-                Ok(())
-            } else {
-                Err(IntegrationError::AccessDenied)
-            }
-        });
-        // Recheck every returned source against fresh authority. Never allow
-        // stale search/index/MCP state to disclose a redacted source.
+        // Stale index hits for redacted sources are dropped (not rejected) so
+        // the response is indistinguishable from "no match".
+        let result = self.execute_batch_visible(
+            batch,
+            || {
+                if state
+                    .authorize_client_hash(&hash, ClientCapability::Read)?
+                    .as_deref()
+                    == Some(client.as_str())
+                {
+                    Ok(())
+                } else {
+                    Err(IntegrationError::AccessDenied)
+                }
+            },
+            |source_id| Ok(!state.source_is_redacted(source_id)?),
+        );
+        // Defense in depth: recheck every returned source against fresh
+        // authority. Anything still naming a redacted source fails closed.
         let result = result.and_then(|response| {
             for item in &response.results {
                 reject_redacted_sources(state, &item.result)?;

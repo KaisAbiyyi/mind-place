@@ -139,6 +139,21 @@ pub(crate) trait CaptureArchiveReader {
     fn list_captures(&self) -> Result<Vec<ConversationSummary>>;
     fn read_capture(&self, id: &str, revision: Option<&str>) -> Result<Conversation>;
     fn capture_snapshots(&self, id: &str) -> Result<Vec<SnapshotSummary>>;
+    /// MP-9C: the source authority that index-derived disclosure (context,
+    /// inspection) must consult before using a possibly stale FTS hit. The
+    /// legacy plaintext reader has none here; the desktop and MCP boundaries
+    /// refuse legacy archive access while plaintext state holds a tombstone.
+    fn source_authority(&self) -> Result<Option<StateStore>>;
+}
+
+/// Visibility predicate for `retrieve_filtered` from an optional authority.
+pub(crate) fn authority_visible(
+    authority: &Option<StateStore>,
+) -> impl FnMut(&str) -> Result<bool> + '_ {
+    move |source_id| match authority {
+        Some(authority) => Ok(!authority.source_is_redacted(source_id)?),
+        None => Ok(true),
+    }
 }
 
 impl CaptureArchiveReader for ArchiveStore {
@@ -150,6 +165,9 @@ impl CaptureArchiveReader for ArchiveStore {
     }
     fn capture_snapshots(&self, id: &str) -> Result<Vec<SnapshotSummary>> {
         Ok(ArchiveStore::snapshots(self, id)?)
+    }
+    fn source_authority(&self) -> Result<Option<StateStore>> {
+        Ok(None)
     }
 }
 
@@ -163,6 +181,9 @@ impl CaptureArchiveReader for vault_archive::VaultCaptureStore {
     }
     fn capture_snapshots(&self, id: &str) -> Result<Vec<SnapshotSummary>> {
         vault_archive::VaultCaptureStore::snapshots(self, id)
+    }
+    fn source_authority(&self) -> Result<Option<StateStore>> {
+        Ok(Some(self.open_state_store()?))
     }
 }
 

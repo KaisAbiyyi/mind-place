@@ -277,7 +277,21 @@ impl<'a> IntegrationCore<'a> {
     pub fn execute_batch(
         &self,
         batch: &ToolBatch,
+        authorize_read: impl FnMut() -> Result<()>,
+    ) -> Result<ToolBatchResponse> {
+        self.execute_batch_visible(batch, authorize_read, |_| Ok(true))
+    }
+
+    /// MP-9C: as `execute_batch`, with the caller's current source authority.
+    /// `memory_search` drops hidden sources before ranking truncation instead
+    /// of failing the batch, so a stale index cannot act as an existence
+    /// oracle for redacted content. Context building consults the archive's
+    /// own authority (vault) the same way.
+    pub fn execute_batch_visible(
+        &self,
+        batch: &ToolBatch,
         mut authorize_read: impl FnMut() -> Result<()>,
+        mut visible: impl FnMut(&str) -> mind_place_index::Result<bool>,
     ) -> Result<ToolBatchResponse> {
         if batch.calls.is_empty() || batch.calls.len() > MAX_BATCH_CALLS {
             return Err(IntegrationError::InvalidRequest);
@@ -298,7 +312,7 @@ impl<'a> IntegrationCore<'a> {
                 ToolName::MemorySearch => {
                     let request: RetrievalRequest = serde_json::from_value(call.arguments.clone())
                         .map_err(|_| IntegrationError::InvalidArguments)?;
-                    serde_json::to_value(self.index.retrieve(&request)?)
+                    serde_json::to_value(self.index.retrieve_filtered(&request, &mut visible)?)
                         .map_err(|_| IntegrationError::Serialization)?
                 }
                 ToolName::MemoryFetch => {

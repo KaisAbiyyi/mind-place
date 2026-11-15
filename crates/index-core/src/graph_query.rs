@@ -77,6 +77,63 @@ pub struct GraphNeighborhood {
     pub truncated: bool,
 }
 
+impl GraphNeighborhood {
+    /// MP-9C: the projection is disposable and may predate a redaction until
+    /// the next sync/rebuild. Drop every node or edge whose canonical source
+    /// (`src:v1:`) is hidden, every edge touching a dropped node, and any
+    /// non-canonical node (e.g. an import archive ID) left with no visible
+    /// edge after it had one, so neither the title nor the identifiers of a
+    /// redacted conversation remain reachable through a stale graph.
+    pub fn retain_visible(&mut self, mut visible: impl FnMut(&str) -> Result<bool>) -> Result<()> {
+        let mut decisions: BTreeMap<String, bool> = BTreeMap::new();
+        let mut shown = |source_ref: &str| -> Result<bool> {
+            if !source_ref.starts_with("src:v1:") {
+                return Ok(true);
+            }
+            if let Some(shown) = decisions.get(source_ref) {
+                return Ok(*shown);
+            }
+            let value = visible(source_ref)?;
+            decisions.insert(source_ref.to_owned(), value);
+            Ok(value)
+        };
+        let mut dropped = BTreeSet::new();
+        for node in &self.nodes {
+            if !shown(&node.source_ref)? {
+                dropped.insert(node.id.clone());
+            }
+        }
+        let mut had_edge = BTreeSet::new();
+        for edge in &self.edges {
+            had_edge.insert(edge.from_node.clone());
+            had_edge.insert(edge.to_node.clone());
+        }
+        let mut kept = Vec::with_capacity(self.edges.len());
+        for edge in self.edges.drain(..) {
+            if dropped.contains(&edge.from_node)
+                || dropped.contains(&edge.to_node)
+                || !shown(&edge.source_ref)?
+            {
+                continue;
+            }
+            kept.push(edge);
+        }
+        self.edges = kept;
+        let mut has_edge = BTreeSet::new();
+        for edge in &self.edges {
+            has_edge.insert(edge.from_node.as_str());
+            has_edge.insert(edge.to_node.as_str());
+        }
+        self.nodes.retain(|node| {
+            !dropped.contains(&node.id)
+                && (node.source_ref.starts_with("src:v1:")
+                    || !had_edge.contains(&node.id)
+                    || has_edge.contains(node.id.as_str()))
+        });
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GraphCommunity {
     /// Smallest stable node ID in this connected component.

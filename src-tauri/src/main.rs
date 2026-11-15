@@ -83,10 +83,33 @@ struct SetupInfo {
 }
 
 fn legacy_archive(state: &AppState) -> Result<ArchiveStore, String> {
-    state
+    let store = state
         .store
         .clone()
-        .ok_or_else(|| "MP_VAULT_NOT_READY:legacy plaintext archive disabled".to_owned())
+        .ok_or_else(|| "MP_VAULT_NOT_READY:legacy plaintext archive disabled".to_owned())?;
+    refuse_legacy_with_redactions(&state.state_path)?;
+    Ok(store)
+}
+
+/// MP-9C: every legacy plaintext archive surface (read, list, snapshots,
+/// export, assets, fetch, context, index sync and all imports) goes through
+/// `legacy_archive`. None of them has a per-source visibility gate, so they
+/// are refused while plaintext state holds any source tombstone or the policy
+/// cannot be read. Logical redaction is enforced in full only by the vault.
+fn refuse_legacy_with_redactions(state_path: &Path) -> Result<(), String> {
+    if !state_path.exists() {
+        return Ok(());
+    }
+    let redacted = StateStore::open(state_path)
+        .and_then(|authority| authority.has_source_redactions())
+        .map_err(|error| format!("{}:{}", error.code(), error))?;
+    if redacted {
+        return Err(
+            "MP_PRIVACY_REQUIRES_VAULT:legacy archive unavailable while a source is redacted"
+                .to_owned(),
+        );
+    }
+    Ok(())
 }
 
 // The owner vault handle pins the same epoch-bound cipher keys for each
@@ -246,6 +269,45 @@ fn serialized_archive_index_writer<T>(
         .validate_lease(lease)
         .map_err(|_| IndexError::Revoked)?;
     operation()
+}
+
+#[cfg(test)]
+mod legacy_redaction_gate_tests {
+    use super::*;
+    use mind_place_state::{ClientCapability, SourceDescriptor, SourceKey};
+
+    #[test]
+    fn legacy_archive_surfaces_are_refused_once_plaintext_state_has_a_tombstone() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("state.sqlite3");
+        // Fresh install: no state file yet, nothing to enforce.
+        assert!(refuse_legacy_with_redactions(&path).is_ok());
+        let state = StateStore::open(&path).unwrap();
+        assert!(refuse_legacy_with_redactions(&path).is_ok());
+        let admin = "a".repeat(64);
+        state
+            .issue_client(
+                "client:v1:owner",
+                "Owner",
+                &admin,
+                &[ClientCapability::Admin],
+            )
+            .unwrap();
+        let source = state
+            .register_source(&SourceDescriptor {
+                provider: "chatgpt",
+                source_namespace: "synthetic",
+                source_kind: "conversation",
+                key: SourceKey::External("legacy-source"),
+            })
+            .unwrap();
+        state
+            .redact_source(&admin, &source, "Owner redaction")
+            .unwrap();
+        let refused = refuse_legacy_with_redactions(&path).unwrap_err();
+        assert!(refused.starts_with("MP_PRIVACY_REQUIRES_VAULT:"));
+        assert!(!refused.contains(&source));
+    }
 }
 
 #[cfg(test)]
@@ -410,8 +472,10 @@ async fn read_archive_hive(
     }
     let hops = max_hops.unwrap_or(2).min(3);
     let index_path = state.index_path.clone();
+    let state_path = state.state_path.clone();
     let vault = owner_vault(&state);
     index_task(&state, move |lease, security| {
+        let authority = open_owner_state(&vault, &state_path)?;
         let query = GraphNeighborhoodRequest {
             scope: "archive:chatgpt".into(),
             seeds: vec![GraphNodeRef::new(seed_kind, key)],
@@ -420,12 +484,17 @@ async fn read_archive_hive(
             max_nodes: 120,
             max_edges: 240,
         };
-        let graph =
+        let mut graph =
             open_owner_index(&vault, &index_path)?.graph_neighbors_with_check(&query, || {
                 security
                     .validate_lease(lease)
                     .map_err(|_| IndexError::Revoked)
             })?;
+        // MP-9C: the projection may predate a redaction until the next sync.
+        graph.retain_visible(|source_id| Ok(!authority.source_is_redacted(source_id)?))?;
+        security
+            .validate_lease(lease)
+            .map_err(|_| IndexError::Revoked)?;
         let nodes = graph
             .nodes
             .iter()
@@ -514,15 +583,10 @@ async fn search_retrieval(
     let vault = owner_vault(&state);
     index_task(&state, move |_, _| {
         let authority = open_owner_state(&vault, &state_path)?;
-        let mut result = open_owner_index(&vault, &index_path)?.retrieve(&request)?;
-        let mut visible = Vec::new();
-        for hit in result.hits {
-            if !authority.source_is_redacted(&hit.source_id)? {
-                visible.push(hit);
-            }
-        }
-        result.hits = visible;
-        Ok(result)
+        // Filter before ranking truncation so counts/flags exclude hidden sources.
+        open_owner_index(&vault, &index_path)?.retrieve_filtered(&request, |source_id| {
+            Ok(!authority.source_is_redacted(source_id)?)
+        })
     })
     .await
 }
@@ -589,13 +653,20 @@ async fn inspect_retrieval(
     request: RetrievalRequest,
 ) -> Result<SearchInspection, String> {
     let index_path = state.index_path.clone();
+    let state_path = state.state_path.clone();
     let vault = owner_vault(&state);
     index_task(&state, move |lease, security| {
-        open_owner_index(&vault, &index_path)?.inspect_retrieval_with_check(&request, || {
-            security
-                .validate_lease(lease)
-                .map_err(|_| IndexError::Revoked)
-        })
+        // MP-9C: inspection carries snippets; apply current source authority.
+        let authority = open_owner_state(&vault, &state_path)?;
+        open_owner_index(&vault, &index_path)?.inspect_retrieval_filtered_with_check(
+            &request,
+            || {
+                security
+                    .validate_lease(lease)
+                    .map_err(|_| IndexError::Revoked)
+            },
+            |source_id| Ok(!authority.source_is_redacted(source_id)?),
+        )
     })
     .await
 }
