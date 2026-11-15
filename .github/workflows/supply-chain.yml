@@ -1,0 +1,108 @@
+name: Supply-chain security gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
+  push:
+    branches: [main]
+  schedule:
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supply-chain-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  policy:
+    name: Supply-chain policy and negative tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 24
+      - run: node --test test/supply-chain.test.mjs test/workflow-security.test.mjs
+      - run: python3 -m unittest discover -s scripts/supply-chain/tests -v
+      - run: node scripts/verify-workflow-security.mjs
+      - name: Validate all workflow syntax
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 .github/workflows/*.yml
+
+  npm:
+    name: npm high and critical vulnerabilities (all dependencies)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+      SOURCE_BASE: ${{ github.event.pull_request.base.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 24
+      - name: Snapshot base lock without executing base code
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/npm-base"
+          git show "$SOURCE_BASE:package.json" > "$RUNNER_TEMP/npm-base/package.json"
+          git show "$SOURCE_BASE:package-lock.json" > "$RUNNER_TEMP/npm-base/package-lock.json"
+      - name: Audit head and base under the same severity policy
+        run: node scripts/supply-chain/npm-audit.mjs . "$RUNNER_TEMP/npm-base" evidence/npm-audit.json
+      - name: Retain audit findings even on failure
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: npm-audit-${{ env.SOURCE_HEAD }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 14
+
+  rust:
+    name: Rust advisories licenses and sources
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+      SOURCE_BASE: ${{ github.event.pull_request.base.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ env.SOURCE_HEAD }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install existing production Rust pin
+        run: rustup toolchain install 1.90.0 --profile minimal --component rustfmt --no-self-update
+      - name: Install checksum-pinned cargo-deny
+        run: |
+          python3 scripts/supply-chain/install-tool.py cargo-deny --destination "$RUNNER_TEMP/security-tools"
+          echo "$RUNNER_TEMP/security-tools" >> "$GITHUB_PATH"
+      - name: Snapshot base and apply the same gate policy
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/rust-base"
+          git archive "$SOURCE_BASE" | tar -x -C "$RUNNER_TEMP/rust-base"
+          cp deny.toml rust-toolchain.toml "$RUNNER_TEMP/rust-base/"
+      - name: Audit base and exact head with one advisory database snapshot
+        run: python3 scripts/supply-chain/rust-audit.py . "$RUNNER_TEMP/rust-base" evidence/rust
+      - name: Assert lockfile integrity
+        if: always()
+        run: git diff --exit-code -- Cargo.lock package-lock.json
+      - name: Retain findings even on failure
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cargo-deny-${{ env.SOURCE_HEAD }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 14

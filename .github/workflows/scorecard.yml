@@ -1,0 +1,48 @@
+name: OpenSSF Scorecard posture collection
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/scorecard.yml'
+      - 'scripts/supply-chain/**'
+  push:
+    branches: [main]
+  schedule:
+    - cron: '47 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scorecard:
+    name: Collect public repository posture (not PR acceptance)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Install checksum-pinned Scorecard CLI
+        run: |
+          python3 scripts/supply-chain/install-tool.py scorecard --destination "$RUNNER_TEMP/scorecard-tools"
+          echo "$RUNNER_TEMP/scorecard-tools" >> "$GITHUB_PATH"
+      - name: Collect posture using read-only repository access
+        env:
+          GH_AUTH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p evidence
+          scorecard --repo=github.com/KaisAbiyyi/mind-place --format=json --show-details > evidence/scorecard.json
+      - name: Record assessment boundary
+        if: always()
+        run: |
+          echo 'Scorecard observes the remote default branch, not the PR snapshot. Scores and -1/unavailable checks are review findings, never a native gate or security PASS. No external publication, OIDC, PAT, or repository setting changes.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain every score and unavailable-check reason
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: scorecard-posture-${{ github.event.pull_request.head.sha || github.sha }}
+          path: evidence/scorecard.json
+          if-no-files-found: error
+          retention-days: 14
