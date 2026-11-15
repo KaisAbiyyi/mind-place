@@ -514,9 +514,6 @@ impl StateStore {
     pub fn source(&self, id: &str) -> Result<Option<SourceRecord>> {
         valid_id(id)?;
         let db = self.read_connection()?;
-        if source_redaction::source_is_redacted(&db, id)? {
-            return Ok(None);
-        }
         let saved = db
             .query_row(
                 "SELECT id,provider,source_namespace,source_kind,key_type,source_key
@@ -525,10 +522,17 @@ impl StateStore {
                 source_record,
             )
             .optional()?;
-        if let Some(ref record) = saved {
-            verify_source_record(record)?;
+        let Some(record) = saved else {
+            // Unknown or non-canonical IDs (e.g. a derived index ID) resolve
+            // to None, as before MP-9C; they can never carry a tombstone.
+            return Ok(None);
+        };
+        verify_source_record(&record)?;
+        // A registered (hence canonical) but redacted source is hidden.
+        if source_redaction::source_is_redacted(&db, &record.id)? {
+            return Ok(None);
         }
-        Ok(saved)
+        Ok(Some(record))
     }
 
     /// Evidence must name an authority-registered canonical source. The FK
