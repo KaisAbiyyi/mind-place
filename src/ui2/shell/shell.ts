@@ -19,14 +19,12 @@ export interface Ui2ShellHandle {
   destroy(): void;
 }
 
-export const UI2_SESSION_EXPIRED = "MP_UI_SESSION_EXPIRED";
-
 /** Both initiation and completion must belong to the same native unlock epoch. */
 export function fenceUi2EpochInvoke(invoke: Invoke, isCurrent: () => boolean): Invoke {
   return async <T>(command: string, args?: Record<string, unknown>): Promise<T> => {
-    if (!isCurrent()) throw new Error(UI2_SESSION_EXPIRED);
+    if (!isCurrent()) throw new Error("MP_UI_SESSION_EXPIRED");
     const result = await invoke<T>(command, args);
-    if (!isCurrent()) throw new Error(UI2_SESSION_EXPIRED);
+    if (!isCurrent()) throw new Error("MP_UI_SESSION_EXPIRED");
     return result;
   };
 }
