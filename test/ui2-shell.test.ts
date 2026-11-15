@@ -55,6 +55,7 @@ test("MP-UI2-04: dev/owner feature flag defaults v1 and requires exact enable va
 test("MP-UI2-04: navigation and clickable breadcrumbs, language switch, a11y keyboard and disposal", () => {
   const { dom, root } = fixture();
   const locale = createI18nController({ initialLocale: "en" });
+  const previousDocumentLanguage = dom.window.document.documentElement.lang;
   let lockCalls = 0;
   const shell = mountUi2Shell(root, { i18n: locale, onLock: () => { lockCalls++; } });
   const doc = dom.window.document;
@@ -90,7 +91,7 @@ test("MP-UI2-04: navigation and clickable breadcrumbs, language switch, a11y key
   doc.querySelector<HTMLButtonElement>('[data-ui2-control="lock"]')!.click();
   assert.equal(lockCalls, 1);
   shell.destroy();
-  assert.equal(doc.documentElement.lang, "en", "lock restores legacy gate document language");
+  assert.equal(doc.documentElement.lang, previousDocumentLanguage, "disposal restores the exact original document language");
   assert.equal(root.childElementCount, 0);
   doc.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }));
   assert.equal(root.childElementCount, 0);
