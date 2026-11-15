@@ -14,6 +14,26 @@ const HTML = `<!doctype html>
 <style>html,body{margin:0;min-height:100%}</style></head>
 <body><div id="app"></div>
 <script type="module">
+  // Match the real main.ts CSS load order before the opt-in v2 chunk.
+  import "katex/dist/katex.min.css";
+  import "/src/style.css";
+  import "/src/knowledge-os.css";
+  import "/src/library-workspace.css";
+  import "/src/memory-inspector.css";
+  import "/src/conversation-archive.css";
+  import "/src/providers-workspace.css";
+  import "/src/memory-entity-lenses.css";
+  import "/src/hive-workspace.css";
+  import "/src/files-vault-workspace.css";
+  import "/src/health-workspace.css";
+  import "/src/workspace-integration.css";
+  import "/src/security.css";
+  import "/src/ui-tokens.css";
+  import "/src/ui-primitives.css";
+  import "/src/ui-shell.css";
+  import "/src/search-workspace.css";
+  import "/src/settings-workspace.css";
+  import "/src/onboarding-workspace.css";
   import { createI18nController } from "/src/ui2/i18n/index.ts";
   import { mountUi2Shell, ensureUi2Styles } from "/src/ui2/shell/entry.ts";
   await ensureUi2Styles();
@@ -157,6 +177,7 @@ async function main() {
     const manifest = {
       guide: "docs/ui/evidence/mp-ui2/wireframe-v1.html",
       guideSha256: "2b4bbce50a079516e7db2326345cfd0bd227ff7b6a5dd347616fc9c790bc3a8c",
+      cssParity: "All legacy CSS from src/main.ts followed by opt-in UI2 styles",
       generatedAt: new Date().toISOString(),
       totalCaptures: matrix.length + interactions.length,
       matrix, interactions,
