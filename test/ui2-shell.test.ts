@@ -90,6 +90,7 @@ test("MP-UI2-04: navigation and clickable breadcrumbs, language switch, a11y key
   doc.querySelector<HTMLButtonElement>('[data-ui2-control="lock"]')!.click();
   assert.equal(lockCalls, 1);
   shell.destroy();
+  assert.equal(doc.documentElement.lang, "en", "lock restores legacy gate document language");
   assert.equal(root.childElementCount, 0);
   doc.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }));
   assert.equal(root.childElementCount, 0);
