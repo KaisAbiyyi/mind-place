@@ -5,6 +5,7 @@ on:
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   push:
     branches: [main]
+    tags: ['v*']
   schedule:
     - cron: '17 3 * * 1'
   workflow_dispatch:
