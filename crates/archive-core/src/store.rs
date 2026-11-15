@@ -10,6 +10,16 @@ use std::{
     time::{Duration, Instant},
 };
 
+/// Owner-issued import authority plus the independently established job context.
+/// This authorizes only legacy plaintext archives; vault markers still fail closed.
+pub struct HistoricalImportAuthorization<'a> {
+    pub gate: &'a mind_place_security::SecurityGate,
+    pub lease: mind_place_security::UnlockLease,
+    pub capability: &'a mind_place_security::ImportAuthorizationCapability,
+    pub job_id: &'a str,
+    pub inventory: &'a ImportSourceInventory,
+}
+
 pub const MAX_CAPTURE_BYTES: usize = 32 * 1024 * 1024;
 const MAX_MESSAGE_BYTES: usize = 4 * 1024 * 1024;
 const MAX_IMAGE_BYTES: usize = 8 * 1024 * 1024;
@@ -72,6 +82,148 @@ pub(crate) fn bounded_read(path: &Path, max: usize) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
+/// Longest wait, in total, for a file that another program holds open (about 3 seconds).
+const TRANSIENT_BACKOFF_MS: [u64; 9] = [10, 20, 40, 80, 160, 320, 640, 1000, 1000];
+
+/// True for the Windows errors a virus scanner, indexer or backup tool causes by holding a file
+/// open without write/delete sharing: access denied (5), sharing violation (32), lock violation
+/// (33). Never true elsewhere.
+pub(crate) fn is_transient_sharing(error: &std::io::Error) -> bool {
+    cfg!(windows) && matches!(error.raw_os_error(), Some(5 | 32 | 33))
+}
+
+/// Runs a file operation again, with a bounded back-off, while it fails with a transient sharing
+/// error. Any other error, or the last transient one, is returned unchanged.
+pub(crate) fn retry_transient<T>(
+    mut operation: impl FnMut() -> std::io::Result<T>,
+) -> std::io::Result<T> {
+    let mut attempt = 0;
+    loop {
+        match operation() {
+            Err(error) if is_transient_sharing(&error) && attempt < TRANSIENT_BACKOFF_MS.len() => {
+                thread::sleep(Duration::from_millis(TRANSIENT_BACKOFF_MS[attempt]));
+                attempt += 1;
+            }
+            other => return other,
+        }
+    }
+}
+
+/// Moves a finished temporary file into place, retrying while the target is held open by another
+/// program. The temporary file survives a failed attempt, so nothing is rewritten.
+pub(crate) fn persist_retry(
+    mut file: tempfile::NamedTempFile,
+    path: &Path,
+    immutable: bool,
+) -> std::io::Result<()> {
+    let mut attempt = 0;
+    loop {
+        let outcome = if immutable {
+            file.persist_noclobber(path)
+        } else {
+            file.persist(path)
+        };
+        match outcome {
+            Ok(_) => return Ok(()),
+            Err(failed)
+                if is_transient_sharing(&failed.error) && attempt < TRANSIENT_BACKOFF_MS.len() =>
+            {
+                file = failed.file;
+                thread::sleep(Duration::from_millis(TRANSIENT_BACKOFF_MS[attempt]));
+                attempt += 1;
+            }
+            Err(failed) => return Err(failed.error),
+        }
+    }
+}
+
+/// `.tmp` plus six alphanumerics: exactly what `tempfile` names the temporary files that
+/// `atomic_write` and the import publisher create.
+pub(crate) fn is_orphan_temp_name(name: &str) -> bool {
+    name.len() == 10
+        && name.starts_with(".tmp")
+        && name[4..].bytes().all(|b| b.is_ascii_alphanumeric())
+}
+
+fn is_real_directory(path: &Path) -> bool {
+    let Ok(meta) = fs::symlink_metadata(path) else {
+        return false;
+    };
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        if meta.file_attributes() & 0x400 != 0 {
+            return false;
+        }
+    }
+    meta.is_dir() && !meta.file_type().is_symlink()
+}
+
+/// True when `dir` is `root` or lies below it, and `root`, `dir` and every directory between them
+/// is a real directory: no symbolic link, junction or other reparse point at any level. A
+/// destructive operation uses this so a linked parent can never redirect it outside the archive.
+/// (The check and the later use are not atomic; a process that can rewrite the archive
+/// directories concurrently is outside the supported threat model, like for every other archive
+/// path check.)
+pub(crate) fn is_contained_real_dir(root: &Path, dir: &Path) -> bool {
+    let Ok(relative) = dir.strip_prefix(root) else {
+        return false;
+    };
+    let mut current = root.to_path_buf();
+    if !is_real_directory(&current) {
+        return false;
+    }
+    for component in relative.components() {
+        match component {
+            std::path::Component::Normal(part) => current.push(part),
+            _ => return false,
+        }
+        if !is_real_directory(&current) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Removes leftover temporary files (a process was killed between creating one and moving it into
+/// place) from one directory, not recursively. Only regular files with the exact temporary-file
+/// name are removed, never links or directories, and only when `dir` is contained in the archive
+/// `root` through real directories only ([`is_contained_real_dir`]); otherwise nothing is touched.
+/// The caller must hold the lock that serializes every writer of this directory, otherwise a live
+/// writer's file could be removed.
+pub(crate) fn sweep_temp_files(root: &Path, dir: &Path) -> usize {
+    if !is_contained_real_dir(root, dir) {
+        return 0;
+    }
+    let Ok(entries) = fs::read_dir(dir) else {
+        return 0;
+    };
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        if !name.to_str().is_some_and(is_orphan_temp_name) {
+            continue;
+        }
+        let path = entry.path();
+        if !fs::symlink_metadata(&path).is_ok_and(|meta| meta.is_file()) {
+            continue;
+        }
+        if retry_transient(|| fs::remove_file(&path)).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
+}
+
+/// Sweeps a conversation directory and the two subdirectories the store writes into
+/// (`captures` for snapshots, `assets` for images). Same locking requirement as
+/// [`sweep_temp_files`].
+pub(crate) fn sweep_conversation_temp_files(root: &Path, dir: &Path) -> usize {
+    sweep_temp_files(root, dir)
+        + sweep_temp_files(root, &dir.join("captures"))
+        + sweep_temp_files(root, &dir.join("assets"))
+}
+
 pub(crate) fn atomic_write(path: &Path, bytes: &[u8], immutable: bool) -> Result<()> {
     no_link(path)?;
     let parent = path
@@ -81,14 +233,24 @@ pub(crate) fn atomic_write(path: &Path, bytes: &[u8], immutable: bool) -> Result
     let mut file = tempfile::NamedTempFile::new_in(parent)?;
     file.write_all(bytes)?;
     file.as_file().sync_all()?;
-    if immutable {
-        file.persist_noclobber(path).map_err(|e| e.error)?;
-    } else {
-        file.persist(path).map_err(|e| e.error)?;
-    }
+    persist_retry(file, path, immutable)?;
     #[cfg(unix)]
     File::open(parent)?.sync_all()?;
     Ok(())
+}
+
+/// Stable archive identity of a conversation (`provider:conversation_id`).
+pub(crate) fn archive_id_for(provider: &str, conversation_id: &str) -> String {
+    digest(format!("{provider}:{conversation_id}").as_bytes())
+}
+
+/// Snapshot identity of a capture: the observation time does not make an otherwise identical
+/// capture a new revision. Shared by the store and the import publisher so a link recorded
+/// before a projection is the id the store will compute.
+pub(crate) fn snapshot_identity(capture: &Capture) -> Result<String> {
+    let mut identity = capture.clone();
+    identity.captured_at = String::new();
+    Ok(digest(&serde_json::to_vec(&identity)?))
 }
 
 fn uuid(id: &str) -> bool {
@@ -222,40 +384,79 @@ fn claude_conversation_id_from_url(source: &str) -> Result<String> {
 }
 
 pub fn validate_capture(c: &mut Capture) -> Result<()> {
-    validate(c)
+    if c.provider == "generic" && c.capture_method == "generic-import" {
+        validate_historical_capture(c, "generic")
+    } else if c.capture_method == "legacy-import" {
+        validate_stored_capture(c)
+    } else if c.capture_method == "takeout-import" {
+        validate_historical_capture(c, "gemini")
+    } else if c.capture_method == "export-import" {
+        validate_historical_capture(c, "chatgpt")
+    } else {
+        validate_live_capture(c)
+    }
 }
 
-fn validate(c: &mut Capture) -> Result<()> {
-    if c.schema_version != 1
-        || !matches!(
-            c.provider.as_str(),
-            "chatgpt" | "gemini" | "generic" | "claude"
+pub fn validate_stored_capture(c: &Capture) -> Result<()> {
+    if c.schema_version != 1 {
+        return Err(invalid("Unsupported archive schema or provider"));
+    }
+    match c.provider.as_str() {
+        "gemini" => {
+            if !matches!(c.capture_method.as_str(), "manual-dom" | "takeout-import") {
+                return Err(invalid("Invalid Gemini stored capture method"));
+            }
+        }
+        "chatgpt" => {
+            if !matches!(
+                c.capture_method.as_str(),
+                "manual-dom" | "automatic-dom" | "legacy-import" | "export-import"
+            ) {
+                return Err(invalid("Invalid ChatGPT stored capture method"));
+            }
+        }
+        "generic" => {
+            if c.capture_method != "generic-import" || !hex_id(&c.conversation_id) {
+                return Err(invalid("Invalid generic source identity or capture method"));
+            }
+        }
+        "claude" => {
+            if c.capture_method != "manual-dom" {
+                return Err(invalid("Invalid Claude stored capture method"));
+            }
+        }
+        _ => return Err(invalid("Unsupported archive schema or provider")),
+    }
+    if !matches!(c.completeness.as_str(), "partial" | "complete") {
+        return Err(invalid("Invalid completeness value"));
+    }
+    if c.source_url.len() > 32768 {
+        return Err(invalid("Capture URL exceeds its size limit"));
+    }
+    validate_content_bounds(c)
+}
+
+pub fn validate_live_capture(c: &mut Capture) -> Result<()> {
+    if c.provider == "generic"
+        || matches!(
+            c.capture_method.as_str(),
+            "legacy-import" | "takeout-import" | "export-import" | "generic-import"
         )
     {
+        return Err(invalid(
+            "Historical or generic methods not permitted on live capture",
+        ));
+    }
+    if c.schema_version != 1 || !matches!(c.provider.as_str(), "chatgpt" | "gemini" | "claude") {
         return Err(invalid("Unsupported archive schema or provider"));
     }
     if matches!(c.provider.as_str(), "gemini" | "claude") && c.capture_method != "manual-dom" {
         return Err(invalid("Gemini capture is explicit manual DOM only"));
     }
-    if c.provider == "generic" {
-        // A generic import must not claim a browser-provider source.
-        if c.capture_method != "generic-import"
-            || !hex_id(&c.conversation_id)
-            || c.source_url != format!("mindplace-import://generic/{}", c.conversation_id)
-        {
-            return Err(invalid("Invalid generic source identity or capture method"));
-        }
-    } else if !matches!(
-        c.capture_method.as_str(),
-        "manual-dom" | "automatic-dom" | "legacy-import"
-    ) {
+    if !matches!(c.capture_method.as_str(), "manual-dom" | "automatic-dom") {
         return Err(invalid("Unsupported capture method"));
     }
-    if !matches!(c.completeness.as_str(), "partial" | "complete")
-        || ((c.provider == "generic"
-            || matches!(c.capture_method.as_str(), "manual-dom" | "automatic-dom"))
-            && c.completeness != "partial")
-    {
+    if c.completeness != "partial" {
         return Err(invalid(
             "A DOM read cannot prove complete conversation history",
         ));
@@ -267,7 +468,6 @@ fn validate(c: &mut Capture) -> Result<()> {
         "chatgpt" => conversation_id_from_url(&c.source_url)?,
         "gemini" => gemini_conversation_id_from_url(&c.source_url)?,
         "claude" => claude_conversation_id_from_url(&c.source_url)?,
-        "generic" => c.conversation_id.clone(),
         _ => return Err(invalid("Unsupported archive provider")),
     };
     let supplied_id = if matches!(c.provider.as_str(), "chatgpt" | "claude") {
@@ -281,6 +481,118 @@ fn validate(c: &mut Capture) -> Result<()> {
         ));
     }
     c.conversation_id = canonical_id;
+    if c.completeness == "partial" && c.warnings.is_empty() {
+        c.warnings
+            .push("Only loaded messages were captured; unloaded history may be missing.".into());
+    }
+    validate_content_bounds(c)
+}
+
+pub fn validate_historical_capture(c: &mut Capture, expected_provider: &str) -> Result<()> {
+    if c.schema_version != 1 {
+        return Err(invalid("Unsupported archive schema version"));
+    }
+    if c.provider != expected_provider {
+        return Err(invalid("Provider mismatch in historical import"));
+    }
+    if matches!(c.capture_method.as_str(), "manual-dom" | "automatic-dom") {
+        return Err(invalid(
+            "Live capture methods not permitted on historical import",
+        ));
+    }
+    if !matches!(c.completeness.as_str(), "partial" | "complete") {
+        return Err(invalid("Invalid completeness value"));
+    }
+    if c.source_url.len() > 32768 {
+        return Err(invalid("Capture URL exceeds its size limit"));
+    }
+
+    match expected_provider {
+        "gemini" => {
+            if c.capture_method != "takeout-import" {
+                return Err(invalid(
+                    "Gemini historical import must use takeout-import method",
+                ));
+            }
+            if c.source_url.starts_with("https://gemini.google.com/") {
+                let canonical_id = gemini_conversation_id_from_url(&c.source_url)?;
+                if c.conversation_id != canonical_id {
+                    return Err(invalid(
+                        "Capture URL and conversation identity do not match",
+                    ));
+                }
+            } else if let Some(id) = c
+                .source_url
+                .strip_prefix("mindplace-import://gemini-takeout/")
+            {
+                if id.is_empty() || c.conversation_id != id {
+                    return Err(invalid(
+                        "Capture URL and conversation identity do not match",
+                    ));
+                }
+            } else if let Some(sha) = c
+                .source_url
+                .strip_prefix("mindplace-import://gemini-canvas/")
+            {
+                if !hex_id(sha) || c.conversation_id != sha {
+                    return Err(invalid("Invalid Gemini Canvas identity or content hash"));
+                }
+            } else {
+                return Err(invalid("Invalid Gemini Takeout source URL"));
+            }
+        }
+        "chatgpt" => {
+            if c.capture_method != "export-import" {
+                return Err(invalid(
+                    "ChatGPT historical import must use export-import method",
+                ));
+            }
+            if c.source_url.starts_with("https://chatgpt.com/")
+                || c.source_url.starts_with("https://chat.openai.com/")
+            {
+                let canonical_id = conversation_id_from_url(&c.source_url)?;
+                if c.conversation_id.to_ascii_lowercase() != canonical_id {
+                    return Err(invalid(
+                        "Capture URL and conversation identity do not match",
+                    ));
+                }
+                c.conversation_id = canonical_id;
+            } else if let Some(id) = c
+                .source_url
+                .strip_prefix("mindplace-import://chatgpt-export/")
+            {
+                if !uuid(id) {
+                    return Err(invalid("Invalid ChatGPT export conversation UUID"));
+                }
+                if c.conversation_id.to_ascii_lowercase() != id.to_ascii_lowercase() {
+                    return Err(invalid(
+                        "Capture URL and conversation identity do not match",
+                    ));
+                }
+                c.conversation_id = id.to_ascii_lowercase();
+            } else {
+                return Err(invalid("Invalid ChatGPT export source URL"));
+            }
+        }
+        "generic" => {
+            if c.capture_method != "generic-import" || !hex_id(&c.conversation_id) {
+                return Err(invalid("Invalid generic source identity or capture method"));
+            }
+            if c.source_url != format!("mindplace-import://generic/{}", c.conversation_id) {
+                return Err(invalid("Capture URL and generic identity do not match"));
+            }
+        }
+        _ => return Err(invalid("Unsupported historical import provider")),
+    }
+
+    if c.completeness == "partial" && c.warnings.is_empty() {
+        c.warnings
+            .push("Only partial conversation history was available in export.".into());
+    }
+    validate_content_bounds(c)
+}
+
+fn validate_content_bounds(c: &Capture) -> Result<()> {
     if c.title.trim().is_empty() || c.title.len() > 1024 {
         return Err(invalid("Conversation title is missing or too long"));
     }
@@ -303,10 +615,6 @@ fn validate(c: &mut Capture) -> Result<()> {
     }
     if c.warnings.len() > 32 || c.warnings.iter().any(|w| w.len() > 2048) {
         return Err(invalid("Too many or oversized capture warnings"));
-    }
-    if c.completeness == "partial" && c.warnings.is_empty() {
-        c.warnings
-            .push("Only loaded messages were captured; unloaded history may be missing.".into());
     }
     let mut ids = HashSet::new();
     for m in &c.messages {
@@ -489,7 +797,85 @@ impl ArchiveStore {
     }
 
     pub fn save(&self, mut capture: Capture) -> Result<SaveReceipt> {
-        validate(&mut capture)?;
+        validate_capture(&mut capture)?;
+        if matches!(
+            capture.capture_method.as_str(),
+            "takeout-import" | "export-import"
+        ) {
+            return Err(invalid(
+                "Historical imports cannot be saved through ordinary save; use authorized historical import entry point",
+            ));
+        }
+        self.save_validated(capture)
+    }
+
+    /// The former unauthenticated entry point is retained as a fail-closed shim.
+    /// Callers must use `save_authorized_historical_import` with owner authority.
+    pub fn save_historical_import(
+        &self,
+        _capture: Capture,
+        _expected_provider: &str,
+    ) -> Result<SaveReceipt> {
+        Err(invalid("Owner import authorization is required"))
+    }
+
+    pub fn save_authorized_historical_import(
+        &self,
+        mut capture: Capture,
+        authorization: &HistoricalImportAuthorization<'_>,
+    ) -> Result<SaveReceipt> {
+        let auth = authorization;
+        self.require_same_owner(auth.gate)?;
+        let verify = || {
+            auth.gate
+                .verify_import_capability_bound(
+                    auth.lease,
+                    auth.capability,
+                    &auth.inventory.provider,
+                    auth.job_id,
+                    &auth.inventory.source_root,
+                    &auth.inventory.manifest_sha256,
+                )
+                .map_err(|_| invalid("Owner import authorization is invalid or revoked"))
+        };
+        verify()?;
+        validate_historical_capture(&mut capture, &auth.inventory.provider)?;
+        let _lock = self.lock()?;
+        auth.gate
+            .with_verified_import_capability_bound(
+                auth.lease,
+                auth.capability,
+                &auth.inventory.provider,
+                auth.job_id,
+                &auth.inventory.source_root,
+                &auth.inventory.manifest_sha256,
+                || self.save_under_lock(capture),
+            )
+            .map_err(|_| invalid("Owner import authorization is invalid or revoked"))?
+    }
+
+    /// An unlocked gate for another profile must never authorize this archive.
+    pub(crate) fn require_same_owner(
+        &self,
+        gate: &mind_place_security::SecurityGate,
+    ) -> Result<()> {
+        let expected_config = self
+            .root
+            .parent()
+            .ok_or_else(|| invalid("Missing archive owner root"))?
+            .join("security-v1.json");
+        if fs::canonicalize(gate.config_path())? != fs::canonicalize(expected_config)? {
+            return Err(invalid("Import authority belongs to another archive owner"));
+        }
+        Ok(())
+    }
+
+    fn save_validated(&self, capture: Capture) -> Result<SaveReceipt> {
+        let _lock = self.lock()?;
+        self.save_under_lock(capture)
+    }
+
+    pub(crate) fn save_under_lock(&self, mut capture: Capture) -> Result<SaveReceipt> {
         if capture.provider == "generic" {
             // A generic locator is meaningful only when its immutable raw source exists.
             // Do not accept a fabricated generic capture without preserved evidence.
@@ -507,8 +893,7 @@ impl ArchiveStore {
                 ));
             }
         }
-        let _lock = self.lock()?;
-        let id = digest(format!("{}:{}", capture.provider, capture.conversation_id).as_bytes());
+        let id = archive_id_for(&capture.provider, &capture.conversation_id);
         let dir = self.conversation_dir(&id)?;
         checked_dir(&dir)?;
         checked_dir(&dir.join("assets"))?;
@@ -556,9 +941,7 @@ impl ArchiveStore {
             }
         }
         // The observation time does not make an otherwise identical manual capture a new revision.
-        let mut identity = capture.clone();
-        identity.captured_at = String::new();
-        let snapshot_id = digest(&serde_json::to_vec(&identity)?);
+        let snapshot_id = snapshot_identity(&capture)?;
         let raw_path = dir.join("captures").join(format!("{snapshot_id}.jsonl"));
         let unchanged = raw_path.exists();
         if unchanged {
@@ -569,16 +952,27 @@ impl ArchiveStore {
             atomic_write(&raw_path, &raw, true)?;
         }
         // Importing old evidence must not replace the current manual capture in the reader.
-        let prior = if capture.capture_method == "legacy-import" && dir.join("meta.json").exists() {
+        let historical_export = matches!(
+            capture.capture_method.as_str(),
+            "export-import" | "takeout-import"
+        );
+        let prior = if (capture.capture_method == "legacy-import" || historical_export)
+            && dir.join("meta.json").exists()
+        {
             Some(self.read(&id, None)?)
         } else {
             None
         };
         let keep_prior = prior.as_ref().is_some_and(|p| {
-            matches!(
+            let live = matches!(
                 p.capture.capture_method.as_str(),
                 "manual-dom" | "automatic-dom"
-            ) || observation_time(&p.capture.captured_at) >= observation_time(&capture.captured_at)
+            );
+            // A provider export never displaces a live capture. A newer export of the same
+            // conversation still becomes the latest snapshot (its time is not an observation).
+            live || (!historical_export
+                && observation_time(&p.capture.captured_at)
+                    >= observation_time(&capture.captured_at))
         });
         let (current, current_snapshot) = if keep_prior {
             let p = prior.unwrap();
@@ -951,4 +1345,110 @@ pub fn markdown(c: &Capture) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod transient_and_sweep_tests {
+    use super::*;
+    use std::cell::Cell;
+
+    fn os_error(code: i32) -> std::io::Error {
+        std::io::Error::from_raw_os_error(code)
+    }
+
+    #[test]
+    fn only_windows_sharing_errors_are_transient() {
+        for code in [5, 32, 33] {
+            assert_eq!(
+                is_transient_sharing(&os_error(code)),
+                cfg!(windows),
+                "{code}"
+            );
+        }
+        assert!(!is_transient_sharing(&os_error(2)));
+        assert!(!is_transient_sharing(&std::io::Error::other("x")));
+    }
+
+    #[test]
+    fn a_transient_error_is_retried_until_it_clears_and_other_errors_are_not() {
+        let calls = Cell::new(0);
+        let result = retry_transient(|| {
+            calls.set(calls.get() + 1);
+            if calls.get() < 3 {
+                Err(os_error(32))
+            } else {
+                Ok(7)
+            }
+        });
+        if cfg!(windows) {
+            assert_eq!(result.unwrap(), 7);
+            assert_eq!(calls.get(), 3);
+        } else {
+            assert!(result.is_err());
+            assert_eq!(calls.get(), 1);
+        }
+        let calls = Cell::new(0);
+        let result: std::io::Result<()> = retry_transient(|| {
+            calls.set(calls.get() + 1);
+            Err(os_error(2))
+        });
+        assert_eq!(result.unwrap_err().raw_os_error(), Some(2));
+        assert_eq!(calls.get(), 1, "a missing file is not transient");
+    }
+
+    #[test]
+    fn the_retry_is_bounded() {
+        let calls = Cell::new(0);
+        let started = Instant::now();
+        let result: std::io::Result<()> = retry_transient(|| {
+            calls.set(calls.get() + 1);
+            Err(os_error(5))
+        });
+        assert!(result.is_err());
+        if cfg!(windows) {
+            assert_eq!(calls.get(), TRANSIENT_BACKOFF_MS.len() + 1);
+            assert!(started.elapsed() < Duration::from_secs(10));
+        } else {
+            assert_eq!(calls.get(), 1);
+        }
+    }
+
+    #[test]
+    fn only_the_exact_temp_file_name_pattern_is_an_orphan() {
+        for name in [".tmpAbC123", ".tmp000000", ".tmpzzzzzZ"] {
+            assert!(is_orphan_temp_name(name), "{name}");
+        }
+        for name in [
+            ".tmpAbC12",
+            ".tmpAbC1234",
+            "tmpAbC123",
+            ".tmp-bad12",
+            ".tmp.json1",
+            "x.tmpAbC123",
+            "",
+        ] {
+            assert!(!is_orphan_temp_name(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn the_sweep_removes_regular_orphan_files_only_and_does_not_recurse() {
+        let dir = tempfile::tempdir().unwrap();
+        let orphan = dir.path().join(".tmpAbC123");
+        let keep_file = dir.path().join("meta.json");
+        let keep_dir = dir.path().join(".tmpDir123");
+        let nested = keep_dir.join(".tmpNest123");
+        fs::write(&orphan, b"x").unwrap();
+        fs::write(&keep_file, b"x").unwrap();
+        fs::create_dir(&keep_dir).unwrap();
+        fs::write(&nested, b"x").unwrap();
+        assert_eq!(sweep_temp_files(dir.path(), dir.path()), 1);
+        assert!(!orphan.exists() && keep_file.exists() && keep_dir.is_dir() && nested.exists());
+        assert_eq!(sweep_temp_files(dir.path(), &dir.path().join("missing")), 0);
+        // A directory outside the root is never swept, even with the exact name inside.
+        let outside = tempfile::tempdir().unwrap();
+        fs::write(outside.path().join(".tmpOut123"), b"x").unwrap();
+        assert_eq!(sweep_temp_files(dir.path(), outside.path()), 0);
+        assert!(outside.path().join(".tmpOut123").exists());
+    }
 }
