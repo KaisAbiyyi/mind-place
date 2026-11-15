@@ -194,3 +194,36 @@ test("MP-UI2-04: locked startup never mounts preview; verified unlock selects pr
     dom.window.close();
   }
 });
+
+test("MP-UI2-04: one compiled app selects legacy v1 by default and v2 only after opt-in", async () => {
+  const globalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  const previous = fixture();
+  const preview = fixture();
+  const originalGlobalStorage = globalStorage;
+  const invoke: Invoke = async <T>(command: string) => {
+    if (command === "get_security_status") {
+      return { configured: true, locked: false, epoch: 4, retry_after_ms: 0 } as T;
+    }
+    if (command === "list_conversations") return [] as T;
+    throw new Error("Unexpected test command " + command);
+  };
+  try {
+    Object.defineProperty(globalThis, "localStorage", { configurable: true, value: previous.dom.window.localStorage });
+    await mountApplication({ root: previous.root, invoke });
+    await delay(10);
+    assert.ok(previous.root.querySelector("#conversation-list"), "classic reader remains the default");
+    assert.equal(previous.root.querySelector(".ui2-shell"), null);
+
+    preview.dom.window.localStorage.setItem(UI2_SHELL_FEATURE_FLAG, "enabled");
+    Object.defineProperty(globalThis, "localStorage", { configurable: true, value: preview.dom.window.localStorage });
+    await mountApplication({ root: preview.root, invoke });
+    await delay(20);
+    assert.ok(preview.root.querySelector(".ui2-shell"), "same bundle selects flagged shell");
+    assert.equal(preview.root.querySelector("#conversation-list"), null, "preview never mounts classic reader simultaneously");
+  } finally {
+    if (originalGlobalStorage) Object.defineProperty(globalThis, "localStorage", originalGlobalStorage);
+    else delete (globalThis as { localStorage?: Storage }).localStorage;
+    previous.dom.window.close();
+    preview.dom.window.close();
+  }
+});
