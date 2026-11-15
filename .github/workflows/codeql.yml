@@ -22,6 +22,9 @@ jobs:
     if: github.event.repository.private == false
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    env:
+      SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+      SOURCE_BASE: ${{ github.event.pull_request.base.sha || github.sha }}
     strategy:
       fail-fast: false
       matrix:
@@ -30,6 +33,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
           persist-credentials: false
       - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4, upstream resolved 2026-11-15
         with:
@@ -41,16 +45,16 @@ jobs:
           output: evidence/codeql
           upload: never
           upload-database: false
-      - name: Retain SARIF for independent security review
+      - name: Require independent disposition and record committed-source provenance
+        run: node scripts/supply-chain/sarif.mjs evidence/codeql
+      - name: Retain SARIF and triage evidence for independent security review
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: codeql-${{ matrix.language }}-${{ github.event.pull_request.head.sha || github.sha }}
-          path: evidence/codeql/*.sarif
+          path: evidence/codeql/
           if-no-files-found: error
           retention-days: 14
-      - name: Require independent disposition of every CodeQL finding
-        run: node scripts/supply-chain/sarif.mjs evidence/codeql
   unsupported:
     name: CodeQL unsupported repository visibility
     if: github.event.repository.private == true

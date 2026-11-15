@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { evaluateAudit, compareFindings, auditArguments } from '../scripts/supply-chain/npm-audit.mjs';
-import { evaluateSarif } from '../scripts/supply-chain/sarif.mjs';
+import { evaluateSarif, repositoryPath, sourceProvenance } from '../scripts/supply-chain/sarif.mjs';
 import { readFileSync, writeFileSync, cpSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -58,6 +58,38 @@ test('CodeQL incomplete or failed scans cannot pass', () => {
   for (const report of [{}, { version: '2.1.0', runs: [] }, { version: '2.1.0', runs: [{ tool: { driver: { name: 'CodeQL' } } }] }]) assert.throws(() => evaluateSarif(report), /CODEQL_BLOCKED/);
   const report = cleanSarif(); report.runs[0].invocations = [{ executionSuccessful: false }];
   assert.throws(() => evaluateSarif(report), /CODEQL_BLOCKED/);
+});
+
+test('SARIF provenance rejects filesystem URLs and traversal without reading local files', () => {
+  for (const path of [undefined, '../secret', '%2e%2e/secret', '/etc/passwd', 'file:///secret', 'C:\\secret', 'a//b', 'a/./b', 'bad%zz']) {
+    assert.throws(() => repositoryPath(path), /CODEQL_BLOCKED/);
+  }
+  assert.equal(repositoryPath('scripts/example.mjs'), 'scripts/example.mjs');
+});
+
+test('CodeQL source equality is reproducible Git evidence and never a finding waiver', t => {
+  const fixture = mkdtempSync(join(tmpdir(), 'mp-sec-12-sarif-'));
+  t.after(() => rmSync(fixture, { recursive: true, force: true }));
+  function git(...args) {
+    const result = spawnSync('git', args, { cwd: fixture, encoding: 'utf8', windowsHide: true });
+    assert.equal(result.status, 0, result.stderr); return result.stdout.trim();
+  }
+  git('init'); git('config', 'user.name', 'Synthetic fixture'); git('config', 'user.email', 'fixture@example.invalid');
+  git('config', 'commit.gpgsign', 'false');
+  writeFileSync(join(fixture, 'same.mjs'), 'unchanged\n');
+  writeFileSync(join(fixture, 'changed.mjs'), 'before\n');
+  git('add', '.'); git('commit', '-m', 'fixture baseline'); const base = git('rev-parse', 'HEAD');
+  writeFileSync(join(fixture, 'changed.mjs'), 'after\n');
+  git('add', '.'); git('commit', '-m', 'fixture change'); const head = git('rev-parse', 'HEAD');
+  const report = cleanSarif();
+  report.runs[0].results = ['same.mjs', 'changed.mjs'].map(path => ({ ruleId: 'test/rule', message: { text: 'fixture' }, locations: [{ physicalLocation: { artifactLocation: { uri: path }, region: { startLine: 1 } } }] }));
+  const evidence = sourceProvenance(report, head, base, fixture);
+  assert.equal(evidence[0].locations[0].classification, 'UNCHANGED_SOURCE_REQUIRES_TRIAGE');
+  assert.equal(evidence[1].locations[0].classification, 'CHANGED_SOURCE_REQUIRES_TRIAGE');
+  assert.equal(evaluateSarif(report).status, 'FAIL');
+  assert.throws(() => sourceProvenance(report, '0'.repeat(40), base, fixture), /unavailable/);
+  report.runs[0].results[0].locations[0].physicalLocation.artifactLocation.uri = '../private';
+  assert.throws(() => sourceProvenance(report, head, base, fixture), /relative path/);
 });
 
 for (const [label, filename, mutate] of [

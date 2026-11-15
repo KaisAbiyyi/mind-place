@@ -1,5 +1,9 @@
 # MP-SEC-12 — existing findings, separate from implementation regressions
 
+Continuation: per-finding triage and separately owned remediation decisions are
+in [independent review disposition](mp-sec-12-review-disposition.md). Historical
+scan observations below are retained; they are not new acceptance or waivers.
+
 Dependency inventory at base `fa2e6b7e8b8ce919067e6e0def28032261646050`:
 464 Cargo lock entries (456 crates.io packages, eight workspace members), 138 npm
 lock entries (all resolved through registry.npmjs.org). No alternate Cargo registry

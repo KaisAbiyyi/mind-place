@@ -20,6 +20,54 @@ def module(name, filename):
 
 installer = module("installer", "install-tool.py")
 sbom = module("sbom", "sbom.py")
+rust_audit = module("rust_audit", "rust-audit.py")
+
+
+class RustTriageTests(unittest.TestCase):
+    def diagnostic(self, version="1.0.0", code="vulnerability", term=""):
+        return {"type": "diagnostic", "fields": {"severity": "error", "code": code, "message": "test finding",
+                "advisory": {"id": "RUSTSEC-2099-0001"}, "graphs": [{"Krate": {"name": "example", "version": version}}],
+                "labels": [{"message": "rejected: license is not explicitly allowed", "span": term}] if term else []}}
+
+    def parsed(self, diagnostic):
+        return rust_audit.diagnostic_findings(json.dumps(diagnostic), 5)[1]
+
+    def test_same_id_with_new_package_version_is_not_existing(self):
+        base = self.parsed(self.diagnostic())
+        head = self.parsed(self.diagnostic(version="1.0.1"))
+        result = rust_audit.compare_findings(head, base)
+        self.assertEqual(len(result["introducedOrChanged"]), 1)
+        self.assertEqual(result["existing"], [])
+
+    def test_license_term_and_dependency_graph_changes_are_visible(self):
+        base = self.parsed(self.diagnostic(code="rejected", term="MPL-2.0"))
+        changed = self.diagnostic(code="rejected", term="WTFPL")
+        self.assertEqual(len(rust_audit.compare_findings(self.parsed(changed), base)["introducedOrChanged"]), 1)
+        changed = self.diagnostic(code="rejected", term="MPL-2.0")
+        changed["fields"]["graphs"][0]["parents"] = [{"Krate": {"name": "new-consumer", "version": "2.0.0"}}]
+        self.assertEqual(len(rust_audit.compare_findings(self.parsed(changed), base)["introducedOrChanged"]), 1)
+
+    def test_errors_cannot_become_clean_audits(self):
+        self.assertEqual(rust_audit.diagnostic_findings("registry unavailable", 2), ("BLOCKED", []))
+        with self.assertRaisesRegex(ValueError, "contradicts"):
+            rust_audit.diagnostic_findings(json.dumps(self.diagnostic()), 0)
+        malformed = self.diagnostic()
+        malformed["fields"]["graphs"] = [{"Krate": {"name": "missing-version"}}]
+        with self.assertRaisesRegex(ValueError, "identity"):
+            self.parsed(malformed)
+
+    def test_existing_failures_and_target_absence_never_waive_gate(self):
+        raw = json.dumps(self.diagnostic())
+        status, findings = rust_audit.diagnostic_findings(raw, 5)
+        self.assertEqual(status, "FAIL")
+        self.assertEqual(len(rust_audit.compare_findings(findings, findings)["existing"]), 1)
+        metadata = {"packages": [{"id": "root", "name": "app", "version": "1"}, {"id": "dep", "name": "example", "version": "1.0.0"}],
+                    "workspace_members": ["root"], "resolve": {"nodes": [{"id": "root", "deps": []}, {"id": "dep", "deps": []}]}}
+        presence = rust_audit.target_presence(metadata, findings)
+        self.assertFalse(presence["packages"][0]["resolvedForTarget"])
+        self.assertTrue(presence["notAnExploitabilityOrNativeCertificate"])
+        metadata["resolve"]["nodes"][0]["deps"] = [{"pkg": "dep"}]
+        self.assertTrue(rust_audit.target_presence(metadata, findings)["packages"][0]["resolvedForTarget"])
 
 
 class ToolIntegrityTests(unittest.TestCase):

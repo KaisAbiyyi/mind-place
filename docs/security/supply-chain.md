@@ -61,6 +61,11 @@ once, records its Git commit, and disables refetch for both audits. Both Rust
 diagnostic streams are retained with exit codes and common/new advisory IDs.
 An ID-only comparison cannot classify affected-version, license or source changes:
 review both logs and dependency diffs before deciding whether those are regressions.
+The review continuation adds schema-2 Rust diagnostic identity (code, affected
+package/version, rejected terms and inclusion-graph hash), plus Windows-target
+resolution evidence. SARIF triage records committed base/head source hashes;
+neither identical diagnostics nor unchanged source bytes waive a finding. See
+[review disposition and remediation decisions](mp-sec-12-review-disposition.md).
 Existing failures remain failures. Tool/database failures remain visible as failed
 steps, not a fabricated clean inventory. CodeQL needs independent base triage for
 any finding; a finding is not automatically called a regression.
