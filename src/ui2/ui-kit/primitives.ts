@@ -8,11 +8,84 @@ function uid(prefix: string): string {
   return `ui2-${prefix}-${nextUi2Uid}`;
 }
 
+function isElementHiddenOrInert(el: HTMLElement, boundary: HTMLElement): boolean {
+  const view = el.ownerDocument.defaultView;
+  let cur: HTMLElement | null = el;
+  while (cur) {
+    if (
+      cur.hidden ||
+      cur.hasAttribute("hidden") ||
+      cur.hasAttribute("inert") ||
+      cur.getAttribute("aria-hidden") === "true"
+    ) {
+      return true;
+    }
+    if (cur.style?.display === "none" || cur.style?.visibility === "hidden") {
+      return true;
+    }
+    if (view && typeof view.getComputedStyle === "function") {
+      const cs = view.getComputedStyle(cur);
+      if (cs.display === "none" || cs.visibility === "hidden") {
+        return true;
+      }
+    }
+    if (cur !== el && cur.tagName === "DETAILS" && !(cur as HTMLDetailsElement).open) {
+      const directSummary = [...cur.children].find((child) => child.tagName === "SUMMARY");
+      if (!directSummary || (el !== directSummary && !directSummary.contains(el))) {
+        return true;
+      }
+    }
+    if (cur === boundary) break;
+    cur = cur.parentElement;
+  }
+  return false;
+}
+
 function getFocusableElements(container: HTMLElement): HTMLElement[] {
+  if (
+    container.hidden ||
+    container.hasAttribute("hidden") ||
+    container.closest("[hidden], [inert], [aria-hidden='true']") ||
+    container.style?.display === "none" ||
+    container.style?.visibility === "hidden"
+  ) {
+    return [];
+  }
   const candidates = container.querySelectorAll<HTMLElement>(
     'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"]), summary'
   );
-  return [...candidates].filter((el) => !el.hasAttribute("hidden"));
+  return [...candidates].filter((el) => {
+    if ("disabled" in el && (el as HTMLButtonElement).disabled) return false;
+    const disabledFieldset = el.closest("fieldset[disabled]");
+    if (disabledFieldset) {
+      const firstLegend = [...disabledFieldset.children].find((child) => child.tagName === "LEGEND");
+      if (!firstLegend || !firstLegend.contains(el)) return false;
+    }
+    return !isElementHiddenOrInert(el, container);
+  });
+}
+
+function trapTabFocus(doc: Document, container: HTMLElement, event: KeyboardEvent): void {
+  if (event.key !== "Tab") return;
+  const focusable = getFocusableElements(container);
+  if (focusable.length === 0) {
+    event.preventDefault();
+    return;
+  }
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  const active =
+    doc.activeElement instanceof doc.defaultView!.HTMLElement ? doc.activeElement : null;
+  const activeInside = Boolean(active && container.contains(active) && focusable.includes(active));
+  if (event.shiftKey) {
+    if (!activeInside || active === first) {
+      event.preventDefault();
+      last.focus();
+    }
+  } else if (!activeInside || active === last) {
+    event.preventDefault();
+    first.focus();
+  }
 }
 
 export interface Ui2ButtonOptions {
@@ -703,19 +776,7 @@ export function createUi2Dialog(doc: Document, options: Ui2DialogOptions): Ui2Di
       close();
       return;
     }
-    if (event.key === "Tab") {
-      const focusable = getFocusableElements(dialog);
-      if (focusable.length === 0) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && doc.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && doc.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    }
+    trapTabFocus(doc, dialog, event);
   };
 
   backdrop.addEventListener("click", (event) => {
@@ -805,10 +866,13 @@ export function createUi2Aside(doc: Document, options: Ui2AsideOptions): Ui2Asid
   let lastOpener: HTMLElement | null = null;
 
   aside.addEventListener("keydown", (event) => {
-    if (opened && event.key === "Escape") {
+    if (!opened) return;
+    if (event.key === "Escape") {
       event.preventDefault();
       close();
+      return;
     }
+    trapTabFocus(doc, aside, event);
   });
 
   const open = (opener?: HTMLElement | null) => {
@@ -816,7 +880,8 @@ export function createUi2Aside(doc: Document, options: Ui2AsideOptions): Ui2Asid
       opener ?? (doc.activeElement instanceof doc.defaultView!.HTMLElement ? doc.activeElement : null);
     opened = true;
     aside.hidden = false;
-    closeBtn.focus();
+    const focusable = getFocusableElements(aside);
+    (focusable[0] ?? closeBtn).focus();
   };
 
   const close = () => {

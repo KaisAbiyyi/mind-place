@@ -381,7 +381,22 @@ export function mountUi2Gallery(
     const asideCopy = doc.createElement("p");
     asideCopy.className = "ui2-lead";
     asideCopy.textContent = i18n.t("gallery.sample.asideBody");
-    activeAside.body.append(asideCopy);
+    const asideActionBtn = createUi2Button(doc, {
+      label: i18n.t("action.openChat"),
+      variant: "secondary",
+      size: "sm",
+      onClick: () => activeAside.close(),
+    });
+    const asideTechDetails = createUi2TechnicalDetails(doc, {
+      summaryLabel: i18n.t("action.showDetails"),
+      entries: [
+        {
+          label: i18n.t("gallery.sample.techLabel"),
+          value: "sha256:abcdef123456",
+        },
+      ],
+    });
+    activeAside.body.append(asideCopy, asideActionBtn, asideTechDetails);
 
     const openDialogBtn = createUi2Button(doc, {
       label: i18n.t("gallery.sample.openDialog"),

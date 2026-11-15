@@ -244,55 +244,181 @@ async function main() {
       }
     }
 
-    // Interactive state & pseudo-locale captures (light, 1280x840)
+    // Interactive state & keyboard focus-cycle checks (light, en, 1280x840)
     const context = await browser.newContext({ viewport: { width: 1280, height: 840 } });
     const page = await context.newPage();
     await page.goto(`${baseUrl}?theme=light&locale=en`, { waitUntil: "networkidle" });
 
-    // Dialog open
-    await page.getByRole("button", { name: "Open modal dialog" }).click();
+    const getActiveInfo = () =>
+      page.evaluate(() => {
+        const el = document.activeElement;
+        return {
+          tag: el?.tagName ?? "",
+          label: el?.getAttribute("aria-label") || el?.textContent?.trim() || "",
+          inDialog: Boolean(el?.closest('[role="dialog"][aria-modal="true"]')),
+          inAside: Boolean(el?.closest(".ui2-aside")),
+        };
+      });
+
+    // Dialog keyboard open, Tab / Shift+Tab wrap, and Escape restore
+    const dialogOpener = page.getByRole("button", { name: "Open modal dialog" });
+    await dialogOpener.focus();
+    await page.keyboard.press("Enter");
     await page.waitForSelector('[role="dialog"][aria-modal="true"]:not([hidden])');
+    const dialogInit = await getActiveInfo();
+    if (!dialogInit.inDialog || dialogInit.label !== "Close") {
+      throw new Error(`Dialog initial focus unexpected: ${JSON.stringify(dialogInit)}`);
+    }
     await page.screenshot({ path: path.join(outDir, "gallery-state-dialog-light-en-wide.png") });
+    await page.keyboard.press("Tab");
+    const dialogCancel = await getActiveInfo();
+    await page.keyboard.press("Tab");
+    const dialogApprove = await getActiveInfo();
+    await page.keyboard.press("Tab");
+    const dialogWrappedForward = await getActiveInfo();
+    if (
+      dialogCancel.label !== "Cancel" ||
+      dialogApprove.label !== "Approve" ||
+      !dialogWrappedForward.inDialog ||
+      dialogWrappedForward.label !== "Close"
+    ) {
+      throw new Error(
+        `Dialog forward Tab trap failed: ${JSON.stringify({ dialogCancel, dialogApprove, dialogWrappedForward })}`
+      );
+    }
+    await page.keyboard.press("Shift+Tab");
+    const dialogWrappedBackward = await getActiveInfo();
+    if (!dialogWrappedBackward.inDialog || dialogWrappedBackward.label !== "Approve") {
+      throw new Error(`Dialog Shift+Tab trap failed: ${JSON.stringify(dialogWrappedBackward)}`);
+    }
     await page.keyboard.press("Escape");
+    await page.waitForSelector('[role="dialog"][aria-modal="true"]', { state: "hidden" });
+    const dialogAfterEscape = await getActiveInfo();
+    if (dialogAfterEscape.label !== "Open modal dialog") {
+      throw new Error(`Dialog Escape focus restore failed: ${JSON.stringify(dialogAfterEscape)}`);
+    }
 
-    // Aside open
-    await page.getByRole("button", { name: "Open detail drawer" }).click();
-    await page.waitForSelector('.ui2-aside:not([hidden])');
+    // Aside keyboard open, Tab / Shift+Tab wrap, and Escape restore
+    const asideOpener = page.getByRole("button", { name: "Open detail drawer" });
+    await asideOpener.focus();
+    await page.keyboard.press("Enter");
+    await page.waitForSelector(".ui2-aside:not([hidden])");
+    const asideInit = await getActiveInfo();
+    if (!asideInit.inAside || asideInit.label !== "Close") {
+      throw new Error(`Aside initial focus unexpected: ${JSON.stringify(asideInit)}`);
+    }
     await page.screenshot({ path: path.join(outDir, "gallery-state-aside-light-en-wide.png"), fullPage: true });
+    await page.keyboard.press("Tab");
+    const asideOpenChat = await getActiveInfo();
+    await page.keyboard.press("Tab");
+    const asideSummary = await getActiveInfo();
+    await page.keyboard.press("Tab");
+    const asideWrappedForward = await getActiveInfo();
+    if (
+      asideOpenChat.label !== "Open chat" ||
+      !asideSummary.inAside ||
+      asideSummary.tag !== "SUMMARY" ||
+      !asideWrappedForward.inAside ||
+      asideWrappedForward.label !== "Close"
+    ) {
+      throw new Error(
+        `Aside forward Tab trap failed: ${JSON.stringify({ asideOpenChat, asideSummary, asideWrappedForward })}`
+      );
+    }
+    await page.keyboard.press("Shift+Tab");
+    const asideWrappedBackward = await getActiveInfo();
+    if (!asideWrappedBackward.inAside || asideWrappedBackward.tag !== "SUMMARY") {
+      throw new Error(`Aside Shift+Tab trap failed: ${JSON.stringify(asideWrappedBackward)}`);
+    }
     await page.keyboard.press("Escape");
+    await page.waitForSelector(".ui2-aside", { state: "hidden" });
+    const asideAfterEscape = await getActiveInfo();
+    if (asideAfterEscape.label !== "Open detail drawer") {
+      throw new Error(`Aside Escape focus restore failed: ${JSON.stringify(asideAfterEscape)}`);
+    }
 
-    // Technical details open
-    await page.locator('[data-ui2-technical-details="true"] summary').click();
+    const keyboardFocusCycle = {
+      dialog: {
+        wrappedForward: dialogWrappedForward.label,
+        wrappedBackward: dialogWrappedBackward.label,
+        restoredOpener: dialogAfterEscape.label,
+      },
+      aside: {
+        visitedSummary: `${asideSummary.tag}:${asideSummary.label}`,
+        wrappedForward: asideWrappedForward.label,
+        wrappedBackward: `${asideWrappedBackward.tag}:${asideWrappedBackward.label}`,
+        restoredOpener: asideAfterEscape.label,
+      },
+    };
+
+    // Technical details open (unambiguous Section 4 selector)
+    await page.locator('.ui2-card > .ui2-stack > [data-ui2-technical-details="true"] > summary').click();
     const openAudit = await runAuditAndChecks(page);
     if (openAudit.contrastFailures.length > 0 || openAudit.openTechDetailsCount !== 1) {
       throw new Error(`Details open check failed: ${JSON.stringify(openAudit)}`);
     }
     await page.screenshot({ path: path.join(outDir, "gallery-state-details-light-en-wide.png"), fullPage: true });
 
-    // Pseudo-locale overflow stress check
-    await page.getByRole("radio", { name: "PS" }).click();
-    const pseudoAudit = await runAuditAndChecks(page);
-    if (pseudoAudit.overflowPx > 0 || pseudoAudit.contrastFailures.length > 0) {
-      throw new Error(`Pseudo-locale check failed: ${JSON.stringify(pseudoAudit)}`);
-    }
-    await page.screenshot({ path: path.join(outDir, "gallery-state-pseudo-light-wide.png"), fullPage: true });
-
     await context.close();
+
+    // Pseudo-locale overflow / a11y / contrast stress matrix across light+dark & wide/laptop/narrow
+    const pseudoResults = [];
+    for (const theme of ["light", "dark"]) {
+      for (const vp of viewports) {
+        const pseudoCtx = await browser.newContext({
+          viewport: { width: vp.width, height: vp.height },
+        });
+        const pseudoPage = await pseudoCtx.newPage();
+        await pseudoPage.goto(`${baseUrl}?theme=${theme}&locale=pseudo`, {
+          waitUntil: "networkidle",
+        });
+        await pseudoPage.waitForSelector(".ui2-root");
+
+        const pseudoAudit = await runAuditAndChecks(pseudoPage);
+        if (pseudoAudit.overflowPx > 0) {
+          throw new Error(
+            `Pseudo-locale horizontal overflow (${pseudoAudit.overflowPx}px) at ${theme}/${vp.name}`
+          );
+        }
+        if (pseudoAudit.missingA11yNames.length > 0) {
+          throw new Error(
+            `Pseudo-locale missing accessible names at ${theme}/${vp.name}: ${pseudoAudit.missingA11yNames.join(", ")}`
+          );
+        }
+        if (pseudoAudit.contrastFailures.length > 0) {
+          throw new Error(
+            `Pseudo-locale contrast failures at ${theme}/${vp.name}: ${JSON.stringify(pseudoAudit.contrastFailures)}`
+          );
+        }
+
+        const filename = `gallery-state-pseudo-${theme}-${vp.name}.png`;
+        await pseudoPage.screenshot({ path: path.join(outDir, filename), fullPage: true });
+        pseudoResults.push({ filename, theme, locale: "pseudo", viewport: vp, audit: pseudoAudit });
+        await pseudoCtx.close();
+      }
+    }
+
+    const interactiveStates = [
+      "gallery-state-dialog-light-en-wide.png",
+      "gallery-state-aside-light-en-wide.png",
+      "gallery-state-details-light-en-wide.png",
+      ...pseudoResults.map((r) => r.filename),
+    ];
 
     const manifest = {
       generatedAt: new Date().toISOString(),
-      totalCaptures: results.length + 4,
+      totalCaptures: results.length + interactiveStates.length,
       coreMatrix: results,
-      interactiveStates: [
-        "gallery-state-dialog-light-en-wide.png",
-        "gallery-state-aside-light-en-wide.png",
-        "gallery-state-details-light-en-wide.png",
-        "gallery-state-pseudo-light-wide.png",
-      ],
+      pseudoMatrix: pseudoResults,
+      keyboardFocusCycle,
+      interactiveStates,
     };
     fs.writeFileSync(path.join(outDir, "gallery-manifest.json"), JSON.stringify(manifest, null, 2));
     console.log(
-      `UI2 gallery visual/a11y OK — ${manifest.totalCaptures} captures, minContrast>=${Math.min(...results.map((r) => r.audit.minContrast))}, overflow=0px`
+      `UI2 gallery visual/a11y OK — ${manifest.totalCaptures} captures, minContrast>=${Math.min(
+        ...results.map((r) => r.audit.minContrast),
+        ...pseudoResults.map((r) => r.audit.minContrast)
+      )}, overflow=0px`
     );
   } finally {
     await browser.close();

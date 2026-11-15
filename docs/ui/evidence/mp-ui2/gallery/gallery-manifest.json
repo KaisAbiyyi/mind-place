@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-11-14T18:53:48.545Z",
-  "totalCaptures": 16,
+  "generatedAt": "2026-11-15T03:17:47.162Z",
+  "totalCaptures": 21,
   "coreMatrix": [
     {
       "filename": "gallery-light-en-wide.png",
@@ -219,10 +219,138 @@
       }
     }
   ],
+  "pseudoMatrix": [
+    {
+      "filename": "gallery-state-pseudo-light-wide.png",
+      "theme": "light",
+      "locale": "pseudo",
+      "viewport": {
+        "name": "wide",
+        "width": 1280,
+        "height": 840
+      },
+      "audit": {
+        "overflowPx": 0,
+        "missingA11yNames": [],
+        "openTechDetailsCount": 0,
+        "anyTechCodeVisibleOutsideOpen": [],
+        "minContrast": 4.86,
+        "contrastFailures": []
+      }
+    },
+    {
+      "filename": "gallery-state-pseudo-light-laptop.png",
+      "theme": "light",
+      "locale": "pseudo",
+      "viewport": {
+        "name": "laptop",
+        "width": 1024,
+        "height": 768
+      },
+      "audit": {
+        "overflowPx": 0,
+        "missingA11yNames": [],
+        "openTechDetailsCount": 0,
+        "anyTechCodeVisibleOutsideOpen": [],
+        "minContrast": 4.86,
+        "contrastFailures": []
+      }
+    },
+    {
+      "filename": "gallery-state-pseudo-light-narrow.png",
+      "theme": "light",
+      "locale": "pseudo",
+      "viewport": {
+        "name": "narrow",
+        "width": 760,
+        "height": 768
+      },
+      "audit": {
+        "overflowPx": 0,
+        "missingA11yNames": [],
+        "openTechDetailsCount": 0,
+        "anyTechCodeVisibleOutsideOpen": [],
+        "minContrast": 4.86,
+        "contrastFailures": []
+      }
+    },
+    {
+      "filename": "gallery-state-pseudo-dark-wide.png",
+      "theme": "dark",
+      "locale": "pseudo",
+      "viewport": {
+        "name": "wide",
+        "width": 1280,
+        "height": 840
+      },
+      "audit": {
+        "overflowPx": 0,
+        "missingA11yNames": [],
+        "openTechDetailsCount": 0,
+        "anyTechCodeVisibleOutsideOpen": [],
+        "minContrast": 6.91,
+        "contrastFailures": []
+      }
+    },
+    {
+      "filename": "gallery-state-pseudo-dark-laptop.png",
+      "theme": "dark",
+      "locale": "pseudo",
+      "viewport": {
+        "name": "laptop",
+        "width": 1024,
+        "height": 768
+      },
+      "audit": {
+        "overflowPx": 0,
+        "missingA11yNames": [],
+        "openTechDetailsCount": 0,
+        "anyTechCodeVisibleOutsideOpen": [],
+        "minContrast": 6.91,
+        "contrastFailures": []
+      }
+    },
+    {
+      "filename": "gallery-state-pseudo-dark-narrow.png",
+      "theme": "dark",
+      "locale": "pseudo",
+      "viewport": {
+        "name": "narrow",
+        "width": 760,
+        "height": 768
+      },
+      "audit": {
+        "overflowPx": 0,
+        "missingA11yNames": [],
+        "openTechDetailsCount": 0,
+        "anyTechCodeVisibleOutsideOpen": [],
+        "minContrast": 6.91,
+        "contrastFailures": []
+      }
+    }
+  ],
+  "keyboardFocusCycle": {
+    "dialog": {
+      "wrappedForward": "Close",
+      "wrappedBackward": "Approve",
+      "restoredOpener": "Open modal dialog"
+    },
+    "aside": {
+      "visitedSummary": "SUMMARY:Details",
+      "wrappedForward": "Close",
+      "wrappedBackward": "SUMMARY:Details",
+      "restoredOpener": "Open detail drawer"
+    }
+  },
   "interactiveStates": [
     "gallery-state-dialog-light-en-wide.png",
     "gallery-state-aside-light-en-wide.png",
     "gallery-state-details-light-en-wide.png",
-    "gallery-state-pseudo-light-wide.png"
+    "gallery-state-pseudo-light-wide.png",
+    "gallery-state-pseudo-light-laptop.png",
+    "gallery-state-pseudo-light-narrow.png",
+    "gallery-state-pseudo-dark-wide.png",
+    "gallery-state-pseudo-dark-laptop.png",
+    "gallery-state-pseudo-dark-narrow.png"
   ]
 }

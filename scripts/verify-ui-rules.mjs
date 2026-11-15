@@ -21,7 +21,74 @@ const PROTECTED_PRODUCT_NAMES = [
   "HTML",
   "SHA-256",
   "SQLite",
+  "Constellation",
 ];
+
+const UI_COPY_OPTION_KEYS = new Set([
+  "label",
+  "ariaLabel",
+  "title",
+  "subtitle",
+  "placeholder",
+  "hint",
+  "error",
+  "meta",
+  "statement",
+  "translatedFromLabel",
+  "toggleOriginalLabel",
+  "actionLabel",
+  "body",
+  "message",
+  "triggerLabel",
+  "question",
+  "confirmLabel",
+  "cancelLabel",
+  "closeLabel",
+  "summaryLabel",
+  "description",
+  "roleLabel",
+  "timestampLabel",
+  "text",
+]);
+
+const DOM_UI_ATTRS = new Set(["aria-label", "title", "placeholder", "alt"]);
+
+const REGEX_BEFORE_KEYWORDS = new Set([
+  "return",
+  "throw",
+  "case",
+  "default",
+  "typeof",
+  "void",
+  "delete",
+  "in",
+  "instanceof",
+  "new",
+  "else",
+  "yield",
+  "await",
+  "export",
+  "of",
+  "do",
+]);
+
+const GROUPING_PREFIX_KEYWORDS = new Set([
+  "return",
+  "throw",
+  "typeof",
+  "void",
+  "delete",
+  "await",
+  "yield",
+  "in",
+  "instanceof",
+  "case",
+  "of",
+  "else",
+  "do",
+]);
+
+const MATCHING_DELIM = { "(": ")", "[": "]", "{": "}" };
 
 const TECH_IDENTIFIER_PATTERNS = [
   /sha256:[0-9a-fA-F]{6,}/,
@@ -64,88 +131,215 @@ function stripCssComments(source) {
  * using zero external dependencies (works even before npm install).
  */
 function scanScriptLiterals(source) {
-  let maskedCode = "";
-  const literals = [];
   const n = source.length;
-  let i = 0;
+  const maskedChars = new Array(n);
+  for (let idx = 0; idx < n; idx += 1) {
+    maskedChars[idx] = source[idx];
+  }
+  const literals = [];
+  let canStartRegex = true;
 
-  while (i < n) {
-    const ch = source[i];
-    const next = source[i + 1];
-
-    // Single-line comment
-    if (ch === "/" && next === "/") {
-      const start = i;
-      i += 2;
-      while (i < n && source[i] !== "\n") i += 1;
-      maskedCode += " ".repeat(i - start);
-      continue;
-    }
-
-    // Multi-line comment
-    if (ch === "/" && next === "*") {
-      const start = i;
-      i += 2;
-      while (i < n && !(source[i] === "*" && source[i + 1] === "/")) i += 1;
-      if (i < n) i += 2;
-      maskedCode += source.slice(start, i).replace(/[^\n]/g, " ");
-      continue;
-    }
-
-    // String or template literal
-    if (ch === '"' || ch === "'" || ch === "`") {
-      const quote = ch;
-      const start = i;
-      i += 1;
-      let rawValue = "";
-      let templateStaticOnly = "";
-      while (i < n) {
-        const c = source[i];
-        if (c === "\\") {
-          const esc = source[i + 1] ?? "";
-          rawValue += c + esc;
-          templateStaticOnly += esc;
-          i += 2;
-          continue;
-        }
-        if (quote === "`" && c === "$" && source[i + 1] === "{") {
-          // Skip template interpolation depth-wise
-          i += 2;
-          let depth = 1;
-          while (i < n && depth > 0) {
-            if (source[i] === "{") depth += 1;
-            else if (source[i] === "}") depth -= 1;
-            i += 1;
-          }
-          templateStaticOnly += " ";
-          continue;
-        }
-        if (c === quote) {
-          i += 1;
-          break;
-        }
-        rawValue += c;
-        templateStaticOnly += c;
-        i += 1;
+  function maskSpan(start, end) {
+    for (let k = start; k < end && k < n; k += 1) {
+      if (maskedChars[k] !== "\n") {
+        maskedChars[k] = " ";
       }
-      literals.push({
-        start,
-        end: i,
-        quote,
-        raw: rawValue,
-        staticText: quote === "`" ? templateStaticOnly : decodeBasicEscapes(rawValue),
-      });
-      // Replace literal contents in maskedCode with spaces preserving length/newlines
-      const inner = source.slice(start, i);
-      maskedCode += inner.replace(/[^\n]/g, " ");
-      continue;
     }
-
-    maskedCode += ch;
-    i += 1;
   }
 
-  return { maskedCode, literals };
+  function scanRange(pos, stopAtCloseBrace) {
+    let braceDepth = 0;
+    while (pos < n) {
+      const ch = source[pos];
+      const next = source[pos + 1];
+
+      if (stopAtCloseBrace) {
+        if (ch === "{") {
+          braceDepth += 1;
+        } else if (ch === "}") {
+          if (braceDepth === 0) {
+            return pos;
+          }
+          braceDepth -= 1;
+        }
+      }
+
+      // Single-line comment
+      if (ch === "/" && next === "/") {
+        const start = pos;
+        pos += 2;
+        while (pos < n && source[pos] !== "\n") pos += 1;
+        maskSpan(start, pos);
+        continue;
+      }
+
+      // Multi-line comment
+      if (ch === "/" && next === "*") {
+        const start = pos;
+        pos += 2;
+        while (pos < n && !(source[pos] === "*" && source[pos + 1] === "/")) pos += 1;
+        if (pos < n) pos += 2;
+        maskSpan(start, pos);
+        continue;
+      }
+
+      // Regex literal in expression-start position
+      if (ch === "/" && canStartRegex && next !== "/" && next !== "*") {
+        const start = pos;
+        pos += 1;
+        let inClass = false;
+        while (pos < n) {
+          const c = source[pos];
+          if (c === "\\") {
+            pos += 2;
+            continue;
+          }
+          if (c === "\n") break;
+          if (c === "[") {
+            inClass = true;
+          } else if (c === "]" && inClass) {
+            inClass = false;
+          } else if (c === "/" && !inClass) {
+            pos += 1;
+            break;
+          }
+          pos += 1;
+        }
+        while (pos < n && /[a-zA-Z]/.test(source[pos])) pos += 1;
+        maskSpan(start, pos);
+        canStartRegex = false;
+        continue;
+      }
+
+      // Quoted string literal
+      if (ch === '"' || ch === "'") {
+        const quote = ch;
+        const start = pos;
+        pos += 1;
+        let rawValue = "";
+        while (pos < n) {
+          const c = source[pos];
+          if (c === "\\") {
+            const esc = source[pos + 1] ?? "";
+            rawValue += c + esc;
+            pos += 2;
+            continue;
+          }
+          if (c === quote) {
+            pos += 1;
+            break;
+          }
+          rawValue += c;
+          pos += 1;
+        }
+        literals.push({
+          start,
+          end: pos,
+          quote,
+          raw: rawValue,
+          staticText: decodeBasicEscapes(rawValue),
+        });
+        maskSpan(start, pos);
+        canStartRegex = false;
+        continue;
+      }
+
+      // Template literal (recursively scans ${...} interpolations)
+      if (ch === "`") {
+        const start = pos;
+        maskSpan(pos, pos + 1);
+        pos += 1;
+        let rawValue = "";
+        let templateStaticOnly = "";
+        while (pos < n) {
+          const c = source[pos];
+          if (c === "\\") {
+            const esc = source[pos + 1] ?? "";
+            rawValue += c + esc;
+            templateStaticOnly += decodeBasicEscapes(c + esc);
+            maskSpan(pos, Math.min(n, pos + 2));
+            pos += 2;
+            continue;
+          }
+          if (c === "$" && source[pos + 1] === "{") {
+            maskSpan(pos, pos + 2);
+            pos += 2;
+            const savedCanStartRegex = canStartRegex;
+            canStartRegex = true;
+            const closeIdx = scanRange(pos, true);
+            canStartRegex = savedCanStartRegex;
+            rawValue += "${}";
+            templateStaticOnly += " ";
+            if (closeIdx < n) {
+              maskSpan(closeIdx, closeIdx + 1);
+              pos = closeIdx + 1;
+            } else {
+              pos = closeIdx;
+            }
+            continue;
+          }
+          if (c === "`") {
+            maskSpan(pos, pos + 1);
+            pos += 1;
+            break;
+          }
+          rawValue += c;
+          templateStaticOnly += c;
+          maskSpan(pos, pos + 1);
+          pos += 1;
+        }
+        literals.push({
+          start,
+          end: pos,
+          quote: "`",
+          raw: rawValue,
+          staticText: templateStaticOnly,
+        });
+        canStartRegex = false;
+        continue;
+      }
+
+      if (/[A-Za-z_$]/.test(ch)) {
+        const idStart = pos;
+        while (pos < n && /[A-Za-z0-9_$]/.test(source[pos])) pos += 1;
+        const ident = source.slice(idStart, pos);
+        let prev = idStart - 1;
+        while (prev >= 0 && /\s/.test(maskedChars[prev])) prev -= 1;
+        const isPropName = prev >= 0 && maskedChars[prev] === ".";
+        canStartRegex = !isPropName && REGEX_BEFORE_KEYWORDS.has(ident);
+        continue;
+      }
+
+      if (/[0-9]/.test(ch)) {
+        while (pos < n && /[0-9a-fA-FxXbBoO_n.]/.test(source[pos])) pos += 1;
+        canStartRegex = false;
+        continue;
+      }
+
+      if (/\s/.test(ch)) {
+        pos += 1;
+        continue;
+      }
+
+      if ((ch === "+" && next === "+") || (ch === "-" && next === "-")) {
+        pos += 2;
+        canStartRegex = false;
+        continue;
+      }
+
+      if (ch === ")" || ch === "]" || ch === ".") {
+        canStartRegex = false;
+      } else {
+        canStartRegex = true;
+      }
+      pos += 1;
+    }
+    return pos;
+  }
+
+  scanRange(0, false);
+  literals.sort((a, b) => a.start - b.start);
+  return { maskedCode: maskedChars.join(""), literals };
 }
 
 function decodeBasicEscapes(value) {
@@ -174,6 +368,278 @@ function extractCatalogMap(source) {
     }
   }
   return map;
+}
+
+function findMatchingDelimiter(maskedCode, openPos) {
+  const opener = maskedCode[openPos];
+  if (!MATCHING_DELIM[opener]) return -1;
+  const stack = [];
+  for (let i = openPos; i < maskedCode.length; i += 1) {
+    const ch = maskedCode[i];
+    if (ch === "(" || ch === "[" || ch === "{") {
+      stack.push(MATCHING_DELIM[ch]);
+    } else if (ch === ")" || ch === "]" || ch === "}") {
+      if (stack.length > 0 && stack[stack.length - 1] === ch) {
+        stack.pop();
+        if (stack.length === 0) return i;
+      }
+    }
+  }
+  return -1;
+}
+
+function splitTopLevelSpans(maskedCode, start, end, delimiter = ",") {
+  const spans = [];
+  let depth = 0;
+  let segStart = start;
+  for (let i = start; i < end; i += 1) {
+    const ch = maskedCode[i];
+    if (ch === "(" || ch === "[" || ch === "{") {
+      depth += 1;
+    } else if (ch === ")" || ch === "]" || ch === "}") {
+      if (depth > 0) depth -= 1;
+    } else if (depth === 0 && ch === delimiter) {
+      spans.push({ start: segStart, end: i });
+      segStart = i + 1;
+    }
+  }
+  spans.push({ start: segStart, end });
+  return spans;
+}
+
+function findExpressionEnd(source, maskedCode, exprStart, continueOnPipe = false) {
+  let depth = 0;
+  for (let i = exprStart; i < maskedCode.length; i += 1) {
+    const ch = maskedCode[i];
+    if (ch === "(" || ch === "[" || ch === "{") {
+      depth += 1;
+      continue;
+    }
+    if (ch === ")" || ch === "]" || ch === "}") {
+      if (depth === 0) return i;
+      depth -= 1;
+      continue;
+    }
+    if (depth === 0) {
+      if (ch === ";" || ch === ",") return i;
+      if (ch === "\n") {
+        let prev = i - 1;
+        while (prev >= exprStart && /[ \t\r\n]/.test(source[prev])) prev -= 1;
+        if (prev < exprStart) continue;
+        const prevCh = maskedCode[prev];
+        if ("=+-?:&|,([{!".includes(prevCh)) continue;
+        let next = i + 1;
+        while (next < maskedCode.length && /\s/.test(maskedCode[next])) next += 1;
+        if (next >= maskedCode.length) return i;
+        const nextTwo = maskedCode.slice(next, next + 2);
+        const nextCh = maskedCode[next];
+        if (
+          nextCh === "." ||
+          nextCh === "?" ||
+          nextCh === ":" ||
+          nextCh === "+" ||
+          nextCh === ")" ||
+          nextCh === "]" ||
+          nextTwo === "&&" ||
+          nextTwo === "||" ||
+          nextTwo === "??" ||
+          (continueOnPipe && (nextCh === "|" || nextCh === "&"))
+        ) {
+          continue;
+        }
+        return i;
+      }
+    }
+  }
+  return maskedCode.length;
+}
+
+function isPositionInRanges(pos, ranges) {
+  return ranges.some((r) => pos >= r.start && pos < r.end);
+}
+
+function getPrevIdentifier(maskedCode, endInclusive) {
+  let k = endInclusive;
+  while (k >= 0 && /[A-Za-z0-9_$]/.test(maskedCode[k])) k -= 1;
+  return maskedCode.slice(k + 1, endInclusive + 1);
+}
+
+function isPrecededByFunctionKeyword(maskedCode, identStart) {
+  let prev = identStart - 1;
+  while (prev >= 0 && /\s/.test(maskedCode[prev])) prev -= 1;
+  if (prev < 0) return false;
+  return getPrevIdentifier(maskedCode, prev) === "function";
+}
+
+function isCallDeclaration(maskedCode, identStart, closeParen) {
+  if (isPrecededByFunctionKeyword(maskedCode, identStart)) return true;
+  const after = maskedCode.slice(closeParen + 1);
+  if (/^\s*(?::[^{=;\n]+)?\s*\{/.test(after)) return true;
+  return false;
+}
+
+function isDirectArgOfCall(maskedCode, pos, calleeName) {
+  let depth = 0;
+  for (let i = pos - 1; i >= 0; i -= 1) {
+    const ch = maskedCode[i];
+    if (ch === ")" || ch === "]" || ch === "}") {
+      depth += 1;
+    } else if (ch === "(" || ch === "[" || ch === "{") {
+      if (depth > 0) {
+        depth -= 1;
+      } else if (ch === "(") {
+        let prev = i - 1;
+        while (prev >= 0 && /\s/.test(maskedCode[prev])) prev -= 1;
+        if (prev < 0) return false;
+        return getPrevIdentifier(maskedCode, prev) === calleeName;
+      } else {
+        return false;
+      }
+    }
+  }
+  return false;
+}
+
+function hasTopLevelSemicolon(maskedCode, openBrace, closeBrace) {
+  let depth = 0;
+  for (let i = openBrace + 1; i < closeBrace; i += 1) {
+    const ch = maskedCode[i];
+    if (ch === "(" || ch === "[" || ch === "{") depth += 1;
+    else if (ch === ")" || ch === "]" || ch === "}") depth -= 1;
+    else if (depth === 0 && ch === ";") return true;
+  }
+  return false;
+}
+
+function isLiteralAtExpressionLevel(maskedCode, rangeStart, rangeEnd, lit) {
+  if (lit.start < rangeStart || lit.end > rangeEnd) return false;
+  const frames = [];
+  for (let i = rangeStart; i < lit.start; i += 1) {
+    const ch = maskedCode[i];
+    if (ch === "(") {
+      let prev = i - 1;
+      while (prev >= rangeStart && /\s/.test(maskedCode[prev])) prev -= 1;
+      let isCall = false;
+      if (prev >= rangeStart) {
+        const prevCh = maskedCode[prev];
+        if (prevCh === ")" || prevCh === "]") {
+          isCall = true;
+        } else if (/[A-Za-z0-9_$]/.test(prevCh)) {
+          const word = getPrevIdentifier(maskedCode, prev);
+          isCall = !GROUPING_PREFIX_KEYWORDS.has(word);
+        }
+      }
+      frames.push(isCall);
+    } else if (ch === "{") {
+      frames.push(true);
+    } else if (ch === "[") {
+      let prev = i - 1;
+      while (prev >= rangeStart && /\s/.test(maskedCode[prev])) prev -= 1;
+      let isSubscript = false;
+      if (prev >= rangeStart) {
+        const prevCh = maskedCode[prev];
+        if (prevCh === ")" || prevCh === "]") {
+          isSubscript = true;
+        } else if (/[A-Za-z0-9_$]/.test(prevCh)) {
+          const word = getPrevIdentifier(maskedCode, prev);
+          isSubscript = !GROUPING_PREFIX_KEYWORDS.has(word);
+        }
+      }
+      frames.push(isSubscript);
+    } else if (ch === ")" || ch === "]" || ch === "}") {
+      if (frames.length > 0) frames.pop();
+    }
+  }
+  if (frames.some(Boolean)) return false;
+  const beforeTrimmed = maskedCode.slice(rangeStart, lit.start).trimEnd();
+  if (/(?:===|!==|==|!=)$/.test(beforeTrimmed)) return false;
+  const afterTrimmed = maskedCode.slice(lit.end, rangeEnd).trimStart();
+  if (/^(?:===|!==|==|!=)/.test(afterTrimmed)) return false;
+  return true;
+}
+
+function collectTsTypeAndAllowedRanges(source, maskedCode) {
+  const ignoredTypeRanges = [];
+  const allowedRawRanges = [];
+
+  // TypeScript interface blocks
+  const ifaceRx = /(?:^|[;\n\r{}])\s*(?:export\s+)?interface\s+[A-Za-z_$][\w$]*/g;
+  for (const m of maskedCode.matchAll(ifaceRx)) {
+    let i = (m.index ?? 0) + m[0].length;
+    let angleDepth = 0;
+    let parenDepth = 0;
+    while (i < maskedCode.length) {
+      const ch = maskedCode[i];
+      if (ch === "<") angleDepth += 1;
+      else if (ch === ">" && angleDepth > 0) angleDepth -= 1;
+      else if (ch === "(") parenDepth += 1;
+      else if (ch === ")" && parenDepth > 0) parenDepth -= 1;
+      else if (ch === "{" && angleDepth === 0 && parenDepth === 0) {
+        const closeBrace = findMatchingDelimiter(maskedCode, i);
+        if (closeBrace !== -1) {
+          ignoredTypeRanges.push({ start: i, end: closeBrace + 1 });
+        }
+        break;
+      } else if (ch === ";" && angleDepth === 0 && parenDepth === 0) {
+        break;
+      }
+      i += 1;
+    }
+  }
+
+  // TypeScript type aliases
+  const typeRx = /(?:^|[;\n\r{}])\s*(?:export\s+)?type\s+[A-Za-z_$][\w$]*/g;
+  for (const m of maskedCode.matchAll(typeRx)) {
+    let i = (m.index ?? 0) + m[0].length;
+    let angleDepth = 0;
+    while (i < maskedCode.length) {
+      const ch = maskedCode[i];
+      if (ch === "<") angleDepth += 1;
+      else if (ch === ">" && angleDepth > 0) angleDepth -= 1;
+      else if (ch === "=" && angleDepth === 0 && maskedCode[i + 1] !== ">") {
+        const exprEnd = findExpressionEnd(source, maskedCode, i + 1, true);
+        ignoredTypeRanges.push({ start: i + 1, end: exprEnd + 1 });
+        break;
+      } else if (ch === ";" || ch === "\n") {
+        if (angleDepth === 0) break;
+      }
+      i += 1;
+    }
+  }
+
+  // Full-argument allowed technical/DOM/console calls
+  const fullArgCallRx =
+    /(?:\b(?:new\s+[A-Za-z_$][\w$]*Error|createUi2TechnicalDetails|renderUi2TechnicalCode|createUi2Icon|createElement|createElementNS|querySelector|querySelectorAll|closest|getElementById|getElementsByClassName|getElementsByTagName|getAttribute|hasAttribute|removeAttribute|matches)|(?:\bconsole\.(?:log|warn|error|info|debug))|(?:\.classList\.(?:add|remove|toggle|contains|replace)))\s*\(/g;
+  for (const m of maskedCode.matchAll(fullArgCallRx)) {
+    const matchStart = m.index ?? 0;
+    const openParen = matchStart + m[0].length - 1;
+    const closeParen = findMatchingDelimiter(maskedCode, openParen);
+    if (closeParen === -1) continue;
+    if (!m[0].startsWith(".") && !/\bnew\s+/.test(m[0]) && !m[0].startsWith("console.")) {
+      if (isCallDeclaration(maskedCode, matchStart, closeParen)) continue;
+    }
+    allowedRawRanges.push({ start: openParen + 1, end: closeParen });
+  }
+
+  // i18n calls: exempt key arg[0] for t/tPlural and format arg[1] for formatDate/formatNumber
+  const i18nCallRx = /(?:^|[^\w$.]|\b(?:[A-Za-z_$][\w$]*\.)?i18n\.)(t|tPlural|formatDate|formatNumber)\s*\(/g;
+  for (const m of maskedCode.matchAll(i18nCallRx)) {
+    const fnName = m[1];
+    const openParen = (m.index ?? 0) + m[0].length - 1;
+    const closeParen = findMatchingDelimiter(maskedCode, openParen);
+    if (closeParen === -1) continue;
+    if (isCallDeclaration(maskedCode, (m.index ?? 0) + m[0].indexOf(fnName), closeParen)) continue;
+    const args = splitTopLevelSpans(maskedCode, openParen + 1, closeParen);
+    if (fnName === "t" || fnName === "tPlural") {
+      if (args.length >= 1) allowedRawRanges.push(args[0]);
+    } else if (fnName === "formatDate" || fnName === "formatNumber") {
+      if (args.length >= 2) {
+        allowedRawRanges.push({ start: args[1].start, end: closeParen });
+      }
+    }
+  }
+
+  return { ignoredTypeRanges, allowedRawRanges };
 }
 
 /**
@@ -325,28 +791,163 @@ function checkTsFile(relPath, content, violations) {
     });
   }
 
-  // Rule 3b & Rule 3c: Forbid raw UI copy assigned to DOM text/attributes
+  // Rule 3b & Rule 3c: Forbid raw UI copy in option objects, DOM properties, and UI helper calls
   if (!isCatalog && !isIcons) {
-    for (const lit of literals) {
-      if (!/[A-Za-z]{2,}/.test(lit.staticText)) continue;
-      const before = maskedCode.slice(Math.max(0, lit.start - 48), lit.start);
-      if (/\.(?:textContent|innerText|placeholder|title|innerHTML)\s*=\s*$/.test(before)) {
-        violations.push({
-          code: "MP_UI2_RULE_RAW_STRING",
-          file: relPath,
-          line: lineNumberAt(content, lit.start),
-          detail: `Raw UI string "${lit.staticText.trim()}" assigned directly to DOM property; use i18n.t(...).`,
-        });
-        continue;
+    const { ignoredTypeRanges, allowedRawRanges } = collectTsTypeAndAllowedRanges(content, maskedCode);
+    const reportedRawStarts = new Set();
+
+    function flagRawLiteral(lit, detail) {
+      if (!/[A-Za-z]{2,}/.test(lit.staticText)) return;
+      if (isPositionInRanges(lit.start, allowedRawRanges)) return;
+      if (reportedRawStarts.has(lit.start)) return;
+      reportedRawStarts.add(lit.start);
+      violations.push({
+        code: "MP_UI2_RULE_RAW_STRING",
+        file: relPath,
+        line: lineNumberAt(content, lit.start),
+        detail,
+      });
+    }
+
+    function checkExprLiterals(rangeStart, rangeEnd, messageForLiteral) {
+      for (const lit of literals) {
+        if (lit.start < rangeStart) continue;
+        if (lit.start >= rangeEnd) break;
+        if (lit.end > rangeEnd) continue;
+        if (isLiteralAtExpressionLevel(maskedCode, rangeStart, rangeEnd, lit)) {
+          flagRawLiteral(lit, messageForLiteral(lit));
+        }
       }
-      const attrBefore = content.slice(Math.max(0, lit.start - 64), lit.start);
-      if (/\.setAttribute\(\s*["'](?:aria-label|title|placeholder)["']\s*,\s*$/.test(attrBefore)) {
-        violations.push({
-          code: "MP_UI2_RULE_RAW_STRING",
-          file: relPath,
-          line: lineNumberAt(content, lit.start),
-          detail: `Raw literal "${lit.staticText.trim()}" passed to setAttribute(); use i18n.t(...).`,
-        });
+    }
+
+    // 1) Component / option object literal properties
+    for (let i = 0; i < maskedCode.length; i += 1) {
+      if (maskedCode[i] !== "{") continue;
+      if (isPositionInRanges(i, ignoredTypeRanges)) continue;
+      const closeBrace = findMatchingDelimiter(maskedCode, i);
+      if (closeBrace === -1) continue;
+      if (hasTopLevelSemicolon(maskedCode, i, closeBrace)) continue;
+
+      const inStatCard = isDirectArgOfCall(maskedCode, i, "createUi2StatCard");
+      const props = splitTopLevelSpans(maskedCode, i + 1, closeBrace);
+      for (const prop of props) {
+        const slice = maskedCode.slice(prop.start, prop.end);
+        const keyMatch = slice.match(/^\s*([A-Za-z_$][\w$]*)\s*:/);
+        if (!keyMatch) continue;
+        const propKey = keyMatch[1];
+        if (!UI_COPY_OPTION_KEYS.has(propKey) && !(inStatCard && propKey === "value")) {
+          continue;
+        }
+        const valStart = prop.start + keyMatch[0].length;
+        checkExprLiterals(
+          valStart,
+          prop.end,
+          (lit) =>
+            `Raw UI string "${lit.staticText.trim()}" in UI option "${propKey}"; use i18n.t(...).`
+        );
+      }
+    }
+
+    // 2) Direct DOM text/label property assignments across full RHS expression
+    for (const m of maskedCode.matchAll(
+      /\.(textContent|innerText|placeholder|title|innerHTML|ariaLabel)\s*(?:\+=|=)(?![=>])/g
+    )) {
+      const propName = m[1];
+      const exprStart = (m.index ?? 0) + m[0].length;
+      const exprEnd = findExpressionEnd(content, maskedCode, exprStart);
+      checkExprLiterals(
+        exprStart,
+        exprEnd,
+        (lit) =>
+          `Raw UI string "${lit.staticText.trim()}" assigned directly to DOM property "${propName}"; use i18n.t(...).`
+      );
+    }
+
+    // 3) Element.setAttribute("aria-label" | "title" | "placeholder" | "alt", <expr>)
+    for (const m of maskedCode.matchAll(/\.setAttribute\s*\(/g)) {
+      const openParen = (m.index ?? 0) + m[0].length - 1;
+      const closeParen = findMatchingDelimiter(maskedCode, openParen);
+      if (closeParen === -1) continue;
+      const args = splitTopLevelSpans(maskedCode, openParen + 1, closeParen);
+      if (args.length < 2) continue;
+      const attrLit = literals.find(
+        (lit) =>
+          lit.start >= args[0].start &&
+          lit.end <= args[0].end &&
+          maskedCode.slice(args[0].start, lit.start).trim() === "" &&
+          maskedCode.slice(lit.end, args[0].end).trim() === ""
+      );
+      if (!attrLit || !DOM_UI_ATTRS.has(attrLit.staticText.toLowerCase())) continue;
+      checkExprLiterals(
+        args[1].start,
+        args[1].end,
+        (lit) =>
+          `Raw literal "${lit.staticText.trim()}" passed to setAttribute("${attrLit.staticText}"); use i18n.t(...).`
+      );
+    }
+
+    // 4) Element.insertAdjacentText(pos, <expr>) / insertAdjacentHTML(pos, <expr>)
+    for (const m of maskedCode.matchAll(/\.insertAdjacent(?:Text|HTML)\s*\(/g)) {
+      const openParen = (m.index ?? 0) + m[0].length - 1;
+      const closeParen = findMatchingDelimiter(maskedCode, openParen);
+      if (closeParen === -1) continue;
+      const args = splitTopLevelSpans(maskedCode, openParen + 1, closeParen);
+      if (args.length < 2) continue;
+      checkExprLiterals(
+        args[1].start,
+        args[1].end,
+        (lit) =>
+          `Raw UI string "${lit.staticText.trim()}" passed to insertAdjacent*; use i18n.t(...).`
+      );
+    }
+
+    // 5) toast.show(<expr>) / field.setError(<expr>)
+    for (const m of maskedCode.matchAll(/\.(show|setError)\s*\(/g)) {
+      const methodName = m[1];
+      const openParen = (m.index ?? 0) + m[0].length - 1;
+      const closeParen = findMatchingDelimiter(maskedCode, openParen);
+      if (closeParen === -1) continue;
+      const args = splitTopLevelSpans(maskedCode, openParen + 1, closeParen);
+      if (args.length < 1 || !/\S/.test(content.slice(args[0].start, args[0].end))) continue;
+      checkExprLiterals(
+        args[0].start,
+        args[0].end,
+        (lit) =>
+          `Raw UI string "${lit.staticText.trim()}" passed to .${methodName}(); use i18n.t(...).`
+      );
+    }
+
+    // 6) createUi2LoadingSkeleton(doc, <ariaLabelExpr>, ...)
+    for (const m of maskedCode.matchAll(/(?:^|[^\w$.])createUi2LoadingSkeleton\s*\(/g)) {
+      const matchPos = m.index ?? 0;
+      const fnPos = matchPos + m[0].indexOf("createUi2LoadingSkeleton");
+      const openParen = matchPos + m[0].length - 1;
+      const closeParen = findMatchingDelimiter(maskedCode, openParen);
+      if (closeParen === -1 || isCallDeclaration(maskedCode, fnPos, closeParen)) continue;
+      const args = splitTopLevelSpans(maskedCode, openParen + 1, closeParen);
+      if (args.length < 2) continue;
+      checkExprLiterals(
+        args[1].start,
+        args[1].end,
+        (lit) =>
+          `Raw UI string "${lit.staticText.trim()}" passed to createUi2LoadingSkeleton(); use i18n.t(...).`
+      );
+    }
+
+    // 7) DOM .append(...) / .prepend(...) / .replaceChildren(...) direct literals/ternaries
+    for (const m of maskedCode.matchAll(/\.(append|prepend|replaceChildren)\s*\(/g)) {
+      const methodName = m[1];
+      const openParen = (m.index ?? 0) + m[0].length - 1;
+      const closeParen = findMatchingDelimiter(maskedCode, openParen);
+      if (closeParen === -1) continue;
+      const args = splitTopLevelSpans(maskedCode, openParen + 1, closeParen);
+      for (const arg of args) {
+        checkExprLiterals(
+          arg.start,
+          arg.end,
+          (lit) =>
+            `Raw UI string "${lit.staticText.trim()}" passed to .${methodName}(); use i18n.t(...).`
+        );
       }
     }
   }

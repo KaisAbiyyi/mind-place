@@ -32,11 +32,65 @@ test("MP-UI2-02: EN and ID catalogs have 100% key, placeholder, and product-name
   assert.equal(t("en", "nav.memory"), "Memory");
   assert.equal(t("id", "nav.memory"), "Memori");
   assert.equal(t("en", "nav.constellation"), "Constellation");
-  assert.equal(t("id", "nav.constellation"), "Konstelasi");
+  assert.equal(t("id", "nav.constellation"), "Constellation");
+  assert.equal(t("en", "constellation.title"), "Constellation");
+  assert.equal(t("id", "constellation.title"), "Constellation");
   assert.equal(t("en", "action.revoke"), "Revoke access");
   assert.equal(t("id", "action.revoke"), "Cabut akses");
   assert.equal(t("en", "action.viewOriginal"), "View original");
   assert.equal(t("id", "action.viewOriginal"), "Lihat asli");
+});
+
+test("MP-UI2-02: Canonical UI-PRINCIPLES glossary and honest MP-UI2-00 import copy constraints", () => {
+  const glossaryPairs: Array<[keyof typeof EN_CATALOG, string, string]> = [
+    ["nav.home", "Home", "Beranda"],
+    ["nav.memory", "Memory", "Memori"],
+    ["nav.archive", "Archive", "Arsip"],
+    ["nav.constellation", "Constellation", "Constellation"],
+    ["nav.sources", "Sources", "Sumber"],
+    ["nav.connections", "Connections", "Koneksi"],
+    ["nav.settings", "Settings", "Pengaturan"],
+    ["memory.behindThis", "Chats behind this", "Percakapan di balik ini"],
+    ["archive.versions", "Saved copies", "Salinan tersimpan"],
+    ["sources.addFolder", "Add folder", "Tambah folder"],
+    ["sources.addFiles", "Add files", "Tambah file"],
+    ["sources.removeAccess", "Remove access", "Hapus akses"],
+    ["sources.filesNeverDeleted", "Your files are never deleted.", "File Anda tidak pernah dihapus."],
+    ["search.copyForAi", "Copy for an AI", "Salin untuk AI"],
+    ["state.connected", "Connected", "Terhubung"],
+    ["state.needsSetup", "Needs setup", "Perlu disiapkan"],
+    ["state.searchUpToDate", "Search is up to date", "Pencarian sudah mutakhir"],
+    ["state.unknown", "Unknown", "Tidak diketahui"],
+  ];
+
+  for (const [key, expectedEn, expectedId] of glossaryPairs) {
+    assert.equal(t("en", key), expectedEn, `EN mismatch for ${key}`);
+    assert.equal(t("id", key), expectedId, `ID mismatch for ${key}`);
+  }
+  assert.ok(EN_CATALOG["sources.revokeConfirmBody"].includes("Your files are never deleted."));
+  assert.ok(ID_CATALOG["sources.revokeConfirmBody"].includes("File Anda tidak pernah dihapus."));
+
+  // Signed-off MP-UI2-00 / MP-IMPORT-APP-01 contract: only ChatGPT & Gemini export folders/zips
+  // on unencrypted (legacy_archive) vaults; standalone transcript files are deferred.
+  for (const locale of ["en", "id"] as const) {
+    const subtitle = t(locale, "import.subtitle");
+    const chooseFile = t(locale, "import.chooseFile");
+    const transcriptLine = t(locale, "import.pasteNotes");
+    const encryptedNotice = t(locale, "import.encryptedNotice");
+
+    assert.match(subtitle, /ChatGPT/);
+    assert.match(subtitle, /Gemini/);
+    assert.match(subtitle, /\.zip/);
+    assert.doesNotMatch(subtitle, /\b(?:Claude|JSON|HTML|Markdown)\b/);
+
+    assert.match(chooseFile, /ChatGPT/);
+    assert.match(chooseFile, /Gemini/);
+
+    assert.match(transcriptLine, /(coming later|hadir nanti)/i);
+    assert.doesNotMatch(transcriptLine, /^(Paste|Tempel)/i);
+
+    assert.match(encryptedNotice, /(unencrypted|tanpa enkripsi)/i);
+  }
 });
 
 test("MP-UI2-02: Intl.PluralRules, numbers, dates, and honest Unknown handling", () => {

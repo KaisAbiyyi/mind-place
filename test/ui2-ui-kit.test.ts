@@ -268,3 +268,134 @@ test("MP-UI2-03: Gallery renders in EN and ID and toggles theme/density cleanly"
   gallery.destroy();
   assert.equal(app.childElementCount, 0);
 });
+
+test("MP-UI2-03: Dialog and Aside trap forward/reverse Tab focus and exclude hidden or collapsed subtrees", () => {
+  const dom = new JSDOM(`<!DOCTYPE html><html><body><div id="mount"></div></body></html>`);
+  const doc = dom.window.document;
+  const win = dom.window;
+  const mount = doc.getElementById("mount")!;
+
+  const dispatchTab = (target: HTMLElement, shiftKey = false) => {
+    const ev = new win.KeyboardEvent("keydown", {
+      key: "Tab",
+      shiftKey,
+      bubbles: true,
+      cancelable: true,
+    });
+    target.dispatchEvent(ev);
+    return ev;
+  };
+
+  // 1. Aside focus trap, hidden-ancestor exclusion, collapsed details, and Escape restore
+  const asideOpener = createUi2Button(doc, { label: "Open aside" });
+  mount.append(asideOpener);
+  const aside = createUi2Aside(doc, { title: "Aside", closeLabel: "Close" });
+  const asideCloseBtn = aside.element.querySelector<HTMLButtonElement>("button")!;
+
+  const hiddenWrap = doc.createElement("div");
+  hiddenWrap.hidden = true;
+  const hiddenBtn = createUi2Button(doc, { label: "Hidden child" });
+  hiddenWrap.append(hiddenBtn);
+
+  const ariaHiddenWrap = doc.createElement("div");
+  ariaHiddenWrap.setAttribute("aria-hidden", "true");
+  const ariaHiddenBtn = createUi2Button(doc, { label: "Aria hidden child" });
+  ariaHiddenWrap.append(ariaHiddenBtn);
+
+  const displayNoneWrap = doc.createElement("div");
+  displayNoneWrap.style.display = "none";
+  const displayNoneBtn = createUi2Button(doc, { label: "Display none child" });
+  displayNoneWrap.append(displayNoneBtn);
+
+  const details = doc.createElement("details");
+  const summary = doc.createElement("summary");
+  summary.textContent = "More";
+  const detailsInnerBtn = createUi2Button(doc, { label: "Details action" });
+  details.append(summary, detailsInnerBtn);
+
+  const asideLastBtn = createUi2Button(doc, { label: "Open item" });
+
+  aside.body.append(hiddenWrap, ariaHiddenWrap, displayNoneWrap, details, asideLastBtn);
+  mount.append(aside.element);
+
+  // Closed aside must never trap or steal focus
+  asideOpener.focus();
+  const closedTabEvent = dispatchTab(aside.element, false);
+  assert.equal(closedTabEvent.defaultPrevented, false);
+  assert.equal(doc.activeElement, asideOpener);
+
+  // Open aside -> first focusable control (closeBtn) receives focus
+  aside.open(asideOpener);
+  assert.equal(aside.isOpen(), true);
+  assert.equal(doc.activeElement, asideCloseBtn);
+
+  // Shift+Tab from first wraps to last visible control (asideLastBtn), skipping hidden/collapsed controls
+  const revFromFirst = dispatchTab(asideCloseBtn, true);
+  assert.equal(revFromFirst.defaultPrevented, true);
+  assert.equal(doc.activeElement, asideLastBtn);
+
+  // Tab from last visible control wraps back to first (asideCloseBtn)
+  const fwdFromLast = dispatchTab(asideLastBtn, false);
+  assert.equal(fwdFromLast.defaultPrevented, true);
+  assert.equal(doc.activeElement, asideCloseBtn);
+
+  // Hide asideLastBtn via hidden wrapper -> summary becomes last, while closed detailsInnerBtn stays unreachable
+  asideLastBtn.hidden = true;
+  dispatchTab(asideCloseBtn, true);
+  assert.equal(doc.activeElement, summary);
+  assert.notEqual(doc.activeElement, detailsInnerBtn);
+
+  dispatchTab(summary, false);
+  assert.equal(doc.activeElement, asideCloseBtn);
+
+  // Opening <details> makes detailsInnerBtn reachable as last focusable element
+  details.open = true;
+  dispatchTab(asideCloseBtn, true);
+  assert.equal(doc.activeElement, detailsInnerBtn);
+  dispatchTab(detailsInnerBtn, false);
+  assert.equal(doc.activeElement, asideCloseBtn);
+
+  // Escape closes aside and restores opener focus; closed aside no longer traps
+  aside.element.dispatchEvent(new win.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  assert.equal(aside.isOpen(), false);
+  assert.equal(aside.element.hidden, true);
+  assert.equal(doc.activeElement, asideOpener);
+  const afterCloseTab = dispatchTab(aside.element, false);
+  assert.equal(afterCloseTab.defaultPrevented, false);
+  assert.equal(doc.activeElement, asideOpener);
+
+  // 2. Dialog hidden-descendant exclusion on open() and Tab / Shift+Tab wrapping
+  const dlgOpener = createUi2Button(doc, { label: "Open dialog" });
+  mount.append(dlgOpener);
+  const dlg = createUi2Dialog(doc, { title: "Dialog", closeLabel: "Close" });
+  const dlgCloseBtn = dlg.dialog.querySelector<HTMLButtonElement>("button")!;
+
+  const dlgHiddenFirstWrap = doc.createElement("div");
+  dlgHiddenFirstWrap.hidden = true;
+  const dlgHiddenFirstBtn = createUi2Button(doc, { label: "Hidden first" });
+  dlgHiddenFirstWrap.append(dlgHiddenFirstBtn);
+
+  const dlgDoneBtn = createUi2Button(doc, { label: "Done" });
+  const dlgHiddenLastWrap = doc.createElement("div");
+  dlgHiddenLastWrap.style.visibility = "hidden";
+  const dlgHiddenLastBtn = createUi2Button(doc, { label: "Hidden last" });
+  dlgHiddenLastWrap.append(dlgHiddenLastBtn);
+
+  dlg.body.append(dlgHiddenFirstWrap);
+  dlg.footer.append(dlgDoneBtn, dlgHiddenLastWrap);
+  mount.append(dlg.backdrop);
+
+  dlgOpener.focus();
+  dlg.open(dlgOpener);
+  assert.equal(doc.activeElement, dlgCloseBtn);
+
+  dispatchTab(dlgCloseBtn, true);
+  assert.equal(doc.activeElement, dlgDoneBtn);
+
+  dispatchTab(dlgDoneBtn, false);
+  assert.equal(doc.activeElement, dlgCloseBtn);
+
+  dlg.dialog.dispatchEvent(new win.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  assert.equal(dlg.isOpen(), false);
+  assert.equal(doc.activeElement, dlgOpener);
+});

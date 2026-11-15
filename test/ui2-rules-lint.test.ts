@@ -111,3 +111,66 @@ test("MP-UI2-03: Linter rejects raw colors, off-scale sizes, raw strings, parity
   });
   assert.equal(tuckedTechResult.ok, true, JSON.stringify(tuckedTechResult.violations));
 });
+
+test("UI2 rules linter catches raw copy in component options, helper calls, and ternary expressions", () => {
+  const result = verifyUiRules({
+    checkParity: false,
+    files: [
+      {
+        path: "src/ui2/views/blindspots.ts",
+        content: `
+          export function badView(doc: Document, el: HTMLElement, toast: { show(m: string): void }, field: { setError(m: string): void }, cond: boolean) {
+            createUi2Button(doc, { label: "Save changes", ariaLabel: "Save item", variant: "primary" });
+            createUi2Field(doc, { label: "Name", placeholder: "Type name", hint: "Short hint", error: "Invalid name" });
+            createUi2SettingsCard(doc, {
+              title: "General",
+              rows: [{ id: "r1", title: "Row title", description: "Row description" }],
+            });
+            createUi2Dialog(doc, { title: "Delete folder?", closeLabel: "Dismiss" });
+            createUi2StatCard(doc, { label: i18n.t("stat.chats"), value: "42 chats" });
+            toast.show("Saved");
+            field.setError("Required");
+            createUi2LoadingSkeleton(doc, "Loading items");
+            createUi2Button(doc, { label: cond ? "Raw label" : i18n.t("action.save") });
+            el.ariaLabel = "Raw aria label";
+            el.append("Raw appended text");
+            el.textContent = cond ? "Raw" : i18n.t("ok");
+          }
+        `,
+      },
+    ],
+  });
+
+  assert.equal(result.ok, false);
+  const rawViolations = result.violations.filter((v) => v.code === "MP_UI2_RULE_RAW_STRING");
+  assert.equal(rawViolations.length, 19, JSON.stringify(rawViolations, null, 2));
+});
+
+test("UI2 rules linter allows internal tokens, i18n keys, DOM helpers, and equality comparisons", () => {
+  const result = verifyUiRules({
+    checkParity: false,
+    files: [
+      {
+        path: "src/ui2/views/clean.ts",
+        content: `
+          export function goodView(doc: Document, el: HTMLElement, locale: string, i18n: { t(k: string): string }) {
+            createUi2Button(doc, { label: i18n.t("action.save"), variant: "primary", size: "md", icon: "search" });
+            createUi2Segmented(doc, {
+              ariaLabel: i18n.t("lang.label"),
+              value: "en",
+              options: [{ value: "en", label: i18n.t("lang.en") }],
+            });
+            createUi2Disclosure(doc, {
+              triggerLabel: i18n.t("details.show"),
+              body: doc.createElement("div"),
+            });
+            el.setAttribute("aria-hidden", "true");
+            return { text: locale === "pseudo" ? i18n.t("a") : i18n.t("b") };
+          }
+        `,
+      },
+    ],
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result.violations, null, 2));
+});

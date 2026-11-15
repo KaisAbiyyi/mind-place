@@ -154,22 +154,25 @@ Every surface from `docs/ui/evidence/mp-ui2/wireframe-v1.html` and `docs/ui/UI-P
 
 ## 5. Planned Notion Backend Task Cards (`MP-UI2-BG-01..03`)
 
-All cards live in the shared Notion Execution Board with strict security invariants (unlocked owner lease required inside blocking worker, no MCP tool exposure, bounded output caps, content-free error codes, unchanged CSP):
+All cards live in the shared Notion Execution Board with canonical `Task ID`, `Resource Locks`, and `Review Owner` / review-class metadata populated and `Status = Blocked` until `MP-UI2-01` is accepted, enforcing strict security invariants (unlocked owner lease required inside blocking worker, no MCP tool exposure, bounded output caps, content-free error codes, unchanged CSP). Because `MP-UI2-BG-01` and `MP-UI2-BG-02` share the `crates/state-core/src/memory_inspection.rs` and `src-tauri/src/main.rs` exclusive lock, they are sequenced (`MP-UI2-BG-01` -> `MP-UI2-BG-02`), never implemented in parallel:
 
-1. **`MP-UI2-BG-01`** — `UI2-BG-01 · Bounded read-only memory Constellation graph & taxonomy query (G1)`
-   - **Prerequisites**: `MP-UI2-01`
-   - **Unlocks**: `MP-UI2-07`
-   - **Resource Locks**: `crates/state-core/src/memory_inspection.rs; src-tauri/src/main.rs (read_memory_constellation)`
+1. **`MP-UI2-BG-01`** — `UI2-BG-01 · Bounded read-only memory Constellation graph & taxonomy query (G1)` (`Task ID: MP-UI2-BG-01`, `Status: Blocked`, `Focus Lane: 03 · Up Next`)
+   - **Prerequisites**: `MP-UI2-01 accepted`
+   - **Unlocks**: `MP-UI2-07; MP-UI2-05 (taxonomy); MP-UI2-BG-02 (sequential lock handoff)`
+   - **Resource Locks**: `crates/state-core/src/memory_inspection.rs; src-tauri/src/main.rs (read_memory_constellation; sequential before MP-UI2-BG-02)`
+   - **Review Owner / Class**: `Independent technical + security review (read-only memory graph, unlock lease & tombstone/scope boundary); owner manual merge` (`Review Verdict: Pending`)
    - **Environment**: `Cloud` (Phase `08`)
-2. **`MP-UI2-BG-02`** — `UI2-BG-02 · Exact memory-evidence-to-archive-chat resolver (G2)`
-   - **Prerequisites**: `MP-UI2-01`
-   - **Unlocks**: `MP-UI2-05`, `MP-UI2-07` (optional enrichment behind "Behind this memory")
-   - **Resource Locks**: `crates/state-core/src/memory_inspection.rs; src-tauri/src/main.rs (resolve_memory_evidence_chats)`
+2. **`MP-UI2-BG-02`** — `UI2-BG-02 · Exact memory-evidence-to-archive-chat resolver (G2)` (`Task ID: MP-UI2-BG-02`, `Status: Blocked`)
+   - **Prerequisites**: `MP-UI2-01 accepted; MP-UI2-BG-01 accepted (sequential on shared crates/state-core/src/memory_inspection.rs and src-tauri/src/main.rs lock)`
+   - **Unlocks**: `MP-UI2-05 (Behind-this-memory); MP-UI2-07`
+   - **Resource Locks**: `crates/state-core/src/memory_inspection.rs; src-tauri/src/main.rs (resolve_memory_evidence_chats; sequential after MP-UI2-BG-01)`
+   - **Review Owner / Class**: `Independent technical + security review (evidence-to-archive disclosure, unlock lease & tombstone/scope boundary); owner manual merge` (`Review Verdict: Pending`)
    - **Environment**: `Cloud` (Phase `08`)
-3. **`MP-UI2-BG-03`** — `UI2-BG-03 · Security-reviewed native Sources folder/file path picker (G3)`
-   - **Prerequisites**: `MP-UI2-01`
+3. **`MP-UI2-BG-03`** — `UI2-BG-03 · Security-reviewed native Sources folder/file path picker (G3)` (`Task ID: MP-UI2-BG-03`, `Status: Blocked`, `Focus Lane: 03 · Up Next`)
+   - **Prerequisites**: `MP-UI2-01 accepted`
    - **Unlocks**: `MP-UI2-08`
-   - **Resource Locks**: `src-tauri/Cargo.toml; src-tauri/tauri.conf.json; src-tauri/src/main.rs (pick_document_source)`
+   - **Resource Locks**: `src-tauri/Cargo.toml; src-tauri/tauri.conf.json; src-tauri/src/main.rs (pick_document_source; serialize main.rs handler registration with MP-UI2-BG-01/02)`
+   - **Review Owner / Class**: `Mandatory security review (privileged native dialog capability & CSP boundary) + Local Windows dialog smoke check + owner manual merge` (`Review Verdict: Pending`)
    - **Environment**: `Cloud` + `Local Windows` interactive dialog smoke verification (Phase `08`)
 
 ---

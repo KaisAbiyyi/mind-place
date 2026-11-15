@@ -16,6 +16,7 @@ export const UI2_LOCALE_STORAGE_KEY = "mind_place.ui2.locale";
  */
 export const PROTECTED_PRODUCT_NAMES: readonly string[] = [
   "Mind Place",
+  "Constellation",
   "ChatGPT",
   "Claude Desktop",
   "Claude",
