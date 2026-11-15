@@ -1,6 +1,3 @@
-import "../ui-kit/tokens.css";
-import "../ui-kit/primitives.css";
-import "./shell.css";
 import type { Invoke } from "../../reader.js";
 import { createI18nController, type Ui2I18nController, type Ui2TestLocale } from "../i18n/index.js";
 import {
