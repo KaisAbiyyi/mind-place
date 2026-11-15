@@ -244,6 +244,12 @@ pub(super) fn cancel_vault_setup(state: State<'_, AppState>) -> Result<(), Strin
         .lock()
         .unwrap_or_else(|error| error.into_inner())
         .take();
+    // MP-9C: any lease revocation reachable during a live vault session is
+    // serialized with in-flight owner forget commits via the Lock gate.
+    let _lock_authority = state
+        .document_authority_gate
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
     state.security.lock();
     Ok(())
 }
