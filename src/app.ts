@@ -42,7 +42,7 @@ export async function mountApplication({ root, invoke, clipboard }: ApplicationO
         if (isUi2ShellEnabled()) {
           // Only load UI2 styles and code after the existing native gate has unlocked.
           // A late import must not resurrect a shell after Lock or a later epoch.
-          void import("./ui2/shell/shell.js").then(({ mountUi2Shell }) => {
+          void import("./ui2/shell/entry.js").then(({ mountUi2Shell }) => {
             if (generation !== epoch || locking) return;
             ui2Shell = mountUi2Shell(root, {
               onLock: () => { void lock(); },
