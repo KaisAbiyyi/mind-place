@@ -222,3 +222,126 @@ fn encrypted_forget_preview_is_bound_to_unlock_epoch_and_restart() {
     );
     assert!(reopened.source(&source).unwrap().is_none());
 }
+
+fn tamper(db: &StateStore, sql: &str) {
+    let raw = rusqlite::Connection::open(db.path()).unwrap();
+    assert!(raw.execute(sql, []).unwrap() >= 1);
+}
+
+#[test]
+fn expired_one_time_confirmation_is_rejected_without_redaction() {
+    let (_home, db, owner, _, src, _) = fixture();
+    let preview = db
+        .preview_source_forget(&owner, &src, "Owner deletion request")
+        .unwrap();
+    tamper(
+        &db,
+        "UPDATE settings SET value_json=json_set(value_json,'$.expires_at_ms',1)
+         WHERE key LIKE 'privacy:forget-preview:v1:%'",
+    );
+    assert!(matches!(
+        db.confirm_source_forget(
+            &owner,
+            &src,
+            &preview.one_time_token,
+            &preview.preview_sha256
+        ),
+        Err(StateError::MemoryDenied)
+    ));
+    assert!(!db.source_is_redacted(&src).unwrap());
+    assert!(db.source_forget_progress(&owner, &src).unwrap().is_none());
+}
+
+#[test]
+fn a_different_admin_cannot_use_the_owners_one_time_token() {
+    let (_home, db, owner, _, src, _) = fixture();
+    let intruder = "c".repeat(64);
+    db.issue_client("client:v1:intruder", "Intruder", &intruder, &[Cap::Admin])
+        .unwrap();
+    let preview = db
+        .preview_source_forget(&owner, &src, "Owner deletion request")
+        .unwrap();
+    assert!(matches!(
+        db.confirm_source_forget(
+            &intruder,
+            &src,
+            &preview.one_time_token,
+            &preview.preview_sha256
+        ),
+        Err(StateError::MemoryDenied)
+    ));
+    assert!(!db.source_is_redacted(&src).unwrap());
+    // Wrong preview fingerprint with the right token is also refused.
+    assert!(matches!(
+        db.confirm_source_forget(&owner, &src, &preview.one_time_token, &"0".repeat(64)),
+        Err(StateError::MemoryDenied)
+    ));
+    assert!(!db.source_is_redacted(&src).unwrap());
+    // The owner's own confirmation still works exactly once.
+    db.confirm_source_forget(
+        &owner,
+        &src,
+        &preview.one_time_token,
+        &preview.preview_sha256,
+    )
+    .unwrap();
+    assert!(db.source_is_redacted(&src).unwrap());
+}
+
+#[test]
+fn concurrent_confirmations_of_one_token_commit_exactly_once() {
+    let (_home, db, owner, _, src, _) = fixture();
+    let preview = db
+        .preview_source_forget(&owner, &src, "Owner deletion request")
+        .unwrap();
+    let path = db.path().to_path_buf();
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(4));
+    // Independent connections, opened up front; only confirmation races.
+    let stores = (0..4)
+        .map(|_| StateStore::open(&path).unwrap())
+        .collect::<Vec<_>>();
+    let workers = stores
+        .into_iter()
+        .map(|store| {
+            let (owner, src) = (owner.clone(), src.clone());
+            let (token, digest) = (
+                preview.one_time_token.clone(),
+                preview.preview_sha256.clone(),
+            );
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                store
+                    .confirm_source_forget(&owner, &src, &token, &digest)
+                    .is_ok()
+            })
+        })
+        .collect::<Vec<_>>();
+    let committed = workers
+        .into_iter()
+        .map(|worker| worker.join().unwrap())
+        .filter(|ok| *ok)
+        .count();
+    assert_eq!(committed, 1);
+    assert!(db.source_is_redacted(&src).unwrap());
+}
+
+#[test]
+fn redaction_policy_probe_reports_tombstones_and_fails_closed_when_malformed() {
+    let (_home, db, owner, _, src, second) = fixture();
+    assert!(!db.has_source_redactions().unwrap());
+    db.redact_source(&owner, &src, "Owner redaction").unwrap();
+    assert!(db.has_source_redactions().unwrap());
+    // A forged/garbled tombstone must not be read as "no redaction".
+    tamper(
+        &db,
+        &format!(
+            "INSERT INTO settings(key,value_json)
+             VALUES('privacy:source-redaction:v1:{second}','{{\"version\":9}}')"
+        ),
+    );
+    assert!(matches!(
+        db.has_source_redactions(),
+        Err(StateError::Corrupt)
+    ));
+}

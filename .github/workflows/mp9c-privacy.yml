@@ -39,6 +39,8 @@ jobs:
         run: cargo test --locked -p mind-place-security --lib vault_fence -- --nocapture
       - name: Source redaction and evidence persistence
         run: cargo test --locked -p mind-place-state --features sqlcipher-preview --test source_redaction -- --nocapture
+      - name: State-core full regression (identity, memory, private scopes)
+        run: cargo test --locked -p mind-place-state -- --nocapture
       - name: Owner-bound one-time forget, shared source and restart regressions
         run: cargo test --locked -p mind-place-state --features sqlcipher-preview --test source_forget -- --nocapture
       - name: Deterministic encrypted capture/redaction interleaving and restart
@@ -47,5 +49,7 @@ jobs:
         run: cargo test --locked -p mind-place-index --features sqlcipher-preview --test vault_capture_encrypted -- --nocapture
       - name: Encrypted MCP synthetic capability and revocation
         run: cargo test --locked -p mind-place-integration --features vault-mcp --test mcp_vault -- --nocapture
+      - name: MCP stale-index redaction filter (no existence oracle) and client authority
+        run: cargo test --locked -p mind-place-integration --test clients -- --nocapture
       - name: Legacy encrypted migration interruption and restart
         run: cargo test --locked -p mind-place-index --features sqlcipher-preview --test vault_migration_restart -- --nocapture

@@ -1494,4 +1494,181 @@ mod privacy_capture_race_tests {
         assert!(reopened.save(synthetic_capture("after restart")).is_err());
         assert!(!home.path().join("vault").join("archive").exists());
     }
+
+    fn capture_with(conversation_id: &str, title: &str, text: &str) -> Capture {
+        let mut capture = synthetic_capture(title);
+        capture.conversation_id = conversation_id.to_owned();
+        capture.source_url = format!("https://chatgpt.com/c/{conversation_id}");
+        capture.messages[0].text = text.to_owned();
+        capture
+    }
+
+    fn zebra(limit: usize) -> crate::RetrievalRequest {
+        crate::RetrievalRequest {
+            queries: vec![crate::QueryTerm::Text("zebracorn".into())],
+            limit,
+            ..Default::default()
+        }
+    }
+
+    fn file_count(path: &Path) -> usize {
+        let mut count = 0;
+        for entry in std::fs::read_dir(path).unwrap() {
+            let entry = entry.unwrap();
+            if entry.file_type().unwrap().is_dir() {
+                count += file_count(&entry.path());
+            } else {
+                count += 1;
+            }
+        }
+        count
+    }
+
+    /// MP-9C stale-index adversarial: redaction commits but the FTS/graph
+    /// projection is NOT resynchronized. Every index-derived surface must hide
+    /// the redacted source and must not turn its match into an error.
+    #[test]
+    fn stale_index_never_discloses_or_signals_a_redacted_source() {
+        let (_home, _gate, _lease, _manifest, _recovery, archive, admin, secret) = fixture();
+        const VISIBLE_ID: &str = "123e4567-e89b-12d3-a456-426614174098";
+        archive
+            .save(capture_with(
+                "123e4567-e89b-12d3-a456-426614174099",
+                "Secret forgotten title",
+                "zebracorn secret evidence",
+            ))
+            .unwrap();
+        archive
+            .save(capture_with(VISIBLE_ID, "Visible title", "zebracorn kept"))
+            .unwrap();
+        let state = archive.open_state_store().unwrap();
+        let index = archive.open_index_store().unwrap();
+        index
+            .sync_vault_with_check(&archive, &state, || Ok(()))
+            .unwrap();
+        state
+            .redact_source(&admin, &secret, "Synthetic stale index")
+            .unwrap();
+
+        // The projection is deliberately stale: raw retrieval still sees it.
+        let raw = index.retrieve(&zebra(20)).unwrap();
+        assert!(raw.hits.iter().any(|hit| hit.source_id == secret));
+
+        let visible = |id: &str| Ok(!state.source_is_redacted(id)?);
+        let filtered = index.retrieve_filtered(&zebra(20), visible).unwrap();
+        assert!(!filtered.hits.is_empty());
+        assert!(filtered.hits.iter().all(|hit| hit.source_id != secret
+            && !hit.title.contains("Secret")
+            && !hit.snippet.contains("secret")));
+        assert_eq!(filtered.candidate_count, filtered.hits.len());
+        // A limit of 1 must not report truncation caused by the hidden source.
+        let one = index.retrieve_filtered(&zebra(1), visible).unwrap();
+        assert_eq!(one.hits.len(), 1);
+        assert!(!one.truncated);
+
+        let inspection = index
+            .inspect_retrieval_filtered_with_check(&zebra(20), || Ok(()), visible)
+            .unwrap();
+        assert!(inspection
+            .result
+            .hits
+            .iter()
+            .all(|hit| hit.source_id != secret));
+        assert_eq!(
+            inspection.trace.candidate_count,
+            inspection.result.hits.len()
+        );
+
+        // Context building (desktop and MCP vault) succeeds without the source.
+        let context = index
+            .build_context_vault_with_check(
+                &archive,
+                &crate::ContextRequest {
+                    queries: vec![crate::QueryTerm::Text("zebracorn".into())],
+                    ..Default::default()
+                },
+                || Ok(()),
+            )
+            .unwrap();
+        assert!(!context.groups.is_empty());
+        assert!(context
+            .groups
+            .iter()
+            .all(|group| group.source_id != secret && !group.title.contains("Secret")));
+        let encoded = serde_json::to_string(&context).unwrap();
+        assert!(!encoded.contains("secret evidence") && !encoded.contains(&secret));
+
+        // Graph hive: stale projection still holds the title; the filter drops
+        // the conversation, revisions and the now-orphaned import node.
+        let mut graph = index
+            .graph_neighbors_with_check(
+                &crate::GraphNeighborhoodRequest {
+                    scope: "archive:chatgpt".into(),
+                    seeds: vec![crate::GraphNodeRef::new(
+                        crate::GraphKind::Conversation,
+                        &secret,
+                    )],
+                    direction: crate::GraphDirection::Both,
+                    max_hops: 2,
+                    max_nodes: 120,
+                    max_edges: 240,
+                },
+                || Ok(()),
+            )
+            .unwrap();
+        assert!(graph.nodes.iter().any(|node| node.label.contains("Secret")));
+        graph.retain_visible(visible).unwrap();
+        assert!(graph.nodes.is_empty(), "{:?}", graph.nodes);
+        assert!(graph.edges.is_empty());
+
+        // After the next sync the derived rows are actually pruned.
+        index
+            .sync_vault_with_check(&archive, &state, || Ok(()))
+            .unwrap();
+        let resynced = index.retrieve(&zebra(20)).unwrap();
+        assert!(resynced.hits.iter().all(|hit| hit.source_id != secret));
+        assert!(!resynced.hits.is_empty());
+    }
+
+    /// Forgotten-source reimport through the owner one-time confirmation:
+    /// no capture of the same canonical source may re-enter the vault,
+    /// including after a restart, and nothing of it is disclosed. Immutable
+    /// encrypted evidence is retained (logical redaction, never erasure).
+    #[test]
+    fn forgotten_source_cannot_be_reimported_or_read_after_restart() {
+        let (home, gate, lease, manifest, recovery, archive, admin, secret) = fixture();
+        let first = archive.save(synthetic_capture("before forget")).unwrap();
+        let files_before = file_count(&home.path().join("vault"));
+        let state = archive.open_state_store().unwrap();
+        let preview = state
+            .preview_source_forget(&admin, &secret, "Synthetic owner forget")
+            .unwrap();
+        state
+            .confirm_source_forget(
+                &admin,
+                &secret,
+                &preview.one_time_token,
+                &preview.preview_sha256,
+            )
+            .unwrap();
+        // Refused at source registration or the visibility gate; either is
+        // fail-closed and nothing is published.
+        assert!(archive
+            .save(synthetic_capture("changed after forget"))
+            .is_err());
+        assert!(archive.read(&first.id, None).is_err());
+        assert!(archive.list("").unwrap().is_empty());
+        drop(state);
+        drop(archive);
+
+        let vault = CryptoVault::restore_with_recovery(&gate, lease, &manifest, &recovery).unwrap();
+        let reopened =
+            VaultCaptureStore::open(home.path().join("vault"), vault, &gate, lease).unwrap();
+        assert!(reopened.save(synthetic_capture("after restart")).is_err());
+        assert!(reopened.read(&first.id, None).is_err());
+        assert!(reopened.export_markdown(&first.id, None).is_err());
+        assert!(reopened.snapshots(&first.id).is_err());
+        assert!(reopened.list("").unwrap().is_empty());
+        assert!(file_count(&home.path().join("vault")) >= files_before);
+    }
 }

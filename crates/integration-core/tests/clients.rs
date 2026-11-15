@@ -236,3 +236,110 @@ fn malformed_and_unknown_credentials_are_not_accepted() {
         .issue("Duplicates", &[Cap::Read, Cap::Read])
         .is_err());
 }
+
+/// MP-9C: a redaction that the FTS generation has not caught up with must not
+/// make `memory_search` fail (an existence oracle for forgotten content) and
+/// must never return the redacted snippet. Naming the redacted source directly
+/// is still refused before any index read.
+#[test]
+fn stale_index_after_redaction_is_filtered_not_an_mcp_existence_oracle() {
+    let f = Fixture::new();
+    const OTHER: &str = "11111111-2222-4333-8444-666666666666";
+    f.archive
+        .save(Capture {
+            schema_version: 1,
+            provider: "chatgpt".into(),
+            conversation_id: OTHER.into(),
+            source_url: format!("https://chatgpt.com/c/{OTHER}"),
+            title: "Kept fixture".into(),
+            conversation_created_at: None,
+            conversation_updated_at: None,
+            captured_at: "2026-10-18T11:00:00Z".into(),
+            capture_method: "manual-dom".into(),
+            completeness: "partial".into(),
+            warnings: vec![],
+            messages: vec![Message {
+                id: "msg-1".into(),
+                role: "user".into(),
+                text: "violet spacecraft kept".into(),
+                format: "plain".into(),
+                authored_at: None,
+                model: None,
+                attachments: vec![],
+            }],
+        })
+        .unwrap();
+    f.index.sync(&f.archive, &f.state).unwrap();
+    f.unlock();
+    let reader = f.owner().issue("Model reader", &[Cap::Read]).unwrap();
+    let admin = f.owner().issue("Owner", &[Cap::Admin]).unwrap();
+    let before = f
+        .core()
+        .execute_client_batch(&f.state, reader.credential(), &Fixture::batch())
+        .unwrap();
+    let hits = before.results[0].result["hits"].as_array().unwrap().clone();
+    assert_eq!(hits.len(), 2);
+    let secret = hits
+        .iter()
+        .find(|hit| hit["conversation_id"] == ID)
+        .unwrap()["source_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let admin_hash = format!("{:x}", sha2::Sha256::digest(admin.credential().as_bytes()));
+    f.state
+        .redact_source(&admin_hash, &secret, "Synthetic owner redaction")
+        .unwrap();
+
+    // Index deliberately NOT resynchronized.
+    let after = f
+        .core()
+        .execute_client_batch(&f.state, reader.credential(), &Fixture::batch())
+        .unwrap();
+    let result = &after.results[0].result;
+    let hits = result["hits"].as_array().unwrap();
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0]["conversation_id"], OTHER);
+    assert_eq!(result["candidate_count"], 1);
+    let encoded = serde_json::to_string(&after).unwrap();
+    assert!(!encoded.contains(&secret) && !encoded.contains("authorization"));
+
+    // A query matching only the redacted conversation looks exactly like a miss.
+    let only_secret = ToolBatch {
+        calls: vec![ToolCall {
+            name: ToolName::MemorySearch,
+            arguments: json!({"queries": ["authorization"]}),
+        }],
+    };
+    let miss = ToolBatch {
+        calls: vec![ToolCall {
+            name: ToolName::MemorySearch,
+            arguments: json!({"queries": ["nonexistentterm"]}),
+        }],
+    };
+    let probed = f
+        .core()
+        .execute_client_batch(&f.state, reader.credential(), &only_secret)
+        .unwrap();
+    let missed = f
+        .core()
+        .execute_client_batch(&f.state, reader.credential(), &miss)
+        .unwrap();
+    assert_eq!(probed.results[0].result, missed.results[0].result);
+
+    // Explicitly naming the redacted source is refused before any read.
+    let named = ToolBatch {
+        calls: vec![ToolCall {
+            name: ToolName::MemorySearch,
+            arguments: json!({
+                "queries": ["violet"],
+                "filters": {"source_ids": [secret]}
+            }),
+        }],
+    };
+    assert!(matches!(
+        f.core()
+            .execute_client_batch(&f.state, reader.credential(), &named),
+        Err(IntegrationError::AccessDenied)
+    ));
+}
