@@ -51,6 +51,19 @@ export function mountUi2Shell(root: HTMLElement, options: Ui2ShellOptions): Ui2S
     shell.querySelector<HTMLElement>(selector)?.focus();
   }
 
+  // Transformed-off-screen drawers remain tabbable unless explicitly inert.
+  function syncNavigationAccessibility(): void {
+    const sidebar = shell.querySelector<HTMLElement>(".ui2-shell-sidebar");
+    const closedDrawer = isNarrow() && !mobileOpen;
+    if (sidebar) {
+      sidebar.inert = closedDrawer;
+      if (closedDrawer) sidebar.setAttribute("aria-hidden", "true");
+      else sidebar.removeAttribute("aria-hidden");
+    }
+    shell.querySelector<HTMLButtonElement>('[data-ui2-control="sidebar"]')
+      ?.setAttribute("aria-expanded", String(isNarrow() ? mobileOpen : !collapsed));
+  }
+
   function closeMobileNavigation(restoreFocus: boolean): void {
     if (!mobileOpen) return;
     mobileOpen = false;
@@ -59,6 +72,7 @@ export function mountUi2Shell(root: HTMLElement, options: Ui2ShellOptions): Ui2S
     toggle?.setAttribute("aria-expanded", "false");
     const scrim = shell.querySelector<HTMLElement>(".ui2-shell-scrim");
     if (scrim) scrim.hidden = true;
+    syncNavigationAccessibility();
     if (restoreFocus) toggle?.focus();
   }
 
@@ -80,6 +94,17 @@ export function mountUi2Shell(root: HTMLElement, options: Ui2ShellOptions): Ui2S
     route = next;
     mobileOpen = false;
     render("heading");
+  };
+
+  const onResize = () => {
+    if (disposed) return;
+    if (!isNarrow()) {
+      mobileOpen = false;
+      shell.dataset.mobileOpen = "false";
+      const scrim = shell.querySelector<HTMLElement>(".ui2-shell-scrim");
+      if (scrim) scrim.hidden = true;
+    }
+    syncNavigationAccessibility();
   };
 
   const onKeyDown = (event: KeyboardEvent) => {
@@ -195,13 +220,13 @@ export function mountUi2Shell(root: HTMLElement, options: Ui2ShellOptions): Ui2S
           mobileOpen = !mobileOpen;
           shell.dataset.mobileOpen = String(mobileOpen);
           scrim.hidden = !mobileOpen;
-          toggle.setAttribute("aria-expanded", String(mobileOpen));
+          syncNavigationAccessibility();
           if (mobileOpen) focusAfterRender(".ui2-shell-nav-button");
           else toggle.focus();
         } else {
           collapsed = !collapsed;
           shell.dataset.collapsed = String(collapsed);
-          toggle.setAttribute("aria-expanded", String(!collapsed));
+          syncNavigationAccessibility();
         }
       },
     });
@@ -287,6 +312,7 @@ export function mountUi2Shell(root: HTMLElement, options: Ui2ShellOptions): Ui2S
     main.append(header, placeholder);
     mainColumn.append(main);
     shell.append(skip, aside, scrim, mainColumn);
+    syncNavigationAccessibility();
 
     searchDialog = createUi2Dialog(doc, {
       title: i18n.t("shell.searchTitle"),
@@ -306,6 +332,7 @@ export function mountUi2Shell(root: HTMLElement, options: Ui2ShellOptions): Ui2S
   const unsubscribe = i18n.subscribe(() => render("language"));
   doc.addEventListener("keydown", onKeyDown);
   win.addEventListener("hashchange", onHashChange);
+  win.addEventListener("resize", onResize);
   root.replaceChildren(shell);
   render();
 
@@ -319,6 +346,7 @@ export function mountUi2Shell(root: HTMLElement, options: Ui2ShellOptions): Ui2S
       unsubscribe();
       doc.removeEventListener("keydown", onKeyDown);
       win.removeEventListener("hashchange", onHashChange);
+      win.removeEventListener("resize", onResize);
       searchDialog?.destroy();
       shell.remove();
     },
