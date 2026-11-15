@@ -2,25 +2,48 @@
 // This uses a synthetic native invoke surface, never an owner's archive or browser profile.
 import assert from 'node:assert/strict';
 import { chromium, expect } from '@playwright/test';
-import { createServer } from 'vite';
+import { createLogger, createServer } from 'vite';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { resolve, join } from 'node:path';
 
 const viewports = [[1180, 820], [1180, 600], [800, 520], [590, 410], [390, 700], [360, 520]];
-const vite = await createServer({ server: { host: '127.0.0.1', port: 14476, strictPort: true }, logLevel: 'error' });
-let browser;
+const output = resolve(process.env.MP_SETTINGS_EVIDENCE_DIR || 'outputs/settings-render');
+await mkdir(output, { recursive: true });
+// Each invocation keeps its own cache and evidence; never erase another run's
+// Vite state or turn an unrelated scan/launch failure into a product PASS.
+const cacheDir = await mkdtemp(join(output, 'vite-cache-'));
+const serverLog = [];
+const logger = createLogger('info');
+for (const level of ['info', 'warn', 'error']) {
+  const original = logger[level].bind(logger);
+  logger[level] = (message, options) => {
+    serverLog.push({ level, message: String(message) });
+    original(message, options);
+  };
+}
+const vite = await createServer({ cacheDir, optimizeDeps: { force: true }, server: { host: '127.0.0.1', port: 14476, strictPort: true }, customLogger: logger });
+let browser, context, failure;
+let stage = 'server';
+const errors = [], consoleErrors = [], requestFailures = [], results = [];
 try {
   await vite.listen();
+  stage = 'browser-launch';
   // Use the installed Edge, without opening or taking over the user's browser profile.
   browser = await chromium.launch({ headless: true, timeout: 15000, executablePath: process.platform === 'win32'
     ? 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'
     : process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH });
-  const page = await browser.newPage();
-  const errors = [];
+  context = await browser.newContext();
+  await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
+  const page = await context.newPage();
   page.on('pageerror', (error) => errors.push(error.message));
-  const results = [];
+  page.on('console', (message) => { if (message.type() === 'error') consoleErrors.push(message.text()); });
+  page.on('requestfailed', (request) => requestFailures.push({ url: request.url(), error: request.failure()?.errorText }));
   for (const [width, height] of viewports) {
     console.log(`Checking Settings at ${width}x${height}`);
     await page.setViewportSize({ width, height });
+    stage = `navigation-${width}x${height}`;
     await page.goto('http://127.0.0.1:14476/');
+    stage = `settings-${width}x${height}`;
     await page.waitForTimeout(100);
     await page.evaluate(async () => {
       const { mountReader } = await import('/src/reader.ts');
@@ -84,8 +107,14 @@ try {
     assert.ok(Object.values(result).every(Boolean), `Settings visual regression at ${width}x${height}: ${JSON.stringify(result)}`);
   }
   assert.deepEqual(errors, [], `Uncaught browser errors: ${errors.join('; ')}`);
+  stage = 'passed';
   console.log(JSON.stringify({ passed: results.length, results }, null, 2));
+} catch (error) {
+  failure = String(error.stack || error);
+  throw error;
 } finally {
+  await context?.tracing.stop({ path: join(output, 'trace.zip') });
   await browser?.close();
   await vite.close();
+  await writeFile(join(output, 'evidence.json'), JSON.stringify({ stage, failure, node: process.version, platform: process.platform, cacheDir, results, errors, consoleErrors, requestFailures, serverLog }, null, 2));
 }

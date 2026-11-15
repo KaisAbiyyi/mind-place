@@ -124,3 +124,63 @@ fn live_sqlite_or_capture_writer_blocks_offline_owner_action() {
     gate.lock();
     assert!(OfflineLegacyRoot::acquire(&root, &gate, lease).is_err());
 }
+
+#[test]
+fn synthetic_owner_migration_child() {
+    let Some(home) = std::env::var_os("MP9C_SYNTHETIC_OWNER_MIGRATION") else {
+        return;
+    };
+    let home = std::path::PathBuf::from(home);
+    let root = home.join("app");
+    let gate = SecurityGate::open(root.join("security-v1.json")).unwrap();
+    gate.unlock(b"synthetic-offline-owner-password").unwrap();
+    let lease = gate.require_unlocked().unwrap();
+    let consent =
+        ExplicitMigrationConsent::from_owner_typed_confirmation("ENCRYPT MY LEGACY VAULT").unwrap();
+    let offline = OfflineLegacyRoot::acquire(&root, &gate, lease).unwrap();
+    let recovery_file = home.join("synthetic-recovery.txt");
+    if !recovery_file.exists() {
+        let prepared = offline.prepare(&gate, lease).unwrap();
+        let code = prepared.recovery_code();
+        // Synthetic fixture only. Never pass recovery material through argv,
+        // environment variables, diagnostics or the repository.
+        fs::write(&recovery_file, code.as_bytes()).unwrap();
+        prepared
+            .confirm(&offline, &gate, lease, &code, &consent)
+            .unwrap();
+    } else {
+        let code = zeroize::Zeroizing::new(fs::read_to_string(recovery_file).unwrap());
+        offline
+            .resume(&gate, lease, &code, &consent, false)
+            .unwrap();
+        let target = root.join("encrypted-vault-v1");
+        let manifest = VaultManifest::read(&target).unwrap();
+        let crypto = CryptoVault::restore_with_dpapi(&gate, lease, &manifest).unwrap();
+        let archive = VaultCaptureStore::open(&target, crypto, &gate, lease).unwrap();
+        assert_eq!(archive.list("").unwrap().len(), 1);
+    }
+    // Real process termination: no Rust destructor-based lock cleanup.
+    std::process::exit(77);
+}
+
+#[test]
+fn owner_confirm_then_fresh_process_resume_preserves_every_source_byte() {
+    let (home, gate) = fixture();
+    gate.lock();
+    drop(gate);
+    let before = inventory(&home.path().join("app"));
+    for _ in 0..3 {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "synthetic_owner_migration_child", "--nocapture"])
+            .env("MP9C_SYNTHETIC_OWNER_MIGRATION", home.path())
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(77),
+            "synthetic child failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(inventory(&home.path().join("app")), before);
+    }
+}

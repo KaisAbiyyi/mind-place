@@ -8,6 +8,7 @@
 //! requires explicit offline owner maintenance. Future writers must join it.
 use crate::{Result, SecurityError};
 use fs2::FileExt;
+use sha2::{Digest, Sha256};
 use std::{
     cell::RefCell,
     collections::HashMap,
@@ -66,8 +67,8 @@ fn holds_privacy_reader(path: &Path) -> bool {
 pub const WRITER_LOCK_NAME: &str = ".vault-writer.lock";
 /// Independent privacy serialization: capture and source redaction acquire
 /// this EXCLUSIVE lock before any nested shared writer/SQLite connection.
-// Advisory sentinel lives BESIDE the vault (not inside its strict backup
-// inventory). It contains no authority or user data.
+// Advisory sentinel lives outside the vault and, for the fixed app child,
+// outside the legacy profile too. It contains no authority or user data.
 pub const PRIVACY_LOCK_NAME: &str = ".vault-privacy.lock";
 
 pub struct VaultWriterFence {
@@ -129,20 +130,47 @@ impl VaultWriterFence {
 }
 
 fn privacy_path(vault_root: &Path) -> Result<PathBuf> {
+    for ancestor in vault_root.ancestors() {
+        if !ancestor.as_os_str().is_empty() {
+            crate::validate_path(ancestor)?;
+        }
+    }
     if !vault_root.is_dir() {
         return Err(SecurityError::InvalidConfig);
     }
-    let parent = vault_root.parent().ok_or(SecurityError::InvalidConfig)?;
+    // Canonical identity is shared by nested guards and separate processes.
+    let root = vault_root.canonicalize()?;
+    let parent = root.parent().ok_or(SecurityError::InvalidConfig)?;
+    let name = root.file_name().and_then(|name| name.to_str());
+    let app_child = name.is_some_and(|name| {
+        if cfg!(windows) {
+            name.eq_ignore_ascii_case("encrypted-vault-v1")
+        } else {
+            name == "encrypted-vault-v1"
+        }
+    });
+    if app_child {
+        // Offline migration publishes this fixed child beneath its immutable
+        // legacy source. A sibling sentinel there would contaminate the strict
+        // source inventory on the first post-publication disclosure. Keep it
+        // outside the ENTIRE profile, like migration's existing work artifacts.
+        // Never delete/adopt an old in-profile sentinel or relax an inventory.
+        let outside = parent.parent().ok_or(SecurityError::InvalidConfig)?;
+        let identity = Sha256::digest(root.as_os_str().as_encoded_bytes());
+        return Ok(outside.join(format!(".mp9c-{identity:x}.privacy.lock")));
+    }
     Ok(parent.join(PRIVACY_LOCK_NAME))
 }
 
 fn privacy_file(vault_root: &Path) -> Result<File> {
-    if !vault_root.is_dir() {
-        return Err(SecurityError::InvalidConfig);
-    }
-    let parent = vault_root.parent().ok_or(SecurityError::InvalidConfig)?;
+    let path = privacy_path(vault_root)?;
+    let parent = path.parent().ok_or(SecurityError::InvalidConfig)?;
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or(SecurityError::InvalidConfig)?;
     // Outside the portable-backup inventory: coordination is never authority.
-    open_lock(parent, PRIVACY_LOCK_NAME)
+    open_lock(parent, name)
 }
 
 fn open_lock(vault_root: &Path, name: &str) -> Result<File> {
@@ -179,6 +207,139 @@ fn open_lock(vault_root: &Path, name: &str) -> Result<File> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn app_child_disclosure_does_not_change_the_strict_legacy_inventory() {
+        use crate::vault_migration::LegacyMigrationPreflight;
+        let home = tempfile::tempdir().unwrap();
+        let legacy = home.path().join("app");
+        fs::create_dir(&legacy).unwrap();
+        fs::write(legacy.join("state.sqlite3"), b"SQLite format 3\0synthetic").unwrap();
+        let root = legacy.join("encrypted-vault-v1");
+        let before: Vec<_> = fs::read_dir(&legacy)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        LegacyMigrationPreflight::inspect(&legacy, &root).unwrap();
+        fs::create_dir(&root).unwrap();
+        let read = VaultWriterFence::privacy_reader(&root).unwrap();
+        drop(read);
+        let recovery = LegacyMigrationPreflight::recovery_authorization_root(&legacy, &root);
+        let mut after: Vec<_> = fs::read_dir(&legacy)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .filter(|name| name != "encrypted-vault-v1")
+            .collect();
+        after.sort();
+        eprintln!(
+            "synthetic legacy entries: {after:?}; recovery accepted: {}",
+            recovery.is_ok()
+        );
+        assert!(
+            recovery.is_ok(),
+            "a disclosure contaminated the legacy inventory"
+        );
+        assert_eq!(
+            after, before,
+            "privacy coordination must not modify the source root"
+        );
+        assert_eq!(
+            fs::read(legacy.join("state.sqlite3")).unwrap(),
+            b"SQLite format 3\0synthetic"
+        );
+    }
+
+    #[test]
+    fn app_child_nested_aliases_keep_one_fence_until_the_last_guard_drops() {
+        let home = tempfile::tempdir().unwrap();
+        let root = home.path().join("app/encrypted-vault-v1");
+        fs::create_dir_all(&root).unwrap();
+        let outer = VaultWriterFence::privacy_reader(&root).unwrap();
+        let inner = VaultWriterFence::privacy_reader(&root.join(".")).unwrap();
+        assert_eq!(outer.path, inner.path);
+        assert!(!outer.path.starts_with(root.parent().unwrap()));
+        let competing = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&outer.path)
+            .unwrap();
+        assert!(FileExt::try_lock_exclusive(&competing).is_err());
+        assert!(VaultWriterFence::privacy(&root.join(".")).is_err());
+        drop(outer);
+        assert!(FileExt::try_lock_exclusive(&competing).is_err());
+        drop(inner);
+        FileExt::try_lock_exclusive(&competing).unwrap();
+        FileExt::unlock(&competing).unwrap();
+        let _exclusive = VaultWriterFence::privacy(&root).unwrap();
+    }
+
+    #[test]
+    fn app_child_rejects_nonempty_or_directory_sentinel_without_repair() {
+        let home = tempfile::tempdir().unwrap();
+        let root = home.path().join("app/encrypted-vault-v1");
+        fs::create_dir_all(&root).unwrap();
+        let path = privacy_path(&root).unwrap();
+        fs::write(&path, b"synthetic-unknown").unwrap();
+        assert!(VaultWriterFence::privacy_reader(&root).is_err());
+        assert!(VaultWriterFence::privacy(&root).is_err());
+        assert_eq!(fs::read(&path).unwrap(), b"synthetic-unknown");
+
+        let other = home.path().join("other/encrypted-vault-v1");
+        fs::create_dir_all(&other).unwrap();
+        let directory = privacy_path(&other).unwrap();
+        fs::create_dir(&directory).unwrap();
+        assert!(VaultWriterFence::privacy_reader(&other).is_err());
+        assert!(VaultWriterFence::privacy(&other).is_err());
+        assert!(directory.is_dir());
+    }
+
+    #[test]
+    fn old_in_profile_sentinel_is_still_rejected_by_migration_and_never_removed() {
+        use crate::vault_migration::LegacyMigrationPreflight;
+        let home = tempfile::tempdir().unwrap();
+        let legacy = home.path().join("app");
+        let root = legacy.join("encrypted-vault-v1");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(legacy.join("state.sqlite3"), b"SQLite format 3\0synthetic").unwrap();
+        let old = legacy.join(PRIVACY_LOCK_NAME);
+        fs::write(&old, b"").unwrap();
+        let _reader = VaultWriterFence::privacy_reader(&root).unwrap();
+        assert!(matches!(
+            LegacyMigrationPreflight::recovery_authorization_root(&legacy, &root),
+            Err(SecurityError::InvalidConfig)
+        ));
+        assert_eq!(fs::read(&old).unwrap(), b"");
+    }
+
+    #[test]
+    fn app_child_privacy_process_probe() {
+        let Some(root) = std::env::var_os("MP9C_SYNTHETIC_FENCE_PROBE") else {
+            return;
+        };
+        let file = privacy_file(Path::new(&root)).unwrap();
+        assert!(
+            FileExt::try_lock_exclusive(&file).is_err(),
+            "another process bypassed the reader"
+        );
+    }
+
+    #[test]
+    fn app_child_privacy_reader_excludes_a_separate_process() {
+        let home = tempfile::tempdir().unwrap();
+        let root = home.path().join("app/encrypted-vault-v1");
+        fs::create_dir_all(&root).unwrap();
+        let _reader = VaultWriterFence::privacy_reader(&root).unwrap();
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "vault_fence::tests::app_child_privacy_process_probe",
+                "--nocapture",
+            ])
+            .env("MP9C_SYNTHETIC_FENCE_PROBE", &root)
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
 
     #[test]
     fn multiple_writers_block_snapshot_until_both_release() {
