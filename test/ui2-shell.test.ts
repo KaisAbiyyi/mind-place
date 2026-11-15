@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { JSDOM } from "jsdom";
@@ -227,5 +229,160 @@ test("MP-UI2-04: one compiled app selects legacy v1 by default and v2 only after
     else delete (globalThis as { localStorage?: Storage }).localStorage;
     previous.dom.window.close();
     preview.dom.window.close();
+  }
+});
+
+test("MP-UI2-04: fresh install preserves classic first-run onboarding under v2 flag, then subsequent unlock mounts v2 with EN/ID and lock safety", async () => {
+  const { dom, root } = fixture();
+  dom.window.document.documentElement.lang = "en";
+  dom.window.localStorage.setItem(UI2_SHELL_FEATURE_FLAG, "enabled");
+  const originalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  const previousGlobals = { document: globalThis.document, Element: globalThis.Element };
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, value: dom.window.localStorage });
+  Object.assign(globalThis, { document: dom.window.document, Element: dom.window.Element });
+
+  let configured = false;
+  let locked = true;
+  let epoch = 0;
+  const commands: string[] = [];
+  const invoke: Invoke = async <T>(command: string) => {
+    commands.push(command);
+    if (command === "get_security_status") {
+      return { configured, locked, epoch, retry_after_ms: 0, vault_mode: "legacy" } as T;
+    }
+    if (command === "initialize_security") {
+      configured = true;
+      locked = false;
+      epoch = 1;
+      return { configured, locked, epoch, retry_after_ms: 0, vault_mode: "legacy" } as T;
+    }
+    if (command === "unlock_security") {
+      locked = false;
+      epoch += 1;
+      return { configured, locked, epoch, retry_after_ms: 0, vault_mode: "legacy" } as T;
+    }
+    if (command === "lock_security") {
+      locked = true;
+      epoch += 1;
+      return { configured, locked, epoch, retry_after_ms: 0, vault_mode: "legacy" } as T;
+    }
+    if (command === "list_conversations" || command === "list_local_mcp_clients") return [] as T;
+    if (command === "get_setup") {
+      return {
+        platform: "windows",
+        archive_path: "fixture-archive",
+        extension_path: "fixture-extension",
+        native_host_name: "com.mindplace.capture",
+        host_path: "fixture-host",
+        extension_id: "fixture-id",
+        registered_browsers: [],
+        legacy_available: false,
+      } as T;
+    }
+    if (command === "refresh_archive_index") return {} as T;
+    return { running: false } as T;
+  };
+
+  try {
+    await mountApplication({ root, invoke, clipboard: { writeText: async () => {} } });
+    assert.ok(root.querySelector("#security-secret-confirm"), "fresh install asks for secret confirmation");
+    root.querySelector<HTMLInputElement>("#security-secret")!.value = "correct horse battery";
+    root.querySelector<HTMLInputElement>("#security-secret-confirm")!.value = "correct horse battery";
+    root.querySelector<HTMLFormElement>("#security-form")!.dispatchEvent(
+      new dom.window.Event("submit", { bubbles: true, cancelable: true }),
+    );
+    for (let i = 0; i < 8; i++) await delay(5);
+
+    assert.ok(root.querySelector(".onboarding-workspace"), "first-run onboarding wizard opens in classic flow even with v2 flag enabled");
+    assert.equal(root.querySelector(".ui2-shell"), null, "v2 shell must not bypass onboarding or mount simultaneously");
+    assert.equal(dom.window.localStorage.getItem(UI2_SHELL_FEATURE_FLAG), "enabled", "preview opt-in stays intact");
+
+    // Lock from classic onboarding/reader and verify gate returns without leaking wizard or preview.
+    root.querySelector<HTMLButtonElement>("[data-action='lock']")!.click();
+    await delay(20);
+    assert.ok(root.querySelector("#security-form"), "gate returns after confirmed Lock");
+    assert.equal(root.querySelector<HTMLElement>("#security-confirm-row")?.hidden, true, "configured profile now shows unlock, not setup");
+    assert.equal(root.querySelector(".onboarding-workspace"), null);
+    assert.equal(root.querySelector(".ui2-shell"), null);
+
+    // Subsequent unlock opens v2 Shell preview, switches EN -> ID, and restores lang on Lock.
+    root.querySelector<HTMLInputElement>("#security-secret")!.value = "correct horse battery";
+    root.querySelector<HTMLFormElement>("#security-form")!.dispatchEvent(
+      new dom.window.Event("submit", { bubbles: true, cancelable: true }),
+    );
+    await delay(50);
+    assert.ok(root.querySelector(".ui2-shell"), "subsequent unlock enters flagged v2 shell");
+    assert.equal(root.querySelector(".onboarding-workspace"), null);
+
+    root.querySelector<HTMLButtonElement>('[data-ui2-seg-value="id"]')!.click();
+    assert.equal(dom.window.document.documentElement.lang, "id");
+    assert.equal(root.querySelector('[data-ui2-route="/home"]')?.getAttribute("aria-label"), "Beranda");
+
+    root.querySelector<HTMLButtonElement>('[data-ui2-control="lock"]')!.click();
+    await delay(20);
+    assert.ok(root.querySelector("#security-form"), "v2 Lock returns to native gate");
+    assert.equal(root.querySelector(".ui2-shell"), null);
+    assert.equal(dom.window.document.documentElement.lang, "en", "Lock restores original gate document language");
+
+    // Third unlock keeps persisted ID locale in v2 shell.
+    root.querySelector<HTMLInputElement>("#security-secret")!.value = "correct horse battery";
+    root.querySelector<HTMLFormElement>("#security-form")!.dispatchEvent(
+      new dom.window.Event("submit", { bubbles: true, cancelable: true }),
+    );
+    await delay(50);
+    assert.ok(root.querySelector(".ui2-shell"));
+    assert.equal(dom.window.document.documentElement.lang, "id");
+    assert.equal(root.querySelector('[data-ui2-route="/archive"]')?.getAttribute("aria-label"), "Arsip");
+    assert.ok(commands.includes("initialize_security"));
+    assert.ok(commands.includes("unlock_security"));
+    assert.ok(commands.includes("lock_security"));
+  } finally {
+    Object.assign(globalThis, previousGlobals);
+    if (originalStorage) Object.defineProperty(globalThis, "localStorage", originalStorage);
+    else delete (globalThis as { localStorage?: Storage }).localStorage;
+    dom.window.close();
+  }
+});
+
+test("MP-UI2-04: Ctrl+K shortcut uses approved high-contrast token >= 4.5:1 in both light and dark themes", () => {
+  const repoRoot = path.resolve(import.meta.dirname, "..");
+  const tokensCss = fs.readFileSync(path.join(repoRoot, "src/ui2/ui-kit/tokens.css"), "utf8");
+  const shellCss = fs.readFileSync(path.join(repoRoot, "src/ui2/shell/shell.css"), "utf8");
+
+  const shortcutRule = /\.ui2-shell-shortcut\s*\{([^}]*)\}/.exec(shellCss)?.[1] ?? "";
+  const colorTokenMatch = /color:\s*var\((--[a-z0-9-]+)\)/.exec(shortcutRule);
+  assert.ok(colorTokenMatch, "shortcut color must use a UI2 CSS token");
+  const fgToken = colorTokenMatch[1];
+  assert.notEqual(fgToken, "--fg-3", "shortcut must not use low-contrast --fg-3");
+
+  const lightBlock = /:root,\s*:root\[data-theme="light"\]\s*\{([^}]*)\}/.exec(tokensCss)?.[1] ?? "";
+  const darkBlock = /:root\[data-theme="dark"\]\s*\{([^}]*)\}/.exec(tokensCss)?.[1] ?? "";
+  assert.ok(lightBlock && darkBlock, "both light and dark token blocks must exist");
+
+  const readHex = (block: string, token: string) => {
+    const m = new RegExp(`${token}:\\s*(#[0-9a-fA-F]{6})\\s*;`).exec(block);
+    assert.ok(m, `missing hex token ${token}`);
+    return m[1];
+  };
+  const hexToLum = (hex: string) => {
+    const channel = (start: number) => {
+      const c = Number.parseInt(hex.slice(start, start + 2), 16) / 255;
+      return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    };
+    return 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5);
+  };
+  const contrast = (hexA: string, hexB: string) => {
+    const l1 = hexToLum(hexA);
+    const l2 = hexToLum(hexB);
+    return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+  };
+
+  for (const [theme, block] of [["light", lightBlock], ["dark", darkBlock]] as const) {
+    const fg = readHex(block, fgToken);
+    for (const bgToken of ["--surface", "--sunken"]) {
+      const bg = readHex(block, bgToken);
+      const ratio = contrast(fg, bg);
+      assert.ok(ratio >= 4.5, `${theme} ${fgToken} (${fg}) on ${bgToken} (${bg}) contrast ${ratio.toFixed(2)} < 4.5`);
+    }
   }
 });

@@ -61,6 +61,49 @@ const entryPlugin = {
 
 async function audit(page) {
   return page.evaluate(() => {
+    function parseRgb(color) {
+      const m = /^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)(?:\s*,\s*([\d.]+))?\s*\)$/i.exec(color || "");
+      if (!m) return null;
+      return { r: Number(m[1]), g: Number(m[2]), b: Number(m[3]), a: m[4] === undefined ? 1 : Number(m[4]) };
+    }
+    function luminance(rgb) {
+      const channel = (v) => {
+        const c = v / 255;
+        return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+      };
+      return 0.2126 * channel(rgb.r) + 0.7152 * channel(rgb.g) + 0.0722 * channel(rgb.b);
+    }
+    function contrastRatio(fg, bg) {
+      const l1 = luminance(fg);
+      const l2 = luminance(bg);
+      return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+    }
+    function effectiveBackground(el) {
+      let cur = el;
+      while (cur) {
+        const bg = parseRgb(getComputedStyle(cur).backgroundColor);
+        if (bg && bg.a > 0.99) return bg;
+        cur = cur.parentElement;
+      }
+      return parseRgb(getComputedStyle(document.documentElement).backgroundColor) || { r: 255, g: 255, b: 255, a: 1 };
+    }
+    function measureContrast(selector) {
+      const el = document.querySelector(selector);
+      if (!el) return null;
+      const rect = el.getBoundingClientRect();
+      const style = getComputedStyle(el);
+      if (style.display === "none" || style.visibility === "hidden" || !rect.width || !rect.height) return null;
+      const fg = parseRgb(style.color);
+      const bg = effectiveBackground(el);
+      if (!fg || !bg) return null;
+      return {
+        ratio: Number(contrastRatio(fg, bg).toFixed(2)),
+        fontSizePx: parseFloat(style.fontSize),
+        color: style.color,
+        backgroundColor: `rgb(${bg.r}, ${bg.g}, ${bg.b})`,
+      };
+    }
+
     const shell = document.querySelector(".ui2-shell");
     const navButtons = [...document.querySelectorAll(".ui2-shell-nav-button")];
     const missingAccessibleNames = [...document.querySelectorAll(".ui2-root button")]
@@ -84,6 +127,11 @@ async function audit(page) {
       documentLanguage: document.documentElement.lang,
       styleLoaded: getComputedStyle(shell).display === "grid",
       sidebarHiddenToAssistiveTech: document.querySelector(".ui2-shell-sidebar")?.getAttribute("aria-hidden") === "true",
+      shortcutContrast: measureContrast(".ui2-shell-shortcut"),
+      navContrast: measureContrast(".ui2-shell-nav-button"),
+      headingContrast: measureContrast(".ui2-h1"),
+      leadContrast: measureContrast(".ui2-lead"),
+      emptyBodyContrast: measureContrast(".ui2-shell-placeholder .ui2-empty-body"),
     };
   });
 }
@@ -123,6 +171,20 @@ async function main() {
           assert.equal(result.unavailableState && result.nonemptyPreview && result.styleLoaded, true);
           assert.equal(result.documentLanguage, locale === "id" ? "id" : "en");
           assert.equal(result.sidebarHiddenToAssistiveTech, viewport.name === "narrow", "closed drawer a11y");
+          if (viewport.name === "wide") {
+            assert.ok(result.shortcutContrast && result.shortcutContrast.ratio >= 4.5,
+              `shortcut contrast ${theme}/${locale}: ${JSON.stringify(result.shortcutContrast)}`);
+          }
+          assert.ok(result.headingContrast && result.headingContrast.ratio >= 4.5,
+            `heading contrast ${theme}/${locale}/${viewport.name}: ${JSON.stringify(result.headingContrast)}`);
+          assert.ok(result.leadContrast && result.leadContrast.ratio >= 4.5,
+            `lead contrast ${theme}/${locale}/${viewport.name}: ${JSON.stringify(result.leadContrast)}`);
+          assert.ok(result.emptyBodyContrast && result.emptyBodyContrast.ratio >= 4.5,
+            `empty body contrast ${theme}/${locale}/${viewport.name}: ${JSON.stringify(result.emptyBodyContrast)}`);
+          if (viewport.name !== "narrow") {
+            assert.ok(result.navContrast && result.navContrast.ratio >= 4.5,
+              `nav contrast ${theme}/${locale}/${viewport.name}: ${JSON.stringify(result.navContrast)}`);
+          }
           const filename = `shell-${theme}-${locale}-${viewport.name}.png`;
           await page.screenshot({ path: path.join(outDir, filename), fullPage: true });
           matrix.push({ filename, theme, locale, viewport, audit: result });
@@ -185,7 +247,7 @@ async function main() {
       ctrlKAndEscapeFocusReturn: "PASS",
       ENIDSwitch: "PASS",
       mobileOverlayEscapeFocusReturn: "PASS",
-      contrastAudit: "NOT_RUN (manual design review required)",
+      contrastAudit: "PASS (automated WCAG 2.1 >= 4.5:1 on .ui2-shell-shortcut and shell text in light and dark; manual UX/screen-reader review remains owner gate)",
       nativeWindowsWebView2: "NOT_RUN (owner gate)",
     };
     fs.writeFileSync(path.join(outDir, "shell-manifest.json"), JSON.stringify(manifest, null, 2));
