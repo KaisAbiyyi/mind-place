@@ -524,3 +524,141 @@ fn migrated_attachment_reopens_without_access_to_plaintext_legacy_source() {
     gate.lock();
     assert!(archive.asset(id, name).is_err());
 }
+
+fn setup_published_restart_fixture(
+    consent: &ExplicitMigrationConsent,
+) -> (
+    Fixture,
+    SecurityGate,
+    mind_place_security::UnlockLease,
+    VaultManifest,
+    RecoverySecret,
+) {
+    let f = fixture();
+    crash(&f, "published");
+    let home = f.home.path();
+    let gate = SecurityGate::open(home.join("gate.json")).unwrap();
+    gate.unlock(PASSWORD).unwrap();
+    let lease = gate.require_unlocked().unwrap();
+    let manifest = VaultManifest::read(&home.join("authorization")).unwrap();
+    let code =
+        zeroize::Zeroizing::new(fs::read_to_string(home.join("synthetic-recovery.txt")).unwrap());
+    let recovery = RecoverySecret::from_export_code(&code).unwrap();
+    let converter = LegacyEncryptedConversion {
+        gate: &gate,
+        lease,
+        consent,
+        manifest: &manifest,
+        recovery: &recovery,
+    };
+    let plan = converter
+        .resume_owner_consented(&home.join("legacy"), &home.join("destination"))
+        .unwrap();
+    converter.execute_or_resume(&plan).unwrap();
+    (f, gate, lease, manifest, recovery)
+}
+
+#[test]
+fn post_publish_restart_recovers_after_read_sidecars_and_rejects_dirty_wal() {
+    let consent = consent();
+    let (f, gate, lease, manifest, recovery) = setup_published_restart_fixture(&consent);
+    let source = f.home.path().join("legacy");
+    let destination = f.home.path().join("destination");
+    let converter = LegacyEncryptedConversion {
+        gate: &gate,
+        lease,
+        consent: &consent,
+        manifest: &manifest,
+        recovery: &recovery,
+    };
+
+    // Repeated encrypted reads followed by fresh resumes must succeed and quiesce.
+    for _ in 0..3 {
+        let vault = CryptoVault::restore_with_recovery(&gate, lease, &manifest, &recovery).unwrap();
+        let archive = VaultCaptureStore::open(&destination, vault, &gate, lease).unwrap();
+        assert_eq!(archive.list("").unwrap().len(), 2);
+        let (id, snapshot, expected) = &f.captures[0];
+        assert_eq!(&archive.read(id, Some(snapshot)).unwrap().capture, expected);
+        assert_eq!(
+            archive.read(id, None).unwrap().snapshot_id,
+            f.selected_current.1
+        );
+        drop(archive);
+
+        let resumed = converter
+            .resume_owner_consented(&source, &destination)
+            .unwrap();
+        converter.execute_or_resume(&resumed).unwrap();
+        for sidecar in [
+            "state.sqlite3-wal",
+            "state.sqlite3-shm",
+            "archive-index.sqlite3-wal",
+            "archive-index.sqlite3-shm",
+        ] {
+            assert!(
+                !destination.join(sidecar).exists(),
+                "{sidecar} remained after resume"
+            );
+        }
+    }
+
+    // Produce real encrypted SQLite WAL frame bytes in an isolated fixture DB,
+    // verify live open fails closed, then verify non-empty WAL is never silently dropped.
+    let (f3, gate3, lease3, manifest3, recovery3) = setup_published_restart_fixture(&consent);
+    let source3 = f3.home.path().join("legacy");
+    let destination3 = f3.home.path().join("destination");
+    let converter3 = LegacyEncryptedConversion {
+        gate: &gate3,
+        lease: lease3,
+        consent: &consent,
+        manifest: &manifest3,
+        recovery: &recovery3,
+    };
+    let vault3 =
+        CryptoVault::restore_with_recovery(&gate3, lease3, &manifest3, &recovery3).unwrap();
+    let derived3 = vault3
+        .derived_key(&gate3, lease3, b"state/sqlcipher/v1")
+        .unwrap();
+    let mut raw3 = [0u8; 32];
+    raw3.copy_from_slice(derived3.as_ref());
+    let key3 = CipherKey::new(raw3, &gate3, lease3);
+    let rw_db = rusqlite::Connection::open_with_flags(
+        destination3.join("state.sqlite3"),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NOFOLLOW,
+    )
+    .unwrap();
+    key3.unlock(&rw_db).unwrap();
+    rw_db
+        .execute_batch(
+            "PRAGMA wal_autocheckpoint = 0; CREATE TABLE uncheckpointed_wal (v INTEGER); INSERT INTO uncheckpointed_wal VALUES (7);",
+        )
+        .unwrap();
+    let real_dirty_wal = fs::read(destination3.join("state.sqlite3-wal")).unwrap();
+    assert!(!real_dirty_wal.is_empty());
+    assert!(converter3
+        .resume_owner_consented(&source3, &destination3)
+        .is_err());
+    drop(rw_db);
+
+    let (f2, gate2, lease2, manifest2, recovery2) = setup_published_restart_fixture(&consent);
+    let source2 = f2.home.path().join("legacy");
+    let destination2 = f2.home.path().join("destination");
+    let converter2 = LegacyEncryptedConversion {
+        gate: &gate2,
+        lease: lease2,
+        consent: &consent,
+        manifest: &manifest2,
+        recovery: &recovery2,
+    };
+    let plan2 = converter2
+        .resume_owner_consented(&source2, &destination2)
+        .unwrap();
+    let wal2 = destination2.join("state.sqlite3-wal");
+    fs::write(&wal2, &real_dirty_wal).unwrap();
+    assert!(converter2
+        .resume_owner_consented(&source2, &destination2)
+        .is_err());
+    assert!(converter2.execute_or_resume(&plan2).is_err());
+    assert_eq!(fs::read(&wal2).unwrap(), real_dirty_wal);
+    assert_eq!(inventory(&source2), f2.before);
+}

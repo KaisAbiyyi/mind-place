@@ -32,6 +32,211 @@ pub fn validate_owner_migration_path(path: &Path) -> Result<()> {
     check(path)
 }
 
+const SQLITE_SHM_REGION_BYTES: usize = 32_768;
+const SQLITE_WAL_INDEX_VERSION: u32 = 3_007_000;
+const SQLITE_WAL_READMARK_NOT_USED: u32 = u32::MAX;
+const SQLITE_SHM_CKPT_INFO_END: usize = 136;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EmptySidecarKind {
+    Wal,
+    Shm,
+}
+
+fn check_safe_regular_file(path: &Path) -> Result<()> {
+    check(path)?;
+    let meta = fs::symlink_metadata(path)?;
+    if !meta.is_file() || meta.file_type().is_symlink() {
+        return Err(SecurityError::UnsafePath);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        if meta.file_attributes() & 0x400 != 0 {
+            return Err(SecurityError::UnsafePath);
+        }
+    }
+    Ok(())
+}
+
+/// Validates that `path` is a safe zero-byte SQLite WAL file without deleting
+/// or mutating it. Any non-empty or non-regular WAL fails closed.
+pub fn validate_empty_sqlite_wal_sidecar(path: &Path) -> Result<()> {
+    check_safe_regular_file(path)?;
+    if fs::symlink_metadata(path)?.len() != 0 {
+        return Err(SecurityError::Crypto);
+    }
+    let mut file = File::open(path)?;
+    let meta = file.metadata()?;
+    if !meta.is_file() || meta.len() != 0 {
+        return Err(SecurityError::Crypto);
+    }
+    let mut probe = [0u8; 1];
+    if file.read(&mut probe)? != 0 {
+        return Err(SecurityError::Crypto);
+    }
+    Ok(())
+}
+
+fn sqlite_wal_header_checksum(header_prefix: &[u8]) -> [u32; 2] {
+    let mut s0: u32 = 0;
+    let mut s1: u32 = 0;
+    for chunk in header_prefix.chunks_exact(8) {
+        let x0 = u32::from_ne_bytes(chunk[0..4].try_into().expect("4-byte chunk"));
+        let x1 = u32::from_ne_bytes(chunk[4..8].try_into().expect("4-byte chunk"));
+        s0 = s0.wrapping_add(x0).wrapping_add(s1);
+        s1 = s1.wrapping_add(x1).wrapping_add(s0);
+    }
+    [s0, s1]
+}
+
+fn validate_empty_sqlite_shm_bytes(bytes: &[u8]) -> Result<()> {
+    if bytes.len() != SQLITE_SHM_REGION_BYTES || bytes[..48] != bytes[48..96] {
+        return Err(SecurityError::Crypto);
+    }
+    let version = u32::from_ne_bytes(bytes[0..4].try_into().map_err(|_| SecurityError::Crypto)?);
+    let unused = u32::from_ne_bytes(bytes[4..8].try_into().map_err(|_| SecurityError::Crypto)?);
+    let is_init = bytes[12];
+    let big_end_cksum = bytes[13];
+    let sz_page = u16::from_ne_bytes(
+        bytes[14..16]
+            .try_into()
+            .map_err(|_| SecurityError::Crypto)?,
+    );
+    let mx_frame = u32::from_ne_bytes(
+        bytes[16..20]
+            .try_into()
+            .map_err(|_| SecurityError::Crypto)?,
+    );
+    let n_page = u32::from_ne_bytes(
+        bytes[20..24]
+            .try_into()
+            .map_err(|_| SecurityError::Crypto)?,
+    );
+    let valid_page_size = sz_page == 0
+        || sz_page == 1
+        || (sz_page >= 512 && sz_page <= 32_768 && sz_page.is_power_of_two());
+    if version != SQLITE_WAL_INDEX_VERSION
+        || unused != 0
+        || is_init != 1
+        || big_end_cksum > 1
+        || !valid_page_size
+        || mx_frame != 0
+        || (sz_page == 0 && n_page != 0)
+        || bytes[24..32] != [0u8; 8]
+    {
+        return Err(SecurityError::Crypto);
+    }
+    let expected_cksum = sqlite_wal_header_checksum(&bytes[0..40]);
+    let actual_cksum = [
+        u32::from_ne_bytes(
+            bytes[40..44]
+                .try_into()
+                .map_err(|_| SecurityError::Crypto)?,
+        ),
+        u32::from_ne_bytes(
+            bytes[44..48]
+                .try_into()
+                .map_err(|_| SecurityError::Crypto)?,
+        ),
+    ];
+    if actual_cksum != expected_cksum {
+        return Err(SecurityError::Crypto);
+    }
+    let n_backfill = u32::from_ne_bytes(
+        bytes[96..100]
+            .try_into()
+            .map_err(|_| SecurityError::Crypto)?,
+    );
+    let mark0 = u32::from_ne_bytes(
+        bytes[100..104]
+            .try_into()
+            .map_err(|_| SecurityError::Crypto)?,
+    );
+    if n_backfill != 0 || mark0 != 0 {
+        return Err(SecurityError::Crypto);
+    }
+    for offset in [104usize, 108, 112, 116] {
+        let mark = u32::from_ne_bytes(
+            bytes[offset..offset + 4]
+                .try_into()
+                .map_err(|_| SecurityError::Crypto)?,
+        );
+        if mark != 0 && mark != SQLITE_WAL_READMARK_NOT_USED {
+            return Err(SecurityError::Crypto);
+        }
+    }
+    let n_backfill_attempted = u32::from_ne_bytes(
+        bytes[128..132]
+            .try_into()
+            .map_err(|_| SecurityError::Crypto)?,
+    );
+    let not_used0 = u32::from_ne_bytes(
+        bytes[132..136]
+            .try_into()
+            .map_err(|_| SecurityError::Crypto)?,
+    );
+    if bytes[120..128] != [0u8; 8] || n_backfill_attempted != 0 || not_used0 != 0 {
+        return Err(SecurityError::Crypto);
+    }
+    if bytes[SQLITE_SHM_CKPT_INFO_END..]
+        .iter()
+        .any(|&byte| byte != 0)
+    {
+        return Err(SecurityError::Crypto);
+    }
+    Ok(())
+}
+
+/// Validates that `path` is a benign 32 KiB empty-WAL SQLite `-shm` index
+/// left after read-only WAL inspection (zero frames, valid checksum, zero tail).
+pub fn validate_empty_sqlite_shm_sidecar(path: &Path) -> Result<()> {
+    check_safe_regular_file(path)?;
+    if fs::symlink_metadata(path)?.len() != SQLITE_SHM_REGION_BYTES as u64 {
+        return Err(SecurityError::Crypto);
+    }
+    let file = File::open(path)?;
+    let meta = file.metadata()?;
+    if !meta.is_file() || meta.len() != SQLITE_SHM_REGION_BYTES as u64 {
+        return Err(SecurityError::Crypto);
+    }
+    let mut bytes = Vec::with_capacity(SQLITE_SHM_REGION_BYTES);
+    file.take((SQLITE_SHM_REGION_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)?;
+    validate_empty_sqlite_shm_bytes(&bytes)
+}
+
+fn benign_empty_sidecar_kind(
+    relative: &Path,
+    has_state_db: bool,
+    has_archive_db: bool,
+) -> Option<EmptySidecarKind> {
+    if relative.components().count() != 1 {
+        return None;
+    }
+    match relative.to_str()? {
+        "state.sqlite3-wal" if has_state_db => Some(EmptySidecarKind::Wal),
+        "state.sqlite3-shm" if has_state_db => Some(EmptySidecarKind::Shm),
+        "archive-index.sqlite3-wal" if has_archive_db => Some(EmptySidecarKind::Wal),
+        "archive-index.sqlite3-shm" if has_archive_db => Some(EmptySidecarKind::Shm),
+        _ => None,
+    }
+}
+
+fn digest_scanned_files(mut files: Vec<LegacyFileReceipt>) -> Result<String> {
+    files.sort_by(|a, b| a.relative.cmp(&b.relative));
+    let mut digest = Sha256::new();
+    digest.update(b"mp9b-migration-output-v2\0");
+    for file in files {
+        let path = file.relative.to_str().ok_or(SecurityError::InvalidConfig)?;
+        digest.update((path.len() as u64).to_be_bytes());
+        digest.update(path.as_bytes());
+        digest.update(file.bytes.to_be_bytes());
+        digest.update(file.sha256.as_bytes());
+    }
+    Ok(format!("{:x}", digest.finalize()))
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LegacyFileReceipt {
     pub relative: PathBuf,
@@ -64,13 +269,7 @@ impl LegacyMigrationPreflight {
         let _operation = plan.operation_lock()?;
         let journal = plan.read_journal(gate, lease, vault)?;
         if plan.destination.exists() {
-            if !matches!(journal.phase.as_str(), "converted" | "published")
-                || plan.staging_path().exists()
-                || journal.output_hash.as_deref()
-                    != Some(plan.output_digest(&plan.destination)?.as_str())
-            {
-                return Err(SecurityError::Crypto);
-            }
+            plan.verify_published_destination_for_resume(&journal)?;
         } else if journal.phase == "published" || journal.phase == "rolled-back" {
             return Err(SecurityError::InvalidConfig);
         }
@@ -408,17 +607,59 @@ impl LegacyMigrationPreflight {
         }
         let mut files = Vec::new();
         scan(directory, directory, 0, &mut files, &mut 0)?;
-        files.sort_by(|a, b| a.relative.cmp(&b.relative));
-        let mut digest = Sha256::new();
-        digest.update(b"mp9b-migration-output-v2\0");
-        for file in files {
-            let path = file.relative.to_str().ok_or(SecurityError::InvalidConfig)?;
-            digest.update((path.len() as u64).to_be_bytes());
-            digest.update(path.as_bytes());
-            digest.update(file.bytes.to_be_bytes());
-            digest.update(file.sha256.as_bytes());
+        digest_scanned_files(files)
+    }
+
+    fn verify_published_destination_for_resume(
+        &self,
+        journal: &DurableMigrationJournal,
+    ) -> Result<()> {
+        if !matches!(journal.phase.as_str(), "converted" | "published")
+            || self.staging_path().exists()
+        {
+            return Err(SecurityError::Crypto);
         }
-        Ok(format!("{:x}", digest.finalize()))
+        let expected_hash = journal
+            .output_hash
+            .as_deref()
+            .ok_or(SecurityError::Crypto)?;
+        check(&self.destination)?;
+        if !fs::symlink_metadata(&self.destination)?.is_dir() {
+            return Err(SecurityError::UnsafePath);
+        }
+        // Confirm no writer, schema migration, or privacy reader holds
+        // destination fences before admitting benign empty SQLite read sidecars.
+        crate::vault_fence::ensure_existing_vault_fences_idle(&self.destination)?;
+        let mut files = Vec::new();
+        scan(&self.destination, &self.destination, 0, &mut files, &mut 0)?;
+        let has_state_db = files
+            .iter()
+            .any(|file| file.relative == Path::new("state.sqlite3"));
+        let has_archive_db = files
+            .iter()
+            .any(|file| file.relative == Path::new("archive-index.sqlite3"));
+        let mut core_files = Vec::with_capacity(files.len());
+        let mut sidecars = Vec::new();
+        for file in files {
+            if let Some(kind) =
+                benign_empty_sidecar_kind(&file.relative, has_state_db, has_archive_db)
+            {
+                sidecars.push((file.relative, kind));
+            } else {
+                core_files.push(file);
+            }
+        }
+        if digest_scanned_files(core_files)? != expected_hash {
+            return Err(SecurityError::Crypto);
+        }
+        for (relative, kind) in sidecars {
+            let path = self.destination.join(relative);
+            match kind {
+                EmptySidecarKind::Wal => validate_empty_sqlite_wal_sidecar(&path)?,
+                EmptySidecarKind::Shm => validate_empty_sqlite_shm_sidecar(&path)?,
+            }
+        }
+        Ok(())
     }
 
     fn read_journal(
@@ -570,13 +811,7 @@ impl LegacyMigrationPreflight {
         let staging = self.staging_path();
         check(&staging)?;
         if self.destination.exists() {
-            if (journal.phase != "converted" && journal.phase != "published")
-                || staging.exists()
-                || journal.output_hash.as_deref()
-                    != Some(self.output_digest(&self.destination)?.as_str())
-            {
-                return Err(SecurityError::Crypto);
-            }
+            self.verify_published_destination_for_resume(&journal)?;
             verify(&self.destination)?;
             self.verify_source_only()?;
             gate.validate_lease(lease)?;
@@ -1125,5 +1360,480 @@ mod tests {
         fs::create_dir(&outside).unwrap();
         symlink(&outside, legacy.join("archive-v1")).unwrap();
         assert!(LegacyMigrationPreflight::inspect(&legacy, &home.path().join("vault")).is_err());
+    }
+
+    fn set_shm_header_checksum(bytes: &mut [u8]) {
+        let [s0, s1] = sqlite_wal_header_checksum(&bytes[0..40]);
+        bytes[40..44].copy_from_slice(&s0.to_ne_bytes());
+        bytes[44..48].copy_from_slice(&s1.to_ne_bytes());
+        let header = bytes[..48].to_vec();
+        bytes[48..96].copy_from_slice(&header);
+    }
+
+    fn synthetic_empty_sqlite_shm() -> Vec<u8> {
+        let mut bytes = vec![0u8; SQLITE_SHM_REGION_BYTES];
+        bytes[0..4].copy_from_slice(&SQLITE_WAL_INDEX_VERSION.to_ne_bytes());
+        bytes[12] = 1;
+        set_shm_header_checksum(&mut bytes);
+        for offset in [104usize, 108, 112, 116] {
+            bytes[offset..offset + 4].copy_from_slice(&SQLITE_WAL_READMARK_NOT_USED.to_ne_bytes());
+        }
+        bytes
+    }
+
+    fn published_synthetic_vault_fixture(
+        with_archive_index: bool,
+    ) -> (
+        tempfile::TempDir,
+        PathBuf,
+        PathBuf,
+        SecurityGate,
+        UnlockLease,
+        CryptoVault,
+        ExplicitMigrationConsent,
+    ) {
+        let (home, plan, gate, lease, vault) = synthetic_journal_fixture();
+        let consent =
+            ExplicitMigrationConsent::from_owner_typed_confirmation(CONSENT_WORDS).unwrap();
+        plan.begin_owner_consented(&consent, &gate, lease, &vault)
+            .unwrap();
+        plan.execute_or_resume(
+            &consent,
+            &gate,
+            lease,
+            &vault,
+            |_source, staging| {
+                fs::write(staging.join("vault-v1.json"), b"synthetic-marker-only")?;
+                fs::write(staging.join("state.sqlite3"), b"synthetic-encrypted-header")?;
+                if with_archive_index {
+                    fs::write(
+                        staging.join("archive-index.sqlite3"),
+                        b"synthetic-encrypted-archive-index",
+                    )?;
+                }
+                Ok(())
+            },
+            fake_crypto_verify,
+        )
+        .unwrap();
+        (
+            home,
+            plan.source,
+            plan.destination,
+            gate,
+            lease,
+            vault,
+            consent,
+        )
+    }
+
+    #[test]
+    fn resume_admits_verified_empty_read_sidecars_and_requires_quiescence() {
+        let (_home, source, destination, gate, lease, vault, consent) =
+            published_synthetic_vault_fixture(true);
+        let shm = synthetic_empty_sqlite_shm();
+        for name in [
+            "state.sqlite3-wal",
+            "state.sqlite3-shm",
+            "archive-index.sqlite3-wal",
+            "archive-index.sqlite3-shm",
+        ] {
+            let contents: &[u8] = if name.ends_with("-wal") { &[] } else { &shm };
+            fs::write(destination.join(name), contents).unwrap();
+        }
+        let recovered = LegacyMigrationPreflight::resume_owner_consented(
+            &source,
+            &destination,
+            &consent,
+            &gate,
+            lease,
+            &vault,
+        )
+        .unwrap();
+        // Post-verify strict digest must still reject unquiesced sidecars.
+        assert!(recovered
+            .execute_or_resume(
+                &consent,
+                &gate,
+                lease,
+                &vault,
+                |_, _| panic!("published output must not convert again"),
+                fake_crypto_verify,
+            )
+            .is_err());
+
+        for _ in 0..2 {
+            for name in [
+                "state.sqlite3-wal",
+                "state.sqlite3-shm",
+                "archive-index.sqlite3-wal",
+                "archive-index.sqlite3-shm",
+            ] {
+                let contents: &[u8] = if name.ends_with("-wal") { &[] } else { &shm };
+                fs::write(destination.join(name), contents).unwrap();
+            }
+            let plan = LegacyMigrationPreflight::resume_owner_consented(
+                &source,
+                &destination,
+                &consent,
+                &gate,
+                lease,
+                &vault,
+            )
+            .unwrap();
+            plan.execute_or_resume(
+                &consent,
+                &gate,
+                lease,
+                &vault,
+                |_, _| panic!("published output must not convert again"),
+                |dir| {
+                    fake_crypto_verify(dir)?;
+                    for name in [
+                        "state.sqlite3-wal",
+                        "state.sqlite3-shm",
+                        "archive-index.sqlite3-wal",
+                        "archive-index.sqlite3-shm",
+                    ] {
+                        let path = dir.join(name);
+                        if path.exists() {
+                            fs::remove_file(path)?;
+                        }
+                    }
+                    Ok(())
+                },
+            )
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn resume_rejects_dirty_forged_unknown_and_contended_sidecars_before_verify() {
+        use crate::vault_fence::VaultWriterFence;
+        use std::cell::Cell;
+
+        let assert_fails_before_verify = |source: &Path,
+                                          destination: &Path,
+                                          consent: &ExplicitMigrationConsent,
+                                          gate: &SecurityGate,
+                                          lease: UnlockLease,
+                                          vault: &CryptoVault,
+                                          pre_plan: &LegacyMigrationPreflight,
+                                          label: &str| {
+            assert!(
+                LegacyMigrationPreflight::resume_owner_consented(
+                    source,
+                    destination,
+                    consent,
+                    gate,
+                    lease,
+                    vault,
+                )
+                .is_err(),
+                "{label}: resume_owner_consented unexpectedly succeeded"
+            );
+            let verify_called = Cell::new(false);
+            assert!(
+                pre_plan
+                    .execute_or_resume(
+                        consent,
+                        gate,
+                        lease,
+                        vault,
+                        |_, _| panic!("{label}: convert must not run"),
+                        |_| {
+                            verify_called.set(true);
+                            Ok(())
+                        },
+                    )
+                    .is_err(),
+                "{label}: execute_or_resume unexpectedly succeeded"
+            );
+            assert!(
+                !verify_called.get(),
+                "{label}: verify closure ran on unauthenticated state"
+            );
+        };
+
+        let (_home, source, destination, gate, lease, vault, consent) =
+            published_synthetic_vault_fixture(true);
+        let pre_plan = LegacyMigrationPreflight::resume_owner_consented(
+            &source,
+            &destination,
+            &consent,
+            &gate,
+            lease,
+            &vault,
+        )
+        .unwrap();
+
+        // 1. Non-empty WAL files.
+        for wal_name in ["state.sqlite3-wal", "archive-index.sqlite3-wal"] {
+            let wal = destination.join(wal_name);
+            fs::write(&wal, b"uncheckpointed-wal-bytes").unwrap();
+            assert_fails_before_verify(
+                &source,
+                &destination,
+                &consent,
+                &gate,
+                lease,
+                &vault,
+                &pre_plan,
+                wal_name,
+            );
+            assert_eq!(fs::read(&wal).unwrap(), b"uncheckpointed-wal-bytes");
+            fs::remove_file(wal).unwrap();
+        }
+
+        // 2. Malformed, forged, or dirty -shm variants.
+        let shm_path = destination.join("state.sqlite3-shm");
+        let bad_size_variants = vec![
+            ("shm-empty", vec![]),
+            ("shm-short", vec![0u8; SQLITE_SHM_REGION_BYTES - 1]),
+            ("shm-long", vec![0u8; SQLITE_SHM_REGION_BYTES + 1]),
+        ];
+        for (label, bytes) in bad_size_variants {
+            fs::write(&shm_path, &bytes).unwrap();
+            assert_fails_before_verify(
+                &source,
+                &destination,
+                &consent,
+                &gate,
+                lease,
+                &vault,
+                &pre_plan,
+                label,
+            );
+            fs::remove_file(&shm_path).unwrap();
+        }
+
+        let mut broken_mirror = synthetic_empty_sqlite_shm();
+        broken_mirror[48] ^= 1;
+        fs::write(&shm_path, &broken_mirror).unwrap();
+        assert_fails_before_verify(
+            &source,
+            &destination,
+            &consent,
+            &gate,
+            lease,
+            &vault,
+            &pre_plan,
+            "shm-broken-mirror",
+        );
+
+        let mut bad_cksum = synthetic_empty_sqlite_shm();
+        bad_cksum[40] ^= 1;
+        bad_cksum[48 + 40] ^= 1;
+        fs::write(&shm_path, &bad_cksum).unwrap();
+        assert_fails_before_verify(
+            &source,
+            &destination,
+            &consent,
+            &gate,
+            lease,
+            &vault,
+            &pre_plan,
+            "shm-bad-checksum",
+        );
+
+        let mut dirty_mx_frame = synthetic_empty_sqlite_shm();
+        dirty_mx_frame[16..20].copy_from_slice(&1u32.to_ne_bytes());
+        set_shm_header_checksum(&mut dirty_mx_frame);
+        fs::write(&shm_path, &dirty_mx_frame).unwrap();
+        assert_fails_before_verify(
+            &source,
+            &destination,
+            &consent,
+            &gate,
+            lease,
+            &vault,
+            &pre_plan,
+            "shm-mxframe-nonzero",
+        );
+
+        let mut dirty_backfill = synthetic_empty_sqlite_shm();
+        dirty_backfill[96..100].copy_from_slice(&1u32.to_ne_bytes());
+        fs::write(&shm_path, &dirty_backfill).unwrap();
+        assert_fails_before_verify(
+            &source,
+            &destination,
+            &consent,
+            &gate,
+            lease,
+            &vault,
+            &pre_plan,
+            "shm-nbackfill-nonzero",
+        );
+
+        let mut dirty_readmark = synthetic_empty_sqlite_shm();
+        dirty_readmark[104..108].copy_from_slice(&2u32.to_ne_bytes());
+        fs::write(&shm_path, &dirty_readmark).unwrap();
+        assert_fails_before_verify(
+            &source,
+            &destination,
+            &consent,
+            &gate,
+            lease,
+            &vault,
+            &pre_plan,
+            "shm-readmark-nonzero",
+        );
+
+        let mut dirty_lock = synthetic_empty_sqlite_shm();
+        dirty_lock[120] = 1;
+        fs::write(&shm_path, &dirty_lock).unwrap();
+        assert_fails_before_verify(
+            &source,
+            &destination,
+            &consent,
+            &gate,
+            lease,
+            &vault,
+            &pre_plan,
+            "shm-alock-nonzero",
+        );
+
+        let mut smuggled_tail = synthetic_empty_sqlite_shm();
+        smuggled_tail[200] = 0x42;
+        fs::write(&shm_path, &smuggled_tail).unwrap();
+        assert_fails_before_verify(
+            &source,
+            &destination,
+            &consent,
+            &gate,
+            lease,
+            &vault,
+            &pre_plan,
+            "shm-nonzero-tail",
+        );
+        fs::remove_file(&shm_path).unwrap();
+
+        // 3. Disallowed sidecars and nested filenames.
+        for unknown in ["state.sqlite3-journal", "index.sqlite3-wal"] {
+            let p = destination.join(unknown);
+            fs::write(&p, b"").unwrap();
+            assert_fails_before_verify(
+                &source,
+                &destination,
+                &consent,
+                &gate,
+                lease,
+                &vault,
+                &pre_plan,
+                unknown,
+            );
+            fs::remove_file(p).unwrap();
+        }
+        fs::create_dir(destination.join("nested")).unwrap();
+        fs::write(destination.join("nested/state.sqlite3-wal"), b"").unwrap();
+        assert_fails_before_verify(
+            &source,
+            &destination,
+            &consent,
+            &gate,
+            lease,
+            &vault,
+            &pre_plan,
+            "nested-wal",
+        );
+        fs::remove_dir_all(destination.join("nested")).unwrap();
+
+        // 4. Contended destination writer, schema, and privacy fences.
+        let writer = VaultWriterFence::writer(&destination).unwrap();
+        assert_fails_before_verify(
+            &source,
+            &destination,
+            &consent,
+            &gate,
+            lease,
+            &vault,
+            &pre_plan,
+            "active-writer-fence",
+        );
+        drop(writer);
+
+        let privacy = VaultWriterFence::privacy_reader(&destination).unwrap();
+        assert_fails_before_verify(
+            &source,
+            &destination,
+            &consent,
+            &gate,
+            lease,
+            &vault,
+            &pre_plan,
+            "active-privacy-fence",
+        );
+        drop(privacy);
+
+        let schema_lock_path = destination.join(".state-schema.lock");
+        let schema_lock = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .open(&schema_lock_path)
+            .unwrap();
+        FileExt::try_lock_exclusive(&schema_lock).unwrap();
+        assert_fails_before_verify(
+            &source,
+            &destination,
+            &consent,
+            &gate,
+            lease,
+            &vault,
+            &pre_plan,
+            "active-schema-lock",
+        );
+        drop(schema_lock);
+        fs::remove_file(&schema_lock_path).unwrap();
+
+        // 5. Non-empty forged lock sentinel must fail.
+        fs::write(destination.join(".vault-writer.lock"), b"forged").unwrap();
+        assert_fails_before_verify(
+            &source,
+            &destination,
+            &consent,
+            &gate,
+            lease,
+            &vault,
+            &pre_plan,
+            "nonempty-writer-lock",
+        );
+        fs::write(destination.join(".vault-writer.lock"), b"").unwrap();
+
+        // 6. Tampered core file even with valid empty sidecars must fail.
+        fs::write(destination.join("state.sqlite3-wal"), b"").unwrap();
+        fs::write(&shm_path, synthetic_empty_sqlite_shm()).unwrap();
+        let mut core = fs::read(destination.join("state.sqlite3")).unwrap();
+        core[0] ^= 1;
+        fs::write(destination.join("state.sqlite3"), core).unwrap();
+        assert_fails_before_verify(
+            &source,
+            &destination,
+            &consent,
+            &gate,
+            lease,
+            &vault,
+            &pre_plan,
+            "tampered-core-with-valid-sidecars",
+        );
+
+        // 7. Archive sidecar without matching archive-index.sqlite3 base DB must fail.
+        let (_home2, src2, dst2, gate2, lease2, vault2, consent2) =
+            published_synthetic_vault_fixture(false);
+        let plan2 = LegacyMigrationPreflight::resume_owner_consented(
+            &src2, &dst2, &consent2, &gate2, lease2, &vault2,
+        )
+        .unwrap();
+        fs::write(dst2.join("archive-index.sqlite3-wal"), b"").unwrap();
+        assert_fails_before_verify(
+            &src2,
+            &dst2,
+            &consent2,
+            &gate2,
+            lease2,
+            &vault2,
+            &plan2,
+            "orphan-archive-wal-without-base-db",
+        );
     }
 }

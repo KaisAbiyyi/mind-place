@@ -162,6 +162,65 @@ fn privacy_path(vault_root: &Path) -> Result<PathBuf> {
     Ok(parent.join(PRIVACY_LOCK_NAME))
 }
 
+/// Returns the lock path coordinating privacy-deletion fences for `vault_root`
+/// without creating or mutating any files on disk.
+pub fn privacy_lock_path(vault_root: &Path) -> Result<PathBuf> {
+    privacy_path(vault_root)
+}
+
+/// Non-blockingly acquires exclusive locks on any coordination lock files that
+/// already exist for `vault_root` (`.vault-writer.lock`, `.state-schema.lock`,
+/// and the privacy fence) without creating missing files.
+pub fn acquire_existing_vault_fences(vault_root: &Path) -> Result<Vec<File>> {
+    for ancestor in vault_root.ancestors() {
+        if !ancestor.as_os_str().is_empty() {
+            crate::validate_path(ancestor)?;
+        }
+    }
+    if !fs::symlink_metadata(vault_root)?.is_dir() {
+        return Err(SecurityError::UnsafePath);
+    }
+    let candidates = [
+        vault_root.join(WRITER_LOCK_NAME),
+        vault_root.join(".state-schema.lock"),
+        privacy_path(vault_root)?,
+    ];
+    let mut guards = Vec::new();
+    for path in candidates {
+        for ancestor in path.ancestors() {
+            if !ancestor.as_os_str().is_empty() {
+                crate::validate_path(ancestor)?;
+            }
+        }
+        let meta = match fs::symlink_metadata(&path) {
+            Ok(meta) => meta,
+            Err(error) if error.kind() == ErrorKind::NotFound => continue,
+            Err(error) => return Err(SecurityError::Io(error)),
+        };
+        if !meta.is_file() || meta.len() != 0 {
+            return Err(SecurityError::InvalidConfig);
+        }
+        let file = OpenOptions::new().read(true).write(true).open(&path)?;
+        let opened = file.metadata()?;
+        if !opened.is_file() || opened.len() != 0 {
+            return Err(SecurityError::InvalidConfig);
+        }
+        FileExt::try_lock_exclusive(&file)?;
+        guards.push(file);
+    }
+    Ok(guards)
+}
+
+/// Verifies that no writer, schema lock, or privacy fence is currently active
+/// on `vault_root`, releasing any probed locks immediately.
+pub fn ensure_existing_vault_fences_idle(vault_root: &Path) -> Result<()> {
+    let guards = acquire_existing_vault_fences(vault_root)?;
+    for guard in guards {
+        let _ = FileExt::unlock(&guard);
+    }
+    Ok(())
+}
+
 fn privacy_file(vault_root: &Path) -> Result<File> {
     let path = privacy_path(vault_root)?;
     let parent = path.parent().ok_or(SecurityError::InvalidConfig)?;
