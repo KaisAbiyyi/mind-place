@@ -33,6 +33,7 @@ export function mountUi2Shell(root: HTMLElement, options: Ui2ShellOptions): Ui2S
   const doc = root.ownerDocument;
   const win = doc.defaultView ?? (() => { throw new Error("MP_UI2_DOCUMENT_WINDOW_MISSING"); })();
   ensureUi2IconSprite(doc);
+  const previousDocumentLanguage = doc.documentElement.lang;
   let storage: Storage | undefined;
   try { storage = win.localStorage; } catch { storage = undefined; }
   const i18n = options.i18n ?? createI18nController({ storage });
@@ -349,6 +350,7 @@ export function mountUi2Shell(root: HTMLElement, options: Ui2ShellOptions): Ui2S
       win.removeEventListener("resize", onResize);
       searchDialog?.destroy();
       shell.remove();
+      doc.documentElement.lang = previousDocumentLanguage;
     },
   };
 }
