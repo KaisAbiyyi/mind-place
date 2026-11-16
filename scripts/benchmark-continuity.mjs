@@ -3,7 +3,15 @@
  * This scores supplied predictions; it does NOT run the product retrieval engine.
  * --oracle is a fixture/schema smoke check, not a measured product score.
  */
-import { readFileSync, statSync } from 'node:fs';
+import {
+  closeSync,
+  constants as fsConstants,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readFileSync,
+  readSync,
+} from 'node:fs';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
@@ -180,9 +188,71 @@ export function evaluate(suite, predictions) {
   return { schema: 'mind-place-continuity-report/v1', dataset: gold.dataset, summary, cases: rows };
 }
 
-function readSmallJson(path) {
-  requireValid(statSync(path).size <= 2 * 1024 * 1024, 'prediction input exceeds 2 MiB');
-  return JSON.parse(readFileSync(path, 'utf8'));
+const MAX_PREDICTION_BYTES = 2 * 1024 * 1024;
+const PREDICTION_READ_CHUNK_BYTES = 64 * 1024;
+const defaultPredictionFs = {
+  openSync,
+  fstatSync,
+  lstatSync,
+  readSync,
+  closeSync,
+  constants: fsConstants,
+};
+
+export function readSmallJson(filePath, { fs = defaultPredictionFs } = {}) {
+  requireValid(
+    typeof filePath === 'string' && filePath.length > 0 && !filePath.includes('\0'),
+    'prediction input path must be a non-empty string',
+  );
+  const constants = fs.constants ?? {};
+  const hasNoFollow = typeof constants.O_NOFOLLOW === 'number' && constants.O_NOFOLLOW !== 0;
+  const openFlags =
+    (constants.O_RDONLY ?? 0) |
+    (hasNoFollow ? constants.O_NOFOLLOW : 0) |
+    (typeof constants.O_NONBLOCK === 'number' ? constants.O_NONBLOCK : 0);
+
+  let fd;
+  try {
+    fd = fs.openSync(filePath, openFlags);
+  } catch (error) {
+    if (error && error.code === 'ELOOP') {
+      requireValid(false, 'prediction input must not be a symbolic link');
+    }
+    if (error && error.code === 'EISDIR') {
+      requireValid(false, 'prediction input must be a regular file');
+    }
+    throw error;
+  }
+
+  try {
+    const fdStat = fs.fstatSync(fd, { bigint: true });
+    requireValid(fdStat.isFile(), 'prediction input must be a regular file');
+    requireValid(fdStat.size <= BigInt(MAX_PREDICTION_BYTES), 'prediction input exceeds 2 MiB');
+
+    // On platforms without O_NOFOLLOW (e.g., Windows), confirm the post-open path leaf is not a symlink
+    // and resolves to the same open file identity without introducing a pre-open TOCTOU check.
+    if (!hasNoFollow) {
+      const pathStat = fs.lstatSync(filePath, { bigint: true });
+      requireValid(!pathStat.isSymbolicLink() && pathStat.isFile(), 'prediction input must not be a symbolic link');
+      requireValid(pathStat.dev === fdStat.dev && pathStat.ino === fdStat.ino, 'prediction input path changed during open');
+    }
+
+    const chunkBuf = Buffer.alloc(PREDICTION_READ_CHUNK_BYTES);
+    const chunks = [];
+    let totalBytes = 0;
+    while (true) {
+      const remainingPlusSentinel = (MAX_PREDICTION_BYTES + 1) - totalBytes;
+      const toRead = Math.min(chunkBuf.length, remainingPlusSentinel);
+      const bytesRead = fs.readSync(fd, chunkBuf, 0, toRead, null);
+      if (bytesRead === 0) break;
+      totalBytes += bytesRead;
+      requireValid(totalBytes <= MAX_PREDICTION_BYTES, 'prediction input exceeds 2 MiB');
+      chunks.push(Buffer.from(chunkBuf.subarray(0, bytesRead)));
+    }
+    return JSON.parse(Buffer.concat(chunks, totalBytes).toString('utf8'));
+  } finally {
+    fs.closeSync(fd);
+  }
 }
 
 const ownCli = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];

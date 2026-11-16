@@ -3,6 +3,17 @@ export const EN_CATALOG = {
   "app.name": "Mind Place",
   "app.skipToMain": "Skip to main content",
   "breadcrumb.ariaLabel": "Breadcrumb",
+  "shell.navAria": "Main navigation",
+  "shell.closeSidebar": "Close sidebar",
+  "shell.previewLead": "The new interface is being built one section at a time.",
+  "shell.previewTitle": "This section is not ready in the new interface",
+  "shell.previewBody": "Your saved information remains available in the classic interface. This preview does not change it.",
+  "shell.openClassic": "Open classic interface",
+  "shell.invalidTitle": "This page is not available",
+  "shell.invalidBody": "Choose a destination from the sidebar.",
+  "shell.searchTitle": "Search",
+  "shell.searchUnavailableTitle": "Search is not ready in this preview",
+  "shell.searchUnavailableBody": "Open the classic interface to find saved memory and conversations.",
 
   // Navigation (exact order: Home, Memory, Archive, Constellation, Sources, Connections, Settings)
   "nav.group.main": "Workspace",
