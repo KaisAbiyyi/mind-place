@@ -1341,6 +1341,7 @@ if (mode === 'stage-write') {
 if (mode === 'read-fail') {
   // Fail reads of conversations-001.json after the first few bytes (the shape of a file locked or failing mid-read).
   const realCreate = fs.createReadStream;
+  const realOpen = fs.promises.open;
   const code = process.env.MP_TEST_READ_CODE ?? 'EBUSY';
   fs.createReadStream = (file, options) => {
     const source = realCreate(file, options);
@@ -1348,6 +1349,24 @@ if (mode === 'read-fail') {
     return Readable.from((async function* () {
       for await (const chunk of source) { yield chunk.subarray(0, 8); throw Object.assign(new Error('injected'), { code }); }
     })());
+  };
+  let probedOnce = false;
+  fs.promises.open = async (file, ...rest) => {
+    const handle = await realOpen.call(fs.promises, file, ...rest);
+    if (!String(file).endsWith('conversations-001.json')) return handle;
+    // Allow the initial walk() identity probe open to inspect stat, then fail the content read.
+    if (!probedOnce) { probedOnce = true; return handle; }
+    const origRead = handle.read.bind(handle);
+    let firstChunk = true;
+    handle.read = async (buffer, offset = 0, length = buffer.length, position = null) => {
+      if (firstChunk) {
+        firstChunk = false;
+        const res = await origRead(buffer, offset, Math.min(length, 8), position);
+        return res;
+      }
+      throw Object.assign(new Error('injected'), { code });
+    };
+    return handle;
   };
 }
 if (mode === 'unlink-after-link') {
@@ -1713,4 +1732,142 @@ test('descriptor-bound openSource handles regular files, valid zips, and closes 
     fs.unlinkSync(badZipPath);
     assert.equal(fs.existsSync(badZipPath), false);
   } finally { t.done(); }
+});
+
+test('directory source fails closed on root swap, ancestor swap, child swap, and zero inode', async () => {
+  const t = scratch('dir-toctou');
+  const { opendir, lstat } = fs.promises;
+  try {
+    const inDir = path.join(t.dir, 'in');
+    const subDir = path.join(inDir, 'nested');
+    const altDir = path.join(t.dir, 'alt');
+    const outsideSecret = path.join(t.dir, 'outside.json');
+    fs.mkdirSync(subDir, { recursive: true });
+    fs.mkdirSync(altDir, { recursive: true });
+    const memberA = path.join(inDir, 'conversations.json');
+    const memberB = path.join(subDir, 'user.json');
+    fs.writeFileSync(memberA, '[{"id":"a","title":"alpha secret"}]\n');
+    fs.writeFileSync(memberB, '{"id":"u1"}\n');
+    fs.writeFileSync(outsideSecret, '{"id":"leak"}\n');
+
+    // 1. Clean nested directory run succeeds via handle-bound child streams and releases all handles.
+    const cleanOut = path.join(t.dir, 'out-clean');
+    assert.equal((await sanitize({ input: inDir, output: cleanOut })).exitCode, 0);
+
+    // 2. Child regular file replaced before deferred open() (different inode) fails closed without reading swapped bytes.
+    const opened = await openSource(inDir);
+    try {
+      const targetEntry = opened.entries.find(e => e.name === 'conversations.json');
+      assert.ok(targetEntry);
+      const replacedTemp = path.join(t.dir, 'replacement.json');
+      fs.writeFileSync(replacedTemp, '[{"id":"b","title":"INJECTED_SWAP"}]\n');
+      fs.rmSync(memberA);
+      fs.renameSync(replacedTemp, memberA);
+      await assert.rejects(targetEntry.open(), { code: 'E_INPUT_CHANGED' });
+    } finally {
+      await opened.close();
+    }
+
+    // 3. Ancestor directory swapped to symlink/junction (or different directory) before deferred child open fails closed.
+    const linkKind = canLink('symlink') ? 'symlink' : (process.platform === 'win32' && canLink('junction') ? 'junction' : null);
+    const openedForDirSwap = await openSource(inDir);
+    try {
+      const nestedEntry = openedForDirSwap.entries.find(e => e.name === 'nested/user.json');
+      assert.ok(nestedEntry);
+      const parked = path.join(t.dir, 'parked-nested');
+      fs.renameSync(subDir, parked);
+      if (linkKind) {
+        dirLink(linkKind, altDir, subDir);
+        fs.writeFileSync(path.join(altDir, 'user.json'), '{"id":"swapped"}\n');
+        await assert.rejects(nestedEntry.open(), { code: 'E_INPUT_SYMLINK' });
+        fs.rmSync(subDir, { force: true });
+      } else {
+        fs.mkdirSync(subDir);
+        fs.writeFileSync(path.join(subDir, 'user.json'), '{"id":"swapped"}\n');
+        await assert.rejects(nestedEntry.open(), { code: 'E_INPUT_CHANGED' });
+        fs.rmSync(subDir, { recursive: true, force: true });
+      }
+      fs.renameSync(parked, subDir);
+    } finally {
+      await openedForDirSwap.close();
+    }
+
+    // 4. Child swapped to a symlink (when supported) before deferred open() is rejected fail-closed.
+    if (canLink('symlink')) {
+      const openedSym = await openSource(inDir);
+      try {
+        const entryA = openedSym.entries.find(e => e.name === 'conversations.json');
+        fs.rmSync(memberA);
+        fs.symlinkSync(outsideSecret, memberA);
+        await assert.rejects(entryA.open(), { code: 'E_INPUT_SYMLINK' });
+      } finally {
+        await openedSym.close();
+        fs.rmSync(memberA, { force: true });
+        fs.writeFileSync(memberA, '[{"id":"a","title":"alpha secret"}]\n');
+      }
+    }
+
+    // 5. Root directory identity race during opendir() fails closed with E_INPUT_CHANGED and leaves no output.
+    let swappedOnce = false;
+    const altRoot = path.join(t.dir, 'alt-root');
+    const swappedOut = path.join(t.dir, 'swapped-root-park');
+    fs.mkdirSync(altRoot);
+    fs.writeFileSync(path.join(altRoot, 'conversations.json'), '[{"id":"evil"}]\n');
+    fs.promises.opendir = async (dirPath, ...rest) => {
+      if (!swappedOnce && path.resolve(dirPath) === path.resolve(inDir)) {
+        swappedOnce = true;
+        fs.renameSync(inDir, swappedOut);
+        fs.renameSync(altRoot, inDir);
+      }
+      return opendir.call(fs.promises, dirPath, ...rest);
+    };
+    await assert.rejects(
+      sanitize({ input: inDir, output: path.join(t.dir, 'out-root-swap') }),
+      { code: 'E_INPUT_CHANGED' },
+    );
+    fs.promises.opendir = opendir;
+    assert.equal(fs.existsSync(path.join(t.dir, 'out-root-swap')), false);
+    fs.renameSync(inDir, altRoot);
+    fs.renameSync(swappedOut, inDir);
+
+    // 6. Zero-inode (ino === 0n) stat fallback is removed and fails closed instead of matching blindly.
+    fs.promises.lstat = async (target, options) => {
+      const realStat = await lstat.call(fs.promises, target, options);
+      if (path.resolve(String(target)) === path.resolve(memberA)) {
+        return new Proxy(realStat, { get: (obj, prop) => (prop === 'ino' ? 0n : Reflect.get(obj, prop, obj)) });
+      }
+      return realStat;
+    };
+    await assert.rejects(openSource(memberA), { code: 'E_INPUT_CHANGED' });
+    fs.promises.lstat = lstat;
+
+    // 7. Full sanitize() pipeline fails closed with E_INPUT_CHANGED when child is swapped after walk() before deferred read.
+    let swappedChild = false;
+    fs.promises.opendir = opendir;
+    const origOpen = fs.promises.open;
+    let memberOpens = 0;
+    fs.promises.open = async (target, ...rest) => {
+      if (!swappedChild && path.resolve(String(target)) === path.resolve(memberA)) {
+        memberOpens++;
+        if (memberOpens === 2) {
+          swappedChild = true;
+          const tmp = path.join(t.dir, 'swap-child.json');
+          fs.writeFileSync(tmp, '[{"id":"z","title":"SWAPPED_IN_SANITIZE"}]\n');
+          fs.rmSync(memberA);
+          fs.renameSync(tmp, memberA);
+        }
+      }
+      return origOpen.call(fs.promises, target, ...rest);
+    };
+    await assert.rejects(
+      sanitize({ input: inDir, output: path.join(t.dir, 'out-child-sanitize-swap') }),
+      { code: 'E_INPUT_CHANGED' },
+    );
+    fs.promises.open = origOpen;
+    assert.equal(fs.existsSync(path.join(t.dir, 'out-child-sanitize-swap')), false);
+  } finally {
+    fs.promises.opendir = opendir;
+    fs.promises.lstat = lstat;
+    t.done();
+  }
 });
