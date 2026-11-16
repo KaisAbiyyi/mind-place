@@ -93,38 +93,68 @@ async function verifyDirectoryChain(dirChain) {
   }
 }
 
-// Node.js node:fs has no fdopendir/openat; pin each directory with an open handle and re-verify
-// ancestor and leaf directory identities immediately before and after bounded opendir() enumeration.
-async function enumerateVerifiedDirectory(dirPath, expectedStat, dirHandle, ancestors, budgetState) {
+function sameDirectoryMetadata(left, right) {
+  if (!sameDirectoryIdentity(left, right)) return false;
+  if (typeof left.mtimeNs === 'bigint' && typeof right.mtimeNs === 'bigint' && left.mtimeNs !== right.mtimeNs) return false;
+  if (typeof left.ctimeNs === 'bigint' && typeof right.ctimeNs === 'bigint' && left.ctimeNs !== right.ctimeNs) return false;
+  return true;
+}
+
+async function verifyDirectorySnapshot(dirPath, expectedStat, ancestors, dirHandle = null, message = 'Input directory changed during enumeration') {
   await verifyDirectoryChain(ancestors);
-  const preEnumLstat = await fs.promises.lstat(dirPath, { bigint: true }).catch(() => null);
-  if (preEnumLstat?.isSymbolicLink()) throw new SanitizerError('E_INPUT_SYMLINK', 'Input path must not be a symbolic link');
-  if (!sameDirectoryIdentity(expectedStat, preEnumLstat)) {
-    throw new SanitizerError('E_INPUT_CHANGED', 'Input directory changed before enumeration');
+  const pathStat = await fs.promises.lstat(dirPath, { bigint: true }).catch(() => null);
+  if (pathStat?.isSymbolicLink()) throw new SanitizerError('E_INPUT_SYMLINK', 'Input path must not be a symbolic link');
+  if (!sameDirectoryMetadata(expectedStat, pathStat)) {
+    throw new SanitizerError('E_INPUT_CHANGED', message);
   }
-  const names = [];
-  const dirStream = await fs.promises.opendir(dirPath);
-  try {
-    const afterOpenLstat = await fs.promises.lstat(dirPath, { bigint: true }).catch(() => null);
-    if (afterOpenLstat?.isSymbolicLink()) throw new SanitizerError('E_INPUT_SYMLINK', 'Input path must not be a symbolic link');
-    if (!sameDirectoryIdentity(expectedStat, afterOpenLstat)) {
-      throw new SanitizerError('E_INPUT_CHANGED', 'Input directory changed during open');
+  if (dirHandle) {
+    const fdStat = await dirHandle.stat({ bigint: true }).catch(() => null);
+    if (!sameDirectoryMetadata(expectedStat, fdStat)) {
+      throw new SanitizerError('E_INPUT_CHANGED', message);
     }
+  }
+}
+
+async function readBoundedDirectoryPass(dirPath, expectedStat, ancestors, onEntry) {
+  const dirStream = await fs.promises.opendir(dirPath);
+  const names = [];
+  try {
+    await verifyDirectorySnapshot(dirPath, expectedStat, ancestors, null, 'Input directory changed during open');
     for await (const dirent of dirStream) {
-      if (++budgetState.enumerated > budgetState.maxMembers) throw new BudgetError('maxMembers', budgetState.maxMembers);
+      onEntry(names.length);
       names.push(dirent.name);
     }
   } finally {
     await dirStream.close().catch(() => {});
   }
-  await verifyDirectoryChain(ancestors);
-  const postEnumLstat = await fs.promises.lstat(dirPath, { bigint: true }).catch(() => null);
-  const postEnumFdStat = await dirHandle.stat({ bigint: true }).catch(() => null);
-  if (postEnumLstat?.isSymbolicLink()) throw new SanitizerError('E_INPUT_SYMLINK', 'Input path must not be a symbolic link');
-  if (!sameDirectoryIdentity(expectedStat, postEnumLstat) || !sameDirectoryIdentity(expectedStat, postEnumFdStat)) {
-    throw new SanitizerError('E_INPUT_CHANGED', 'Input directory changed during enumeration');
-  }
   names.sort();
+  return names;
+}
+
+// SECURITY BOUNDARY: Node.js node:fs (including FileHandle and fs.Dir) does not expose fdopendir(fd),
+// openat(dirFd, name), or an underlying file descriptor/HANDLE on fs.Dir. Therefore standard pure-JS
+// directory enumeration cannot enforce kernel-atomic identity binding between opendir() and dirHandle.
+// Instead, this performs a bounded fail-closed consistency protocol: hold an O_NOFOLLOW dirHandle open,
+// verify ancestor/leaf (dev, ino > 0, mtimeNs, ctimeNs) before and after enumeration, and run a second
+// bounded confirmation pass so transient swap-and-restore omissions fail with E_INPUT_CHANGED rather than
+// publishing a silently incomplete export. Callers requiring kernel-atomic input isolation should supply
+// a .zip or single-file input (both bound end-to-end to one open FileHandle).
+async function enumerateVerifiedDirectory(dirPath, expectedStat, dirHandle, ancestors, budgetState) {
+  await verifyDirectorySnapshot(dirPath, expectedStat, ancestors, dirHandle, 'Input directory changed before enumeration');
+  const names = await readBoundedDirectoryPass(dirPath, expectedStat, ancestors, () => {
+    if (++budgetState.enumerated > budgetState.maxMembers) throw new BudgetError('maxMembers', budgetState.maxMembers);
+  });
+  await verifyDirectorySnapshot(dirPath, expectedStat, ancestors, dirHandle, 'Input directory changed during enumeration');
+
+  // Confirmation pass is bounded to names.length + 1 without double-charging budgetState.enumerated
+  // for legitimate inputs at the maxMembers limit; any discrepancy fails closed with E_INPUT_CHANGED.
+  const confirmed = await readBoundedDirectoryPass(dirPath, expectedStat, ancestors, seen => {
+    if (seen + 1 > names.length) throw new SanitizerError('E_INPUT_CHANGED', 'Directory contents changed during enumeration');
+  });
+  await verifyDirectorySnapshot(dirPath, expectedStat, ancestors, dirHandle, 'Input directory changed during confirmation');
+  if (confirmed.length !== names.length || confirmed.some((name, index) => name !== names[index])) {
+    throw new SanitizerError('E_INPUT_CHANGED', 'Directory contents changed during enumeration');
+  }
   return names;
 }
 
@@ -185,7 +215,10 @@ async function walk(root, rootStat, rootHandle, maxMembers) {
     const childChain = [...ancestors, { path: dir, stat: { dev: dirStat.dev, ino: dirStat.ino, isDirectory: () => true } }];
     for (const name of names) {
       const file = path.join(dir, name);
-      const stat = await fs.promises.lstat(file, { bigint: true });
+      const stat = await fs.promises.lstat(file, { bigint: true }).catch(error => {
+        if (error?.code === 'ENOENT') throw new SanitizerError('E_INPUT_CHANGED', 'Input entry disappeared during traversal');
+        throw error;
+      });
       if (stat.isSymbolicLink()) { skipped.symlinks++; continue; }
       if (stat.isDirectory()) {
         const subHandle = await openNoFollow(file);

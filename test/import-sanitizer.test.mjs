@@ -1865,6 +1865,77 @@ test('directory source fails closed on root swap, ancestor swap, child swap, and
     );
     fs.promises.open = origOpen;
     assert.equal(fs.existsSync(path.join(t.dir, 'out-child-sanitize-swap')), false);
+
+    // 8. Transient opendir() swap-and-restore (pathname lstat stays original throughout) never silently omits files.
+    const transientIn = path.join(t.dir, 'transient-in');
+    const transientNested = path.join(transientIn, 'nested');
+    const transientPartial = path.join(t.dir, 'transient-partial');
+    const transientNestedPartial = path.join(t.dir, 'transient-nested-partial');
+    const existingOut = path.join(t.dir, 'transient-existing-out');
+    fs.mkdirSync(transientNested, { recursive: true });
+    fs.mkdirSync(transientPartial, { recursive: true });
+    fs.mkdirSync(transientNestedPartial, { recursive: true });
+    fs.writeFileSync(path.join(transientIn, 'conversations.json'), '[{"id":"c1","title":"first secret"}]\n');
+    fs.writeFileSync(path.join(transientNested, 'user.json'), '{"id":"u1"}\n');
+    // Alternate dirs drop nested/conversations or drop user.json to simulate silent omission.
+    fs.writeFileSync(path.join(transientPartial, 'conversations.json'), '[{"id":"c1","title":"first secret"}]\n');
+
+    assert.equal((await sanitize({ input: transientIn, output: existingOut })).exitCode, 0);
+    const existingSnapshot = snapshot(existingOut);
+
+    // 8a: First opendir() call for root transiently sees partial directory while lstat/dirHandle still see real transientIn.
+    let transientPass = 0;
+    fs.promises.opendir = async (dirPath, ...rest) => {
+      if (path.resolve(dirPath) === path.resolve(transientIn)) {
+        transientPass++;
+        if (transientPass === 1) return opendir.call(fs.promises, transientPartial, ...rest);
+      }
+      return opendir.call(fs.promises, dirPath, ...rest);
+    };
+    await assert.rejects(
+      sanitize({ input: transientIn, output: existingOut, force: true }),
+      { code: 'E_INPUT_CHANGED' },
+    );
+    fs.promises.opendir = opendir;
+    assert.deepEqual(snapshot(existingOut), existingSnapshot, 'transient omission must preserve existing --force output');
+    assert.deepEqual(leftoverNames(t.dir), []);
+
+    // 8b: Second (confirmation) opendir() call for root transiently sees extra/different entries while path stays original.
+    let reversePass = 0;
+    const transientExtra = path.join(t.dir, 'transient-extra');
+    fs.mkdirSync(transientExtra, { recursive: true });
+    fs.writeFileSync(path.join(transientExtra, 'conversations.json'), '[{"id":"c1"}]\n');
+    fs.mkdirSync(path.join(transientExtra, 'nested'), { recursive: true });
+    fs.writeFileSync(path.join(transientExtra, 'rogue.json'), '[{"id":"r1"}]\n');
+    fs.promises.opendir = async (dirPath, ...rest) => {
+      if (path.resolve(dirPath) === path.resolve(transientIn)) {
+        reversePass++;
+        if (reversePass === 2) return opendir.call(fs.promises, transientExtra, ...rest);
+      }
+      return opendir.call(fs.promises, dirPath, ...rest);
+    };
+    await assert.rejects(
+      sanitize({ input: transientIn, output: path.join(t.dir, 'out-transient-reverse') }),
+      { code: 'E_INPUT_CHANGED' },
+    );
+    fs.promises.opendir = opendir;
+    assert.equal(fs.existsSync(path.join(t.dir, 'out-transient-reverse')), false);
+
+    // 8c: Transient swap-and-restore on a nested subdirectory omits user.json once -> must fail closed, never silent SUCCESS.
+    let nestedPass = 0;
+    fs.promises.opendir = async (dirPath, ...rest) => {
+      if (path.resolve(dirPath) === path.resolve(transientNested)) {
+        nestedPass++;
+        if (nestedPass === 1) return opendir.call(fs.promises, transientNestedPartial, ...rest);
+      }
+      return opendir.call(fs.promises, dirPath, ...rest);
+    };
+    await assert.rejects(
+      sanitize({ input: transientIn, output: path.join(t.dir, 'out-transient-nested') }),
+      { code: 'E_INPUT_CHANGED' },
+    );
+    fs.promises.opendir = opendir;
+    assert.equal(fs.existsSync(path.join(t.dir, 'out-transient-nested')), false);
   } finally {
     fs.promises.opendir = opendir;
     fs.promises.lstat = lstat;
