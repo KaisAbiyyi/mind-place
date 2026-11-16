@@ -498,30 +498,105 @@ fn authorization_wait_does_not_trip_extraction_elapsed_limit() {
 
     let input = b"# First\nalpha\n## Second\nbeta\n";
     let limits = ExtractionLimits {
-        max_millis: 40,
+        max_millis: 150,
+        max_total_millis: 2_000,
         ..ExtractionLimits::default()
     };
     let mut polls = 0usize;
+    let mut injected = false;
     let doc = extract_with_check(DocumentFormat::Markdown, input, limits, || {
         polls += 1;
         if polls == 2 {
-            thread::sleep(Duration::from_millis(80));
+            injected = true;
+            thread::sleep(Duration::from_millis(300));
         }
         true
     })
-    .expect("host authorization callback wait must not trip parser elapsed_millis");
+    .expect("bounded host authorization callback wait must not trip parser elapsed_millis");
+    assert!(injected);
     assert!(polls >= 3);
     assert!(doc.text.contains("alpha") && doc.text.contains("beta"));
 
-    // Denied authorization still fails closed immediately regardless of duration.
+    // Denied authorization still fails closed immediately even if wait exceeded max_total_millis.
+    let tight_total = ExtractionLimits {
+        max_millis: 150,
+        max_total_millis: 100,
+        ..ExtractionLimits::default()
+    };
     let mut denied_polls = 0usize;
-    let denied = extract_with_check(DocumentFormat::Markdown, input, limits, || {
+    let denied = extract_with_check(DocumentFormat::Markdown, input, tight_total, || {
         denied_polls += 1;
         if denied_polls == 2 {
-            thread::sleep(Duration::from_millis(80));
+            thread::sleep(Duration::from_millis(140));
             return false;
         }
         true
     });
     assert_eq!(denied, Err(ExtractionError::Revoked));
+}
+
+#[test]
+fn authorization_wait_exceeding_total_limit_fails_closed() {
+    use std::{thread, time::Duration};
+
+    let mut markdown = String::new();
+    for section in 0..8 {
+        markdown.push_str(&format!("# Section {section}\nbody {section}\n"));
+    }
+
+    // Repeated short authorization waits accumulate against max_total_millis even
+    // though each call and total parser work remain below max_millis.
+    let cumulative_limits = ExtractionLimits {
+        max_millis: 500,
+        max_total_millis: 120,
+        ..ExtractionLimits::default()
+    };
+    let mut polls = 0usize;
+    let cumulative = extract_with_check(
+        DocumentFormat::Markdown,
+        markdown.as_bytes(),
+        cumulative_limits,
+        || {
+            polls += 1;
+            thread::sleep(Duration::from_millis(45));
+            true
+        },
+    );
+    assert!(polls >= 3);
+    assert_eq!(
+        cumulative,
+        Err(ExtractionError::Limit("total_elapsed_millis"))
+    );
+
+    // Zero total budget configuration fails closed before parsing.
+    let invalid_cfg = ExtractionLimits {
+        max_total_millis: 0,
+        ..ExtractionLimits::default()
+    };
+    assert_eq!(
+        extract_bytes(DocumentFormat::Markdown, b"# Title\nbody", invalid_cfg),
+        Err(ExtractionError::Limit("configuration"))
+    );
+}
+
+#[test]
+fn parser_work_timeout_fails_closed_within_total_budget() {
+    let mut stream = String::from("BT\n");
+    for _ in 0..80_000 {
+        stream.push_str("0 0 m\n");
+    }
+    stream.push_str("(tail) Tj\nET");
+    let pdf = format!(
+        "%PDF-1.7\n1 0 obj\n<< /Length {} >>\nstream\n{stream}\nendstream\nendobj\n%%EOF",
+        stream.len()
+    );
+    let limits = ExtractionLimits {
+        max_millis: 1,
+        max_total_millis: 10_000,
+        ..ExtractionLimits::default()
+    };
+    assert_eq!(
+        extract_with_check(DocumentFormat::Pdf, pdf.as_bytes(), limits, || true),
+        Err(ExtractionError::Limit("elapsed_millis"))
+    );
 }
