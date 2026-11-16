@@ -1,0 +1,422 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import assert from "node:assert/strict";
+import { chromium } from "@playwright/test";
+import { createServer } from "vite";
+
+const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const outDir = path.join(rootDir, "docs", "ui", "evidence", "mp-ui2", "shell");
+
+const HTML = `<!doctype html>
+<html lang="en" data-theme="light" data-density="comfortable">
+<head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>html,body{margin:0;min-height:100%}</style></head>
+<body><div id="app"></div>
+<script type="module">
+  // Match the real main.ts CSS load order before the opt-in v2 chunk.
+  import "katex/dist/katex.min.css";
+  import "/src/style.css";
+  import "/src/knowledge-os.css";
+  import "/src/library-workspace.css";
+  import "/src/memory-inspector.css";
+  import "/src/conversation-archive.css";
+  import "/src/providers-workspace.css";
+  import "/src/memory-entity-lenses.css";
+  import "/src/hive-workspace.css";
+  import "/src/files-vault-workspace.css";
+  import "/src/health-workspace.css";
+  import "/src/workspace-integration.css";
+  import "/src/security.css";
+  import "/src/ui-tokens.css";
+  import "/src/ui-primitives.css";
+  import "/src/ui-shell.css";
+  import "/src/search-workspace.css";
+  import "/src/settings-workspace.css";
+  import "/src/onboarding-workspace.css";
+  import { createI18nController } from "/src/ui2/i18n/index.ts";
+  import { mountUi2Shell, ensureUi2Styles } from "/src/ui2/shell/entry.ts";
+  await ensureUi2Styles();
+  const params = new URLSearchParams(location.search);
+  document.documentElement.dataset.theme = params.get("theme") || "light";
+  const locale = params.get("locale") || "en";
+  const i18n = createI18nController({ initialLocale: locale });
+  const root = document.getElementById("app");
+  window.__shell = mountUi2Shell(root, { i18n, onLock() { window.__locked = true; },
+    onSwitchClassic() { window.__classicRequested = true; } });
+</script></body></html>`;
+
+const entryPlugin = {
+  name: "ui2-shell-virtual-entry",
+  configureServer(server) {
+    server.middlewares.use(async (req, res, next) => {
+      if (req.url?.split("?")[0] !== "/__ui2-shell.html") return next();
+      const html = await server.transformIndexHtml(req.url, HTML);
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.end(html);
+    });
+  },
+};
+
+async function audit(page) {
+  return page.evaluate(() => {
+    function parseRgb(color) {
+      const m = /^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)(?:\s*,\s*([\d.]+))?\s*\)$/i.exec(color || "");
+      if (!m) return null;
+      return { r: Number(m[1]), g: Number(m[2]), b: Number(m[3]), a: m[4] === undefined ? 1 : Number(m[4]) };
+    }
+    function luminance(rgb) {
+      const channel = (v) => {
+        const c = v / 255;
+        return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+      };
+      return 0.2126 * channel(rgb.r) + 0.7152 * channel(rgb.g) + 0.0722 * channel(rgb.b);
+    }
+    function contrastRatio(fg, bg) {
+      const l1 = luminance(fg);
+      const l2 = luminance(bg);
+      return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+    }
+    function effectiveBackground(el) {
+      let cur = el;
+      while (cur) {
+        const bg = parseRgb(getComputedStyle(cur).backgroundColor);
+        if (bg && bg.a > 0.99) return bg;
+        cur = cur.parentElement;
+      }
+      return parseRgb(getComputedStyle(document.documentElement).backgroundColor) || { r: 255, g: 255, b: 255, a: 1 };
+    }
+    function measureContrast(selector) {
+      const el = document.querySelector(selector);
+      if (!el) return null;
+      const rect = el.getBoundingClientRect();
+      const style = getComputedStyle(el);
+      if (style.display === "none" || style.visibility === "hidden" || !rect.width || !rect.height) return null;
+      const fg = parseRgb(style.color);
+      const bg = effectiveBackground(el);
+      if (!fg || !bg) return null;
+      return {
+        ratio: Number(contrastRatio(fg, bg).toFixed(2)),
+        fontSizePx: parseFloat(style.fontSize),
+        color: style.color,
+        backgroundColor: `rgb(${bg.r}, ${bg.g}, ${bg.b})`,
+      };
+    }
+
+    const shell = document.querySelector(".ui2-shell");
+    const navButtons = [...document.querySelectorAll(".ui2-shell-nav-button")];
+    const missingAccessibleNames = [...document.querySelectorAll(".ui2-root button")]
+      .filter(el => {
+        const rect = el.getBoundingClientRect();
+        if (!rect.width && !rect.height) return false;
+        return !(el.getAttribute("aria-label") || el.textContent?.trim());
+      }).map(el => el.className || el.tagName);
+    const navNames = navButtons.map(el => el.getAttribute("aria-label"));
+    const rect = shell?.getBoundingClientRect();
+    const visibleText = shell?.innerText || "";
+    return {
+      destinations: navButtons.length,
+      navNames,
+      overflowPx: Math.max(0, document.documentElement.scrollWidth - window.innerWidth),
+      minRootWidth: rect?.width ?? 0,
+      missingAccessibleNames,
+      technicalStringVisible: /\\b(?:sha-?256|revision|epoch|grpc|sqlite|token budget)\\b/i.test(visibleText),
+      unavailableState: Boolean(document.querySelector(".ui2-shell-placeholder")),
+      nonemptyPreview: Boolean(document.querySelector(".ui2-shell-placeholder .ui2-empty-body")?.textContent?.trim()),
+      documentLanguage: document.documentElement.lang,
+      styleLoaded: getComputedStyle(shell).display === "grid",
+      sidebarHiddenToAssistiveTech: document.querySelector(".ui2-shell-sidebar")?.getAttribute("aria-hidden") === "true",
+      shortcutContrast: measureContrast(".ui2-shell-shortcut"),
+      navContrast: measureContrast(".ui2-shell-nav-button"),
+      headingContrast: measureContrast(".ui2-h1"),
+      leadContrast: measureContrast(".ui2-lead"),
+      emptyBodyContrast: measureContrast(".ui2-shell-placeholder .ui2-empty-body"),
+    };
+  });
+}
+
+async function main() {
+  fs.mkdirSync(outDir, { recursive: true });
+  const server = await createServer({ root: rootDir, server: { host: "127.0.0.1", port: 0 }, plugins: [entryPlugin], logLevel: "silent" });
+  await server.listen();
+  const address = server.httpServer.address();
+  const url = `http://127.0.0.1:${address.port}/__ui2-shell.html`;
+  const browser = await chromium.launch({ headless: true });
+  const matrix = [];
+  const interactions = [];
+
+  try {
+    const viewports = [
+      { name: "wide", width: 1280, height: 840 },
+      { name: "laptop", width: 1024, height: 768 },
+      { name: "narrow", width: 760, height: 768 },
+    ];
+    for (const theme of ["light", "dark"]) {
+      for (const locale of ["en", "id", "pseudo"]) {
+        for (const viewport of viewports) {
+          const ctx = await browser.newContext({ viewport });
+          const page = await ctx.newPage();
+          const errors = [];
+          page.on("pageerror", error => errors.push(error.message));
+          await page.goto(`${url}?theme=${theme}&locale=${locale}`, { waitUntil: "networkidle" });
+          await page.waitForSelector(".ui2-shell-nav-button");
+          await page.waitForFunction(() => getComputedStyle(document.querySelector(".ui2-shell")).display === "grid");
+          const result = await audit(page);
+          assert.deepEqual(errors, [], `browser errors ${theme}/${locale}/${viewport.name}`);
+          assert.equal(result.destinations, 7);
+          assert.equal(result.overflowPx, 0, `horizontal overflow ${theme}/${locale}/${viewport.name}`);
+          assert.deepEqual(result.missingAccessibleNames, []);
+          assert.equal(result.technicalStringVisible, false);
+          assert.equal(result.unavailableState && result.nonemptyPreview && result.styleLoaded, true);
+          assert.equal(result.documentLanguage, locale === "id" ? "id" : "en");
+          assert.equal(result.sidebarHiddenToAssistiveTech, viewport.name === "narrow", "closed drawer a11y");
+          if (viewport.name === "wide") {
+            assert.ok(result.shortcutContrast && result.shortcutContrast.ratio >= 4.5,
+              `shortcut contrast ${theme}/${locale}: ${JSON.stringify(result.shortcutContrast)}`);
+          }
+          assert.ok(result.headingContrast && result.headingContrast.ratio >= 4.5,
+            `heading contrast ${theme}/${locale}/${viewport.name}: ${JSON.stringify(result.headingContrast)}`);
+          assert.ok(result.leadContrast && result.leadContrast.ratio >= 4.5,
+            `lead contrast ${theme}/${locale}/${viewport.name}: ${JSON.stringify(result.leadContrast)}`);
+          assert.ok(result.emptyBodyContrast && result.emptyBodyContrast.ratio >= 4.5,
+            `empty body contrast ${theme}/${locale}/${viewport.name}: ${JSON.stringify(result.emptyBodyContrast)}`);
+          if (viewport.name !== "narrow") {
+            assert.ok(result.navContrast && result.navContrast.ratio >= 4.5,
+              `nav contrast ${theme}/${locale}/${viewport.name}: ${JSON.stringify(result.navContrast)}`);
+          }
+          const filename = `shell-${theme}-${locale}-${viewport.name}.png`;
+          await page.screenshot({ path: path.join(outDir, filename), fullPage: true });
+          matrix.push({ filename, theme, locale, viewport, audit: result });
+          await ctx.close();
+        }
+      }
+    }
+
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 840 } });
+    const page = await ctx.newPage();
+    await page.goto(`${url}?theme=light&locale=en`, { waitUntil: "networkidle" });
+
+    await page.locator('[data-ui2-route="/memory"]').click();
+    assert.equal(await page.locator(".ui2-breadcrumb-current").innerText(), "Memory");
+    await page.getByRole("button", { name: "Home", exact: true }).last().click();
+    assert.equal(await page.locator(".ui2-breadcrumb-current").innerText(), "Home");
+
+    const searchButton = page.locator('[data-ui2-control="search"]');
+    await searchButton.focus();
+    await page.keyboard.press("Control+k");
+    assert.equal(await page.getByRole("dialog").isVisible(), true);
+    const filenameSearch = "shell-state-search-light-en-wide.png";
+    await page.screenshot({ path: path.join(outDir, filenameSearch) });
+    interactions.push(filenameSearch);
+    await page.keyboard.press("Escape");
+    assert.equal(await searchButton.evaluate(el => document.activeElement === el), true);
+
+    await page.locator('[data-ui2-seg-value="id"]').click();
+    assert.equal(await page.locator('[data-ui2-route="/home"]').getAttribute("aria-label"), "Beranda");
+    await page.locator('[data-ui2-seg-value="en"]').click();
+    await page.locator('[data-ui2-control="sidebar"]').click();
+    assert.equal(await page.locator(".ui2-shell").getAttribute("data-collapsed"), "true");
+    const filenameCollapsed = "shell-state-collapsed-light-en-wide.png";
+    await page.screenshot({ path: path.join(outDir, filenameCollapsed) });
+    interactions.push(filenameCollapsed);
+    await ctx.close();
+
+    const mobileCtx = await browser.newContext({ viewport: { width: 760, height: 768 } });
+    const mobile = await mobileCtx.newPage();
+    await mobile.goto(`${url}?theme=dark&locale=id`, { waitUntil: "networkidle" });
+
+    async function measureMobileDrawer(targetPage) {
+      return targetPage.evaluate(() => {
+        const shell = document.querySelector(".ui2-shell");
+        const sidebar = document.querySelector(".ui2-shell-sidebar");
+        const scrim = document.querySelector(".ui2-shell-scrim");
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        const sidebarStyle = sidebar ? getComputedStyle(sidebar) : null;
+        const sidebarRect = sidebar ? sidebar.getBoundingClientRect() : null;
+        const scrimStyle = scrim ? getComputedStyle(scrim) : null;
+        const navButtons = [...document.querySelectorAll(".ui2-shell-nav-button")].map((button) => {
+          const rect = button.getBoundingClientRect();
+          const btnStyle = getComputedStyle(button);
+          const label = button.querySelector(".ui2-shell-nav-label");
+          const labelRect = label ? label.getBoundingClientRect() : null;
+          const labelStyle = label ? getComputedStyle(label) : null;
+          const inViewport = rect.width > 0
+            && rect.height > 0
+            && rect.left >= 0
+            && rect.top >= 0
+            && rect.right <= vw
+            && rect.bottom <= vh;
+          const cx = rect.left + rect.width / 2;
+          const cy = rect.top + rect.height / 2;
+          const hit = (inViewport && cx >= 0 && cy >= 0 && cx < vw && cy < vh)
+            ? document.elementFromPoint(cx, cy)
+            : null;
+          const hitByPointer = Boolean(hit && (hit === button || button.contains(hit)));
+          const labelVisible = Boolean(
+            label
+            && label.textContent?.trim()
+            && labelStyle
+            && labelStyle.display !== "none"
+            && labelStyle.visibility !== "hidden"
+            && labelRect
+            && labelRect.width > 0
+            && labelRect.height > 0
+            && labelRect.left >= 0
+            && labelRect.right <= vw,
+          );
+          const focusable = button.tabIndex >= 0
+            && !button.disabled
+            && btnStyle.display !== "none"
+            && btnStyle.visibility !== "hidden"
+            && !sidebar?.inert;
+          return {
+            route: button.dataset.ui2Route || "",
+            label: label?.textContent?.trim() || "",
+            rect: { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height },
+            inViewport,
+            hitByPointer,
+            labelVisible,
+            focusable,
+          };
+        });
+        const transform = sidebarStyle?.transform || "";
+        return {
+          mobileOpen: shell?.getAttribute("data-mobile-open") === "true",
+          sidebarInert: Boolean(sidebar?.inert),
+          sidebarAriaHidden: sidebar?.getAttribute("aria-hidden"),
+          scrimVisible: Boolean(scrim && !scrim.hidden && scrimStyle?.display !== "none"),
+          transform,
+          transformIdentity: transform === "none" || transform === "matrix(1, 0, 0, 1, 0, 0)",
+          viewport: { width: vw, height: vh },
+          sidebarRect: sidebarRect
+            ? {
+              left: sidebarRect.left,
+              right: sidebarRect.right,
+              top: sidebarRect.top,
+              bottom: sidebarRect.bottom,
+              width: sidebarRect.width,
+              height: sidebarRect.height,
+            }
+            : null,
+          navButtons,
+        };
+      });
+    }
+
+    function assertMobileDrawerVisible(report, expectedDestinations = 7) {
+      assert.equal(report.mobileOpen, true, "drawer not visually open: data-mobile-open must be true");
+      assert.equal(report.sidebarInert, false, "drawer not visually open: sidebar must not be inert");
+      assert.notEqual(report.sidebarAriaHidden, "true", "drawer not visually open: sidebar aria-hidden must not be true");
+      assert.equal(report.scrimVisible, true, "drawer not visually open: mobile scrim should be visible");
+      assert.equal(report.transformIdentity, true, `drawer transition incomplete: transform=${report.transform}`);
+      assert.ok(report.sidebarRect, "sidebar element missing");
+      const intersectsViewport = report.sidebarRect.right > 0
+        && report.sidebarRect.left < report.viewport.width
+        && report.sidebarRect.bottom > 0
+        && report.sidebarRect.top < report.viewport.height
+        && report.sidebarRect.left >= 0
+        && report.sidebarRect.width >= 150;
+      assert.equal(intersectsViewport, true,
+        `sidebar offscreen or collapsed: ${JSON.stringify(report.sidebarRect)}`);
+      assert.equal(report.navButtons.length, expectedDestinations, "expected seven nav buttons in mobile drawer");
+      for (const nav of report.navButtons) {
+        assert.equal(nav.inViewport, true, `nav button offscreen: ${nav.route} ${JSON.stringify(nav.rect)}`);
+        assert.equal(nav.hitByPointer, true, `nav button occluded (e.g. scrim only): ${nav.route}`);
+        assert.equal(nav.labelVisible, true, `nav label hidden: ${nav.route}`);
+        assert.equal(nav.focusable, true, `nav button not focusable: ${nav.route}`);
+      }
+    }
+
+    // Negative assertion: if only the scrim is shown while the sidebar remains offscreen, drawer visibility must fail.
+    const scrimOnlyProbe = await mobileCtx.newPage();
+    await scrimOnlyProbe.goto(`${url}?theme=dark&locale=id`, { waitUntil: "networkidle" });
+    await scrimOnlyProbe.evaluate(() => {
+      const scrim = document.querySelector(".ui2-shell-scrim");
+      if (scrim) scrim.hidden = false;
+    });
+    const scrimOnlyReport = await measureMobileDrawer(scrimOnlyProbe);
+    assert.equal(scrimOnlyReport.scrimVisible, true, "scrim-only probe must show scrim");
+    assert.throws(
+      () => assertMobileDrawerVisible(scrimOnlyReport, 7),
+      /drawer not visually open|sidebar offscreen|nav button|transition incomplete/i,
+      "opening only the scrim must never pass mobile drawer verification",
+    );
+    await scrimOnlyProbe.evaluate(() => {
+      const shell = document.querySelector(".ui2-shell");
+      const sidebar = document.querySelector(".ui2-shell-sidebar");
+      if (shell) shell.setAttribute("data-mobile-open", "true");
+      if (sidebar) {
+        sidebar.inert = false;
+        sidebar.removeAttribute("aria-hidden");
+        sidebar.style.transform = "translateX(-100%)";
+      }
+    });
+    const scrimWithOpenAttrReport = await measureMobileDrawer(scrimOnlyProbe);
+    assert.throws(
+      () => assertMobileDrawerVisible(scrimWithOpenAttrReport, 7),
+      /transition incomplete|sidebar offscreen|nav button/i,
+      "data-mobile-open=true with an offscreen sidebar must never pass mobile drawer verification",
+    );
+    await scrimOnlyProbe.close();
+
+    const mobileToggle = mobile.locator('[data-ui2-control="sidebar"]');
+    await mobileToggle.click();
+    await mobile.waitForFunction(() => {
+      const shell = document.querySelector(".ui2-shell");
+      const sidebar = document.querySelector(".ui2-shell-sidebar");
+      if (!shell || !sidebar || shell.getAttribute("data-mobile-open") !== "true") return false;
+      const transform = getComputedStyle(sidebar).transform;
+      const rect = sidebar.getBoundingClientRect();
+      return (transform === "none" || transform === "matrix(1, 0, 0, 1, 0, 0)")
+        && rect.width >= 150
+        && rect.left >= 0
+        && rect.right > 0;
+    });
+    await mobile.evaluate(() => new Promise(resolve => {
+      requestAnimationFrame(() => requestAnimationFrame(resolve));
+    }));
+    const drawerReport = await measureMobileDrawer(mobile);
+    assertMobileDrawerVisible(drawerReport, 7);
+
+    const filenameMobile = "shell-state-mobile-nav-dark-id-narrow.png";
+    await mobile.screenshot({ path: path.join(outDir, filenameMobile) });
+    interactions.push(filenameMobile);
+
+    const lastMobileNav = mobile.locator(".ui2-shell-nav-button").last();
+    await lastMobileNav.focus();
+    assert.equal(await lastMobileNav.evaluate(el => document.activeElement === el), true,
+      "opened drawer navigation buttons must accept focus");
+    await mobile.keyboard.press("Escape");
+    assert.equal(await mobile.locator(".ui2-shell").getAttribute("data-mobile-open"), "false");
+    assert.equal(await mobileToggle.evaluate(el => document.activeElement === el), true);
+    await mobileCtx.close();
+
+    const manifest = {
+      guide: "docs/ui/evidence/mp-ui2/wireframe-v1.html",
+      guideSha256: "2b4bbce50a079516e7db2326345cfd0bd227ff7b6a5dd347616fc9c790bc3a8c",
+      cssParity: "All legacy CSS from src/main.ts followed by opt-in UI2 styles",
+      generatedAt: new Date().toISOString(),
+      totalCaptures: matrix.length + interactions.length,
+      matrix, interactions,
+      browserNavigation: "PASS",
+      ctrlKAndEscapeFocusReturn: "PASS",
+      ENIDSwitch: "PASS",
+      mobileOverlayEscapeFocusReturn: "PASS",
+      mobileDrawerVisibility: {
+        sidebarRect: drawerReport.sidebarRect,
+        visibleDestinations: drawerReport.navButtons.length,
+        scrimOnlyNegativeCheck: "PASS",
+      },
+      contrastAudit: "PASS (automated WCAG 2.1 >= 4.5:1 on .ui2-shell-shortcut and shell text in light and dark; manual UX/screen-reader review remains owner gate)",
+      nativeWindowsWebView2: "NOT_RUN (owner gate)",
+    };
+    fs.writeFileSync(path.join(outDir, "shell-manifest.json"), JSON.stringify(manifest, null, 2));
+    console.log(`UI2 shell visuals PASS: ${manifest.totalCaptures} captures; 0 overflow; 7 destinations; accessible names; keyboard and focus checks`);
+  } finally {
+    await browser.close();
+    await server.close();
+  }
+}
+main().catch(err => { console.error(err); process.exitCode = 1; });

@@ -5,6 +5,17 @@ export const ID_CATALOG: Record<Ui2TranslationKey, string> = {
   "app.name": "Mind Place",
   "app.skipToMain": "Langsung ke konten utama",
   "breadcrumb.ariaLabel": "Navigasi halaman",
+  "shell.navAria": "Navigasi utama",
+  "shell.closeSidebar": "Tutup bilah sisi",
+  "shell.previewLead": "Antarmuka baru sedang dibangun secara bertahap.",
+  "shell.previewTitle": "Bagian ini belum tersedia di antarmuka baru",
+  "shell.previewBody": "Informasi tersimpan Anda masih tersedia di antarmuka lama. Pratinjau ini tidak mengubahnya.",
+  "shell.openClassic": "Buka antarmuka lama",
+  "shell.invalidTitle": "Halaman ini tidak tersedia",
+  "shell.invalidBody": "Pilih tujuan dari bilah sisi.",
+  "shell.searchTitle": "Cari",
+  "shell.searchUnavailableTitle": "Pencarian belum siap dalam pratinjau ini",
+  "shell.searchUnavailableBody": "Buka antarmuka lama untuk mencari memori dan percakapan tersimpan.",
 
   // Navigasi (urutan resmi: Beranda, Memori, Arsip, Constellation, Sumber, Koneksi, Pengaturan)
   "nav.group.main": "Ruang kerja",

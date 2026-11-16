@@ -6,6 +6,7 @@ on:
       - 'test/**'
       - 'scripts/mp8f-visual-smoke.mjs'
       - 'scripts/mp-ui09-visual.mjs'
+      - 'scripts/ui2-shell-visual.mjs'
       - 'docs/ui/evidence/mp-ui-09/reference.html'
       - '.github/workflows/mp8f-visual.yml'
   workflow_dispatch:
@@ -31,6 +32,16 @@ jobs:
         run: node scripts/mp8f-visual-smoke.mjs
       - name: Integrated UI-09 original versus candidate comparisons
         run: node scripts/mp-ui09-visual.mjs
+      - name: UI2 shell responsive, locale, keyboard and screenshot qualification
+        run: node scripts/ui2-shell-visual.mjs
+      - name: Save UI2 shell screenshot evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ui2-shell-visual-${{ github.sha }}
+          path: docs/ui/evidence/mp-ui2/shell/
+          if-no-files-found: warn
+          retention-days: 14
       - name: Save synthetic screenshot evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
