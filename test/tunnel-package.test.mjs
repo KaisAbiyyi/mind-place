@@ -84,7 +84,8 @@ test('Windows portable payload includes the verified helper, notices and receipt
     const extension = path.join(root, 'extension');
     const helper = path.join(root, 'helper');
     for (const dir of [source, extension, helper]) fs.mkdirSync(dir);
-    for (const name of ['mind-place.exe', 'mind-place-capture-host.exe']) fs.writeFileSync(path.join(source, name), 'app fixture');
+    const exe = process.platform === 'win32' ? '.exe' : '';
+    for (const name of [`mind-place${exe}`, `mind-place-capture-host${exe}`]) fs.writeFileSync(path.join(source, name), 'app fixture');
     fs.writeFileSync(path.join(extension, 'manifest.json'), JSON.stringify({
       permissions: ['activeTab', 'scripting', 'nativeMessaging', 'storage'],
       optional_host_permissions: ['https://chatgpt.com/*'],
@@ -252,7 +253,8 @@ test('prepareTunnelHelper and stageProduct reject concurrent destination swaps a
     const helper = path.join(root, 'helper');
     const binDir = path.join(root, 'src-tauri-binaries');
     for (const dir of [source, extension, helper, binDir]) fs.mkdirSync(dir, { recursive: true });
-    for (const name of ['mind-place.exe', 'mind-place-capture-host.exe']) fs.writeFileSync(path.join(source, name), 'app fixture');
+    const exe = process.platform === 'win32' ? '.exe' : '';
+    for (const name of [`mind-place${exe}`, `mind-place-capture-host${exe}`]) fs.writeFileSync(path.join(source, name), 'app fixture');
     fs.writeFileSync(path.join(extension, 'manifest.json'), JSON.stringify({
       permissions: ['activeTab', 'scripting', 'nativeMessaging', 'storage'],
       optional_host_permissions: ['https://chatgpt.com/*'],
@@ -344,29 +346,27 @@ test('prepareTunnelHelper and stageProduct reject concurrent destination swaps a
       { directory: helper, pin },
     ), /Unexpected tunnel helper resource payload/);
 
-    if (process.platform === 'win32') {
-      const outJunction = path.join(root, 'out-junction');
-      const outside = path.join(root, 'outside-target');
-      fs.mkdirSync(outJunction, { recursive: true });
-      fs.mkdirSync(outside, { recursive: true });
-      let junctioned = false;
-      try {
-        fs.symlinkSync(outside, path.join(outJunction, 'tunnel'), 'junction');
-        junctioned = true;
-      } catch {
-        junctioned = false;
-      }
-      if (junctioned) {
-        assert.throws(() => stageProduct(
-          source,
-          outJunction,
-          extension,
-          path.join(root, 'notices'),
-          path.join(root, 'license'),
-          { directory: helper, pin },
-        ), /Invalid helper resources|ELOOP/);
-        assert.deepEqual(fs.readdirSync(outside), []);
-      }
+    const outLink = path.join(root, 'out-link-tunnel');
+    const outside = path.join(root, 'outside-target');
+    fs.mkdirSync(outLink, { recursive: true });
+    fs.mkdirSync(outside, { recursive: true });
+    let linked = false;
+    try {
+      fs.symlinkSync(outside, path.join(outLink, 'tunnel'), process.platform === 'win32' ? 'junction' : 'dir');
+      linked = true;
+    } catch {
+      linked = false;
+    }
+    if (linked) {
+      assert.throws(() => stageProduct(
+        source,
+        outLink,
+        extension,
+        path.join(root, 'notices'),
+        path.join(root, 'license'),
+        { directory: helper, pin },
+      ), /Invalid helper resources|ELOOP/);
+      assert.deepEqual(fs.readdirSync(outside), []);
     }
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
