@@ -1,0 +1,20 @@
+{
+  "cargo-deny": {
+    "version": "0.18.6",
+    "url": "https://github.com/EmbarkStudios/cargo-deny/releases/download/0.18.6/cargo-deny-0.18.6-x86_64-unknown-linux-musl.tar.gz",
+    "sha256": "a9c3db6db22288045ad8407bd0febbb13c6339b3d948d666ae8ef634fb3f3853",
+    "binary": "cargo-deny"
+  },
+  "cargo-cyclonedx": {
+    "version": "0.5.10",
+    "url": "https://github.com/CycloneDX/cyclonedx-rust-cargo/releases/download/cargo-cyclonedx-0.5.10/cargo-cyclonedx-x86_64-unknown-linux-gnu.tar.xz",
+    "sha256": "2e4ef64a53c0a38d4b7d805c593b5f47ecd29821e98d81e484d03abaa0edb95f",
+    "binary": "cargo-cyclonedx"
+  },
+  "scorecard": {
+    "version": "5.6.0",
+    "url": "https://github.com/ossf/scorecard/releases/download/v5.6.0/scorecard_5.6.0_linux_amd64.tar.gz",
+    "sha256": "19bde07129450cb65a95c6e3b9f34e034341579e6f0e241546ec3ae6efb2dd9a",
+    "binary": "scorecard"
+  }
+}
