@@ -71,6 +71,47 @@ impl DerefMut for FencedDocumentConnection {
     }
 }
 
+/// Bounded, content-free skip classification counts from one `refresh_root` pass.
+/// Never stores paths, URIs, hashes, or document text.
+#[derive(Clone, Debug, Default, Serialize, PartialEq, Eq)]
+pub struct DocumentSkipBreakdown {
+    pub unsupported_extension: usize,
+    pub oversized_input: usize,
+    pub invalid_content: usize,
+    pub unsupported_content: usize,
+    pub limit_elapsed_millis: usize,
+    pub limit_other: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_limit_kind: Option<&'static str>,
+}
+
+impl DocumentSkipBreakdown {
+    pub fn is_empty(&self) -> bool {
+        self.unsupported_extension == 0
+            && self.oversized_input == 0
+            && self.invalid_content == 0
+            && self.unsupported_content == 0
+            && self.limit_elapsed_millis == 0
+            && self.limit_other == 0
+    }
+
+    fn record_extraction_error(&mut self, error: &ExtractionError) {
+        match error {
+            ExtractionError::Invalid => self.invalid_content += 1,
+            ExtractionError::Unsupported => self.unsupported_content += 1,
+            ExtractionError::Limit("elapsed_millis") => {
+                self.limit_elapsed_millis += 1;
+                self.last_limit_kind = Some("elapsed_millis");
+            }
+            ExtractionError::Limit(kind) => {
+                self.limit_other += 1;
+                self.last_limit_kind = Some(kind);
+            }
+            ExtractionError::Revoked => {}
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub struct DocumentIndexReport {
     pub root_id: String,
@@ -79,6 +120,8 @@ pub struct DocumentIndexReport {
     pub skipped_files: usize,
     pub indexed_chunks: usize,
     pub generation: i64,
+    #[serde(skip_serializing_if = "DocumentSkipBreakdown::is_empty")]
+    pub skip_breakdown: DocumentSkipBreakdown,
 }
 
 /// Bounded, freshly verified owner-only extracted source preview.
@@ -369,11 +412,13 @@ impl DocumentIndex {
             skipped_files: 0,
             indexed_chunks: 0,
             generation,
+            skip_breakdown: DocumentSkipBreakdown::default(),
         };
         for uri in uris {
             check()?;
             let Some(format) = format_for_uri(&uri) else {
                 report.skipped_files += 1;
+                report.skip_breakdown.unsupported_extension += 1;
                 continue;
             };
             let Some(head) = objects.current_version(&uri, || lease(&mut check))? else {
@@ -381,6 +426,7 @@ impl DocumentIndex {
             };
             if head.byte_length > ExtractionLimits::default().max_input_bytes as u64 {
                 report.skipped_files += 1;
+                report.skip_breakdown.oversized_input += 1;
                 continue;
             }
             let bytes = objects.read_version(&uri, &head.id, || lease(&mut check))?;
@@ -398,11 +444,12 @@ impl DocumentIndex {
                 Ok(value) => value,
                 Err(ExtractionError::Revoked) => return Err(IndexError::Revoked),
                 Err(
-                    ExtractionError::Invalid
+                    ref err @ (ExtractionError::Invalid
                     | ExtractionError::Unsupported
-                    | ExtractionError::Limit(_),
+                    | ExtractionError::Limit(_)),
                 ) => {
                     report.skipped_files += 1;
+                    report.skip_breakdown.record_extraction_error(err);
                     continue;
                 }
             };
@@ -1019,5 +1066,114 @@ mod tests {
             .unwrap();
         assert_eq!(count, 1);
         assert!(DocumentIndex::open(tmp.path().join("document-index.sqlite3")).is_ok());
+    }
+
+    #[test]
+    fn skip_breakdown_records_safe_classifications_without_paths_or_content() {
+        let mut breakdown = DocumentSkipBreakdown::default();
+        assert!(breakdown.is_empty());
+        breakdown.record_extraction_error(&ExtractionError::Invalid);
+        breakdown.record_extraction_error(&ExtractionError::Unsupported);
+        breakdown.record_extraction_error(&ExtractionError::Limit("elapsed_millis"));
+        breakdown.record_extraction_error(&ExtractionError::Limit("output_bytes"));
+        assert!(!breakdown.is_empty());
+        assert_eq!(breakdown.invalid_content, 1);
+        assert_eq!(breakdown.unsupported_content, 1);
+        assert_eq!(breakdown.limit_elapsed_millis, 1);
+        assert_eq!(breakdown.limit_other, 1);
+        assert_eq!(breakdown.last_limit_kind, Some("output_bytes"));
+
+        let clean_report = DocumentIndexReport {
+            root_id: "root:v1:0".into(),
+            scanned_files: 1,
+            indexed_files: 1,
+            skipped_files: 0,
+            indexed_chunks: 1,
+            generation: 1,
+            skip_breakdown: DocumentSkipBreakdown::default(),
+        };
+        let clean_json = serde_json::to_value(&clean_report).unwrap();
+        assert!(clean_json.get("skip_breakdown").is_none());
+
+        let skipped_json = serde_json::to_value(&DocumentIndexReport {
+            skip_breakdown: breakdown,
+            ..clean_report
+        })
+        .unwrap();
+        assert_eq!(skipped_json["skip_breakdown"]["limit_elapsed_millis"], 1);
+        assert_eq!(
+            skipped_json["skip_breakdown"]["last_limit_kind"],
+            "output_bytes"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_refresh_root_classifies_skips_and_survives_authorization_poll_wait() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = StateStore::open(dir.path().join("authority/state.sqlite3")).unwrap();
+        let folder = dir.path().join("approved");
+        std::fs::create_dir_all(&folder).unwrap();
+        let mut valid_md = String::new();
+        for section in 0..10 {
+            valid_md.push_str(&format!(
+                "## Section {section}\nSynthetic scale content segment {section}\n"
+            ));
+        }
+        std::fs::write(folder.join("good.md"), &valid_md).unwrap();
+        std::fs::write(folder.join("nullbyte.md"), b"bad\0content").unwrap();
+        std::fs::write(folder.join("badutf8.md"), [0xff, 0xfe, 0x00]).unwrap();
+        std::fs::write(folder.join("notes.jsonl"), "{\"line\":1}\n").unwrap();
+
+        let root = state.register_document_root(&folder).unwrap();
+        state.approve_document_root(&root.id).unwrap();
+        let index = DocumentIndex::open(dir.path().join("document-index.sqlite3")).unwrap();
+        let report = index.refresh_root(&state, &root.id, || Ok(())).unwrap();
+        assert_eq!(report.scanned_files, 4);
+        assert_eq!(report.indexed_files, 1);
+        assert_eq!(report.skipped_files, 3);
+        assert_eq!(
+            report.skip_breakdown,
+            DocumentSkipBreakdown {
+                unsupported_extension: 1,
+                oversized_input: 0,
+                invalid_content: 1,
+                unsupported_content: 1,
+                limit_elapsed_millis: 0,
+                limit_other: 0,
+                last_limit_kind: None,
+            }
+        );
+
+        // Removing the intentionally unextractable fixtures, verify a >2s wait inside
+        // the caller's authorization lease callback during extraction no longer
+        // triggers ExtractionError::Limit("elapsed_millis") or skips valid files.
+        std::fs::remove_file(folder.join("nullbyte.md")).unwrap();
+        std::fs::remove_file(folder.join("badutf8.md")).unwrap();
+        std::fs::remove_file(folder.join("notes.jsonl")).unwrap();
+        let mut baseline_calls = 0usize;
+        let clean = index
+            .refresh_root(&state, &root.id, || {
+                baseline_calls += 1;
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(clean.skipped_files, 0);
+        // Hit right inside extract_with_check's middle polls (before post-extraction chunk inserts).
+        let target_poll = baseline_calls.saturating_sub(20);
+        let mut current = 0usize;
+        let stalled = index
+            .refresh_root(&state, &root.id, || {
+                current += 1;
+                if current == target_poll {
+                    std::thread::sleep(std::time::Duration::from_millis(2_150));
+                }
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(stalled.scanned_files, 1);
+        assert_eq!(stalled.indexed_files, 1);
+        assert_eq!(stalled.skipped_files, 0);
+        assert!(stalled.skip_breakdown.is_empty());
     }
 }

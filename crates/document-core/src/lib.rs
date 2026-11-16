@@ -137,6 +137,7 @@ pub fn extract_with_check(
     let mut ctx = Context {
         limits,
         started: Instant::now(),
+        auth_elapsed: Duration::ZERO,
         authorized: &mut authorized,
         expanded: 0,
         output_bytes: 0,
@@ -171,6 +172,7 @@ pub fn extract_with_check(
 pub(crate) struct Context<'a> {
     pub limits: ExtractionLimits,
     started: Instant,
+    auth_elapsed: Duration,
     authorized: &'a mut dyn FnMut() -> bool,
     expanded: usize,
     output_bytes: usize,
@@ -180,14 +182,21 @@ pub(crate) struct Context<'a> {
 
 impl Context<'_> {
     pub fn poll(&mut self) -> Result<()> {
-        if !(self.authorized)() {
+        // Charge parser max_millis against extraction work rather than external
+        // SQLite/NTFS waits inside the caller's authorization lease callback.
+        let auth_started = Instant::now();
+        let allowed = (self.authorized)();
+        self.auth_elapsed = self.auth_elapsed.saturating_add(auth_started.elapsed());
+        if !allowed {
             return Err(ExtractionError::Revoked);
         }
         self.check_time()
     }
 
     pub fn check_time(&self) -> Result<()> {
-        if self.started.elapsed() > Duration::from_millis(self.limits.max_millis) {
+        if self.started.elapsed().saturating_sub(self.auth_elapsed)
+            > Duration::from_millis(self.limits.max_millis)
+        {
             return Err(ExtractionError::Limit("elapsed_millis"));
         }
         Ok(())

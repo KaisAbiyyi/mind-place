@@ -491,3 +491,37 @@ fn pdf_long_dictionary_and_content_skips_preserve_visible_text() {
         .iter()
         .any(|warning| warning.contains("no OCR")));
 }
+
+#[test]
+fn authorization_wait_does_not_trip_extraction_elapsed_limit() {
+    use std::{thread, time::Duration};
+
+    let input = b"# First\nalpha\n## Second\nbeta\n";
+    let limits = ExtractionLimits {
+        max_millis: 40,
+        ..ExtractionLimits::default()
+    };
+    let mut polls = 0usize;
+    let doc = extract_with_check(DocumentFormat::Markdown, input, limits, || {
+        polls += 1;
+        if polls == 2 {
+            thread::sleep(Duration::from_millis(80));
+        }
+        true
+    })
+    .expect("host authorization callback wait must not trip parser elapsed_millis");
+    assert!(polls >= 3);
+    assert!(doc.text.contains("alpha") && doc.text.contains("beta"));
+
+    // Denied authorization still fails closed immediately regardless of duration.
+    let mut denied_polls = 0usize;
+    let denied = extract_with_check(DocumentFormat::Markdown, input, limits, || {
+        denied_polls += 1;
+        if denied_polls == 2 {
+            thread::sleep(Duration::from_millis(80));
+            return false;
+        }
+        true
+    });
+    assert_eq!(denied, Err(ExtractionError::Revoked));
+}
