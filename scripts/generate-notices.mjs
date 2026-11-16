@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { helperPin, helperDirectory, verifyHelperBundle, readVerifiedRegularFile } from './tunnel-helper.mjs';
+import { helperPin, helperDirectory, readVerifiedHelperBundle, readVerifiedRegularFile } from './tunnel-helper.mjs';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const product=JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8'));
@@ -42,9 +42,9 @@ function nodePackage(name,from){
 }
 for(const dep of Object.keys(product.dependencies))nodePackage(dep,root);
 if(process.platform==='win32'){
- verifyHelperBundle(helperDirectory);
+ const bundle=readVerifiedHelperBundle(helperDirectory);
  sections.push(`\n${'='.repeat(72)}\nOpenAI tunnel-client ${helperPin.version} (Windows x64)\nSource and release: ${helperPin.repository}/releases/tag/v${helperPin.version}\nPinned executable SHA-256: ${helperPin.executable.sha256}\nBundled notices, upstream release SBOM and exact included-file receipt: tunnel/\nOnly tunnel-client.exe is distributed; the upstream cloudflared companion is excluded.\n`);
- for(const name of Object.keys(helperPin.resources).filter(name=>!name.endsWith('.json'))){const notice=readVerifiedRegularFile(path.join(helperDirectory,'resources',name),{maxBytes:1024*1024}).toString('utf8');sections.push(`--- tunnel/${name} ---\n${notice}`);}
+ for(const name of Object.keys(helperPin.resources).filter(name=>!name.endsWith('.json'))){const notice=bundle.resources.get(name).toString('utf8');sections.push(`--- tunnel/${name} ---\n${notice}`);}
 }
 const output=sections.join('\n')+'\n';
 fs.writeFileSync(path.join(root,'THIRD-PARTY-NOTICES.txt'),output);
