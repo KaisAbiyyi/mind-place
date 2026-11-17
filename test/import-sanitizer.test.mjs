@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 import { Readable } from 'node:stream';
 import { test } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { sanitize } from '../scripts/import-sanitizer/sanitize.mjs';
+import { openSource, sanitize } from '../scripts/import-sanitizer/sanitize.mjs';
 import { DEFAULT_BUDGETS, totalStructureEstimateBytes } from '../scripts/import-sanitizer/budgets.mjs';
 import { DistinctCounter, LeakRegistry } from '../scripts/import-sanitizer/leak-check.mjs';
 import { rewriteHtml, scanHtml } from '../scripts/import-sanitizer/html-stream.mjs';
@@ -836,7 +836,7 @@ test('SAN-F05: the report separates structure fidelity from privacy and lists th
     assert.equal(chat.report.keptValues, undefined);
 
     const gemini = await sanitize({ input: path.join(t.dir, 'gemini'), output: path.join(t.dir, 'o2') });
-    assert.ok(gemini.report.residualMetadata.linkHosts.includes('gemini.google.com'));
+    assert.ok(gemini.report.residualMetadata.linkHosts.some(host => host === 'gemini.google.com'));
     assert.ok(gemini.report.residualMetadata.htmlClassTokens.includes('outer-cell'));
     assert.ok(gemini.report.residualMetadata.memberNames.includes('MyActivity.html'));
 
@@ -1341,6 +1341,7 @@ if (mode === 'stage-write') {
 if (mode === 'read-fail') {
   // Fail reads of conversations-001.json after the first few bytes (the shape of a file locked or failing mid-read).
   const realCreate = fs.createReadStream;
+  const realOpen = fs.promises.open;
   const code = process.env.MP_TEST_READ_CODE ?? 'EBUSY';
   fs.createReadStream = (file, options) => {
     const source = realCreate(file, options);
@@ -1348,6 +1349,24 @@ if (mode === 'read-fail') {
     return Readable.from((async function* () {
       for await (const chunk of source) { yield chunk.subarray(0, 8); throw Object.assign(new Error('injected'), { code }); }
     })());
+  };
+  let probedOnce = false;
+  fs.promises.open = async (file, ...rest) => {
+    const handle = await realOpen.call(fs.promises, file, ...rest);
+    if (!String(file).endsWith('conversations-001.json')) return handle;
+    // Allow the initial walk() identity probe open to inspect stat, then fail the content read.
+    if (!probedOnce) { probedOnce = true; return handle; }
+    const origRead = handle.read.bind(handle);
+    let firstChunk = true;
+    handle.read = async (buffer, offset = 0, length = buffer.length, position = null) => {
+      if (firstChunk) {
+        firstChunk = false;
+        const res = await origRead(buffer, offset, Math.min(length, 8), position);
+        return res;
+      }
+      throw Object.assign(new Error('injected'), { code });
+    };
+    return handle;
   };
 }
 if (mode === 'unlink-after-link') {
@@ -1387,10 +1406,8 @@ test('SAN-F09-A: a report that fails mid-write leaves no staged file and no outp
       return true;
     });
     restore();
-    assert.equal(fs.existsSync(staged), false, 'the partially written staged report was removed');
-    assert.equal(fs.existsSync(report), false);
-    assert.equal(fs.existsSync(out), false);
     assert.deepEqual(fs.readdirSync(t.dir).sort(), rootBefore);
+    assert.equal(fs.readdirSync(t.dir).includes(path.basename(staged)), false, 'the partially written staged report was removed');
     assert.deepEqual(fs.readdirSync(path.dirname(out)), [], 'no output, partial or spool left');
 
     // API, previous output and previous report with --force: both intact, byte for byte.
@@ -1409,7 +1426,7 @@ test('SAN-F09-A: a report that fails mid-write leaves no staged file and no outp
     fs.rmSync(report);
 
     // A file that already has the staging name is not ours: it is refused and left untouched.
-    fs.writeFileSync(staged, 'OWNER FILE');
+    fs.writeFileSync(staged, 'OWNER FILE', { flag: 'wx' });
     await assert.rejects(sanitize({ input, output: out, report }), { code: 'E_REPORT_WRITE' });
     assert.equal(fs.readFileSync(staged, 'utf8'), 'OWNER FILE');
     assert.equal(fs.existsSync(out), false);
@@ -1484,10 +1501,12 @@ test('SAN-F09-B: if cleaning the staged name fails after the report was linked, 
  * stream errors with `code` (EBUSY for a locked file, EACCES, EIO). Returns the function that undoes it.
  */
 function failReads(target, { afterBytes, code }) {
+  const resolvedTarget = path.resolve(target);
   const real = fs.createReadStream;
+  const realOpen = fs.promises.open;
   fs.createReadStream = (file, options) => {
     const source = real(file, options);
-    if (path.resolve(String(file)) !== path.resolve(target)) return source;
+    if (path.resolve(String(file)) !== resolvedTarget) return source;
     return Readable.from((async function* () {
       let seen = 0;
       for await (const chunk of source) {
@@ -1499,7 +1518,32 @@ function failReads(target, { afterBytes, code }) {
       throw Object.assign(new Error(`${code}: injected`), { code }); // failure exactly at the end of the data
     })());
   };
-  return () => { fs.createReadStream = real; };
+  fs.promises.open = async (file, ...rest) => {
+    const handle = await realOpen.call(fs.promises, file, ...rest);
+    if (path.resolve(String(file)) !== resolvedTarget) return handle;
+    const realRead = handle.read.bind(handle);
+    let bodySeen = 0;
+    let sniffed = false;
+    handle.read = async (buffer, offset = 0, length = buffer.length, position = null) => {
+      if (!sniffed && position === 0 && length === 4) {
+        sniffed = true;
+        return realRead(buffer, offset, length, position);
+      }
+      const room = Math.max(0, afterBytes - bodySeen);
+      if (room === 0) throw Object.assign(new Error(`${code}: injected`), { code });
+      const res = await realRead(buffer, offset, Math.min(length, room), position);
+      bodySeen += res.bytesRead;
+      if (bodySeen >= afterBytes) {
+        handle.read = async () => { throw Object.assign(new Error(`${code}: injected`), { code }); };
+      }
+      return res;
+    };
+    return handle;
+  };
+  return () => {
+    fs.createReadStream = real;
+    fs.promises.open = realOpen;
+  };
 }
 
 function leftoverNames(dir) {
@@ -1650,4 +1694,251 @@ test('WIN-SAN-F03: a staging directory that cannot be created is a stable, conte
       }
     }
   } finally { fs.promises.mkdtemp = realMkdtemp; t.done(); }
+});
+
+test('descriptor-bound openSource handles regular files, valid zips, and closes handles on zip rejection', async () => {
+  const t = scratch('open-source-handle');
+  try {
+    const regularFile = path.join(t.dir, 'conversations.json');
+    fs.writeFileSync(regularFile, '[{"id":"a"}]\n', 'utf8');
+    const regular = await openSource(regularFile);
+    try {
+      assert.equal(regular.kind, 'file');
+      assert.equal(regular.entries.length, 1);
+      // Positioned reads from the same descriptor remain repeatable across analysis + leak passes.
+      assert.equal(await collect(await regular.entries[0].open()), '[{"id":"a"}]\n');
+      assert.equal(await collect(await regular.entries[0].open()), '[{"id":"a"}]\n');
+    } finally {
+      await regular.close();
+    }
+
+    const zipPath = path.join(t.dir, 'export.zip');
+    const writer = new ZipWriter(zipPath);
+    await writer.addFile('notes.txt', Buffer.from('hello from zip\n', 'utf8'));
+    await writer.finish();
+    const openedZip = await openSource(zipPath);
+    try {
+      assert.equal(openedZip.kind, 'zip');
+      assert.equal(openedZip.entries.length, 1);
+      assert.equal(await collect(await openedZip.entries[0].open()), 'hello from zip\n');
+    } finally {
+      await openedZip.close();
+    }
+
+    const badZipPath = path.join(t.dir, 'truncated.zip');
+    fs.writeFileSync(badZipPath, Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00]));
+    await assert.rejects(openSource(badZipPath), error => /^E_ZIP_/.test(error?.code ?? ''));
+    // Descriptor must already be closed in finally so immediate unlink succeeds on Windows.
+    fs.unlinkSync(badZipPath);
+    assert.equal(fs.existsSync(badZipPath), false);
+  } finally { t.done(); }
+});
+
+test('directory source fails closed on root swap, ancestor swap, child swap, and zero inode', async () => {
+  const t = scratch('dir-toctou');
+  const { opendir, lstat } = fs.promises;
+  try {
+    const inDir = path.join(t.dir, 'in');
+    const subDir = path.join(inDir, 'nested');
+    const altDir = path.join(t.dir, 'alt');
+    const outsideSecret = path.join(t.dir, 'outside.json');
+    fs.mkdirSync(subDir, { recursive: true });
+    fs.mkdirSync(altDir, { recursive: true });
+    const memberA = path.join(inDir, 'conversations.json');
+    const memberB = path.join(subDir, 'user.json');
+    fs.writeFileSync(memberA, '[{"id":"a","title":"alpha secret"}]\n');
+    fs.writeFileSync(memberB, '{"id":"u1"}\n');
+    fs.writeFileSync(outsideSecret, '{"id":"leak"}\n');
+
+    // 1. Clean nested directory run succeeds via handle-bound child streams and releases all handles.
+    const cleanOut = path.join(t.dir, 'out-clean');
+    assert.equal((await sanitize({ input: inDir, output: cleanOut })).exitCode, 0);
+
+    // 2. Child regular file replaced before deferred open() (different inode) fails closed without reading swapped bytes.
+    const opened = await openSource(inDir);
+    try {
+      const targetEntry = opened.entries.find(e => e.name === 'conversations.json');
+      assert.ok(targetEntry);
+      const replacedTemp = path.join(t.dir, 'replacement.json');
+      fs.writeFileSync(replacedTemp, '[{"id":"b","title":"INJECTED_SWAP"}]\n');
+      fs.rmSync(memberA);
+      fs.renameSync(replacedTemp, memberA);
+      await assert.rejects(targetEntry.open(), { code: 'E_INPUT_CHANGED' });
+    } finally {
+      await opened.close();
+    }
+
+    // 3. Ancestor directory swapped to symlink/junction (or different directory) before deferred child open fails closed.
+    const linkKind = canLink('symlink') ? 'symlink' : (process.platform === 'win32' && canLink('junction') ? 'junction' : null);
+    const openedForDirSwap = await openSource(inDir);
+    try {
+      const nestedEntry = openedForDirSwap.entries.find(e => e.name === 'nested/user.json');
+      assert.ok(nestedEntry);
+      const parked = path.join(t.dir, 'parked-nested');
+      fs.renameSync(subDir, parked);
+      if (linkKind) {
+        dirLink(linkKind, altDir, subDir);
+        fs.writeFileSync(path.join(altDir, 'user.json'), '{"id":"swapped"}\n');
+        await assert.rejects(nestedEntry.open(), { code: 'E_INPUT_SYMLINK' });
+        fs.rmSync(subDir, { force: true });
+      } else {
+        fs.mkdirSync(subDir);
+        fs.writeFileSync(path.join(subDir, 'user.json'), '{"id":"swapped"}\n');
+        await assert.rejects(nestedEntry.open(), { code: 'E_INPUT_CHANGED' });
+        fs.rmSync(subDir, { recursive: true, force: true });
+      }
+      fs.renameSync(parked, subDir);
+    } finally {
+      await openedForDirSwap.close();
+    }
+
+    // 4. Child swapped to a symlink (when supported) before deferred open() is rejected fail-closed.
+    if (canLink('symlink')) {
+      const openedSym = await openSource(inDir);
+      try {
+        const entryA = openedSym.entries.find(e => e.name === 'conversations.json');
+        fs.rmSync(memberA);
+        fs.symlinkSync(outsideSecret, memberA);
+        await assert.rejects(entryA.open(), { code: 'E_INPUT_SYMLINK' });
+      } finally {
+        await openedSym.close();
+        fs.rmSync(memberA, { force: true });
+        fs.writeFileSync(memberA, '[{"id":"a","title":"alpha secret"}]\n');
+      }
+    }
+
+    // 5. Root directory identity race during opendir() fails closed with E_INPUT_CHANGED and leaves no output.
+    let swappedOnce = false;
+    const altRoot = path.join(t.dir, 'alt-root');
+    const swappedOut = path.join(t.dir, 'swapped-root-park');
+    fs.mkdirSync(altRoot);
+    fs.writeFileSync(path.join(altRoot, 'conversations.json'), '[{"id":"evil"}]\n');
+    fs.promises.opendir = async (dirPath, ...rest) => {
+      if (!swappedOnce && path.resolve(dirPath) === path.resolve(inDir)) {
+        swappedOnce = true;
+        fs.renameSync(inDir, swappedOut);
+        fs.renameSync(altRoot, inDir);
+      }
+      return opendir.call(fs.promises, dirPath, ...rest);
+    };
+    await assert.rejects(
+      sanitize({ input: inDir, output: path.join(t.dir, 'out-root-swap') }),
+      { code: 'E_INPUT_CHANGED' },
+    );
+    fs.promises.opendir = opendir;
+    assert.equal(fs.existsSync(path.join(t.dir, 'out-root-swap')), false);
+    fs.renameSync(inDir, altRoot);
+    fs.renameSync(swappedOut, inDir);
+
+    // 6. Zero-inode (ino === 0n) stat fallback is removed and fails closed instead of matching blindly.
+    fs.promises.lstat = async (target, options) => {
+      const realStat = await lstat.call(fs.promises, target, options);
+      if (path.resolve(String(target)) === path.resolve(memberA)) {
+        return new Proxy(realStat, { get: (obj, prop) => (prop === 'ino' ? 0n : Reflect.get(obj, prop, obj)) });
+      }
+      return realStat;
+    };
+    await assert.rejects(openSource(memberA), { code: 'E_INPUT_CHANGED' });
+    fs.promises.lstat = lstat;
+
+    // 7. Full sanitize() pipeline fails closed with E_INPUT_CHANGED when child is swapped after walk() before deferred read.
+    let swappedChild = false;
+    fs.promises.opendir = opendir;
+    const origOpen = fs.promises.open;
+    let memberOpens = 0;
+    fs.promises.open = async (target, ...rest) => {
+      if (!swappedChild && path.resolve(String(target)) === path.resolve(memberA)) {
+        memberOpens++;
+        if (memberOpens === 2) {
+          swappedChild = true;
+          const tmp = path.join(t.dir, 'swap-child.json');
+          fs.writeFileSync(tmp, '[{"id":"z","title":"SWAPPED_IN_SANITIZE"}]\n');
+          fs.rmSync(memberA);
+          fs.renameSync(tmp, memberA);
+        }
+      }
+      return origOpen.call(fs.promises, target, ...rest);
+    };
+    await assert.rejects(
+      sanitize({ input: inDir, output: path.join(t.dir, 'out-child-sanitize-swap') }),
+      { code: 'E_INPUT_CHANGED' },
+    );
+    fs.promises.open = origOpen;
+    assert.equal(fs.existsSync(path.join(t.dir, 'out-child-sanitize-swap')), false);
+
+    // 8. Transient opendir() swap-and-restore (pathname lstat stays original throughout) never silently omits files.
+    const transientIn = path.join(t.dir, 'transient-in');
+    const transientNested = path.join(transientIn, 'nested');
+    const transientPartial = path.join(t.dir, 'transient-partial');
+    const transientNestedPartial = path.join(t.dir, 'transient-nested-partial');
+    const existingOut = path.join(t.dir, 'transient-existing-out');
+    fs.mkdirSync(transientNested, { recursive: true });
+    fs.mkdirSync(transientPartial, { recursive: true });
+    fs.mkdirSync(transientNestedPartial, { recursive: true });
+    fs.writeFileSync(path.join(transientIn, 'conversations.json'), '[{"id":"c1","title":"first secret"}]\n');
+    fs.writeFileSync(path.join(transientNested, 'user.json'), '{"id":"u1"}\n');
+    // Alternate dirs drop nested/conversations or drop user.json to simulate silent omission.
+    fs.writeFileSync(path.join(transientPartial, 'conversations.json'), '[{"id":"c1","title":"first secret"}]\n');
+
+    assert.equal((await sanitize({ input: transientIn, output: existingOut })).exitCode, 0);
+    const existingSnapshot = snapshot(existingOut);
+
+    // 8a: First opendir() call for root transiently sees partial directory while lstat/dirHandle still see real transientIn.
+    let transientPass = 0;
+    fs.promises.opendir = async (dirPath, ...rest) => {
+      if (path.resolve(dirPath) === path.resolve(transientIn)) {
+        transientPass++;
+        if (transientPass === 1) return opendir.call(fs.promises, transientPartial, ...rest);
+      }
+      return opendir.call(fs.promises, dirPath, ...rest);
+    };
+    await assert.rejects(
+      sanitize({ input: transientIn, output: existingOut, force: true }),
+      { code: 'E_INPUT_CHANGED' },
+    );
+    fs.promises.opendir = opendir;
+    assert.deepEqual(snapshot(existingOut), existingSnapshot, 'transient omission must preserve existing --force output');
+    assert.deepEqual(leftoverNames(t.dir), []);
+
+    // 8b: Second (confirmation) opendir() call for root transiently sees extra/different entries while path stays original.
+    let reversePass = 0;
+    const transientExtra = path.join(t.dir, 'transient-extra');
+    fs.mkdirSync(transientExtra, { recursive: true });
+    fs.writeFileSync(path.join(transientExtra, 'conversations.json'), '[{"id":"c1"}]\n');
+    fs.mkdirSync(path.join(transientExtra, 'nested'), { recursive: true });
+    fs.writeFileSync(path.join(transientExtra, 'rogue.json'), '[{"id":"r1"}]\n');
+    fs.promises.opendir = async (dirPath, ...rest) => {
+      if (path.resolve(dirPath) === path.resolve(transientIn)) {
+        reversePass++;
+        if (reversePass === 2) return opendir.call(fs.promises, transientExtra, ...rest);
+      }
+      return opendir.call(fs.promises, dirPath, ...rest);
+    };
+    await assert.rejects(
+      sanitize({ input: transientIn, output: path.join(t.dir, 'out-transient-reverse') }),
+      { code: 'E_INPUT_CHANGED' },
+    );
+    fs.promises.opendir = opendir;
+    assert.equal(fs.existsSync(path.join(t.dir, 'out-transient-reverse')), false);
+
+    // 8c: Transient swap-and-restore on a nested subdirectory omits user.json once -> must fail closed, never silent SUCCESS.
+    let nestedPass = 0;
+    fs.promises.opendir = async (dirPath, ...rest) => {
+      if (path.resolve(dirPath) === path.resolve(transientNested)) {
+        nestedPass++;
+        if (nestedPass === 1) return opendir.call(fs.promises, transientNestedPartial, ...rest);
+      }
+      return opendir.call(fs.promises, dirPath, ...rest);
+    };
+    await assert.rejects(
+      sanitize({ input: transientIn, output: path.join(t.dir, 'out-transient-nested') }),
+      { code: 'E_INPUT_CHANGED' },
+    );
+    fs.promises.opendir = opendir;
+    assert.equal(fs.existsSync(path.join(t.dir, 'out-transient-nested')), false);
+  } finally {
+    fs.promises.opendir = opendir;
+    fs.promises.lstat = lstat;
+    t.done();
+  }
 });
