@@ -121,11 +121,15 @@ const TRANSITIVE_LOCK = LOCK + [
 test('Windows transitive notices require exact texts in their own locked crate sections', () => {
   const [mpl] = transitiveLicenseNotices('selectors', '0.38.0');
   const [blessing] = transitiveLicenseNotices('sqlcipher-src', SQLCIPHER_VERSION);
-  const selectors = (files) => section('selectors', '0.38.0', 'MPL-2.0', files);
-  const sqlcipher = (files) => section('sqlcipher-src', SQLCIPHER_VERSION, 'MIT AND BSD-3-Clause AND blessing AND WTFPL', files);
+  const withSource = (body, sourceUrl) => body.replace('\n\n', '\nSource archive: ' + sourceUrl + '\n\n');
+  const selectors = (files) => withSource(section('selectors', '0.38.0', 'MPL-2.0', files), mpl.sourceUrl);
+  const sqlcipher = (files) => withSource(
+    section('sqlcipher-src', SQLCIPHER_VERSION, 'MIT AND BSD-3-Clause AND blessing AND WTFPL', files), blessing.sourceUrl);
+
   const mplFiles = { [mpl.name]: mpl.text };
   const cipherFiles = { LICENSE: MIT_TEXT, [blessing.name]: blessing.text };
   assert.match(mpl.text, /Mozilla Public License/);
+  assert.equal(mpl.sourceUrl, 'https://crates.io/api/v1/crates/selectors/0.38.0/download');
   assert.match(blessing.text, /disclaims copyright/);
   assert.deepEqual(assertWindowsTransitiveNotices(selectors(mplFiles) + sqlcipher(cipherFiles), TRANSITIVE_LOCK),
     ['selectors', 'sqlcipher-src']);
@@ -137,6 +141,16 @@ test('Windows transitive notices require exact texts in their own locked crate s
     /selectors 0\.38\.0: missing or altered LICENSE-MPL/);
   assert.throws(() => assertWindowsTransitiveNotices(selectors({ [mpl.name]: blessing.text }) + sqlcipher(cipherFiles), TRANSITIVE_LOCK),
     /selectors 0\.38\.0: missing or altered LICENSE-MPL/);
+  assert.throws(() => assertWindowsTransitiveNotices(selectors(mplFiles) + sqlcipher({
+    ...cipherFiles, [blessing.name]: blessing.text.replace('disclaims', 'claims'),
+  }), TRANSITIVE_LOCK), /sqlcipher-src 419\.0\.6.*missing or altered .*BLESSING/);
+  const valid = selectors(mplFiles) + sqlcipher(cipherFiles);
+  assert.throws(() => assertWindowsTransitiveNotices(valid.replace(mpl.sourceUrl, blessing.sourceUrl), TRANSITIVE_LOCK),
+    /selectors 0\.38\.0: missing or altered source archive/);
+  assert.throws(() => assertWindowsTransitiveNotices(valid.replace('Declared license: MPL-2.0', 'Declared license: MIT'), TRANSITIVE_LOCK),
+    /selectors 0\.38\.0: unexpected declared license/);
+  assert.throws(() => assertWindowsTransitiveNotices(valid + selectors(mplFiles), TRANSITIVE_LOCK),
+    /selectors 0\.38\.0: duplicate third-party notice sections/);
   assert.throws(() => assertWindowsTransitiveNotices(selectors(mplFiles), TRANSITIVE_LOCK),
     /sqlcipher-src 419\.0\.6.*no third-party notice section/);
 });
@@ -146,4 +160,3 @@ test('notice supplements are scoped to their recorded versions', () => {
   assert.deepEqual(transitiveLicenseNotices('sqlcipher-src', '420.0.0'), []);
   assert.deepEqual(assertWindowsTransitiveNotices('', LOCK), []);
 });
-

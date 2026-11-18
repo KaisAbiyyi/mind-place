@@ -18,15 +18,17 @@ const TRANSITIVE_NOTICES = [
     crate: 'selectors',
     version: '0.38.0',
     name: 'LICENSE-MPL-2.0',
-    // The selectors crate header points to MPL-2.0. The pinned cssparser
-    // 0.37.0 LICENSE provides a verbatim copy of that license.
+    declared: 'MPL-2.0',
+    // The selectors crate header points to MPL-2.0. The locked dtoa-short
+    // 0.3.5 LICENSE supplies an identical copy of that license text.
     file: 'MPL-2.0.txt',
-    sha256: 'fab3dd6bdab226f1c08630b1dd917e11fcb4ec5e1e020e2c16f83a0a13863e85',
+    sha256: '1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5',
   },
   {
     crate: 'sqlcipher-src',
     version: '419.0.6+sqlcipher-4.19.0-sqlite-3.53.4-libtomcrypt-1.18.2',
     name: 'sqlcipher/LICENSE-SQLITE-BLESSING',
+    declared: 'MIT AND BSD-3-Clause AND blessing AND WTFPL',
     // From the leading notice of sqlcipher/sqlite3.h in the locked crate.
     // Header SHA-256: 8a9d1bff44d75174ca6dea3ea9bac50a6104d86facb566647b8bb839375b7b3a.
     file: 'SQLITE-BLESSING.txt',
@@ -42,6 +44,10 @@ function noticeDigest(text) {
   return createHash('sha256').update(normalizedNotice(text)).digest('hex');
 }
 
+function crateSourceArchive({ crate, version }) {
+  return 'https://crates.io/api/v1/crates/' + crate + '/' + encodeURIComponent(version) + '/download';
+}
+
 /** Supplemental notices for known registry packages in the resolved graph. */
 export function transitiveLicenseNotices(crate, version) {
   return TRANSITIVE_NOTICES
@@ -49,8 +55,7 @@ export function transitiveLicenseNotices(crate, version) {
     .map(entry => {
       const text = normalizedNotice(fs.readFileSync(new URL('./licenses/' + entry.file, import.meta.url), 'utf8'));
       if (noticeDigest(text) !== entry.sha256) throw new Error('Supplemental license text changed: ' + entry.file);
-      const sourceUrl = 'https://crates.io/api/v1/crates/' + entry.crate + '/' + encodeURIComponent(entry.version) + '/download';
-      return { name: entry.name, text, sourceUrl };
+      return { name: entry.name, text, sourceUrl: crateSourceArchive(entry) };
     });
 }
 
@@ -104,14 +109,18 @@ export function lockedVersions(lockText) {
   return locked;
 }
 
-/** Notice sections keyed by `name version`, as Map<string, { license, body }>. */
-export function noticeSections(noticesText) {
-  const sections = new Map();
+function noticeSectionEntries(noticesText) {
+  const sections = [];
   for (const chunk of noticesText.split(`\n${SEPARATOR}\n`).slice(1)) {
     const heading = /^(\S+) (\S+)\nDeclared license: ([^\n]*)\n/.exec(chunk);
-    if (heading) sections.set(`${heading[1]} ${heading[2]}`, { license: heading[3].trim(), body: chunk });
+    if (heading) sections.push([`${heading[1]} ${heading[2]}`, { license: heading[3].trim(), body: chunk }]);
   }
   return sections;
+}
+
+/** Notice sections keyed by `name version`, as Map<string, { license, body }>. */
+export function noticeSections(noticesText) {
+  return new Map(noticeSectionEntries(noticesText));
 }
 
 function noticeFiles(body) {
@@ -139,16 +148,22 @@ export function licenseFileTexts(body) {
 /** Require complete, component-specific text for the known locked Windows transitive packages. */
 export function assertWindowsTransitiveNotices(noticesText, lockText) {
   const locked = lockedVersions(lockText);
-  const sections = noticeSections(noticesText.replace(/\r\n/g, '\n'));
+  const sections = noticeSectionEntries(noticesText.replace(/\r\n/g, '\n'));
   const checked = [];
   for (const entry of TRANSITIVE_NOTICES) {
     if (!(locked.get(entry.crate) ?? []).includes(entry.version)) continue;
 
     const heading = entry.crate + ' ' + entry.version;
-    const section = sections.get(heading);
-    if (!section) throw new Error(heading + ': no third-party notice section');
-    if (!section.license || section.license === 'See source license') {
-      throw new Error(heading + ': no declared license');
+    const matches = sections.filter(([key]) => key === heading);
+    if (!matches.length) throw new Error(heading + ': no third-party notice section');
+    if (matches.length !== 1) throw new Error(heading + ': duplicate third-party notice sections');
+
+    const [, section] = matches[0];
+    if (section.license !== entry.declared) throw new Error(heading + ': unexpected declared license');
+    const preamble = section.body.split(/^--- /m, 1)[0];
+    const origins = preamble.split('\n').filter(line => line.startsWith('Source archive: '));
+    if (origins.length !== 1 || origins[0] !== 'Source archive: ' + crateSourceArchive(entry)) {
+      throw new Error(heading + ': missing or altered source archive');
     }
     const files = noticeFiles(section.body).filter(file => file.name === entry.name);
     if (files.length !== 1 || noticeDigest(files[0].text) !== entry.sha256) {
