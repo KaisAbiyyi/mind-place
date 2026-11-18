@@ -11,7 +11,7 @@ pub const MAX_TAKEOUT_HTML_BYTES: u64 = 64 * 1024 * 1024; // 64 MiB
 
 pub fn parse_takeout_timestamp(s: &str) -> Option<String> {
     let s = s.trim();
-    if chrono::DateTime::parse_from_rfc3339(s).is_ok() {
+    if time::OffsetDateTime::parse(s, &time::format_description::well_known::Rfc3339).is_ok() {
         return Some(s.to_owned());
     }
 
@@ -76,7 +76,9 @@ pub fn parse_takeout_timestamp(s: &str) -> Option<String> {
 
     let formatted =
         format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}{tz_offset}");
-    if chrono::DateTime::parse_from_rfc3339(&formatted).is_ok() {
+    if time::OffsetDateTime::parse(&formatted, &time::format_description::well_known::Rfc3339)
+        .is_ok()
+    {
         Some(formatted)
     } else {
         None
@@ -453,7 +455,9 @@ impl GeminiTakeoutParser {
                 "Provider event timestamp unavailable in Takeout card; using import processing time"
                     .into(),
             );
-            chrono::Utc::now().to_rfc3339()
+            time::OffsetDateTime::now_utc()
+                .format(&time::format_description::well_known::Rfc3339)
+                .expect("valid UTC timestamp")
         };
 
         // 4. Structure-aware turn extraction

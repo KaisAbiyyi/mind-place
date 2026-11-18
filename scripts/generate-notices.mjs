@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { transitiveLicenseNotices } from './notice-coverage.mjs';
+import { transitiveLicenseNotices, hasMplLicense, registrySourceArchive } from './notice-coverage.mjs';
 import { helperPin, helperDirectory, readVerifiedHelperBundle, readVerifiedRegularFile } from './tunnel-helper.mjs';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
@@ -20,17 +20,20 @@ function licenseFiles(dir,depth=0){
  }
  return out;
 }
-function add(name,version,license,dir,supplements=[]){
+function add(name,version,license,dir,supplements=[],extraSourceUrls=[]){
  sections.push(`\n${'='.repeat(72)}\n${name} ${version}\nDeclared license: ${license||'See source license'}\n`);
- for (const { sourceUrl } of supplements) sections.push('Source archive: ' + sourceUrl);
+ const sourceUrls=new Set([...supplements.map(s=>s.sourceUrl).filter(Boolean),...extraSourceUrls]);
+ for (const sourceUrl of sourceUrls) sections.push('Source archive: ' + sourceUrl);
  const files=licenseFiles(dir);
  for(const file of files){const body=readVerifiedRegularFile(file,{maxBytes:1024*1024,sizeTypeError:`License file too large: ${name}`}).toString('utf8');sections.push(`--- ${path.relative(dir,file).replaceAll('\\','/')} ---\n${body}`);}
  for(const supplement of supplements)sections.push(`--- ${supplement.name} ---\n${supplement.text}`);
  if(!files.length&&!supplements.length)sections.push(`License declaration: ${license||'Not declared'}; package source: ${name}`);
 }
 for (const p of packages.sort((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version))) {
- const supplements = p.source.startsWith('registry+') ? transitiveLicenseNotices(p.name, p.version) : [];
- add(p.name, p.version, p.license, path.dirname(p.manifest_path), supplements);
+ const isRegistry=p.source.startsWith('registry+');
+ const supplements = isRegistry ? transitiveLicenseNotices(p.name, p.version) : [];
+ const mplSources = isRegistry && hasMplLicense(p.license) ? [registrySourceArchive(p.name, p.version)] : [];
+ add(p.name, p.version, p.license, path.dirname(p.manifest_path), supplements, mplSources);
 }
 const seen=new Set();
 function nodePackage(name,from){
@@ -43,7 +46,8 @@ function nodePackage(name,from){
  if(!dir)throw new Error(`Missing production package ${name}`);
  if(seen.has(dir))return;seen.add(dir);
  const pkg=JSON.parse(fs.readFileSync(path.join(dir,'package.json'),'utf8'));
- add(pkg.name,pkg.version,pkg.license,dir);
+ const mplSources = hasMplLicense(pkg.license) ? [`https://registry.npmjs.org/${pkg.name}/-/${pkg.name.split('/').pop()}-${encodeURIComponent(pkg.version)}.tgz`] : [];
+ add(pkg.name,pkg.version,pkg.license,dir,[],mplSources);
  for(const dep of Object.keys(pkg.dependencies||{}))nodePackage(dep,dir);
 }
 for(const dep of Object.keys(product.dependencies))nodePackage(dep,root);

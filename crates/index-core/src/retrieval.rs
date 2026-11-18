@@ -1,10 +1,10 @@
 //! Phase 2A: bounded, provider-neutral retrieval over the disposable FTS projection.
 //! No derived rowid is returned as a durable source reference.
 use crate::{IndexError, IndexStore, Result};
-use chrono::DateTime;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 const MAX_QUERIES: usize = 8;
 const MAX_QUERY_BYTES: usize = 1024;
@@ -201,12 +201,16 @@ impl RetrievalFilters {
         let from = self
             .captured_from
             .as_deref()
-            .map(|value| DateTime::parse_from_rfc3339(value).map_err(|_| IndexError::InvalidQuery))
+            .map(|value| {
+                OffsetDateTime::parse(value, &Rfc3339).map_err(|_| IndexError::InvalidQuery)
+            })
             .transpose()?;
         let to = self
             .captured_to
             .as_deref()
-            .map(|value| DateTime::parse_from_rfc3339(value).map_err(|_| IndexError::InvalidQuery))
+            .map(|value| {
+                OffsetDateTime::parse(value, &Rfc3339).map_err(|_| IndexError::InvalidQuery)
+            })
             .transpose()?;
         if from.zip(to).is_some_and(|(from, to)| from > to) {
             return Err(IndexError::InvalidQuery);

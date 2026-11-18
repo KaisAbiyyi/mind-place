@@ -8,6 +8,19 @@ This document is implementer triage, **not independent approval, accepted risk,
 release authorization or a waiver of any red check**. Final exact-head evidence
 is recorded in PR #178, without a self-referential source-SHA claim in this file.
 
+## Owner-approved remediations executed (2026-11-18)
+
+Following owner approval of `#179`, `#180`, `#181`, and `chrono` (`RUSTSEC-2026-0543`) on 2026-11-18 under serialized `Cargo.lock` ownership:
+
+| Item | Action executed in PR #178 | Verification / Status |
+| --- | --- | --- |
+| `#179` (`RUSTSEC-2026-0502`, `sqlcipher-src`) | Upgraded coordinated storage cohort `rusqlite` `=0.41.0` → `=0.43.0`, `libsqlite3-sys` `0.39.0` → `0.40.0`, `sqlcipher-src` `419.0.6` → `420.0.0+sqlcipher-4.20.0-sqlite-3.54.1-libtomcrypt-1.18.2`. Updated `scripts/notice-coverage.mjs` and `test/notice-coverage.test.mjs`. | All 7 workspace crates + `state-core`/`index-core` `--features sqlcipher-preview` & `integration-core --features vault-mcp` pass locally; hosted CI `SQLCipher` / Windows native product qualification pending non-Draft gating. |
+| `#180` (`RUSTSEC-2024-0429` `glib`, `RUSTSEC-2024-0370` `proc-macro-error`) | Investigated upstream cohort: `tauri 2.12.3` is already latest stable v2 (`wry 0.57.2`/`tao 0.37.2` still bind `gtk 0.18.2`/`glib 0.18.5` on Linux only; Windows target unaffected; zero `VariantStrIter` call sites). Added narrow documented `[advisories].ignore` entries in `deny.toml` and tightened `test_policy_has_only_owner_approved_exceptions` in `test_security_tools.py`. | `11/11` Python policy tests pass; awaiting hosted `cargo-deny` confirmation. |
+| `#181` (Seven license rejections) | Verified distribution obligations: updated `scripts/generate-notices.mjs` so **all** `MPL-2.0` registry crates (`cssparser`, `cssparser-macros`, `dtoa-short`, `option-ext`, `selectors`) emit both full license text and `Source archive:` availability URL (MPL-2.0 §3.2); added `assertMplSourceNotices` in `scripts/notice-coverage.mjs` & `scripts/verify-release-license.mjs`; `sqlcipher-src` `MIT`/`BSD-3-Clause`/`WTFPL`/`blessing` texts preserved via `generate-notices.mjs` & `SQLITE-BLESSING.txt`; `target-lexicon` (`Apache-2.0 WITH LLVM-exception`) is Linux/all-target GTK build-only. Added `MPL-2.0`, `Apache-2.0 WITH LLVM-exception`, `blessing` to `deny.toml` `[licenses].allow` and scoped `WTFPL` solely to `sqlcipher-src` in `[licenses].exceptions`. | `notice-coverage.test.mjs` & `test_security_tools.py` pass; awaiting hosted `cargo-deny` confirmation. |
+| `RUSTSEC-2026-0543` (`chrono 0.4.45`) | Migrated all workspace `chrono` call sites in `crates/archive-core` and `crates/index-core` to `time 0.3.55` (already present in `Cargo.lock`, `MIT OR Apache-2.0`), removing `chrono` from `Cargo.toml` and `Cargo.lock`. | Full workspace `cargo test --locked` across all 7 crates passes locally. |
+
+Historical triage notes prior to execution follow below.
+
 ## Review findings and implemented fixes
 
 The independent reviewer verified that both original Rust diagnostic streams were

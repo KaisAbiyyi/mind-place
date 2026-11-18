@@ -109,12 +109,14 @@ class ToolIntegrityTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 sbom.validate_bom({**valid, **change})
 
-    def test_policy_has_no_advisory_or_license_exceptions(self):
+    def test_policy_has_only_owner_approved_exceptions(self):
         policy = tomllib.loads((ROOT / "deny.toml").read_text())
-        self.assertEqual(policy["advisories"]["ignore"], [])
+        ignores = policy["advisories"]["ignore"]
+        self.assertEqual({entry["id"] for entry in ignores}, {"RUSTSEC-2024-0429", "RUSTSEC-2024-0370"})
+        self.assertTrue(all(isinstance(entry.get("reason"), str) and len(entry["reason"].strip()) >= 20 for entry in ignores))
         self.assertEqual(policy["advisories"]["unmaintained"], "all")
         self.assertEqual(policy["advisories"]["yanked"], "deny")
-        self.assertEqual(policy["licenses"]["exceptions"], [])
+        self.assertEqual(policy["licenses"]["exceptions"], [{"allow": ["WTFPL"], "name": "sqlcipher-src"}])
         self.assertFalse(policy["licenses"]["private"]["ignore"])
         self.assertTrue(policy["graph"]["all-features"])
         self.assertNotIn("exclude", policy["graph"])

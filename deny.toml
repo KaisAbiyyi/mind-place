@@ -1,11 +1,17 @@
-# MP-SEC-12: no advisory ignores, graph exclusions, or per-crate exceptions.
+# MP-SEC-12: strict supply-chain baseline with owner-approved #180/#181 exceptions.
 # Policy rationale and distribution obligations: docs/security/supply-chain.md.
 [graph]
 all-features = true
 
 [advisories]
 db-urls = ["https://github.com/RustSec/advisory-db"]
-ignore = []
+ignore = [
+  # #180: tauri 2.12.3 is already the latest stable v2 (wry 0.57.x/tao 0.37.x bind gtk 0.18.x on Linux only).
+  # Qualified Windows desktop target is unaffected; workspace has zero VariantStrIter call sites.
+  # Revisit when Tauri/gtk-rs migrates off gtk 0.18.x / glib 0.18.x.
+  { id = "RUSTSEC-2024-0429", reason = "Linux-only GTK3 binding via tauri 2.12.3; zero VariantStrIter call sites; Windows unaffected (#180)" },
+  { id = "RUSTSEC-2024-0370", reason = "Linux-only proc-macro-error build dep of gtk 0.18.x/glib 0.18.x via tauri 2.12.3; Windows unaffected (#180)" },
+]
 unmaintained = "all"
 yanked = "deny"
 maximum-db-staleness = "P1D"
@@ -15,8 +21,15 @@ confidence-threshold = 0.8
 allow = [
   "MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC",
   "Unicode-3.0", "Zlib", "CC0-1.0", "BSL-1.0", "OpenSSL",
+  # #181 owner-approved after distribution-obligation verification:
+  "MPL-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "blessing",
 ]
-exceptions = []
+exceptions = [
+  # #181: scope WTFPL solely to sqlcipher-src (bundled SQLCipher amalgamation).
+  { allow = ["WTFPL"], name = "sqlcipher-src" },
+]
 
 [licenses.private]
 ignore = false

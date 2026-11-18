@@ -28,8 +28,8 @@ merge that separate plan PR.
 
 | Check | Coverage | Blocking policy |
 | --- | --- | --- |
-| cargo-deny 0.18.6 | Whole workspace, all features and targets, including build/dev graph | Every vulnerability/unsound/notice advisory as implemented by this pinned cargo-deny; unmaintained crates and yanked versions fail; no ignore IDs or graph pruning |
-| Rust licenses | Workspace and third-party crates; private packages included | Deny by default; listed license families below only; unknown/ambiguous licensing fails; no crate exceptions or invented clarifications |
+| cargo-deny 0.18.6 | Whole workspace, all features and targets, including build/dev graph | Every vulnerability/unsound/notice advisory fails; unmaintained crates and yanked versions fail; no graph pruning; only owner-approved Linux-only GTK3 ignores (#180) with documented tracking |
+| Rust licenses | Workspace and third-party crates; private packages included | Deny by default; listed permissive/MPL/SQLite license set + scoped `sqlcipher-src` `WTFPL` exception (#181) after distribution-notice verification |
 | Rust sources | Resolved dependency graph | crates.io registry only; unknown registries and every Git source fail |
 | npm audit | Lockfile closure including production, dev, optional and peer packages | High and critical fail even if already present on base; low/moderate remain in evidence; registry/network/parser errors are BLOCKED, never PASS |
 | CodeQL | JS/TS, Rust and Python, security-extended, build-mode none | All SARIF findings block pending independent disposition, including suppressed results; incomplete scans fail; no automatic baseline waiver |

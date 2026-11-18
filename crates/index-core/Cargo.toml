@@ -15,11 +15,11 @@ mind-place-archive = { path = "../archive-core" }
 mind-place-state = { path = "../state-core" }
 mind-place-security = { path = "../security-core" }
 mind-place-documents = { path = "../document-core" }
-rusqlite = { version = "=0.41.0", features = ["bundled"] }
+rusqlite = { version = "=0.43.0", features = ["bundled"] }
 sha2.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-chrono.workspace = true
+time.workspace = true
 thiserror.workspace = true
 zeroize = "1.9.0"
 base64.workspace = true
