@@ -100,6 +100,22 @@ contains the unclaimed, separately scoped follow-up work packages.
 The current npm low KaTeX finding is also retained; this continuation does not
 change the justified high/critical threshold or perform an unrelated upgrade.
 
+## Integration status after main `a502bcb` (2026-11-18)
+
+This PR was reconciled with main `a502bcb097acb882d0f4254bad0354ba663d4642` (clean merge, no textual conflict, no
+policy/lock/dependency change in this PR). Remediations already accepted on main are **not** redone here:
+
+| Item | State on main `a502bcb` | What remains |
+| --- | --- | --- |
+| RUSTSEC-2026-0486, rustix | `Cargo.lock` locks `rustix 1.1.6` (PR #189). The decision row above that says "not resolved" is historical and superseded. | Nothing in this PR. The gate still compares and reports exactly. |
+| CodeQL JS results | Source remediations merged through #183, #186 and #187. An earlier isolated integration candidate recorded JS PASS (`triage.json` status PASS, zero findings). | The exact-head CodeQL run on this branch is the evidence; do not reuse that candidate result. If any result remains, it stays red. |
+| RUSTSEC-2026-0502, sqlcipher-src `419.0.6` | Still locked. | [#179](https://github.com/KaisAbiyyi/mind-place/issues/179): storage compatibility cohort and an owner-assigned `Cargo.lock` window with #151/#152. Not changed here. |
+| RUSTSEC-2024-0429 glib `0.18.5`, RUSTSEC-2024-0370 proc-macro-error `1.0.4` | Still locked (GTK/Tauri macro cohort). | [#180](https://github.com/KaisAbiyyi/mind-place/issues/180) unit 2, serialized with other `Cargo.lock` changes. Not changed here. |
+| Seven license rejections | `deny.toml` unchanged; no allowlist edit. | [#181](https://github.com/KaisAbiyyi/mind-place/issues/181) owner distribution decision. The two packaged-notice corrections (selectors MPL text, SQLite header notice) are implemented separately in [#193](https://github.com/KaisAbiyyi/mind-place/pull/193); they are not an owner disposition. |
+
+The Rust advisory and license jobs remain expected to fail until the items above are resolved by their owners. A red
+job is never reclassified as PASS and a skipped job is never counted as PASS.
+
 ## Required-check enforcement — owner decision, MP-GOV-04
 
 On 2026-11-15, read-only API inspection returned no repository rulesets; the
