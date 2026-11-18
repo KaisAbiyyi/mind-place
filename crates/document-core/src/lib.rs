@@ -52,7 +52,17 @@ pub struct ExtractionLimits {
     pub max_pdf_objects: usize,
     pub max_pages: usize,
     pub max_xml_depth: usize,
+    /// Maximum parser/extraction work time in milliseconds, excluding waits
+    /// inside the caller's synchronous authorization callback.
     pub max_millis: u64,
+    /// Maximum total end-to-end wall-clock duration in milliseconds for one
+    /// extraction, including cumulative authorization-callback wait time.
+    #[serde(default = "default_max_total_millis")]
+    pub max_total_millis: u64,
+}
+
+const fn default_max_total_millis() -> u64 {
+    30_000
 }
 
 impl Default for ExtractionLimits {
@@ -67,6 +77,7 @@ impl Default for ExtractionLimits {
             max_pages: 250,
             max_xml_depth: 96,
             max_millis: 2_000,
+            max_total_millis: default_max_total_millis(),
         }
     }
 }
@@ -128,6 +139,7 @@ pub fn extract_with_check(
         || limits.max_pages == 0
         || limits.max_xml_depth == 0
         || limits.max_millis == 0
+        || limits.max_total_millis == 0
     {
         return Err(ExtractionError::Limit("configuration"));
     }
@@ -137,6 +149,7 @@ pub fn extract_with_check(
     let mut ctx = Context {
         limits,
         started: Instant::now(),
+        auth_elapsed: Duration::ZERO,
         authorized: &mut authorized,
         expanded: 0,
         output_bytes: 0,
@@ -171,6 +184,7 @@ pub fn extract_with_check(
 pub(crate) struct Context<'a> {
     pub limits: ExtractionLimits,
     started: Instant,
+    auth_elapsed: Duration,
     authorized: &'a mut dyn FnMut() -> bool,
     expanded: usize,
     output_bytes: usize,
@@ -180,15 +194,27 @@ pub(crate) struct Context<'a> {
 
 impl Context<'_> {
     pub fn poll(&mut self) -> Result<()> {
-        if !(self.authorized)() {
+        // Charge parser max_millis against extraction work rather than external
+        // SQLite/NTFS waits inside the caller's authorization lease callback, while
+        // max_total_millis caps cumulative end-to-end wall time across both.
+        let auth_started = Instant::now();
+        let allowed = (self.authorized)();
+        self.auth_elapsed = self.auth_elapsed.saturating_add(auth_started.elapsed());
+        if !allowed {
             return Err(ExtractionError::Revoked);
         }
         self.check_time()
     }
 
     pub fn check_time(&self) -> Result<()> {
-        if self.started.elapsed() > Duration::from_millis(self.limits.max_millis) {
+        let total_elapsed = self.started.elapsed();
+        if total_elapsed.saturating_sub(self.auth_elapsed)
+            > Duration::from_millis(self.limits.max_millis)
+        {
             return Err(ExtractionError::Limit("elapsed_millis"));
+        }
+        if total_elapsed > Duration::from_millis(self.limits.max_total_millis) {
+            return Err(ExtractionError::Limit("total_elapsed_millis"));
         }
         Ok(())
     }
@@ -287,4 +313,59 @@ fn parse_utf8(ctx: &mut Context<'_>, input: &[u8], format: DocumentFormat) -> Re
     }
     ctx.emit(&section, &buffer)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn context_with_elapsed<'a>(
+        max_millis: u64,
+        max_total_millis: u64,
+        total_elapsed_ms: u64,
+        auth_elapsed_ms: u64,
+        authorized: &'a mut dyn FnMut() -> bool,
+    ) -> Context<'a> {
+        Context {
+            limits: ExtractionLimits {
+                max_millis,
+                max_total_millis,
+                ..ExtractionLimits::default()
+            },
+            started: Instant::now() - Duration::from_millis(total_elapsed_ms),
+            auth_elapsed: Duration::from_millis(auth_elapsed_ms),
+            authorized,
+            expanded: 0,
+            output_bytes: 0,
+            chunks: Vec::new(),
+            warnings: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn context_time_budget_separates_parser_work_and_bounds_total_wall_clock() {
+        let mut allow = || true;
+        // Auth wait exceeded parser budget (120 > 40), but work is 15ms and total <= 500ms.
+        let within_both = context_with_elapsed(40, 500, 135, 120, &mut allow);
+        assert_eq!(within_both.check_time(), Ok(()));
+
+        // Work exceeded parser budget (50 > 40) even while total <= 500ms.
+        let parser_over = context_with_elapsed(40, 500, 170, 120, &mut allow);
+        assert_eq!(
+            parser_over.check_time(),
+            Err(ExtractionError::Limit("elapsed_millis"))
+        );
+
+        // Work stayed under 40ms, but cumulative auth waits pushed total past max_total_millis.
+        let total_over = context_with_elapsed(40, 500, 520, 510, &mut allow);
+        assert_eq!(
+            total_over.check_time(),
+            Err(ExtractionError::Limit("total_elapsed_millis"))
+        );
+
+        // Revocation takes precedence over budget expiration on poll.
+        let mut deny = || false;
+        let mut revoked_ctx = context_with_elapsed(40, 500, 600, 590, &mut deny);
+        assert_eq!(revoked_ctx.poll(), Err(ExtractionError::Revoked));
+    }
 }

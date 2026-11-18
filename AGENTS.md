@@ -61,6 +61,23 @@ Low-level Rust, compact binary derived formats, mmap, zero-copy parsing, SIMD/pa
 - Keep extension permissions minimal. Required checks reject unconditional host access and content scripts.
 - Preserve unrelated working-tree changes and local user archives.
 
+## UI work rules (owner-approved direction, 2026-11-11; MP-UI2-00 candidate in PR #172 pending final owner sign-off and merge)
+
+The engineering priority list above governs code, contracts and storage. **It does not govern what the user sees:** the visible UI is **human-first** (calm, plain, tidy), never a console for agents. Machine-oriented detail belongs in APIs, MCP and Details/Info panels.
+
+Before any UI task read `docs/ui/UI-PRINCIPLES.md`, `docs/ui/MP-UI2-placement-matrix.md`, the signed-off in-repo HTML guide it names (`docs/ui/evidence/mp-ui2/wireframe-v1.html`), and `docs/ui/MP-UI-09-feature-coverage-matrix.md`. Authority order: owner's explicit decision, then the guide for what it shows, then `UI-PRINCIPLES.md` plus tokens for everything else. Existing code is never evidence of intended design. The `MP-UI2-00` additions in PR #172 (placement matrix + gaps, `DEV-01..DEV-04`, EN/ID glossary, proposed performance targets/protocol, and per-page criteria) become the locked `MP-UI2-00` contract upon owner approval and manual merge of PR #172; `MP-UI2-01..03` remain `Blocked` until then.
+
+When a capability is **not shown in the guide** (the guide is intentionally incomplete) do **not** improvise or "extend the closest pattern". Follow the gap protocol:
+
+1. state the person's job in one plain sentence;
+2. classify it and place it in an existing destination (never add a top-level destination);
+3. build it only from the pattern catalog and the token set (no new colors, sizes, radii, spacings or control styles);
+4. write the copy through the i18n layer (English and Indonesian together) in human words, with technical detail hidden behind Details/Info;
+5. record it in the PR **design gap ledger** with screenshots (light and dark, EN and ID, wide/laptop/narrow);
+6. if no catalog pattern fits, stop, mark the task `BLOCKED-DESIGN` and ask the owner. Do not ship a guess.
+
+Never edit the guide to make an implementation fit. Never merge UI work that shows hashes, revisions, protocol names or raw identifiers in a default view. Security behaviour (locked by default, lock fences, recovery on the locked gate, sanitized transcripts) is part of the UI contract and is reused, not redesigned. A UI PR without the ledger and the evidence block from `UI-PRINCIPLES.md` section 10 is incomplete.
+
 ## Cloud/local workflow
 
 A cloud unit should implement one bounded subsystem or integration boundary, run appropriate tests/benchmarks, push GitHub, and leave a handoff with the final SHA and whether local qualification is required.

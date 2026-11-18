@@ -110,6 +110,8 @@ jobs:
         run: cargo test --locked -p mind-place-security --lib
       - name: MP-9D parser and MCP adversarial tests
         run: cargo test --locked -p mind-place-documents -p mind-place-integration --tests
+      - name: Archive import, validation boundary and historical-write authority tests
+        run: cargo test --locked -p mind-place-archive --tests
 
   native-evidence:
     name: Native execution evidence
