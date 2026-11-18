@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { evaluate, loadSuite, oraclePredictions, validateSuite } from '../scripts/benchmark-continuity.mjs';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { evaluate, loadSuite, oraclePredictions, readSmallJson, validateSuite } from '../scripts/benchmark-continuity.mjs';
 
 const clone = (value) => structuredClone(value);
 const suite = loadSuite();
@@ -100,4 +105,260 @@ test('scores are deterministic under prediction input case reorder', () => {
   const original = evaluate(suite, p);
   p.cases.reverse();
   assert.deepEqual(evaluate(suite, p), original);
+});
+
+const withTempDir = (fn) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mp-continuity-'));
+  try {
+    return fn(dir);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+};
+
+const cliScriptPath = fileURLToPath(new URL('../scripts/benchmark-continuity.mjs', import.meta.url));
+const MAX_PREDICTION_BYTES = 2 * 1024 * 1024;
+
+test('readSmallJson enforces exact 2 MiB byte ceiling via helper and CLI --predictions', () => {
+  withTempDir((dir) => {
+    const baseJson = JSON.stringify(oraclePredictions(suite));
+    const padExact = MAX_PREDICTION_BYTES - Buffer.byteLength(baseJson, 'utf8');
+    assert.ok(padExact > 0);
+    const exactFile = path.join(dir, 'exact-2mib.json');
+    fs.writeFileSync(exactFile, baseJson + ' '.repeat(padExact), 'utf8');
+    assert.equal(fs.statSync(exactFile).size, MAX_PREDICTION_BYTES);
+
+    const parsed = readSmallJson(exactFile);
+    assert.equal(parsed.cases.length, suite.gold.cases.length);
+
+    const okCli = spawnSync(process.execPath, [cliScriptPath, '--predictions', exactFile], {
+      encoding: 'utf8',
+      windowsHide: true,
+    });
+    assert.equal(okCli.status, 0, okCli.stderr);
+    const cliReport = JSON.parse(okCli.stdout);
+    assert.equal(cliReport.mode, 'submitted_predictions');
+    assert.equal(cliReport.summary.answer_accuracy, 1);
+
+    const overFile = path.join(dir, 'over-2mib.json');
+    fs.writeFileSync(overFile, baseJson + ' '.repeat(padExact + 1), 'utf8');
+    assert.throws(() => readSmallJson(overFile), /Invalid continuity benchmark: prediction input exceeds 2 MiB/);
+
+    const failCli = spawnSync(process.execPath, [cliScriptPath, '--predictions', overFile], {
+      encoding: 'utf8',
+      windowsHide: true,
+    });
+    assert.equal(failCli.status, 1);
+    assert.match(failCli.stderr, /prediction input exceeds 2 MiB/);
+  });
+});
+
+test('readSmallJson rejects directories, non-regular descriptors, and invalid paths without leaking fds', () => {
+  withTempDir((dir) => {
+    assert.throws(() => readSmallJson(''), /prediction input path must be a non-empty string/);
+    assert.throws(() => readSmallJson('bad\0path.json'), /prediction input path must be a non-empty string/);
+    assert.throws(() => readSmallJson(dir), /prediction input must be a regular file/);
+
+    const filePath = path.join(dir, 'sample.json');
+    fs.writeFileSync(filePath, '{"ok":true}', 'utf8');
+
+    const openFds = new Set();
+    let readCalled = false;
+    const nonRegularFs = {
+      constants: fs.constants,
+      openSync: (target, flags) => {
+        const fd = fs.openSync(target, flags);
+        openFds.add(fd);
+        return fd;
+      },
+      fstatSync: () => ({
+        isFile: () => false,
+        size: 11n,
+        dev: 1n,
+        ino: 1n,
+      }),
+      lstatSync: fs.lstatSync,
+      readSync: (...args) => {
+        readCalled = true;
+        return fs.readSync(...args);
+      },
+      closeSync: (fd) => {
+        openFds.delete(fd);
+        return fs.closeSync(fd);
+      },
+    };
+    assert.throws(() => readSmallJson(filePath, { fs: nonRegularFs }), /prediction input must be a regular file/);
+    assert.equal(readCalled, false);
+    assert.equal(openFds.size, 0);
+  });
+});
+
+test('readSmallJson rejects symlinks via O_NOFOLLOW or post-open leaf verification without fd leaks', () => {
+  withTempDir((dir) => {
+    const targetFile = path.join(dir, 'target.json');
+    fs.writeFileSync(targetFile, '{"ok":true}', 'utf8');
+    const linkFile = path.join(dir, 'link.json');
+
+    let symlinkCreated = false;
+    try {
+      fs.symlinkSync(targetFile, linkFile);
+      symlinkCreated = true;
+    } catch (error) {
+      if (!error || (error.code !== 'EPERM' && error.code !== 'ENOTSUP')) throw error;
+    }
+    if (symlinkCreated) {
+      assert.throws(() => readSmallJson(linkFile), /prediction input must not be a symbolic link/);
+    }
+
+    let observedFlags = 0;
+    const posixOloopFs = {
+      constants: { O_RDONLY: 0, O_NOFOLLOW: 0x20000, O_NONBLOCK: 0x800 },
+      openSync: (_p, flags) => {
+        observedFlags = flags;
+        const err = new Error('ELOOP: too many levels of symbolic links');
+        err.code = 'ELOOP';
+        throw err;
+      },
+      fstatSync: fs.fstatSync,
+      lstatSync: fs.lstatSync,
+      readSync: fs.readSync,
+      closeSync: fs.closeSync,
+    };
+    assert.throws(() => readSmallJson(targetFile, { fs: posixOloopFs }), /prediction input must not be a symbolic link/);
+    assert.ok((observedFlags & 0x20000) !== 0, 'O_NOFOLLOW flag must be passed when available');
+
+    const openFds = new Set();
+    let readCalled = false;
+    const windowsSymlinkFs = {
+      constants: { O_RDONLY: 0 },
+      openSync: (target, flags) => {
+        const fd = fs.openSync(target, flags);
+        openFds.add(fd);
+        return fd;
+      },
+      fstatSync: fs.fstatSync,
+      lstatSync: () => ({
+        isSymbolicLink: () => true,
+        isFile: () => false,
+        dev: 1n,
+        ino: 1n,
+      }),
+      readSync: (...args) => {
+        readCalled = true;
+        return fs.readSync(...args);
+      },
+      closeSync: (fd) => {
+        openFds.delete(fd);
+        return fs.closeSync(fd);
+      },
+    };
+    assert.throws(() => readSmallJson(targetFile, { fs: windowsSymlinkFs }), /prediction input must not be a symbolic link/);
+    assert.equal(readCalled, false);
+    assert.equal(openFds.size, 0);
+  });
+});
+
+test('readSmallJson enforces 2 MiB ceiling when a file grows concurrently after open/fstatSync', () => {
+  withTempDir((dir) => {
+    const growFile = path.join(dir, 'growing.json');
+    fs.writeFileSync(growFile, '{"padding":"', 'utf8');
+
+    const openFds = new Set();
+    let appended = false;
+    let totalReadCalls = 0;
+    const growingFs = {
+      constants: fs.constants,
+      openSync: (target, flags) => {
+        const fd = fs.openSync(target, flags);
+        openFds.add(fd);
+        return fd;
+      },
+      fstatSync: fs.fstatSync,
+      lstatSync: fs.lstatSync,
+      readSync: (fd, buf, offset, length, position) => {
+        totalReadCalls += 1;
+        if (!appended) {
+          appended = true;
+          // Grow real file past 2 MiB AFTER openSync + fstatSync already saw 12 bytes
+          fs.appendFileSync(growFile, 'a'.repeat(MAX_PREDICTION_BYTES) + '"}', 'utf8');
+        }
+        return fs.readSync(fd, buf, offset, length, position);
+      },
+      closeSync: (fd) => {
+        openFds.delete(fd);
+        return fs.closeSync(fd);
+      },
+    };
+
+    assert.throws(() => readSmallJson(growFile, { fs: growingFs }), /Invalid continuity benchmark: prediction input exceeds 2 MiB/);
+    assert.ok(appended);
+    assert.ok(totalReadCalls >= 1);
+    assert.equal(openFds.size, 0);
+  });
+});
+
+test('readSmallJson binds reads to opened fd on swap and rejects Windows post-open path identity changes', () => {
+  withTempDir((dir) => {
+    const primaryFile = path.join(dir, 'primary.json');
+    const swappedFile = path.join(dir, 'swapped.json');
+    fs.writeFileSync(primaryFile, JSON.stringify({ ok: true, source: 'original-fd' }), 'utf8');
+    fs.writeFileSync(swappedFile, '{invalid-json-from-swapped-path', 'utf8');
+
+    // Scenario A: With O_NOFOLLOW support, subsequent path replacement cannot alter bytes read from open fd.
+    const openFds = new Set();
+    let swappedAfterOpen = false;
+    const descriptorPinnedFs = {
+      constants: { O_RDONLY: fs.constants.O_RDONLY ?? 0, O_NOFOLLOW: fs.constants.O_NOFOLLOW || 0x20000 },
+      openSync: (target) => {
+        const fd = fs.openSync(target, fs.constants.O_RDONLY ?? 0);
+        openFds.add(fd);
+        if (!swappedAfterOpen) {
+          swappedAfterOpen = true;
+          try {
+            fs.renameSync(swappedFile, primaryFile);
+          } catch (error) {
+            // Windows denies rename over open handle with EPERM; path identity remains pinned to open fd regardless
+            if (!error || error.code !== 'EPERM') throw error;
+          }
+        }
+        return fd;
+      },
+      fstatSync: fs.fstatSync,
+      lstatSync: fs.lstatSync,
+      readSync: fs.readSync,
+      closeSync: (fd) => {
+        openFds.delete(fd);
+        return fs.closeSync(fd);
+      },
+    };
+    const pinnedData = readSmallJson(primaryFile, { fs: descriptorPinnedFs });
+    assert.deepEqual(pinnedData, { ok: true, source: 'original-fd' });
+    assert.equal(openFds.size, 0);
+
+    // Scenario B: Without O_NOFOLLOW (Windows fallback), changed (dev, ino) at path fails closed before reading.
+    fs.writeFileSync(primaryFile, JSON.stringify({ ok: true, source: 'primary' }), 'utf8');
+    fs.writeFileSync(swappedFile, '{poison', 'utf8');
+    let readCalled = false;
+    const identityMismatchFs = {
+      constants: { O_RDONLY: 0 },
+      openSync: (target, flags) => {
+        const fd = fs.openSync(target, flags);
+        openFds.add(fd);
+        return fd;
+      },
+      fstatSync: fs.fstatSync,
+      lstatSync: () => fs.lstatSync(swappedFile, { bigint: true }),
+      readSync: (...args) => {
+        readCalled = true;
+        return fs.readSync(...args);
+      },
+      closeSync: (fd) => {
+        openFds.delete(fd);
+        return fs.closeSync(fd);
+      },
+    };
+    assert.throws(() => readSmallJson(primaryFile, { fs: identityMismatchFs }), /prediction input path changed during open/);
+    assert.equal(readCalled, false);
+    assert.equal(openFds.size, 0);
+  });
 });

@@ -71,6 +71,53 @@ impl DerefMut for FencedDocumentConnection {
     }
 }
 
+/// Bounded, content-free skip classification counts from one `refresh_root` pass.
+/// Never stores paths, URIs, hashes, or document text.
+#[derive(Clone, Debug, Default, Serialize, PartialEq, Eq)]
+pub struct DocumentSkipBreakdown {
+    pub unsupported_extension: usize,
+    pub oversized_input: usize,
+    pub invalid_content: usize,
+    pub unsupported_content: usize,
+    pub limit_elapsed_millis: usize,
+    pub limit_total_elapsed_millis: usize,
+    pub limit_other: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_limit_kind: Option<&'static str>,
+}
+
+impl DocumentSkipBreakdown {
+    pub fn is_empty(&self) -> bool {
+        self.unsupported_extension == 0
+            && self.oversized_input == 0
+            && self.invalid_content == 0
+            && self.unsupported_content == 0
+            && self.limit_elapsed_millis == 0
+            && self.limit_total_elapsed_millis == 0
+            && self.limit_other == 0
+    }
+
+    fn record_extraction_error(&mut self, error: &ExtractionError) {
+        match error {
+            ExtractionError::Invalid => self.invalid_content += 1,
+            ExtractionError::Unsupported => self.unsupported_content += 1,
+            ExtractionError::Limit("elapsed_millis") => {
+                self.limit_elapsed_millis += 1;
+                self.last_limit_kind = Some("elapsed_millis");
+            }
+            ExtractionError::Limit("total_elapsed_millis") => {
+                self.limit_total_elapsed_millis += 1;
+                self.last_limit_kind = Some("total_elapsed_millis");
+            }
+            ExtractionError::Limit(kind) => {
+                self.limit_other += 1;
+                self.last_limit_kind = Some(kind);
+            }
+            ExtractionError::Revoked => {}
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub struct DocumentIndexReport {
     pub root_id: String,
@@ -79,6 +126,8 @@ pub struct DocumentIndexReport {
     pub skipped_files: usize,
     pub indexed_chunks: usize,
     pub generation: i64,
+    #[serde(skip_serializing_if = "DocumentSkipBreakdown::is_empty")]
+    pub skip_breakdown: DocumentSkipBreakdown,
 }
 
 /// Bounded, freshly verified owner-only extracted source preview.
@@ -329,6 +378,16 @@ impl DocumentIndex {
         root_id: &str,
         mut check: impl FnMut() -> Result<()>,
     ) -> Result<DocumentIndexReport> {
+        self.refresh_root_with_limits(state, root_id, ExtractionLimits::default(), &mut check)
+    }
+
+    fn refresh_root_with_limits(
+        &self,
+        state: &StateStore,
+        root_id: &str,
+        limits: ExtractionLimits,
+        check: &mut impl FnMut() -> Result<()>,
+    ) -> Result<DocumentIndexReport> {
         check()?;
         // One approved-root generation spans scanner object/state publication
         // and the FTS transaction below. A per-connection fence alone permits
@@ -340,12 +399,12 @@ impl DocumentIndex {
             None
         };
         let mut scanner = self.scanner(state)?;
-        let scan = scanner.rescan(root_id, || lease(&mut check))?;
+        let scan = scanner.rescan(root_id, || lease(check))?;
         if !scan.complete {
             return Err(IndexError::InvalidEvidence);
         }
         let uris = scanner
-            .current_uris(root_id, || lease(&mut check))?
+            .current_uris(root_id, || lease(check))?
             .ok_or(IndexError::InvalidEvidence)?;
         let objects = self.objects(state)?;
         let mut db = self.connection()?;
@@ -369,45 +428,52 @@ impl DocumentIndex {
             skipped_files: 0,
             indexed_chunks: 0,
             generation,
+            skip_breakdown: DocumentSkipBreakdown::default(),
         };
         for uri in uris {
             check()?;
             let Some(format) = format_for_uri(&uri) else {
                 report.skipped_files += 1;
+                report.skip_breakdown.unsupported_extension += 1;
                 continue;
             };
-            let Some(head) = objects.current_version(&uri, || lease(&mut check))? else {
+            let Some(head) = objects.current_version(&uri, || lease(check))? else {
                 return Err(IndexError::InvalidEvidence);
             };
-            if head.byte_length > ExtractionLimits::default().max_input_bytes as u64 {
+            if head.byte_length > limits.max_input_bytes as u64 {
                 report.skipped_files += 1;
+                report.skip_breakdown.oversized_input += 1;
                 continue;
             }
-            let bytes = objects.read_version(&uri, &head.id, || lease(&mut check))?;
+            let bytes = objects.read_version(&uri, &head.id, || lease(check))?;
             // A source can mutate after the scan; a version alone never proves
             // the indexed bytes are still the live approved file.
-            let live =
-                state.read_document_bytes(&uri, ExtractionLimits::default().max_input_bytes)?;
+            let live = state.read_document_bytes(&uri, limits.max_input_bytes)?;
             if Sha256::digest(&live).as_slice() != Sha256::digest(&bytes).as_slice() {
                 return Err(IndexError::InvalidEvidence);
             }
-            let extracted = extract_with_check(format, &bytes, ExtractionLimits::default(), || {
-                check().is_ok() && state.require_approved_document_uri(&uri).is_ok()
+            let extracted = extract_with_check(format, &bytes, limits, || {
+                #[cfg(test)]
+                let hook_allowed = test_hooks::on_extract_auth_poll(&uri);
+                #[cfg(not(test))]
+                let hook_allowed = true;
+                hook_allowed && check().is_ok() && state.require_approved_document_uri(&uri).is_ok()
             });
             let extracted = match extracted {
                 Ok(value) => value,
                 Err(ExtractionError::Revoked) => return Err(IndexError::Revoked),
                 Err(
-                    ExtractionError::Invalid
+                    ref err @ (ExtractionError::Invalid
                     | ExtractionError::Unsupported
-                    | ExtractionError::Limit(_),
+                    | ExtractionError::Limit(_)),
                 ) => {
                     report.skipped_files += 1;
+                    report.skip_breakdown.record_extraction_error(err);
                     continue;
                 }
             };
             if objects
-                .current_version(&uri, || lease(&mut check))?
+                .current_version(&uri, || lease(check))?
                 .map(|v| v.id)
                 != Some(head.id.clone())
             {
@@ -430,7 +496,7 @@ impl DocumentIndex {
         // Reconcile the latest inventory before the final authority fence.
         // Do not invoke the potentially blocking caller lease inside the fence.
         scanner
-            .current_uris(root_id, || lease(&mut check))?
+            .current_uris(root_id, || lease(check))?
             .ok_or(IndexError::Revoked)?;
         tx.execute(
             "INSERT INTO document_meta(root_id,generation) VALUES(?1,?2)
@@ -660,6 +726,44 @@ impl DocumentIndex {
         state.with_approved_document_roots(&[path.root_id().to_owned()], || {
             check()?;
             Ok::<_, IndexError>(preview)
+        })
+    }
+}
+
+#[cfg(test)]
+mod test_hooks {
+    use std::cell::RefCell;
+
+    type PollHook = Box<dyn FnMut(&str) -> bool>;
+
+    thread_local! {
+        static EXTRACT_AUTH_HOOK: RefCell<Option<PollHook>> = RefCell::new(None);
+    }
+
+    pub(super) struct ScopedExtractAuthHook {
+        previous: Option<PollHook>,
+    }
+
+    impl ScopedExtractAuthHook {
+        pub(super) fn install(hook: impl FnMut(&str) -> bool + 'static) -> Self {
+            let previous = EXTRACT_AUTH_HOOK.with(|slot| slot.borrow_mut().replace(Box::new(hook)));
+            Self { previous }
+        }
+    }
+
+    impl Drop for ScopedExtractAuthHook {
+        fn drop(&mut self) {
+            let previous = self.previous.take();
+            EXTRACT_AUTH_HOOK.with(|slot| {
+                *slot.borrow_mut() = previous;
+            });
+        }
+    }
+
+    pub(super) fn on_extract_auth_poll(uri: &str) -> bool {
+        EXTRACT_AUTH_HOOK.with(|slot| match slot.borrow_mut().as_mut() {
+            Some(hook) => hook(uri),
+            None => true,
         })
     }
 }
@@ -1019,5 +1123,298 @@ mod tests {
             .unwrap();
         assert_eq!(count, 1);
         assert!(DocumentIndex::open(tmp.path().join("document-index.sqlite3")).is_ok());
+    }
+
+    #[test]
+    fn skip_breakdown_records_safe_classifications_without_paths_or_content() {
+        let mut breakdown = DocumentSkipBreakdown::default();
+        assert!(breakdown.is_empty());
+        breakdown.record_extraction_error(&ExtractionError::Invalid);
+        breakdown.record_extraction_error(&ExtractionError::Unsupported);
+        breakdown.record_extraction_error(&ExtractionError::Limit("elapsed_millis"));
+        breakdown.record_extraction_error(&ExtractionError::Limit("total_elapsed_millis"));
+        breakdown.record_extraction_error(&ExtractionError::Limit("output_bytes"));
+        assert!(!breakdown.is_empty());
+        assert_eq!(breakdown.invalid_content, 1);
+        assert_eq!(breakdown.unsupported_content, 1);
+        assert_eq!(breakdown.limit_elapsed_millis, 1);
+        assert_eq!(breakdown.limit_total_elapsed_millis, 1);
+        assert_eq!(breakdown.limit_other, 1);
+        assert_eq!(breakdown.last_limit_kind, Some("output_bytes"));
+
+        let clean_report = DocumentIndexReport {
+            root_id: "root:v1:0".into(),
+            scanned_files: 1,
+            indexed_files: 1,
+            skipped_files: 0,
+            indexed_chunks: 1,
+            generation: 1,
+            skip_breakdown: DocumentSkipBreakdown::default(),
+        };
+        let clean_json = serde_json::to_value(&clean_report).unwrap();
+        assert!(clean_json.get("skip_breakdown").is_none());
+
+        let skipped_json = serde_json::to_value(&DocumentIndexReport {
+            skip_breakdown: breakdown,
+            ..clean_report
+        })
+        .unwrap();
+        assert_eq!(skipped_json["skip_breakdown"]["limit_elapsed_millis"], 1);
+        assert_eq!(
+            skipped_json["skip_breakdown"]["limit_total_elapsed_millis"],
+            1
+        );
+        assert_eq!(
+            skipped_json["skip_breakdown"]["last_limit_kind"],
+            "output_bytes"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_refresh_root_classifies_skips_and_survives_authorization_poll_wait() {
+        use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+        use std::time::{Duration, Instant};
+
+        let dir = tempfile::tempdir().unwrap();
+        let state = StateStore::open(dir.path().join("authority/state.sqlite3")).unwrap();
+        let folder = dir.path().join("approved");
+        std::fs::create_dir_all(&folder).unwrap();
+        let mut valid_md = String::new();
+        for section in 0..10 {
+            valid_md.push_str(&format!(
+                "## Section {section}\nSynthetic scale content segment {section}\n"
+            ));
+        }
+        std::fs::write(folder.join("good.md"), &valid_md).unwrap();
+        std::fs::write(folder.join("nullbyte.md"), b"bad\0content").unwrap();
+        std::fs::write(folder.join("badutf8.md"), [0xff, 0xfe, 0x00]).unwrap();
+        std::fs::write(folder.join("notes.jsonl"), "{\"line\":1}\n").unwrap();
+
+        let root = state.register_document_root(&folder).unwrap();
+        state.approve_document_root(&root.id).unwrap();
+        let index = DocumentIndex::open(dir.path().join("document-index.sqlite3")).unwrap();
+        let report = index.refresh_root(&state, &root.id, || Ok(())).unwrap();
+        assert_eq!(report.scanned_files, 4);
+        assert_eq!(report.indexed_files, 1);
+        assert_eq!(report.skipped_files, 3);
+        assert_eq!(
+            report.skip_breakdown,
+            DocumentSkipBreakdown {
+                unsupported_extension: 1,
+                oversized_input: 0,
+                invalid_content: 1,
+                unsupported_content: 1,
+                limit_elapsed_millis: 0,
+                limit_total_elapsed_millis: 0,
+                limit_other: 0,
+                last_limit_kind: None,
+            }
+        );
+
+        // Removing the intentionally unextractable fixtures, inject a >2s wait inside
+        // extract_with_check's authorization callback via ScopedExtractAuthHook and
+        // prove the sleep actually ran inside extraction without causing a skip.
+        std::fs::remove_file(folder.join("nullbyte.md")).unwrap();
+        std::fs::remove_file(folder.join("badutf8.md")).unwrap();
+        std::fs::remove_file(folder.join("notes.jsonl")).unwrap();
+
+        let extract_polls = Arc::new(AtomicUsize::new(0));
+        let injected = Arc::new(AtomicBool::new(false));
+        let slept_ms = Arc::new(AtomicU64::new(0));
+        let hook_polls = Arc::clone(&extract_polls);
+        let hook_injected = Arc::clone(&injected);
+        let hook_slept = Arc::clone(&slept_ms);
+        let _guard = test_hooks::ScopedExtractAuthHook::install(move |uri| {
+            assert!(uri.ends_with("/good.md"));
+            let n = hook_polls.fetch_add(1, Ordering::SeqCst) + 1;
+            if n == 2 {
+                let wait_started = Instant::now();
+                std::thread::sleep(Duration::from_millis(2_150));
+                hook_slept.store(wait_started.elapsed().as_millis() as u64, Ordering::SeqCst);
+                hook_injected.store(true, Ordering::SeqCst);
+            }
+            true
+        });
+
+        let mut outer_calls = 0usize;
+        let stalled = index
+            .refresh_root(&state, &root.id, || {
+                outer_calls += 1;
+                Ok(())
+            })
+            .unwrap();
+        assert!(
+            injected.load(Ordering::SeqCst),
+            "injected delay must execute inside extract_with_check"
+        );
+        assert!(slept_ms.load(Ordering::SeqCst) >= 2_100);
+        let observed_extract_polls = extract_polls.load(Ordering::SeqCst);
+        assert!(observed_extract_polls >= 3);
+        assert!(outer_calls > observed_extract_polls);
+        assert_eq!(stalled.scanned_files, 1);
+        assert_eq!(stalled.indexed_files, 1);
+        assert_eq!(stalled.skipped_files, 0);
+        assert!(stalled.skip_breakdown.is_empty());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_refresh_root_enforces_total_budget_parser_timeout_and_revocation() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        use std::time::Duration;
+
+        let dir = tempfile::tempdir().unwrap();
+        let state = StateStore::open(dir.path().join("authority/state.sqlite3")).unwrap();
+        let folder = dir.path().join("approved");
+        std::fs::create_dir_all(&folder).unwrap();
+        let mut valid_md = String::new();
+        for section in 0..10 {
+            valid_md.push_str(&format!(
+                "## Section {section}\nSynthetic timeout fixture segment {section}\n"
+            ));
+        }
+        std::fs::write(folder.join("good.md"), &valid_md).unwrap();
+
+        let root = state.register_document_root(&folder).unwrap();
+        state.approve_document_root(&root.id).unwrap();
+        let index = DocumentIndex::open(dir.path().join("document-index.sqlite3")).unwrap();
+
+        // 1. Cumulative extraction+authorization wait exceeding max_total_millis fails closed
+        // with total_elapsed_millis even though parser work stays within max_millis.
+        {
+            let injected = Arc::new(AtomicBool::new(false));
+            let polls = Arc::new(AtomicUsize::new(0));
+            let hook_injected = Arc::clone(&injected);
+            let hook_polls = Arc::clone(&polls);
+            let _guard = test_hooks::ScopedExtractAuthHook::install(move |_| {
+                let n = hook_polls.fetch_add(1, Ordering::SeqCst) + 1;
+                if n == 2 {
+                    hook_injected.store(true, Ordering::SeqCst);
+                    std::thread::sleep(Duration::from_millis(180));
+                }
+                true
+            });
+            let total_limits = ExtractionLimits {
+                max_millis: 500,
+                max_total_millis: 120,
+                ..ExtractionLimits::default()
+            };
+            let report = index
+                .refresh_root_with_limits(&state, &root.id, total_limits, &mut || Ok(()))
+                .unwrap();
+            assert!(injected.load(Ordering::SeqCst));
+            assert_eq!(report.scanned_files, 1);
+            assert_eq!(report.indexed_files, 0);
+            assert_eq!(report.skipped_files, 1);
+            assert_eq!(
+                report.skip_breakdown,
+                DocumentSkipBreakdown {
+                    limit_total_elapsed_millis: 1,
+                    last_limit_kind: Some("total_elapsed_millis"),
+                    ..DocumentSkipBreakdown::default()
+                }
+            );
+            assert!(index
+                .search(&state, "Synthetic", 10, || Ok(()))
+                .unwrap()
+                .is_empty());
+        }
+
+        // 2. Parser-work timeout (max_millis) fails closed with elapsed_millis within total budget.
+        {
+            std::fs::remove_file(folder.join("good.md")).unwrap();
+            let mut stream = String::from("BT\n");
+            for _ in 0..80_000 {
+                stream.push_str("0 0 m\n");
+            }
+            stream.push_str("(tail) Tj\nET");
+            let pdf = format!(
+                "%PDF-1.7\n1 0 obj\n<< /Length {} >>\nstream\n{stream}\nendstream\nendobj\n%%EOF",
+                stream.len()
+            );
+            std::fs::write(folder.join("slow.pdf"), pdf.as_bytes()).unwrap();
+
+            let polls = Arc::new(AtomicUsize::new(0));
+            let hook_polls = Arc::clone(&polls);
+            let _guard = test_hooks::ScopedExtractAuthHook::install(move |_| {
+                hook_polls.fetch_add(1, Ordering::SeqCst);
+                true
+            });
+            let parser_limits = ExtractionLimits {
+                max_millis: 1,
+                max_total_millis: 10_000,
+                ..ExtractionLimits::default()
+            };
+            let report = index
+                .refresh_root_with_limits(&state, &root.id, parser_limits, &mut || Ok(()))
+                .unwrap();
+            assert!(polls.load(Ordering::SeqCst) >= 1);
+            assert_eq!(report.scanned_files, 1);
+            assert_eq!(report.indexed_files, 0);
+            assert_eq!(report.skipped_files, 1);
+            assert_eq!(
+                report.skip_breakdown,
+                DocumentSkipBreakdown {
+                    limit_elapsed_millis: 1,
+                    last_limit_kind: Some("elapsed_millis"),
+                    ..DocumentSkipBreakdown::default()
+                }
+            );
+        }
+
+        // 3. Revocation inside extraction (via lease denial and via SQLite root revoke) aborts
+        // immediately with IndexError::Revoked and never classifies revocation as skipped_files.
+        std::fs::remove_file(folder.join("slow.pdf")).unwrap();
+        std::fs::write(folder.join("good.md"), &valid_md).unwrap();
+        let baseline = index.refresh_root(&state, &root.id, || Ok(())).unwrap();
+        assert_eq!(baseline.indexed_files, 1);
+        assert_eq!(baseline.skipped_files, 0);
+
+        {
+            let denied = Arc::new(AtomicBool::new(false));
+            let polls = Arc::new(AtomicUsize::new(0));
+            let hook_denied = Arc::clone(&denied);
+            let hook_polls = Arc::clone(&polls);
+            let _guard = test_hooks::ScopedExtractAuthHook::install(move |_| {
+                let n = hook_polls.fetch_add(1, Ordering::SeqCst) + 1;
+                if n == 2 {
+                    hook_denied.store(true, Ordering::SeqCst);
+                    return false;
+                }
+                true
+            });
+            let err = index.refresh_root(&state, &root.id, || Ok(())).unwrap_err();
+            assert!(denied.load(Ordering::SeqCst));
+            assert!(matches!(err, IndexError::Revoked));
+        }
+
+        // Prior valid generation survives a revoked refresh because transaction rolls back.
+        let hits = index.search(&state, "timeout", 20, || Ok(())).unwrap();
+        assert_eq!(hits.len(), 10);
+
+        {
+            let revoked = Arc::new(AtomicBool::new(false));
+            let polls = Arc::new(AtomicUsize::new(0));
+            let hook_revoked = Arc::clone(&revoked);
+            let hook_polls = Arc::clone(&polls);
+            let state_clone = state.clone();
+            let root_id_clone = root.id.clone();
+            let _guard = test_hooks::ScopedExtractAuthHook::install(move |_| {
+                let n = hook_polls.fetch_add(1, Ordering::SeqCst) + 1;
+                if n == 2 {
+                    state_clone.revoke_document_root(&root_id_clone).unwrap();
+                    hook_revoked.store(true, Ordering::SeqCst);
+                }
+                true
+            });
+            let err = index.refresh_root(&state, &root.id, || Ok(())).unwrap_err();
+            assert!(revoked.load(Ordering::SeqCst));
+            assert!(matches!(err, IndexError::Revoked));
+            assert!(index
+                .search(&state, "timeout", 10, || Ok(()))
+                .unwrap()
+                .is_empty());
+        }
     }
 }
