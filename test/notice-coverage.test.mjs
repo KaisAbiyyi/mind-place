@@ -5,6 +5,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
+  assertMplSourceNotices,
   assertPinnedCrateNotices,
   assertWindowsTransitiveNotices,
   licenseFileTexts,
@@ -109,7 +110,7 @@ test('the repository pins html5gum for shipping and Cargo.lock agrees, so its no
   assert.deepEqual(lockedVersions(fs.readFileSync(path.join(repo, 'Cargo.lock'), 'utf8')).get('html5gum'), ['0.8.0']);
 });
 
-const SQLCIPHER_VERSION = '419.0.6+sqlcipher-4.19.0-sqlite-3.53.4-libtomcrypt-1.18.2';
+const SQLCIPHER_VERSION = '420.0.0+sqlcipher-4.20.0-sqlite-3.54.1-libtomcrypt-1.18.2';
 const TRANSITIVE_LOCK = LOCK + [
   { name: 'selectors', version: '0.38.0' },
   { name: 'sqlcipher-src', version: SQLCIPHER_VERSION },
@@ -136,14 +137,14 @@ test('Windows transitive notices require exact texts in their own locked crate s
   assert.throws(() => assertWindowsTransitiveNotices(selectors({}) + sqlcipher(cipherFiles), TRANSITIVE_LOCK),
     /selectors 0\.38\.0: missing or altered LICENSE-MPL/);
   assert.throws(() => assertWindowsTransitiveNotices(selectors(mplFiles) + sqlcipher({ LICENSE: MIT_TEXT }), TRANSITIVE_LOCK),
-    /sqlcipher-src 419\.0\.6.*missing or altered .*BLESSING/);
+    /sqlcipher-src 420\.0\.0.*missing or altered .*BLESSING/);
   assert.throws(() => assertWindowsTransitiveNotices(selectors({ [mpl.name]: mpl.text.slice(0, -250) }) + sqlcipher(cipherFiles), TRANSITIVE_LOCK),
     /selectors 0\.38\.0: missing or altered LICENSE-MPL/);
   assert.throws(() => assertWindowsTransitiveNotices(selectors({ [mpl.name]: blessing.text }) + sqlcipher(cipherFiles), TRANSITIVE_LOCK),
     /selectors 0\.38\.0: missing or altered LICENSE-MPL/);
   assert.throws(() => assertWindowsTransitiveNotices(selectors(mplFiles) + sqlcipher({
     ...cipherFiles, [blessing.name]: blessing.text.replace('disclaims', 'claims'),
-  }), TRANSITIVE_LOCK), /sqlcipher-src 419\.0\.6.*missing or altered .*BLESSING/);
+  }), TRANSITIVE_LOCK), /sqlcipher-src 420\.0\.0.*missing or altered .*BLESSING/);
   const valid = selectors(mplFiles) + sqlcipher(cipherFiles);
   assert.throws(() => assertWindowsTransitiveNotices(valid.replace(mpl.sourceUrl, blessing.sourceUrl), TRANSITIVE_LOCK),
     /selectors 0\.38\.0: missing or altered source archive/);
@@ -152,11 +153,24 @@ test('Windows transitive notices require exact texts in their own locked crate s
   assert.throws(() => assertWindowsTransitiveNotices(valid + selectors(mplFiles), TRANSITIVE_LOCK),
     /selectors 0\.38\.0: duplicate third-party notice sections/);
   assert.throws(() => assertWindowsTransitiveNotices(selectors(mplFiles), TRANSITIVE_LOCK),
-    /sqlcipher-src 419\.0\.6.*no third-party notice section/);
+    /sqlcipher-src 420\.0\.0.*no third-party notice section/);
+});
+
+test('MPL-2.0 sections require both license text and source archive URL', () => {
+  const [mpl] = transitiveLicenseNotices('selectors', '0.38.0');
+  const withSource = section('cssparser', '0.37.0', 'MPL-2.0', { LICENSE: mpl.text })
+    .replace('\n\n', '\nSource archive: https://crates.io/api/v1/crates/cssparser/0.37.0/download\n\n');
+  assert.deepEqual(assertMplSourceNotices(`head${withSource}`), ['cssparser 0.37.0']);
+  assert.throws(() => assertMplSourceNotices(`head${section('cssparser', '0.37.0', 'MPL-2.0', { LICENSE: mpl.text })}`),
+    /missing source availability URL/);
+  assert.throws(() => assertMplSourceNotices(`head${withSource.replace('https://crates.io/api/v1/crates/cssparser/0.37.0/download', 'http://insecure.invalid')}`),
+    /missing source availability URL/);
+  assert.throws(() => assertMplSourceNotices(`head${withSource.replace(mpl.text, 'short')}`),
+    /missing license text/);
 });
 
 test('notice supplements are scoped to their recorded versions', () => {
   assert.deepEqual(transitiveLicenseNotices('selectors', '0.38.1'), []);
-  assert.deepEqual(transitiveLicenseNotices('sqlcipher-src', '420.0.0'), []);
+  assert.deepEqual(transitiveLicenseNotices('sqlcipher-src', '421.0.0'), []);
   assert.deepEqual(assertWindowsTransitiveNotices('', LOCK), []);
 });

@@ -1468,6 +1468,46 @@ class SeparatedProductPrerequisiteTests(unittest.TestCase):
                 "jobs": without_windows[run["id"]],
             })
 
+    def test_draft_skipped_product_run_does_not_fail_ready_run_or_blame_ci(self):
+        cand, ci_run, product_run, jobs_by_run, sources, evidence, _ = (
+            self._mp_ci_win_01_fixture(178))
+        draft_product_run = native_run(
+            cand, run_id=400, path=native_contract.PRODUCT_WORKFLOW,
+            status="completed", conclusion="success")
+        draft_jobs = json.loads(json.dumps(jobs_by_run[product_run["id"]]))
+        for item in draft_jobs:
+            if item["name"] != "Windows Product / candidate result":
+                item["conclusion"] = "skipped"
+        jobs_by_run[draft_product_run["id"]] = draft_jobs
+
+        def fetch_jobs(run):
+            jobs = jobs_by_run[run["id"]]
+            return {"total_count": len(jobs), "jobs": jobs}
+
+        # While the promoted Ready run is actively running on the same head_sha,
+        # an earlier completed Draft run with skipped jobs must keep coordination pending.
+        ready_in_progress = dict(product_run, status="in_progress", conclusion=None)
+        state, reason = coordinator.classify(
+            [ci_run, ready_in_progress, draft_product_run], cand, REPO, False, CONTRACT,
+            fetch_jobs, lambda run: evidence, workflow_sources=sources)
+        self.assertEqual(state, "pending", reason)
+        self.assertIn(native_contract.PRODUCT_WORKFLOW, reason)
+        self.assertNotIn(native_contract.CI_WORKFLOW, reason)
+
+        # Once the Ready run succeeds, the older Draft run must not prevent acceptance.
+        state, reason = coordinator.classify(
+            [ci_run, draft_product_run, product_run], cand, REPO, False, CONTRACT,
+            fetch_jobs, lambda run: evidence, workflow_sources=sources)
+        self.assertEqual(state, "ready", reason)
+
+        # Fail closed: if only the Draft-skipped run exists with no active/green Ready run,
+        # coordination must fail against windows-product.yml.
+        state, reason = coordinator.classify(
+            [ci_run, draft_product_run], cand, REPO, False, CONTRACT,
+            fetch_jobs, lambda run: evidence, workflow_sources=sources)
+        self.assertEqual(state, "failed", reason)
+        self.assertIn(native_contract.PRODUCT_WORKFLOW, reason)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -14,7 +14,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
 base64 = "0.22"
-chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+time = { version = "0.3.55", default-features = false, features = ["std", "formatting", "parsing"] }
 url = "2.5"
 fs2 = "0.4"
 tempfile = "3.23"

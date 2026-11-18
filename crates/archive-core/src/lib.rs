@@ -17,6 +17,15 @@ pub use store::{
     HistoricalImportAuthorization, MAX_CAPTURE_BYTES,
 };
 
+/// Parses an RFC 3339 timestamp while restricting the date-time separator to `T`, `t`, or ASCII
+/// space to match SQLite `julianday()` and strict `chrono` parsing.
+pub fn parse_rfc3339(value: &str) -> Option<time::OffsetDateTime> {
+    if !matches!(value.as_bytes().get(10), Some(b'T' | b't' | b' ')) {
+        return None;
+    }
+    time::OffsetDateTime::parse(value, &time::format_description::well_known::Rfc3339).ok()
+}
+
 pub const NATIVE_HOST_NAME: &str = "com.mindplace.capture";
 
 pub fn native_host_manifest(host: &Path) -> Result<serde_json::Value> {
