@@ -257,40 +257,44 @@ export function authorizeWrite(state, auth, request, options = {}) {
   if (state.collections?.[request.collectionId]?.layer !== layer) return DENIED;
   const grant = findGrant(state, client, auth, request);
   if (!grant) return DENIED;
+  let destGrant = null;
+  if (request.operation === 'move') {
+    const dest = request.destinationCollectionId;
+    if (typeof dest !== 'string' || !dest || state.collections?.[dest]?.layer !== layer ||
+        (client.tier === 'cloud' && !quarantineOf(state, dest, auth.clientId))) return DENIED;
+    destGrant = findGrant(state, client, auth, { collectionId: dest, objectKind: request.objectKind, operation: 'move' });
+    if (!destGrant) return DENIED;
+  }
   if (request.operation === 'create_import' && request.objectId !== undefined) return DENIED; // server assigns ids
 
   const digest = digestOf(request);
+  const needsApproval = request.operation === 'delete' || grant.mode === 'ask_first' || destGrant?.mode === 'ask_first';
   if (!options.replay) {
-    const eff = effectiveLimits(state, grant);
-    if (!eff.ok) return DENIED;
-    const { limits } = eff;
-    if (Buffer.byteLength(request.payload) > limits.maxBytes) return LIMIT;
-    if ((request.objectCount ?? 1) > limits.maxObjects) return LIMIT;
-    if (recentWrites(state, grant.id) >= limits.maxWritesPerHour) return LIMIT;
+    for (const activeGrant of destGrant ? [grant, destGrant] : [grant]) {
+      const eff = effectiveLimits(state, activeGrant);
+      if (!eff.ok) return DENIED;
+      const { limits } = eff;
+      if (Buffer.byteLength(request.payload) > limits.maxBytes) return LIMIT;
+      if ((request.objectCount ?? 1) > limits.maxObjects) return LIMIT;
+      if (recentWrites(state, activeGrant.id) >= limits.maxWritesPerHour) return LIMIT;
+    }
     if (request.operation !== 'create_import') {
       const existing = request.objectId === undefined ? undefined : state.objects?.[request.objectId];
       if (!existing || existing.vaultId !== request.vaultId || existing.objectKind !== request.objectKind ||
           existing.collectionId !== request.collectionId || existing.tombstoned === true) return DENIED;
       if (request.expectedRevision !== existing.revision) return CONFLICT;
     }
-    // delete (tombstone) always needs a single-use owner approval; ask_first needs one for any operation.
-    if ((request.operation === 'delete' || grant.mode === 'ask_first') &&
-        !findApproval(state, client, auth, { ...request, digest })) return APPROVAL_REQUIRED;
+    // delete (tombstone) always needs a single-use owner approval; ask_first on source or destination needs one too.
+    if (needsApproval && !findApproval(state, client, auth, { ...request, digest })) return APPROVAL_REQUIRED;
   }
-  if (request.operation === 'move') {
-    const dest = request.destinationCollectionId;
-    if (typeof dest !== 'string' || !dest || state.collections?.[dest]?.layer !== layer ||
-        (client.tier === 'cloud' && !quarantineOf(state, dest, auth.clientId)) ||
-        !findGrant(state, client, auth, { collectionId: dest, objectKind: request.objectKind, operation: 'move' })) return DENIED;
-  }
-  return { ok: true, code: 'ALLOWED', digest, grantId: grant.id };
+  return { ok: true, code: 'ALLOWED', digest, grantId: grant.id, destGrantId: destGrant?.id ?? null, needsApproval };
 }
 
 export function canRead(state, auth, collectionId) {
   const p = principal(state, auth);
   if (!p.ok) return false;
   const layer = state.collections?.[collectionId]?.layer;
-  if (!layer || (p.client.tier === 'cloud' && layer === 'raw')) return false;
+  if (!layer || (p.client.tier === 'cloud' && !CLOUD_LAYERS.has(layer))) return false;
   return state.readGrants?.some((g) =>
     g.clientId === auth.clientId && g.vaultId === state.vaultId && g.collectionId === collectionId &&
     g.enabled === true && g.revoked !== true && g.policyRevision === p.client.readPolicyRevision) === true;
@@ -326,10 +330,13 @@ function runWrite(state, auth, request, options) {
   const atCommit = authorizeWrite(state, auth, request);
   if (!atCommit.ok) return atCommit;
 
-  const approval = (request.operation === 'delete' || findGrant(state, state.clients[auth.clientId], auth, request)?.mode === 'ask_first')
+  const approval = atCommit.needsApproval
     ? findApproval(state, state.clients[auth.clientId], auth, { ...request, digest: atCommit.digest }) : null;
   if (approval) approval.used = true; // single-use
   (state.writeLog ??= []).push({ grantId: atCommit.grantId, at: state.now });
+  if (atCommit.destGrantId && atCommit.destGrantId !== atCommit.grantId) {
+    state.writeLog.push({ grantId: atCommit.destGrantId, at: state.now });
+  }
 
   const id = request.objectId ?? 'obj:' + auth.clientId + ':' + request.operationId;
   const old = state.objects[id];
@@ -365,7 +372,8 @@ export function ownerRestoreTombstone(state, owner, objectId) {
 }
 
 // ---- Local-tier bulk jobs: out-of-band, scoped, staged, reviewed by exception, applied separately ----
-const jobKey = (auth, jobId) => auth.clientId + ':' + jobId;
+const jobKey = (auth, jobId) => JSON.stringify([auth.clientId, jobId]);
+const batchKey = (clientId, batchId) => JSON.stringify([clientId, batchId]);
 const audienceCovers = (source, target) => Array.isArray(source) && Array.isArray(target) && target.every((r) => source.includes(r));
 const stageGrant = (state, p, auth, job) => findGrant(state, p.client, auth, { collectionId: job.target, objectKind: job.kind, operation: 'bulk_stage' });
 const applyGrant = (state, p, auth, job) => findGrant(state, p.client, auth, { collectionId: job.target, objectKind: job.kind, operation: 'bulk_apply' });
@@ -443,7 +451,7 @@ function openJob(state, auth, jobId, { leaseRequired }) {
   const p = principal(state, auth);
   if (!p.ok || p.client.tier !== 'local') return null;
   const job = state.jobs?.[jobKey(auth, jobId)];
-  if (!job || job.status !== 'open' || job.epoch !== state.epoch || job.policyRevision !== p.client.writePolicyRevision) return null;
+  if (!job || job.clientId !== auth.clientId || job.status !== 'open' || job.epoch !== state.epoch || job.policyRevision !== p.client.writePolicyRevision) return null;
   if (leaseRequired && state.now >= job.leaseExpiresAt) return null;
   return { p, job };
 }
@@ -514,7 +522,7 @@ function autoApplyAllowed(state, client, clientId, batch, cls) {
 // The approval surface contract. A pure, deterministic function of the immutable batch and current state; the owner approves
 // exactly (batchDigest, summaryDigest, exception decisions). Evidence and full diff are expandable but never required.
 export function buildReviewSurface(state, clientId, batchId) {
-  const batch = state?.batches?.[clientId + ':' + batchId];
+  const batch = state?.batches?.[batchKey(clientId, batchId)];
   const job = batch && state.jobs?.[batch.jobKey];
   const client = state?.clients?.[clientId];
   if (!batch || !job || !client) return null;
@@ -543,7 +551,7 @@ export function buildReviewSurface(state, clientId, batchId) {
 }
 
 export function reviewItemDetail(state, clientId, batchId, index) {
-  const batch = state?.batches?.[clientId + ':' + batchId];
+  const batch = state?.batches?.[batchKey(clientId, batchId)];
   const item = batch?.items?.[index];
   if (!item) return null;
   const cls = classify(state, batch)[index];
@@ -553,7 +561,7 @@ export function reviewItemDetail(state, clientId, batchId, index) {
     evidence: item.evidence, sources: item.sources, before, after };
 }
 export const reviewFullDiff = (state, clientId, batchId) =>
-  (state?.batches?.[clientId + ':' + batchId]?.items ?? []).map((_, i) => reviewItemDetail(state, clientId, batchId, i));
+  (state?.batches?.[batchKey(clientId, batchId)]?.items ?? []).map((_, i) => reviewItemDetail(state, clientId, batchId, i));
 
 const proposalExpiry = (state, batch, grant) => {
   const eff = grant && effectiveLimits(state, grant);
@@ -573,7 +581,7 @@ export function stageBulkBatch(state, auth, jobId, batchId, items, meta = {}) {
   const { limits } = eff;
   if (items.length > limits.maxBatch || job.itemCount + items.length > limits.maxItems) return res(LIMIT);
   if (items.reduce((n, i) => n + Buffer.byteLength(typeof i.payload === 'string' ? i.payload : ''), 0) > limits.maxBytes) return res(LIMIT);
-  const key = auth.clientId + ':' + batchId;
+  const key = batchKey(auth.clientId, batchId);
   if (state.batches?.[key]) return res(CONFLICT);
   const clusters = meta.clusters;
   if (!Array.isArray(clusters) || clusters.length === 0 || clusters.some((c) => typeof c?.id !== 'string' || !ID.test(c.id) || typeof c.theme !== 'string' || c.theme.length === 0 || c.theme.length > 200) ||
@@ -617,7 +625,7 @@ const sameIndices = (decisions, indices) => {
 // (summaryDigest) and decide every exception (confirm or withhold). Created only from the trusted local UI.
 export function ownerApproveBatch(state, owner, clientId, batchId, { summaryDigest, decisions = {} } = {}) {
   const res = (r) => audit(state ?? {}, { clientId: 'owner' }, { operation: 'bulk_approve' }, r);
-  const batch = state?.batches?.[clientId + ':' + batchId];
+  const batch = state?.batches?.[batchKey(clientId, batchId)];
   if (!ownerOk(state, owner) || !batch || batch.status !== 'staged') return res(DENIED);
   const job = state.jobs?.[batch.jobKey];
   const client = state.clients?.[clientId];
@@ -656,7 +664,7 @@ export function setAutoApplyPolicy(state, owner, policy) {
 export function applyBulkBatch(state, auth, jobId, batchId, options = {}) {
   const res = (r) => audit(state ?? {}, auth, { operation: 'bulk_apply', collectionId: null }, r);
   const early = openJob(state, auth, jobId, { leaseRequired: false }); // the WORKER lease is deliberately not required
-  const first = early && state.batches?.[auth.clientId + ':' + batchId];
+  const first = early && state.batches?.[batchKey(auth.clientId, batchId)];
   if (!first || first.status !== 'staged') return res(DENIED);
   // Revalidated before and again inside the commit, with FRESH lookups each time: binding to the staging job, lifetime,
   // permissions, scope and item-level provenance, evidence authority/redaction, epoch, tombstones, expected revisions and
@@ -664,8 +672,9 @@ export function applyBulkBatch(state, auth, jobId, batchId, options = {}) {
   const verify = () => {
     const pr = principal(state, auth);
     const job = state.jobs?.[jobKey(auth, jobId)];
-    const batch = state.batches?.[auth.clientId + ':' + batchId];
-    if (!pr.ok || pr.client.tier !== 'local' || !job || !batch || job.status !== 'open' || batch.status !== 'staged') return { err: DENIED };
+    const batch = state.batches?.[batchKey(auth.clientId, batchId)];
+    if (!pr.ok || pr.client.tier !== 'local' || !job || !batch || job.clientId !== auth.clientId ||
+        job.status !== 'open' || batch.status !== 'staged') return { err: DENIED };
     // A staged batch applies only through the job that staged it, and only while that job still carries the same immutable
     // target, kind and source scope the batch was staged under. Everything below uses the BATCH's target and scope.
     if (batch.jobKey !== jobKey(auth, jobId) || job.target !== batch.target || job.kind !== batch.kind || !sameSet(job.scope, batch.scope)) return { err: DENIED };
@@ -725,7 +734,7 @@ export function applyBulkBatch(state, auth, jobId, batchId, options = {}) {
 
 // Rollback is owner-only and logical: created objects are tombstoned, changed objects get a NEW revision restoring prior content.
 export function ownerRollbackBatch(state, owner, clientId, batchId) {
-  const batch = state?.batches?.[clientId + ':' + batchId];
+  const batch = state?.batches?.[batchKey(clientId, batchId)];
   const res = (r) => audit(state ?? {}, { clientId: 'owner' }, { operation: 'bulk_rollback' }, r);
   if (!ownerOk(state, owner) || !batch || batch.status !== 'applied') return res(DENIED);
   const { created, changed } = batch.applied;

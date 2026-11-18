@@ -11,6 +11,8 @@ import {
 } from './support/mp-7mcp-authority-model.mjs';
 
 const OWNER = Object.freeze({ localUi: true, authenticated: true });
+const jKey = (clientId, jobId) => JSON.stringify([clientId, jobId]);
+const bKey = (clientId, batchId) => JSON.stringify([clientId, batchId]);
 
 function fixture(operation = 'create_import', kind = 'memory') {
   const state = {
@@ -558,7 +560,7 @@ test('bulk apply re-validates the declared scope at commit: a source revoked aft
       const res = when === 'before apply' ? (mutate(b.state), b.apply()) : b.apply('b1', { beforeCommit: mutate });
       assert.equal(res.code, 'DENIED', label + ' / ' + when);
       assert.deepEqual(b.state.objects, expected, label + ' / ' + when + ': nothing applied');
-      assert.equal(b.state.batches['local-L:b1'].status, 'staged');
+      assert.equal(b.state.batches[bKey('local-L', 'b1')].status, 'staged');
     }
   }
 });
@@ -606,7 +608,7 @@ test('bulk apply is atomic: one stale item applies nothing', () => {
   const res = b.apply('b1', { beforeCommit(s) { s.objects.m1.revision = 3; } });
   assert.equal(res.code, 'CONFLICT');
   assert.deepEqual(b.state.objects, expected, 'no item of the batch was applied');
-  assert.equal(b.state.batches['local-L:b1'].status, 'staged');
+  assert.equal(b.state.batches[bKey('local-L', 'b1')].status, 'staged');
 });
 
 test('bulk: tombstone and move are never bulk operations', () => {
@@ -792,7 +794,7 @@ test('C1 bulk batch, item and byte limits follow the same default < cap < ceilin
   assert.equal(b.stage('ok', b.creates(DEFAULT_LIMITS.maxBatch)).code, 'STAGED');
   const bytes = ['A', 'B', 'C'].map((c, i) => ({ operation: 'create_import', payload: c.repeat(12_000), sources: ['raw-A'], evidence: [b.src('big' + i)], cluster: 'c1' }));
   assert.equal(b.stage('bytes', bytes).code, 'LIMIT', 'a staging request cannot exceed the payload limit');
-  b.state.jobs['local-L:job-1'].itemCount = DEFAULT_LIMITS.maxItems - 1;
+  b.state.jobs[jKey('local-L', 'job-1')].itemCount = DEFAULT_LIMITS.maxItems - 1;
   assert.equal(b.stage('over', b.creates(2, 'z')).code, 'LIMIT');
 
   const o = bulk({ stageExtra: { limits: { maxBatch: 1024 } } });
@@ -826,7 +828,7 @@ test('C2 worker lease expiry does not destroy a valid staged proposal, and apply
   b.start(); b.stage();
   b.state.now += DEFAULT_LIMITS.leaseMs + 1; // the worker's execution lease is over
   assert.equal(b.stage('b2', b.creates(1, 'x')).code, 'DENIED', 'an expired worker cannot stage');
-  assert.equal(b.state.batches['local-L:b1'].status, 'staged', 'the proposal survives');
+  assert.equal(b.state.batches[bKey('local-L', 'b1')].status, 'staged', 'the proposal survives');
   assert.equal(b.approve().code, 'APPROVED');
   assert.equal(b.apply().code, 'APPLIED', 'a reviewed proposal is applicable after its worker expired');
 });
@@ -840,8 +842,8 @@ test('C2 the worker lease is renewable only while unexpired and fully authorized
   const renewed = renewWorkerLease(b.state, b.local, 'job-1');
   assert.equal(renewed.code, 'RENEWED');
   assert.equal(renewed.leaseExpiresAt, b.state.now + DEFAULT_LIMITS.leaseMs);
-  assert.equal(b.state.jobs['local-L:job-1'].renewals, 1);
-  assert.equal(b.state.batches['local-L:b1'].expiresAt, expiresAt, 'renewal never extends a proposal');
+  assert.equal(b.state.jobs[jKey('local-L', 'job-1')].renewals, 1);
+  assert.equal(b.state.batches[bKey('local-L', 'b1')].expiresAt, expiresAt, 'renewal never extends a proposal');
   b.state.now += DEFAULT_LIMITS.leaseMs; // expires
   assert.equal(renewWorkerLease(b.state, b.local, 'job-1').code, 'DENIED', 'an expired lease cannot be revived');
   const c = bulk();
@@ -866,7 +868,7 @@ test('C2 a staged proposal has its own TTL: an expired proposal is never approve
   b.state.now = staged.expiresAt;
   const before = b.objects();
   assert.equal(b.apply().code, 'EXPIRED');
-  assert.equal(b.state.batches['local-L:b1'].status, 'expired');
+  assert.equal(b.state.batches[bKey('local-L', 'b1')].status, 'expired');
   assert.deepEqual(b.state.objects, before);
   assert.equal(b.apply().code, 'DENIED', 'an expired batch stays expired');
   const c = bulk();
@@ -921,7 +923,7 @@ test('C2 apply revalidates evidence authority: redaction, stale digests and remo
       const res = when === 'before apply' ? (mutate(b.state), b.apply()) : b.apply('b1', { beforeCommit: mutate });
       assert.equal(res.code, code, label + ' / ' + when);
       assert.deepEqual(b.state.objects, expected, label + ' / ' + when + ': nothing applied');
-      assert.equal(b.state.batches['local-L:b1'].status, 'staged');
+      assert.equal(b.state.batches[bKey('local-L', 'b1')].status, 'staged');
     }
   }
   const b = bulk();
@@ -983,7 +985,7 @@ test('a staged batch applies only through the job that staged it: wrong, unknown
   b.grant('bulk_apply', b.target, 'local-M', 'memory');
   assert.equal(applyBulkBatch(b.state, m, 'job-1', 'b1').code, 'DENIED', 'another client cannot reach the batch');
   assert.deepEqual(b.state.objects, expected, 'nothing was applied');
-  assert.equal(b.state.batches['local-L:b1'].status, 'staged');
+  assert.equal(b.state.batches[bKey('local-L', 'b1')].status, 'staged');
   assert.equal(b.state.approvals.at(-1).used, false, 'failed attempts consume no approval');
   assert.equal(b.applyVia('job-1').code, 'APPLIED', 'the staging job still applies it');
 });
@@ -999,7 +1001,7 @@ test('different source scopes: revoking the staging job source after staging can
   assert.equal(b.applyVia('job-2').code, 'DENIED', 'job-2 must not publish raw-A derived content');
   assert.equal(b.applyVia('job-1').code, 'DENIED', 'the staging job is blocked by its revoked source');
   assert.deepEqual(b.state.objects, expected);
-  assert.equal(b.state.batches['local-L:b1'].status, 'staged');
+  assert.equal(b.state.batches[bKey('local-L', 'b1')].status, 'staged');
 });
 
 test('different targets: a batch can neither be applied through, nor misrouted into, another job target, even with auto-apply', () => {
@@ -1024,11 +1026,11 @@ test('different targets: a batch can neither be applied through, nor misrouted i
 
 test('before-commit mutation cannot rebind a batch to another job, target or scope', () => {
   const rebind = {
-    'batch rebound to another job': (s) => { s.batches['local-L:b1'].jobKey = 'local-L:job-2'; },
-    'batch target rewritten': (s) => { s.batches['local-L:b1'].target = 'curated-B'; },
-    'batch scope rewritten': (s) => { s.batches['local-L:b1'].scope = ['raw-B']; },
-    'staging job scope rewritten': (s) => { s.jobs['local-L:job-1'].scope = ['raw-B']; },
-    'staging job target rewritten': (s) => { s.jobs['local-L:job-1'].target = 'curated-B'; }
+    'batch rebound to another job': (s) => { s.batches[bKey('local-L', 'b1')].jobKey = jKey('local-L', 'job-2'); },
+    'batch target rewritten': (s) => { s.batches[bKey('local-L', 'b1')].target = 'curated-B'; },
+    'batch scope rewritten': (s) => { s.batches[bKey('local-L', 'b1')].scope = ['raw-B']; },
+    'staging job scope rewritten': (s) => { s.jobs[jKey('local-L', 'job-1')].scope = ['raw-B']; },
+    'staging job target rewritten': (s) => { s.jobs[jKey('local-L', 'job-1')].target = 'curated-B'; }
   };
   for (const [label, mutate] of Object.entries(rebind)) {
     for (const via of ['job-1', 'job-2']) {
@@ -1038,16 +1040,16 @@ test('before-commit mutation cannot rebind a batch to another job, target or sco
       const res = b.applyVia(via, 'b1', { beforeCommit: mutate });
       assert.equal(res.ok, false, label + ' via ' + via);
       assert.deepEqual(b.state.objects, expected, label + ' via ' + via + ': nothing applied');
-      assert.equal(b.state.batches['local-L:b1'].status, 'staged');
+      assert.equal(b.state.batches[bKey('local-L', 'b1')].status, 'staged');
     }
   }
   // Identical twin job (same target and scope): only the job identity bound into the digest can tell the jobs apart,
   // and the staging job must still be open inside the commit.
   const twin = {
-    'batch rebound to an identical twin job': [(s) => { s.batches['local-L:b1'].jobKey = 'local-L:job-2'; }, 'job-2'],
-    'batch and staging job rewritten together (target)': [(s) => { s.batches['local-L:b1'].target = 'curated-B'; s.jobs['local-L:job-1'].target = 'curated-B'; }, 'job-1'],
-    'batch and staging job rewritten together (scope)': [(s) => { s.batches['local-L:b1'].scope = ['raw-A', 'raw-B']; s.jobs['local-L:job-1'].scope = ['raw-A', 'raw-B']; }, 'job-1'],
-    'staging job closed inside the commit': [(s) => { s.jobs['local-L:job-1'].status = 'closed'; }, 'job-1']
+    'batch rebound to an identical twin job': [(s) => { s.batches[bKey('local-L', 'b1')].jobKey = jKey('local-L', 'job-2'); }, 'job-2'],
+    'batch and staging job rewritten together (target)': [(s) => { s.batches[bKey('local-L', 'b1')].target = 'curated-B'; s.jobs[jKey('local-L', 'job-1')].target = 'curated-B'; }, 'job-1'],
+    'batch and staging job rewritten together (scope)': [(s) => { s.batches[bKey('local-L', 'b1')].scope = ['raw-A', 'raw-B']; s.jobs[jKey('local-L', 'job-1')].scope = ['raw-A', 'raw-B']; }, 'job-1'],
+    'staging job closed inside the commit': [(s) => { s.jobs[jKey('local-L', 'job-1')].status = 'closed'; }, 'job-1']
   };
   for (const [label, [mutate, via]] of Object.entries(twin)) {
     const b = bulk();
@@ -1055,7 +1057,7 @@ test('before-commit mutation cannot rebind a batch to another job, target or sco
     const expected = b.objects();
     assert.equal(b.applyVia(via, 'b1', { beforeCommit: mutate }).code, 'DENIED', label);
     assert.deepEqual(b.state.objects, expected, label + ': nothing applied');
-    assert.equal(b.state.batches['local-L:b1'].status, 'staged', label);
+    assert.equal(b.state.batches[bKey('local-L', 'b1')].status, 'staged', label);
   }
   // a source revoked inside the commit blocks the apply whichever job id is used
   for (const via of ['job-1', 'job-2']) {
@@ -1069,9 +1071,9 @@ test('before-commit mutation cannot rebind a batch to another job, target or sco
 
 test('the batch digest binds job identity, target and scope: a consistent rewrite before owner approval is still rejected', () => {
   const rewrites = {
-    'job identity (identical twin job)': [(s) => { s.batches['local-L:b1'].jobKey = 'local-L:job-2'; }, 'job-2'],
-    'target (batch and staging job rewritten together)': [(s) => { s.batches['local-L:b1'].target = 'curated-B'; s.jobs['local-L:job-1'].target = 'curated-B'; }, 'job-1'],
-    'scope (batch and staging job rewritten together)': [(s) => { s.batches['local-L:b1'].scope = ['raw-A', 'raw-B']; s.jobs['local-L:job-1'].scope = ['raw-A', 'raw-B']; }, 'job-1']
+    'job identity (identical twin job)': [(s) => { s.batches[bKey('local-L', 'b1')].jobKey = jKey('local-L', 'job-2'); }, 'job-2'],
+    'target (batch and staging job rewritten together)': [(s) => { s.batches[bKey('local-L', 'b1')].target = 'curated-B'; s.jobs[jKey('local-L', 'job-1')].target = 'curated-B'; }, 'job-1'],
+    'scope (batch and staging job rewritten together)': [(s) => { s.batches[bKey('local-L', 'b1')].scope = ['raw-A', 'raw-B']; s.jobs[jKey('local-L', 'job-1')].scope = ['raw-A', 'raw-B']; }, 'job-1']
   };
   for (const [label, [mutate, via]] of Object.entries(rewrites)) {
     const b = bulk();
@@ -1087,9 +1089,9 @@ test('the batch digest binds job identity, target and scope: a consistent rewrit
 test('the batch verified inside the commit is the batch that is applied and marked applied', () => {
   const b = bulk();
   b.start(); b.stage(); b.approve();
-  const res = b.apply('b1', { beforeCommit(s) { s.batches['local-L:b1'] = structuredClone(s.batches['local-L:b1']); } });
+  const res = b.apply('b1', { beforeCommit(s) { s.batches[bKey('local-L', 'b1')] = structuredClone(s.batches[bKey('local-L', 'b1')]); } });
   assert.equal(res.code, 'APPLIED');
-  assert.equal(b.state.batches['local-L:b1'].status, 'applied', 'the live batch record carries the outcome');
+  assert.equal(b.state.batches[bKey('local-L', 'b1')].status, 'applied', 'the live batch record carries the outcome');
   assert.equal(b.apply().code, 'DENIED', 'and it cannot be applied twice');
 });
 
@@ -1101,8 +1103,8 @@ test('item-level provenance is revalidated inside the commit: every source and e
     const b = bulk();
     b.start(); b.stage();
     b.readGrant('raw-B', 'local-L'); // raw-B is readable by this client, but it is not part of job-1's declared scope
-    smuggle(b, b.state.batches['local-L:b1'].items[0]);
-    b.state.batches['local-L:b1'].digest = b.surface().batchDigest; // refresh the stored digest so only the item-level check can stop it
+    smuggle(b, b.state.batches[bKey('local-L', 'b1')].items[0]);
+    b.state.batches[bKey('local-L', 'b1')].digest = b.surface().batchDigest; // refresh the stored digest so only the item-level check can stop it
     assert.equal(b.approve().code, 'APPROVED', 'the owner is shown and approves the tampered batch');
     const expected = b.objects();
     assert.equal(b.apply().code, 'DENIED');
@@ -1143,7 +1145,7 @@ test('C3 risk is deterministic: model confidence, scores and labels are ignored 
   b.state.objects.m1.origin = 'owner';
   const risky = (extra) => [{ operation: 'update', objectId: 'm1', expectedRevision: 2, payload: 'x', sources: ['raw-A'], evidence: [b.src('m')], cluster: 'c1', ...extra }];
   const a = b.stage('ba', risky({ confidence: 0.999, risk: 'low', label: 'safe', autoApply: true }));
-  const staged = b.state.batches['local-L:ba'].items[0];
+  const staged = b.state.batches[bKey('local-L', 'ba')].items[0];
   assert.deepEqual(Object.keys(staged).sort(), ['cluster', 'evidence', 'expectedRevision', 'objectId', 'operation', 'payload', 'sources', 'subject']);
   assert.equal(b.surface('ba').risk.high, 1, 'an owner-authored claim is exceptional whatever the model says');
   const clean = bulk(); clean.start(); clean.state.objects.m1.origin = 'owner';
@@ -1187,7 +1189,7 @@ test('C3 exceptions need an explicit owner decision: confirm applies the item, w
   const w = (withheld.approve, withheld.b.apply());
   assert.deepEqual([w.code, w.created, w.changed, w.withheld], ['APPLIED', 3, 0, 1]);
   assert.equal(withheld.b.state.objects.m1.data, 'old', 'a withheld exception is never applied');
-  assert.deepEqual(withheld.b.state.batches['local-L:b1'].applied.withheld, [3]);
+  assert.deepEqual(withheld.b.state.batches[bKey('local-L', 'b1')].applied.withheld, [3]);
   // a forged approval without per-exception decisions does not unlock the batch
   const forged = bulk(); exceptionBatch(forged);
   const sur = forged.surface();
@@ -1209,10 +1211,10 @@ test('C3 the approval is bound to the exact immutable displayed batch: any mutat
   assert.equal(b.approve('b1', {}, shown.summaryDigest).code, 'APPROVED');
   const base = structuredClone(b.state);
   const mutations = {
-    'payload changed': (s) => { s.batches['local-L:b1'].items[0].payload = 'tampered'; },
-    'item added': (s) => { const x = s.batches['local-L:b1']; x.items.push({ ...x.items[0], payload: 'extra' }); },
-    'item removed': (s) => { s.batches['local-L:b1'].items.pop(); },
-    'cluster theme rewritten': (s) => { s.batches['local-L:b1'].clusters[0].theme = 'Something harmless'; },
+    'payload changed': (s) => { s.batches[bKey('local-L', 'b1')].items[0].payload = 'tampered'; },
+    'item added': (s) => { const x = s.batches[bKey('local-L', 'b1')]; x.items.push({ ...x.items[0], payload: 'extra' }); },
+    'item removed': (s) => { s.batches[bKey('local-L', 'b1')].items.pop(); },
+    'cluster theme rewritten': (s) => { s.batches[bKey('local-L', 'b1')].clusters[0].theme = 'Something harmless'; },
     'target object became owner-authored (risk changes)': (s) => { s.objects.m1.origin = 'owner'; },
     'risk policy version differs': (s) => { s.approvals.at(-1).riskPolicyVersion = RISK_POLICY_VERSION + 1; },
     'decisions tampered after approval': (s) => { s.approvals.at(-1).decisions = { 0: 'confirm' }; },
@@ -1233,7 +1235,7 @@ test('C3 the approval is bound to the exact immutable displayed batch: any mutat
   assert.equal(applyBulkBatch(structuredClone(base), b.local, 'job-1', 'b1').code, 'APPLIED');
   // mid-commit mutation of the immutable batch is caught by the second verification
   const mid = structuredClone(base);
-  assert.equal(applyBulkBatch(mid, b.local, 'job-1', 'b1', { beforeCommit(s) { s.batches['local-L:b1'].items[0].payload = 'swapped'; } }).ok, false);
+  assert.equal(applyBulkBatch(mid, b.local, 'job-1', 'b1', { beforeCommit(s) { s.batches[bKey('local-L', 'b1')].items[0].payload = 'swapped'; } }).ok, false);
   assert.equal(mid.objects['obj:local-L:b1:0'], undefined);
 });
 
@@ -1251,7 +1253,7 @@ test('C3 each approval binding holds on its own: batch digest, decisions digest 
 test('C3 a batch mutated after staging is rejected even if the owner is later shown and approves the mutated content', () => {
   const b = bulk();
   b.start(); b.stage();
-  b.state.batches['local-L:b1'].items[0].payload = 'swapped after staging';
+  b.state.batches[bKey('local-L', 'b1')].items[0].payload = 'swapped after staging';
   assert.equal(b.approve().code, 'APPROVED', 'the approval UI only reflects the stored batch');
   const before = b.objects();
   assert.equal(b.apply().code, 'DENIED', 'the staged batch is immutable: its recomputed digest must equal the digest recorded at staging');
@@ -1304,4 +1306,57 @@ test('C3 auto-apply is denied for anything above low risk, ask_first, withheld p
   const exp = bulk({ applyMode: 'allow' });
   exp.autoApply(); exp.start(); const s = exp.stage('b1', exp.creates(2)); exp.state.now = s.expiresAt;
   assert.equal(exp.apply().code, 'EXPIRED', 'auto-apply never applies an expired proposal');
+});
+
+test('logical move requires approval when destination grant is ask_first, enforces destination limits, and checks destination before conflict', () => {
+  const f = fixture('move');
+  f.grant('move', 'curated-A', 'client-A', 'memory', { mode: 'allow' });
+  const req = { ...f.req, objectId: 'prior', expectedRevision: 99, destinationCollectionId: 'curated-B', payload: '' };
+  // Missing destination grant returns DENIED before expectedRevision CONFLICT.
+  assert.equal(authorizeWrite(f.state, f.auth, req).code, 'DENIED');
+  const dg = f.grant('move', 'curated-B', 'client-A', 'memory', { mode: 'ask_first', limits: { maxWritesPerHour: 1 } });
+  const validReq = { ...req, expectedRevision: 3 };
+  assert.equal(authorizeWrite(f.state, f.auth, validReq).code, 'APPROVAL_REQUIRED');
+  assert.equal(simulateWrite(f.state, f.auth, validReq).code, 'APPROVAL_REQUIRED');
+  f.approve(validReq);
+  assert.equal(simulateWrite(f.state, f.auth, validReq).code, 'COMMITTED');
+  assert.equal(f.state.objects.prior.collectionId, 'curated-B');
+  // Approval is single-use: raise maxWritesPerHour on dg (keep ask_first) so a second move into curated-B requires fresh approval,
+  // and destination maxWritesPerHour=1 triggers LIMIT when dg.mode is changed to allow.
+  dg.limits = { maxWritesPerHour: 2 };
+  const secondAskReq = { ...validReq, collectionId: 'curated-A', destinationCollectionId: 'curated-B', expectedRevision: 4, operationId: 'op-B' };
+  f.state.objects.prior.collectionId = 'curated-A';
+  assert.equal(authorizeWrite(f.state, f.auth, secondAskReq).code, 'APPROVAL_REQUIRED');
+  dg.mode = 'allow';
+  dg.limits = { maxWritesPerHour: 1 };
+  const againReq = { ...validReq, collectionId: 'curated-A', destinationCollectionId: 'curated-B', expectedRevision: 4, operationId: 'op-C' };
+  assert.equal(authorizeWrite(f.state, f.auth, againReq).code, 'LIMIT');
+});
+
+test('cloud clients read curated layer only and cannot read raw or derived collections even with a read grant', () => {
+  const f = fixture();
+  f.readGrant('curated-A');
+  f.readGrant('raw-A');
+  f.readGrant('graph-A');
+  assert.equal(canRead(f.state, f.auth, 'curated-A'), true);
+  assert.equal(canRead(f.state, f.auth, 'raw-A'), false);
+  assert.equal(canRead(f.state, f.auth, 'graph-A'), false);
+  f.readGrant('graph-A', 'local-L');
+  assert.equal(canRead(f.state, f.local, 'graph-A'), true);
+});
+
+test('bulk job and batch keys do not collide across colon boundaries and enforce job.clientId', () => {
+  const b = bulk();
+  b.state.clients['local'] = { enabled: true, tier: 'local', writePolicyRevision: 4, readPolicyRevision: 2 };
+  b.state.clients['local:1'] = { enabled: true, tier: 'local', writePolicyRevision: 4, readPolicyRevision: 2 };
+  b.grant('bulk_stage', 'shared-C', 'local', 'memory');
+  b.grant('bulk_stage', 'shared-C', 'local:1', 'memory');
+  b.readGrant('raw-A', 'local');
+  b.readGrant('raw-A', 'local:1');
+  const auth1 = { ...b.local, clientId: 'local' };
+  const auth2 = { ...b.local, clientId: 'local:1' };
+  assert.equal(startBulkJob(b.state, auth1, { jobId: '1:x', targetCollectionId: 'shared-C', objectKind: 'memory', scopeCollections: ['raw-A'] }).code, 'STARTED');
+  assert.equal(startBulkJob(b.state, auth2, { jobId: 'x', targetCollectionId: 'shared-C', objectKind: 'memory', scopeCollections: ['raw-A'] }).code, 'STARTED');
+  b.state.jobs[jKey('local', '1:x')].clientId = 'local:1';
+  assert.equal(renewWorkerLease(b.state, auth1, '1:x').code, 'DENIED');
 });

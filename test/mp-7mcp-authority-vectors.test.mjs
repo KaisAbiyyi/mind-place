@@ -69,6 +69,11 @@ test('vector file declares the shared schema and every vector has a unique id', 
   const ids = doc.vectors.map((v) => v.id);
   assert.equal(new Set(ids).size, ids.length);
   assert.ok(ids.length >= 20);
+  for (const vector of doc.vectors) {
+    const grants = vector.patch?.grants ?? [];
+    const grantIds = grants.map((g) => g.id);
+    assert.equal(new Set(grantIds).size, grantIds.length, `vector ${vector.id} has duplicate grant id`);
+  }
 });
 
 test('vectors cover every required rollout category', () => {
