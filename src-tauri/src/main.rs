@@ -291,6 +291,38 @@ fn serialized_archive_index_writer<T>(
     operation()
 }
 
+/// MP-9C: a disclosure read fails closed with `MP_INDEX_STALE_GENERATION`
+/// while the derived index still holds a redacted source (its ranking, scores
+/// and counts would otherwise depend on hidden rows). In vault mode, prune the
+/// projection once through the serialized index writer and retry the read once.
+fn read_pruning_stale_projection<T>(
+    vault: &Option<Arc<VaultCaptureStore>>,
+    state_path: &Path,
+    index_path: &Path,
+    write_gate: &Mutex<()>,
+    security: &SecurityGate,
+    lease: UnlockLease,
+    read: impl Fn() -> mind_place_index::Result<T>,
+) -> mind_place_index::Result<T> {
+    match read() {
+        Err(IndexError::StaleGeneration) if vault.is_some() => {
+            serialized_archive_index_writer(write_gate, security, lease, || {
+                let archive = vault.as_ref().ok_or(IndexError::Revoked)?;
+                let authority = open_owner_state(vault, state_path)?;
+                let index = open_owner_index(vault, index_path)?;
+                index.sync_vault_with_check(archive, &authority, || {
+                    security
+                        .validate_lease(lease)
+                        .map_err(|_| IndexError::Revoked)
+                })?;
+                Ok(())
+            })?;
+            read()
+        }
+        other => other,
+    }
+}
+
 #[cfg(test)]
 mod legacy_redaction_gate_tests {
     use super::*;
@@ -526,14 +558,17 @@ async fn read_archive_hive(
             max_nodes: 120,
             max_edges: 240,
         };
-        let mut graph =
-            open_owner_index(&vault, &index_path)?.graph_neighbors_with_check(&query, || {
+        // MP-9C: the projection may predate a redaction until the next sync,
+        // so visibility is enforced during seed resolution and traversal.
+        let graph = open_owner_index(&vault, &index_path)?.graph_neighbors_visible_with_check(
+            &query,
+            &mut mind_place_index::AuthorityVisibility(&authority),
+            || {
                 security
                     .validate_lease(lease)
                     .map_err(|_| IndexError::Revoked)
-            })?;
-        // MP-9C: the projection may predate a redaction until the next sync.
-        graph.retain_visible(|source_id| Ok(!authority.source_is_redacted(source_id)?))?;
+            },
+        )?;
         security
             .validate_lease(lease)
             .map_err(|_| IndexError::Revoked)?;
@@ -580,9 +615,14 @@ async fn read_archive_hive(
 #[tauri::command]
 async fn get_archive_index_stats(state: State<'_, AppState>) -> Result<IndexStats, String> {
     let index_path = state.index_path.clone();
+    let state_path = state.state_path.clone();
     let vault = owner_vault(&state);
     index_task(&state, move |_, _| {
-        open_owner_index(&vault, &index_path)?.stats()
+        let _privacy = disclosure_fence(&vault)?;
+        // MP-9C: aggregates count visible sources only.
+        let authority = open_owner_state(&vault, &state_path)?;
+        open_owner_index(&vault, &index_path)?
+            .stats_visible(&mut mind_place_index::AuthorityVisibility(&authority))
     })
     .await
 }
@@ -597,21 +637,28 @@ async fn search_archive_index(
     let index_path = state.index_path.clone();
     let state_path = state.state_path.clone();
     let vault = owner_vault(&state);
-    index_task(&state, move |_, _| {
+    let write_gate = state.archive_index_write_gate.clone();
+    index_task(&state, move |lease, security| {
         let _privacy = disclosure_fence(&vault)?;
-        let authority = open_owner_state(&vault, &state_path)?;
-        let hits = open_owner_index(&vault, &index_path)?.search(
-            &query,
-            include_history.unwrap_or(false),
-            limit.unwrap_or(20),
-        )?;
-        let mut visible = Vec::new();
-        for hit in hits {
-            if !authority.source_is_redacted(&hit.source_id)? {
-                visible.push(hit);
-            }
-        }
-        Ok(visible)
+        read_pruning_stale_projection(
+            &vault,
+            &state_path,
+            &index_path,
+            &write_gate,
+            &security,
+            lease,
+            || {
+                let authority = open_owner_state(&vault, &state_path)?;
+                // MP-9C: hidden sources are excluded before LIMIT/ranking by
+                // failing closed on a stale projection, never filtered after.
+                open_owner_index(&vault, &index_path)?.search_visible(
+                    &query,
+                    include_history.unwrap_or(false),
+                    limit.unwrap_or(20),
+                    &mut mind_place_index::AuthorityVisibility(&authority),
+                )
+            },
+        )
     })
     .await
 }
@@ -624,13 +671,25 @@ async fn search_retrieval(
     let index_path = state.index_path.clone();
     let state_path = state.state_path.clone();
     let vault = owner_vault(&state);
-    index_task(&state, move |_, _| {
+    let write_gate = state.archive_index_write_gate.clone();
+    index_task(&state, move |lease, security| {
         let _privacy = disclosure_fence(&vault)?;
-        let authority = open_owner_state(&vault, &state_path)?;
-        // Filter before ranking truncation so counts/flags exclude hidden sources.
-        open_owner_index(&vault, &index_path)?.retrieve_filtered(&request, |source_id| {
-            Ok(!authority.source_is_redacted(source_id)?)
-        })
+        read_pruning_stale_projection(
+            &vault,
+            &state_path,
+            &index_path,
+            &write_gate,
+            &security,
+            lease,
+            || {
+                let authority = open_owner_state(&vault, &state_path)?;
+                // Hidden rows never shape shortlist, ranking, scores or counts.
+                open_owner_index(&vault, &index_path)?.retrieve_filtered(
+                    &request,
+                    &mut mind_place_index::AuthorityVisibility(&authority),
+                )
+            },
+        )
     })
     .await
 }
@@ -676,19 +735,35 @@ async fn build_retrieval_context(
         None
     };
     let index_path = state.index_path.clone();
+    let state_path = state.state_path.clone();
+    let write_gate = state.archive_index_write_gate.clone();
     index_task(&state, move |lease, security| {
         let _privacy = disclosure_fence(&vault)?;
-        let index = open_owner_index(&vault, &index_path)?;
-        let check = || {
-            security
-                .validate_lease(lease)
-                .map_err(|_| IndexError::Revoked)
-        };
-        match (vault.as_ref(), archive.as_ref()) {
-            (Some(vault), _) => index.build_context_vault_with_check(vault, &request, check),
-            (None, Some(archive)) => index.build_context_with_check(archive, &request, check),
-            _ => Err(IndexError::Revoked),
-        }
+        read_pruning_stale_projection(
+            &vault,
+            &state_path,
+            &index_path,
+            &write_gate,
+            &security,
+            lease,
+            || {
+                let index = open_owner_index(&vault, &index_path)?;
+                let check = || {
+                    security
+                        .validate_lease(lease)
+                        .map_err(|_| IndexError::Revoked)
+                };
+                match (vault.as_ref(), archive.as_ref()) {
+                    (Some(vault), _) => {
+                        index.build_context_vault_with_check(vault, &request, check)
+                    }
+                    (None, Some(archive)) => {
+                        index.build_context_with_check(archive, &request, check)
+                    }
+                    _ => Err(IndexError::Revoked),
+                }
+            },
+        )
     })
     .await
 }
@@ -701,18 +776,29 @@ async fn inspect_retrieval(
     let index_path = state.index_path.clone();
     let state_path = state.state_path.clone();
     let vault = owner_vault(&state);
+    let write_gate = state.archive_index_write_gate.clone();
     index_task(&state, move |lease, security| {
         let _privacy = disclosure_fence(&vault)?;
         // MP-9C: inspection carries snippets; apply current source authority.
-        let authority = open_owner_state(&vault, &state_path)?;
-        open_owner_index(&vault, &index_path)?.inspect_retrieval_filtered_with_check(
-            &request,
+        read_pruning_stale_projection(
+            &vault,
+            &state_path,
+            &index_path,
+            &write_gate,
+            &security,
+            lease,
             || {
-                security
-                    .validate_lease(lease)
-                    .map_err(|_| IndexError::Revoked)
+                let authority = open_owner_state(&vault, &state_path)?;
+                open_owner_index(&vault, &index_path)?.inspect_retrieval_filtered_with_check(
+                    &request,
+                    || {
+                        security
+                            .validate_lease(lease)
+                            .map_err(|_| IndexError::Revoked)
+                    },
+                    &mut mind_place_index::AuthorityVisibility(&authority),
+                )
             },
-            |source_id| Ok(!authority.source_is_redacted(source_id)?),
         )
     })
     .await
@@ -730,19 +816,35 @@ async fn inspect_retrieval_context(
         None
     };
     let index_path = state.index_path.clone();
+    let state_path = state.state_path.clone();
+    let write_gate = state.archive_index_write_gate.clone();
     index_task(&state, move |lease, security| {
         let _privacy = disclosure_fence(&vault)?;
-        let index = open_owner_index(&vault, &index_path)?;
-        let check = || {
-            security
-                .validate_lease(lease)
-                .map_err(|_| IndexError::Revoked)
-        };
-        match (vault.as_ref(), archive.as_ref()) {
-            (Some(vault), _) => index.inspect_context_vault_with_check(vault, &request, check),
-            (None, Some(archive)) => index.inspect_context_with_check(archive, &request, check),
-            _ => Err(IndexError::Revoked),
-        }
+        read_pruning_stale_projection(
+            &vault,
+            &state_path,
+            &index_path,
+            &write_gate,
+            &security,
+            lease,
+            || {
+                let index = open_owner_index(&vault, &index_path)?;
+                let check = || {
+                    security
+                        .validate_lease(lease)
+                        .map_err(|_| IndexError::Revoked)
+                };
+                match (vault.as_ref(), archive.as_ref()) {
+                    (Some(vault), _) => {
+                        index.inspect_context_vault_with_check(vault, &request, check)
+                    }
+                    (None, Some(archive)) => {
+                        index.inspect_context_with_check(archive, &request, check)
+                    }
+                    _ => Err(IndexError::Revoked),
+                }
+            },
+        )
     })
     .await
 }

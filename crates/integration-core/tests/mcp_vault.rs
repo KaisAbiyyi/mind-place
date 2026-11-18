@@ -256,6 +256,61 @@ mod mp9c_privacy {
         ));
     }
 
+    /// MP-9C review P1: a stale hidden row must not displace the visible hit at
+    /// LIMIT nor shape ranking/counts. The credentialed read prunes the stale
+    /// projection (fail closed first) and the client sees only visible rows.
+    #[test]
+    fn stale_hidden_row_cannot_displace_the_visible_hit_at_limit_one() {
+        let r = rig();
+        let state = r.archive.open_state_store().unwrap();
+        state
+            .redact_source(&r.admin_hash, &r.secret, "Owner redaction")
+            .unwrap();
+        let core = IntegrationCore::new_vault(&r.archive, &r.index, &r.security);
+        // Whatever the raw ranking, the stale index still holds the secret.
+        assert!(r
+            .index
+            .retrieve(&RetrievalRequest {
+                queries: vec![QueryTerm::Text("violet".into())],
+                limit: 5,
+                ..Default::default()
+            })
+            .unwrap()
+            .hits
+            .iter()
+            .any(|hit| hit.source_id == r.secret));
+        let limited = ToolBatch {
+            calls: vec![ToolCall {
+                name: ToolName::MemorySearch,
+                arguments: json!({"queries": ["violet"], "limit": 1}),
+            }],
+        };
+        let response = core
+            .execute_client_batch(&state, &r.reader, &limited)
+            .unwrap();
+        let result = &response.results[0].result;
+        let hits = result["hits"].as_array().unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0]["conversation_id"], KEPT_ID);
+        assert_eq!(result["candidate_count"], 1);
+        assert_eq!(result["truncated"], false);
+        assert!(!serde_json::to_string(&response)
+            .unwrap()
+            .contains(&r.secret));
+        // The projection was pruned, so the derived rows no longer hold it.
+        assert!(r
+            .index
+            .retrieve(&RetrievalRequest {
+                queries: vec![QueryTerm::Text("violet".into())],
+                limit: 5,
+                ..Default::default()
+            })
+            .unwrap()
+            .hits
+            .iter()
+            .all(|hit| hit.source_id != r.secret));
+    }
+
     /// Review P1, ordering A: a batch that already decided the secret source
     /// is visible holds the disclosure fence, so a concurrent redaction cannot
     /// commit until the response exists. Ordering B: afterwards nothing leaks.
@@ -274,7 +329,7 @@ mod mp9c_privacy {
                 core_ref.execute_batch_visible(
                     &search("violet spacecraft"),
                     || Ok(()),
-                    |source_id| {
+                    &mut |source_id: &str| {
                         let visible = !state.source_is_redacted(source_id)?;
                         if !paused {
                             paused = true;
@@ -335,7 +390,7 @@ mod mp9c_privacy {
                 core_ref.execute_batch_visible(
                     &search("violet spacecraft"),
                     || Ok(()),
-                    |_| {
+                    &mut |_: &str| {
                         if !paused {
                             paused = true;
                             decided_tx.send(()).unwrap();

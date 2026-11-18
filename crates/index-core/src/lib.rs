@@ -146,14 +146,82 @@ pub(crate) trait CaptureArchiveReader {
     fn source_authority(&self) -> Result<Option<StateStore>>;
 }
 
-/// Visibility predicate for `retrieve_filtered` from an optional authority.
-pub(crate) fn authority_visible(
-    authority: &Option<StateStore>,
-) -> impl FnMut(&str) -> Result<bool> + '_ {
-    move |source_id| match authority {
-        Some(authority) => Ok(!authority.source_is_redacted(source_id)?),
-        None => Ok(true),
+/// MP-9C: current source authority for index-derived disclosure. The derived
+/// FTS projection is disposable and may predate a redaction until the next
+/// sync/rebuild; because BM25 ranking and scores depend on corpus statistics
+/// of EVERY indexed row, a hidden row that is still indexed would influence
+/// visible results even when never returned. When the authority can enumerate
+/// its tombstones (`hidden_sources`), readers therefore fail closed with
+/// `StaleGeneration` while any hidden source is still indexed, and aggregate
+/// counts exclude them exactly. A bare predicate (`FnMut(&str) -> Result<bool>`)
+/// can only be asked about sources a query surfaces, so it fails closed when a
+/// surfaced candidate is hidden.
+pub trait SourceVisibility {
+    fn is_visible(&mut self, source_id: &str) -> Result<bool>;
+    /// Complete set of hidden source IDs, or `None` when not enumerable.
+    fn hidden_sources(&mut self) -> Result<Option<Vec<String>>> {
+        Ok(None)
     }
+}
+
+impl<F: FnMut(&str) -> Result<bool>> SourceVisibility for F {
+    fn is_visible(&mut self, source_id: &str) -> Result<bool> {
+        self(source_id)
+    }
+}
+
+/// Authority-backed visibility with an enumerable tombstone set.
+pub struct AuthorityVisibility<'a>(pub &'a StateStore);
+
+impl SourceVisibility for AuthorityVisibility<'_> {
+    fn is_visible(&mut self, source_id: &str) -> Result<bool> {
+        Ok(!self.0.source_is_redacted(source_id)?)
+    }
+    fn hidden_sources(&mut self) -> Result<Option<Vec<String>>> {
+        Ok(Some(self.0.redacted_source_ids()?))
+    }
+}
+
+/// Visibility from an optional authority (legacy plaintext readers have none).
+pub(crate) struct OptionalAuthorityVisibility<'a>(pub &'a Option<StateStore>);
+
+impl SourceVisibility for OptionalAuthorityVisibility<'_> {
+    fn is_visible(&mut self, source_id: &str) -> Result<bool> {
+        match self.0 {
+            Some(authority) => AuthorityVisibility(authority).is_visible(source_id),
+            None => Ok(true),
+        }
+    }
+    fn hidden_sources(&mut self) -> Result<Option<Vec<String>>> {
+        match self.0 {
+            Some(authority) => AuthorityVisibility(authority).hidden_sources(),
+            None => Ok(Some(Vec::new())),
+        }
+    }
+}
+
+/// Fail closed when the derived projection still holds any hidden source.
+pub(crate) fn assert_projection_current(
+    db: &Connection,
+    visible: &mut (impl SourceVisibility + ?Sized),
+) -> Result<Option<String>> {
+    let Some(hidden) = visible.hidden_sources()? else {
+        return Ok(None);
+    };
+    if hidden.is_empty() {
+        return Ok(Some("[]".into()));
+    }
+    let json = serde_json::to_string(&hidden).map_err(|_| IndexError::InvalidQuery)?;
+    let stale: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM revisions WHERE source_id IN (SELECT value FROM json_each(?1)))
+             OR EXISTS(SELECT 1 FROM chunks WHERE source_id IN (SELECT value FROM json_each(?1)))",
+        [&json],
+        |row| row.get(0),
+    )?;
+    if stale {
+        return Err(IndexError::StaleGeneration);
+    }
+    Ok(Some(json))
 }
 
 impl CaptureArchiveReader for ArchiveStore {
@@ -491,6 +559,37 @@ impl IndexStore {
         stats(&db, 0)
     }
 
+    /// MP-9C: aggregates that count only visible sources, so a stale
+    /// projection never discloses how many hidden revisions/chunks exist.
+    pub fn stats_visible(&self, visible: &mut impl SourceVisibility) -> Result<IndexStats> {
+        let db = self.connection()?;
+        let Some(hidden) = visible.hidden_sources()? else {
+            return stats(&db, 0);
+        };
+        let json = serde_json::to_string(&hidden).map_err(|_| IndexError::InvalidQuery)?;
+        let count = |sql: &str| db.query_row(sql, [&json], |row| row.get::<_, i64>(0));
+        Ok(IndexStats {
+            sources: count(
+                "SELECT COUNT(DISTINCT source_id) FROM revisions
+                 WHERE source_id NOT IN (SELECT value FROM json_each(?1))",
+            )?,
+            revisions: count(
+                "SELECT COUNT(*) FROM revisions
+                 WHERE source_id NOT IN (SELECT value FROM json_each(?1))",
+            )?,
+            chunks: count(
+                "SELECT COUNT(*) FROM chunks
+                 WHERE source_id NOT IN (SELECT value FROM json_each(?1))",
+            )?,
+            generation: db.query_row(
+                "SELECT CAST(value AS INTEGER) FROM index_meta WHERE key='generation'",
+                [],
+                |row| row.get(0),
+            )?,
+            inserted_revisions: 0,
+        })
+    }
+
     pub fn sync(&self, archive: &ArchiveStore, authority: &StateStore) -> Result<IndexStats> {
         self.sync_with_check(archive, authority, || Ok(()))
     }
@@ -660,10 +759,25 @@ impl IndexStore {
         include_history: bool,
         limit: usize,
     ) -> Result<Vec<SearchHit>> {
+        self.search_visible(query, include_history, limit, &mut |_: &str| Ok(true))
+    }
+
+    /// MP-9C: lexical lookup under current source authority. Fails closed with
+    /// `StaleGeneration` while a hidden source is still indexed (it would
+    /// displace visible hits at LIMIT and shift BM25 scores); a bare predicate
+    /// fails closed if any surfaced hit is hidden.
+    pub fn search_visible(
+        &self,
+        query: &str,
+        include_history: bool,
+        limit: usize,
+        visible: &mut impl SourceVisibility,
+    ) -> Result<Vec<SearchHit>> {
         if query.trim().is_empty() || query.len() > 1024 || limit == 0 || limit > 100 {
             return Err(IndexError::InvalidQuery);
         }
         let db = self.connection()?;
+        assert_projection_current(&db, visible)?;
         let mut statement = db.prepare(
             "SELECT c.source_id,r.archive_id,c.snapshot_id,c.message_id,c.part,
                     c.kind,c.role,r.title,
@@ -693,8 +807,13 @@ impl IndexStore {
                 })
             },
         )?;
-        rows.collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(Into::into)
+        let hits = rows.collect::<std::result::Result<Vec<_>, _>>()?;
+        for hit in &hits {
+            if !visible.is_visible(&hit.source_id)? {
+                return Err(IndexError::StaleGeneration);
+            }
+        }
+        Ok(hits)
     }
 }
 

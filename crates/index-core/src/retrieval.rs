@@ -1,6 +1,6 @@
 //! Phase 2A: bounded, provider-neutral retrieval over the disposable FTS projection.
 //! No derived rowid is returned as a durable source reference.
-use crate::{IndexError, IndexStore, Result};
+use crate::{assert_projection_current, IndexError, IndexStore, Result, SourceVisibility};
 use chrono::DateTime;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
@@ -220,20 +220,22 @@ impl IndexStore {
     /// and check its unlock lease before disclosing the returned snippets.
     /// Later source adapters must apply root revocation before this point.
     pub fn retrieve(&self, request: &RetrievalRequest) -> Result<RetrievalResponse> {
-        self.retrieve_filtered(request, |_| Ok(true))
+        self.retrieve_filtered(request, &mut |_: &str| Ok(true))
     }
 
-    /// MP-9C: retrieval with current source authority. `visible` is asked once
-    /// per distinct source and hidden candidates are removed BEFORE
-    /// `candidate_count`, ranking truncation and `truncated` are computed, so a
-    /// stale FTS generation cannot disclose a redacted snippet, title or count,
-    /// and never turns a match into an error. Residual: the bounded SQL
-    /// shortlist (limit x 8) is still drawn from the stale generation, so a
-    /// page may be shorter than `limit` until sync/rebuild prunes the rows.
+    /// MP-9C: retrieval under current source authority. BM25 ranking, scores
+    /// and the SQL shortlist are all computed over the whole projection, so a
+    /// hidden source that is still indexed could displace visible hits at
+    /// LIMIT and shift their scores. This therefore fails closed with
+    /// `StaleGeneration` (`MP_INDEX_STALE_GENERATION`) while the projection
+    /// holds any hidden source — fully enumerated when the authority provides
+    /// its tombstone list, otherwise detected on surfaced candidates — until a
+    /// sync/rebuild prunes it. Visible-only results, counts and scores
+    /// follow. Callers must not retry with a weaker filter.
     pub fn retrieve_filtered(
         &self,
         request: &RetrievalRequest,
-        mut visible: impl FnMut(&str) -> Result<bool>,
+        visible: &mut (impl SourceVisibility + ?Sized),
     ) -> Result<RetrievalResponse> {
         if request.queries.is_empty()
             || request.queries.len() > MAX_QUERIES
@@ -281,6 +283,7 @@ impl IndexStore {
             LIMIT ?13";
 
         let db = self.connection()?;
+        assert_projection_current(&db, visible)?;
         let mut statement = db.prepare(sql)?;
         type Key = (String, String, String, String, i64);
         let mut candidates: BTreeMap<Key, RetrievalHit> = BTreeMap::new();
@@ -370,14 +373,16 @@ impl IndexStore {
             let shown = match decisions.get(&hit.source_id) {
                 Some(shown) => *shown,
                 None => {
-                    let shown = visible(&hit.source_id)?;
+                    let shown = visible.is_visible(&hit.source_id)?;
                     decisions.insert(hit.source_id.clone(), shown);
                     shown
                 }
             };
-            if shown {
-                hits.push(hit);
+            if !shown {
+                // A hidden source is still indexed: ranking/scores are tainted.
+                return Err(IndexError::StaleGeneration);
             }
+            hits.push(hit);
         }
         let candidate_count = hits.len();
         hits.sort_by(|a, b| {

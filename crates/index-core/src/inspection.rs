@@ -63,7 +63,7 @@ impl IndexStore {
         request: &RetrievalRequest,
         check: impl FnMut() -> Result<()>,
     ) -> Result<SearchInspection> {
-        self.inspect_retrieval_filtered_with_check(request, check, |_| Ok(true))
+        self.inspect_retrieval_filtered_with_check(request, check, &mut |_: &str| Ok(true))
     }
 
     /// MP-9C: the inspection carries evidence snippets, so it must apply the
@@ -72,7 +72,7 @@ impl IndexStore {
         &self,
         request: &RetrievalRequest,
         mut check: impl FnMut() -> Result<()>,
-        visible: impl FnMut(&str) -> Result<bool>,
+        visible: &mut (impl crate::SourceVisibility + ?Sized),
     ) -> Result<SearchInspection> {
         check()?;
         let started = Instant::now();

@@ -1563,20 +1563,105 @@ mod privacy_capture_race_tests {
         let raw = index.retrieve(&zebra(20)).unwrap();
         assert!(raw.hits.iter().any(|hit| hit.source_id == secret));
 
-        let visible = |id: &str| Ok(!state.source_is_redacted(id)?);
-        let filtered = index.retrieve_filtered(&zebra(20), visible).unwrap();
-        assert!(!filtered.hits.is_empty());
-        assert!(filtered.hits.iter().all(|hit| hit.source_id != secret
+        // MP-9C: a hidden source still indexed would displace visible hits at
+        // LIMIT and shift BM25 scores, so every authority-aware read fails
+        // closed (enumerated tombstones) instead of filtering after ranking.
+        let stale = |result: crate::Result<crate::RetrievalResponse>| {
+            matches!(result, Err(crate::IndexError::StaleGeneration))
+        };
+        assert!(stale(index.retrieve_filtered(
+            &zebra(20),
+            &mut crate::AuthorityVisibility(&state)
+        )));
+        // A bare predicate fails closed when a surfaced candidate is hidden.
+        assert!(stale(
+            index.retrieve_filtered(
+                &zebra(1),
+                &mut |id: &str| Ok(!state.source_is_redacted(id)?)
+            )
+        ));
+        assert!(matches!(
+            index.inspect_retrieval_filtered_with_check(
+                &zebra(20),
+                || Ok(()),
+                &mut crate::AuthorityVisibility(&state)
+            ),
+            Err(crate::IndexError::StaleGeneration)
+        ));
+        assert!(matches!(
+            index.search_visible(
+                "zebracorn",
+                false,
+                20,
+                &mut crate::AuthorityVisibility(&state)
+            ),
+            Err(crate::IndexError::StaleGeneration)
+        ));
+        // Aggregates exclude the hidden source exactly, even while stale.
+        let raw_stats = index.stats().unwrap();
+        let visible_stats = index
+            .stats_visible(&mut crate::AuthorityVisibility(&state))
+            .unwrap();
+        assert_eq!(visible_stats.sources, raw_stats.sources - 1);
+        assert!(visible_stats.revisions < raw_stats.revisions);
+        assert!(visible_stats.chunks < raw_stats.chunks);
+
+        // Context building consults the same authority and also fails closed.
+        assert!(matches!(
+            index.build_context_vault_with_check(
+                &archive,
+                &crate::ContextRequest {
+                    queries: vec![crate::QueryTerm::Text("zebracorn".into())],
+                    ..Default::default()
+                },
+                || Ok(()),
+            ),
+            Err(crate::IndexError::StaleGeneration)
+        ));
+        // Graph traversal needs no prune: it is visibility-gated while walking.
+        let mut visible_graph = index
+            .graph_neighbors_visible_with_check(
+                &crate::GraphNeighborhoodRequest {
+                    scope: "archive:chatgpt".into(),
+                    seeds: vec![crate::GraphNodeRef::new(
+                        crate::GraphKind::Conversation,
+                        &secret,
+                    )],
+                    direction: crate::GraphDirection::Both,
+                    max_hops: 2,
+                    max_nodes: 120,
+                    max_edges: 240,
+                },
+                &mut crate::AuthorityVisibility(&state),
+                || Ok(()),
+            )
+            .unwrap();
+        assert!(visible_graph.nodes.is_empty() && visible_graph.edges.is_empty());
+        visible_graph.truncated = false;
+
+        // Pruning the stale projection restores visible-only retrieval.
+        index
+            .sync_vault_with_check(&archive, &state, || Ok(()))
+            .unwrap();
+        let pruned = index
+            .retrieve_filtered(&zebra(20), &mut crate::AuthorityVisibility(&state))
+            .unwrap();
+        assert!(!pruned.hits.is_empty());
+        assert!(pruned.hits.iter().all(|hit| hit.source_id != secret
             && !hit.title.contains("Secret")
             && !hit.snippet.contains("secret")));
-        assert_eq!(filtered.candidate_count, filtered.hits.len());
-        // A limit of 1 must not report truncation caused by the hidden source.
-        let one = index.retrieve_filtered(&zebra(1), visible).unwrap();
+        assert_eq!(pruned.candidate_count, pruned.hits.len());
+        let one = index
+            .retrieve_filtered(&zebra(1), &mut crate::AuthorityVisibility(&state))
+            .unwrap();
         assert_eq!(one.hits.len(), 1);
         assert!(!one.truncated);
-
         let inspection = index
-            .inspect_retrieval_filtered_with_check(&zebra(20), || Ok(()), visible)
+            .inspect_retrieval_filtered_with_check(
+                &zebra(20),
+                || Ok(()),
+                &mut crate::AuthorityVisibility(&state),
+            )
             .unwrap();
         assert!(inspection
             .result
@@ -1587,6 +1672,15 @@ mod privacy_capture_race_tests {
             inspection.trace.candidate_count,
             inspection.result.hits.len()
         );
+        assert_eq!(
+            index
+                .stats_visible(&mut crate::AuthorityVisibility(&state))
+                .unwrap()
+                .chunks,
+            index.stats().unwrap().chunks
+        );
+        let resynced = index.retrieve(&zebra(20)).unwrap();
+        assert!(resynced.hits.iter().all(|hit| hit.source_id != secret));
 
         // Context building (desktop and MCP vault) succeeds without the source.
         let context = index
@@ -1606,37 +1700,6 @@ mod privacy_capture_race_tests {
             .all(|group| group.source_id != secret && !group.title.contains("Secret")));
         let encoded = serde_json::to_string(&context).unwrap();
         assert!(!encoded.contains("secret evidence") && !encoded.contains(&secret));
-
-        // Graph hive: stale projection still holds the title; the filter drops
-        // the conversation, revisions and the now-orphaned import node.
-        let mut graph = index
-            .graph_neighbors_with_check(
-                &crate::GraphNeighborhoodRequest {
-                    scope: "archive:chatgpt".into(),
-                    seeds: vec![crate::GraphNodeRef::new(
-                        crate::GraphKind::Conversation,
-                        &secret,
-                    )],
-                    direction: crate::GraphDirection::Both,
-                    max_hops: 2,
-                    max_nodes: 120,
-                    max_edges: 240,
-                },
-                || Ok(()),
-            )
-            .unwrap();
-        assert!(graph.nodes.iter().any(|node| node.label.contains("Secret")));
-        graph.retain_visible(visible).unwrap();
-        assert!(graph.nodes.is_empty(), "{:?}", graph.nodes);
-        assert!(graph.edges.is_empty());
-
-        // After the next sync the derived rows are actually pruned.
-        index
-            .sync_vault_with_check(&archive, &state, || Ok(()))
-            .unwrap();
-        let resynced = index.retrieve(&zebra(20)).unwrap();
-        assert!(resynced.hits.iter().all(|hit| hit.source_id != secret));
-        assert!(!resynced.hits.is_empty());
     }
 
     /// Forgotten-source reimport through the owner one-time confirmation:
@@ -1724,7 +1787,7 @@ mod privacy_capture_race_tests {
             let index = command_archive.open_index_store().unwrap();
             let mut paused = false;
             let hits = index
-                .retrieve_filtered(&zebra(20), |id| {
+                .retrieve_filtered(&zebra(20), &mut |id: &str| {
                     let visible = !authority.source_is_redacted(id)?;
                     if !paused {
                         paused = true;
@@ -1776,10 +1839,17 @@ mod privacy_capture_race_tests {
         // Ordering B: a command starting after the commit sees no trace.
         let _privacy = archive.disclosure_fence().unwrap();
         let authority = archive.open_state_store().unwrap();
-        let after = archive
-            .open_index_store()
-            .unwrap()
-            .retrieve_filtered(&zebra(20), |id| Ok(!authority.source_is_redacted(id)?))
+        let index = archive.open_index_store().unwrap();
+        // The projection is stale, so the read fails closed until pruned.
+        assert!(matches!(
+            index.retrieve_filtered(&zebra(20), &mut crate::AuthorityVisibility(&authority)),
+            Err(crate::IndexError::StaleGeneration)
+        ));
+        index
+            .sync_vault_with_check(&archive, &authority, || Ok(()))
+            .unwrap();
+        let after = index
+            .retrieve_filtered(&zebra(20), &mut crate::AuthorityVisibility(&authority))
             .unwrap();
         assert!(!after.hits.is_empty());
         assert!(after.hits.iter().all(|hit| hit.source_id != secret));

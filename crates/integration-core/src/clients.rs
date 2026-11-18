@@ -180,21 +180,33 @@ impl IntegrationCore<'_> {
         }
         // Stale index hits for redacted sources are dropped (not rejected) so
         // the response is indistinguishable from "no match".
-        let result = self.execute_batch_visible(
-            batch,
-            || {
-                if state
-                    .authorize_client_hash(&hash, ClientCapability::Read)?
-                    .as_deref()
-                    == Some(client.as_str())
-                {
-                    Ok(())
-                } else {
-                    Err(IntegrationError::AccessDenied)
-                }
-            },
-            |source_id| Ok(!state.source_is_redacted(source_id)?),
-        );
+        let authorize = || {
+            if state
+                .authorize_client_hash(&hash, ClientCapability::Read)?
+                .as_deref()
+                == Some(client.as_str())
+            {
+                Ok(())
+            } else {
+                Err(IntegrationError::AccessDenied)
+            }
+        };
+        // MP-9C: hidden sources are excluded from ranking by failing closed
+        // on a stale projection; prune it and retry once so the client sees
+        // only visible results and no stale-generation signal.
+        let run = || {
+            self.execute_batch_visible(
+                batch,
+                authorize,
+                &mut mind_place_index::AuthorityVisibility(state),
+            )
+        };
+        let result = match run() {
+            Err(IntegrationError::Index(mind_place_index::IndexError::StaleGeneration)) => self
+                .prune_stale_projection(state, authorize)
+                .and_then(|()| run()),
+            other => other,
+        };
         // Defense in depth: recheck every returned source against fresh
         // authority. Anything still naming a redacted source fails closed.
         let result = result.and_then(|response| {

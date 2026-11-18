@@ -290,7 +290,7 @@ impl IndexStore {
                 filters,
                 limit: SEARCH_POOL,
             },
-            crate::authority_visible(&authority),
+            &mut crate::OptionalAuthorityVisibility(&authority),
         )?;
         check()?;
 
@@ -375,7 +375,10 @@ impl IndexStore {
                 // confirms the tombstone; lease revocation still propagates
                 // because re-reading authority then fails.
                 Err(IndexError::Revoked)
-                    if !crate::authority_visible(&authority)(&hit.source_id)? =>
+                    if !crate::SourceVisibility::is_visible(
+                        &mut crate::OptionalAuthorityVisibility(&authority),
+                        &hit.source_id,
+                    )? =>
                 {
                     continue;
                 }
