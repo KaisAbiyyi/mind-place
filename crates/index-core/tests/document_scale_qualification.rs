@@ -144,7 +144,16 @@ fn qualifies_document_scale() {
     for id in &ids {
         let root_started = Instant::now();
         let report = index.refresh_root(&state, id, || Ok(())).unwrap();
-        assert_eq!(report.skipped_files, 0);
+        assert_eq!(
+            report.skipped_files,
+            0,
+            "MP-10C strict gate failed: root_id={} scanned={} indexed={} skipped={} breakdown={:?}",
+            report.root_id,
+            report.scanned_files,
+            report.indexed_files,
+            report.skipped_files,
+            report.skip_breakdown
+        );
         assert_eq!(report.scanned_files, report.indexed_files);
         assert_eq!(report.indexed_chunks, report.indexed_files * SECTIONS);
         actual_files += report.indexed_files;

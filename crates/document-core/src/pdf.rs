@@ -437,6 +437,7 @@ mod tests {
         Context {
             limits,
             started,
+            auth_elapsed: Duration::ZERO,
             authorized,
             expanded: 0,
             output_bytes: 0,

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { helperPin, helperDirectory, verifyHelperBundle } from './tunnel-helper.mjs';
+import { helperPin, helperDirectory, readVerifiedHelperBundle, readVerifiedRegularFile } from './tunnel-helper.mjs';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const product=JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8'));
@@ -22,7 +22,7 @@ function licenseFiles(dir,depth=0){
 function add(name,version,license,dir){
  sections.push(`\n${'='.repeat(72)}\n${name} ${version}\nDeclared license: ${license||'See source license'}\n`);
  const files=licenseFiles(dir);
- for(const file of files){if(fs.statSync(file).size>1024*1024)throw new Error(`License file too large: ${name}`);sections.push(`--- ${path.relative(dir,file).replaceAll('\\','/')} ---\n${fs.readFileSync(file,'utf8')}`);}
+ for(const file of files){const body=readVerifiedRegularFile(file,{maxBytes:1024*1024,sizeTypeError:`License file too large: ${name}`}).toString('utf8');sections.push(`--- ${path.relative(dir,file).replaceAll('\\','/')} ---\n${body}`);}
  if(!files.length)sections.push(`License declaration: ${license||'Not declared'}; package source: ${name}`);
 }
 for(const p of packages.sort((a,b)=>a.name.localeCompare(b.name)||a.version.localeCompare(b.version)))add(p.name,p.version,p.license,path.dirname(p.manifest_path));
@@ -42,9 +42,10 @@ function nodePackage(name,from){
 }
 for(const dep of Object.keys(product.dependencies))nodePackage(dep,root);
 if(process.platform==='win32'){
- verifyHelperBundle(helperDirectory);
+ const bundle=readVerifiedHelperBundle(helperDirectory);
  sections.push(`\n${'='.repeat(72)}\nOpenAI tunnel-client ${helperPin.version} (Windows x64)\nSource and release: ${helperPin.repository}/releases/tag/v${helperPin.version}\nPinned executable SHA-256: ${helperPin.executable.sha256}\nBundled notices, upstream release SBOM and exact included-file receipt: tunnel/\nOnly tunnel-client.exe is distributed; the upstream cloudflared companion is excluded.\n`);
- for(const name of Object.keys(helperPin.resources).filter(name=>!name.endsWith('.json')))sections.push(`--- tunnel/${name} ---\n${fs.readFileSync(path.join(helperDirectory,'resources',name),'utf8')}`);
+ for(const name of Object.keys(helperPin.resources).filter(name=>!name.endsWith('.json'))){const notice=bundle.resources.get(name).toString('utf8');sections.push(`--- tunnel/${name} ---\n${notice}`);}
 }
-fs.writeFileSync(path.join(root,'THIRD-PARTY-NOTICES.txt'),sections.join('\n')+'\n');
-console.log(`Notices: ${packages.length} Rust packages, ${seen.size} frontend packages; ${fs.statSync(path.join(root,'THIRD-PARTY-NOTICES.txt')).size} bytes`);
+const output=sections.join('\n')+'\n';
+fs.writeFileSync(path.join(root,'THIRD-PARTY-NOTICES.txt'),output);
+console.log(`Notices: ${packages.length} Rust packages, ${seen.size} frontend packages; ${Buffer.byteLength(output)} bytes`);
