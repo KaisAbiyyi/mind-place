@@ -1,6 +1,6 @@
-# MP-ADR-006 — MCP write-scope amendment proposal v3
+# MP-ADR-006 — MCP write-scope amendment proposal v3.1
 
-**Status: PROPOSED / NOT ACCEPTED.** Date: 2026-11-08 (v1: 2026-11-06; v2 and v3 the same day). Owner decision: direction recorded, **final acceptance PENDING**.
+**Status: PROPOSED / NOT ACCEPTED.** Date: 2026-11-18 (v3.1; v1: 2026-11-06; v2 and v3: 2026-11-08). Owner decision: direction recorded, **final acceptance PENDING**.
 **Current MP-ADR-006 is still ACCEPTED as READ-ONLY.** This proposal is a separate candidate and is **not** itself an updated grant, a change to the accepted decision register, or authorization to publish writable MCP tools. It is meant to be recorded as its own ADR entry, preserving the accepted 2026-10-31 decision history.
 
 ## Context and problem
@@ -16,9 +16,11 @@ Keep all MP-ADR-006 Windows lifecycle and unlock behavior. Add:
 3. **Raw evidence is immutable over MCP** (only `create_import`/`append` of new revisions); tombstoned objects are immutable over MCP; restore, rollback and physical purge are owner-only local actions. **Hard delete, archive byte rewrites, filesystem/root grants, SQL/shell/admin, key export and backup/restore remain unavailable over MCP.**
 4. **Bulk** is a local-tier, user-scoped, out-of-band job reviewed **by exception**: staged evidence-backed proposals invisible until a separate apply step; deterministic, versioned risk classification (model confidence is never an input); one short-lived, single-use owner approval bound to the exact displayed batch (a stale view or any mutation invalidates it) with an explicit confirm/withhold decision for every exception; low-risk auto-apply only under an explicit owner policy and deterministic checks; all-or-nothing apply, bound to the job that staged the batch, with owner-only logical rollback. A renewable **worker lease**, an independent **staged-proposal TTL** and the **owner approval lifetime** are separate, and an expired proposal is never applied. Sub-agents and model choice carry no authority of their own.
 4a. **Limits** have three levels: safe defaults, owner-configurable hard caps (overrides never exceed the current cap), and engine safety ceilings that nothing can exceed. Local dreaming defaults to 3 concurrent workers with an owner cap (factory: 5). This amendment does not enlarge the production request envelope.
-5. Runtime validates client credential and audience, tier/transport, vault, current exact grant, server-derived policy revision, source revision and live unlock epoch at admission, mutation/commit and all disclosure; fails closed if the authority store is unreadable; writes content-free audit for every decision. Durable bound idempotency receipts and crash-recoverable atomic staging are mandatory. Write never confers read.
+5. **One provider-neutral capability model.** Claude, ChatGPT and Gemini (and every other client) use the same tiers, grants, limits, approvals and receipts. Hosted-write **rollout eligibility** is credential state, checked at grant issuance and at every write; absent state fails closed. **ChatGPT and Gemini hosted write are DEFERRED** until the owner's December 2026 decision (MP-7MCP-07); Claude is the only hosted-write qualification target for v1.0. No ChatGPT or Gemini credential may receive a hosted-write grant before an attributable owner decision; their curated reads are unaffected.
+5a. **Cloud quarantine.** Cloud-tier writes are staged proposals into a per-client quarantine collection (curated layer, one owning client); a cloud principal cannot write to ordinary curated collections or to another client's quarantine, and promotion out of quarantine is an owner or local-tier action. The same operation set maps to local-tier high-volume worker jobs (loopback-only credentials) and to bounded cloud staging.
+6. Runtime validates client credential and audience, tier/transport, vault, current exact grant, server-derived policy revision, source revision and live unlock epoch at admission, mutation/commit and all disclosure; fails closed if the authority store is unreadable; writes content-free audit for every decision. Durable bound idempotency receipts and crash-recoverable atomic staging are mandatory. Write never confers read.
 
-The [normative proposed contract (v3)](mp-7mcp-01-write-authority-contract.md) contains the exact matrix, limits, threat model and negative-test plan, and is versioned together with this amendment.
+The [normative proposed contract (v3.1)](mp-7mcp-01-write-authority-contract.md) contains the exact matrix, limits, threat model and negative-test plan, and is versioned together with this amendment. The executable cases are shared, language-neutral JSON vectors (`test/vectors/mp-7mcp-01-authority-vectors.v1.json`) that the JS reference model and the future Rust engine must both pass.
 
 ## Considered alternatives
 
@@ -29,7 +31,7 @@ The [normative proposed contract (v3)](mp-7mcp-01-write-authority-contract.md) c
 
 ## Decision and rollout gates
 
-1. Independent reviewer validates the v3 matrix, tiering, tombstone/restore semantics, bulk model, source immutability, fences, principal binding and absence of read escalation.
+1. Independent reviewer validates the v3.1 matrix, tiering, tombstone/restore semantics, bulk model, source immutability, fences, principal binding and absence of read escalation.
 2. Owner explicitly accepts or revises the final text with an attributable, dated approval; only then record an ACCEPTED amendment in the Notion ADR register. A GitHub APPROVE from the PR author's own account is not possible; record the owner's decision separately.
 3. Implement the authenticated authoritative policy store, tier/transport binding and staged write engine in separately scoped source work; no raw keys or owner corpus.
 4. Production negative transport/storage tests and exact-source CI, including lock/revoke/race/crash/replay, then real-client and Windows/native qualification per provider and per principal class.
@@ -37,4 +39,4 @@ The [normative proposed contract (v3)](mp-7mcp-01-write-authority-contract.md) c
 
 ## Current outcome
 
-No final owner approval; no production write authorization; no production negative-test or native acceptance claim. Existing MP-ADR-006 read-only policy remains binding.
+No final owner approval; no production write authorization; hosted ChatGPT and Gemini writes remain DEFERRED; no production negative-test or native acceptance claim. Existing MP-ADR-006 read-only policy remains binding.

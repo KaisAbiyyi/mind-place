@@ -1,9 +1,11 @@
-# MP-7MCP-01 — Scoped MCP write-authority contract (v3)
+# MP-7MCP-01 — Scoped MCP write-authority contract (v3.1)
 
 **Status: PROPOSED; NOT APPROVED; production MCP stays READ-ONLY.**
 Task: MP-7MCP-01 | Lock: mcp-write-authority | Contract v3, 2026-11-08 (v2 earlier the same day; v1: 2026-11-06, baseline main `24648c74f3f59e176974d3878049b882478db69b`).
 
 v2 incorporated the owner's direction of 2026-11-08 and review findings F1–F8; v3 resolves the independent review's C1 (owner-configurable hard caps), C2 (worker lease vs proposal lifetime) and C3 (review by exception), and a later review's cross-job batch-substitution blocker (section 6.5). The owner direction is **not** an ADR acceptance: the amendment is accepted only when the owner confirms this final text.
+
+**v3.1 (2026-11-18)** reconciles this contract with the owner-approved rollout plan after the independent integration review: one provider-neutral capability model for Claude, ChatGPT and Gemini (section 2.1); hosted ChatGPT and Gemini writes are **DEFERRED** to the owner's December 2026 decision while Claude hosted write is the only hosted-write qualification target; cloud-tier writes are staged proposals into a per-client **quarantine** collection (section 2.2); and the executable cases are now **shared JSON vectors** (section 9) that both the JS reference model and the future Rust engine must pass. v3.1 changes no accepted ADR, enables no endpoint and does not replace owner acceptance.
 
 References: [canonical ADR register](https://app.notion.com/p/40ac4a6aaf7381aa93cdc99957ae9fee), [vault security](https://app.notion.com/p/40ac4a6aaf7381969fddc8d0284131d2), [Phase 3B](../implementation-plan/phase-3b-client-authorization.md), [ADR-006 write amendment proposal](mp-adr-006-mcp-write-amendment-proposed.md).
 
@@ -19,10 +21,20 @@ The tier is a property of the **credential class and the transport**, never of t
 
 | Tier | Typical clients | May | May not |
 | --- | --- | --- | --- |
-| **cloud** | ChatGPT, Claude (web), Codex cloud, Cowork cloud, Claude Code cloud, anything reaching Mind Place through the hosted tunnel | read curated; write curated within per-request limits | read raw; process raw; bulk/mass writes; graph build |
+| **cloud** | ChatGPT, Gemini, Claude (web), Codex cloud, Cowork cloud, Claude Code cloud, anything reaching Mind Place through the hosted tunnel | read curated; stage curated-layer writes into its own quarantine collection within per-request limits, only for a provider whose hosted-write rollout is `ENABLED` | read raw; process raw; bulk/mass writes; graph build |
 | **local** | Codex local, Cowork local, Claude Code CLI/desktop with local access | read raw; process curated; build graph; run bulk jobs (section 6) | act outside collections it was granted |
 
 Rules: the server issues a credential with exactly one class; the class must equal the client's registered tier; a **local-class credential is valid only on the local transport (loopback / local pipe) and is rejected through the hosted tunnel**; anything arriving through the tunnel is cloud by construction. Sub-agents and model choice (for example a cheaper worker model) carry **no authority of their own**: they act under the credential of the principal that spawned them, and audit records name that principal only.
+
+### 2.1 One capability model; rollout is credential state
+
+There is **one** capability model (tier, per-operation grants, limits, approvals, receipts, audit) for every provider. A provider is never a different security model; it only has a **hosted-write rollout state**, `state.rollout.hostedWrite[provider]` in the reference model, with the values `ENABLED` or `DEFERRED`. An absent, unknown or non-string provider is `DEFERRED` (fail closed). The state is consulted twice: when a cloud write grant is **issued** (`validateGrant` returns `hosted-write-deferred`) and at **every write** admission (`authorizeWrite` denies), so a credential issued earlier cannot write after a provider is deferred or removed. Reads are unaffected: curated read for ChatGPT and Gemini keeps working under its own read grants.
+
+Owner rollout decisions recorded in the owner-approved plan (2026-11-11) and mirrored in the Notion rules: Claude is the only hosted-write qualification target for v1.0; **ChatGPT and Gemini hosted write are DEFERRED until the owner's December 2026 decision (MP-7MCP-07)** and no ChatGPT or Gemini credential receives hosted-write grants before then; Gemini CLI write is local tier and belongs to the local-tier write engine, not to this deferral. The same operations map to local-tier high-volume worker jobs (section 6, loopback-only credentials) and to bounded cloud staging (section 2.2); neither changes the operation set or the grant shape.
+
+### 2.2 Cloud quarantine
+
+Cloud-tier writes are **staged proposals** into a per-client **quarantine collection**: a `curated`-layer collection with exactly one owning client (`quarantineFor` in the reference model). A cloud principal may write, and may be granted writes, **only** in the quarantine collection it owns; a write to an ordinary curated collection or to another client's quarantine is denied, and a cloud `move` needs the destination to be its own quarantine as well as grants on source and destination. Promotion out of quarantine into ordinary curated collections is an owner or local-tier action and is not an MCP cloud operation. Model-authored content stays `asserted_by=model` and is never auto-promoted (MP-SEC-11).
 
 Consequence for reads: cloud clients no longer receive raw conversation hits (message-level archive evidence) from `memory_search` / `memory_fetch` / `context_build`; they see only the curated layer. This narrows MP-7MCP-02 and MP-7MCP-04 and is a change to the read behavior accepted in MP-ADR-006.
 
@@ -164,15 +176,17 @@ Every mutation requires an unpredictable `operation_id`; the durable receipt ide
 | Unauthorized auto-apply | off by default, owner policy, deterministic low-risk checks, strictest policy wins | model confidence ignored; disabled, unlisted, medium/high, ask_first and a late policy change all route to the owner |
 | Cross-job batch substitution (a different job's scope or target used to apply a staged batch) | batch bound to the staging job's identity, target, kind and scope inside the digest and re-checked in the commit; later checks use the batch's own scope and target | wrong, unknown, foreign and identical-twin job ids; different scopes with a revoked source; different targets with auto-apply; mid-commit rebinding; consistent rewrites before approval |
 | Provenance outside the declared scope | item-level membership and per-source authority revalidated inside the commit | an item citing a collection outside the staging scope is rejected even if the batch and its digest were refreshed and approved |
+| Cloud write escapes quarantine (ordinary collection, another client's quarantine, move into either) | writes and grants confined to the principal's own quarantine collection | vectors `cloud-quarantine`, `move-needs-quarantine-destination` |
+| Hosted write enabled for a provider before the owner decision | rollout state checked at grant issuance and at every write; absent state = DEFERRED | vectors `hosted-write-deferred-chatgpt-gemini`, `rollout-enable-is-credential-state-only` |
 | Resource exhaustion | per-grant limits, bulk caps, lease | LIMIT results |
 | Crash/partial failure | staging, journal, atomic activation, all-or-nothing apply | fail at stage, commit, ack |
 | Missing authority store | fail closed | unreadable store denies |
 
 ## 9. Verification stages (truthful boundaries)
 
-**Stage A — this PR:** security contract + executable isolated reference model + negative tests. These tests verify the **reference model only**, not production MCP authorization.
+**Stage A — this PR:** security contract + executable isolated reference model + negative tests + **shared JSON conformance vectors** (`test/vectors/mp-7mcp-01-authority-vectors.v1.json`, schema `mp-7mcp-01/authority-vectors/v1`). The vectors are pure data: a baseline state, named credential profiles and ordered steps (`patch` as an RFC 7386 merge patch, `authorizeWrite`, `simulateWrite`, `ownerApprove`, `canRead`, `validateGrant`) with exact expected results; their step semantics are documented in the file. They cover scoped grants and revocation, idempotent replay and conflict, single-use approvals, tombstones, tier and transport binding, cloud quarantine, deferred hosted-write rollout for ChatGPT and Gemini, limits and fail-closed behavior. `test/mp-7mcp-authority-vectors.test.mjs` runs them against the JS reference model. Both the reference model and the vectors verify the **reference model only**, not production MCP authorization, and passing the JS runner is not cross-engine conformance until the Rust engine (MP-7MCP-03/05) and the MP-PAR-01 suite run the same file.
 **Stage B — after owner approval of this text:** persistent policy schema, server-side evaluation, tier/transport binding in the Rust transport, operation handlers, and true integration negative tests against state/storage/transport, crash and concurrency fixtures; exact-source full checks and hosted CI.
-**Stage C — after independent review and Stage B:** provider write tasks (Claude MP-7MCP-03, ChatGPT MP-7MCP-05, optional Gemini MP-7MCP-07) and any principal classes not yet covered by a task (Codex, Cowork, Claude Code), each after its read gate, with real-client write proof and Windows/native Lock/revoke qualification. No provider write path may be advertised before these gates.
+**Stage C — after independent review and Stage B:** provider write tasks (local-tier write MP-7MCP-03 and the Claude-first cloud-tier write engine MP-7MCP-05; ChatGPT and Gemini hosted write MP-7MCP-07 stay DEFERRED until the owner's December 2026 decision) and any principal classes not yet covered by a task (Codex, Cowork, Claude Code), each after its read gate, with real-client write proof and Windows/native Lock/revoke qualification. No provider write path may be advertised before these gates.
 
 ## 10. Owner decision record
 
@@ -184,6 +198,9 @@ Every mutation requires an unpredictable `operation_id`; the durable receipt ide
 | Cloud limits (30 days, 20 objects, 60 writes/hour) and owner-configurable local limits; the earlier '1 MiB per request' is **withdrawn** because the production request envelope is 64 KiB | owner direction recorded — **final acceptance PENDING**; the owner must separately decide whether a larger request envelope is wanted in Stage B |
 | Bulk model (section 6), apply default `ask_first` | owner direction recorded — **final acceptance PENDING** |
 | Hard caps, worker concurrency (default 3, owner cap 5), lease/proposal/approval lifetimes, review by exception, auto-apply policy | owner direction recorded — **final acceptance PENDING** |
-| Independent review of this v3 text | NOT RUN |
+| Hosted write for ChatGPT and Gemini | **DEFERRED** to the owner's December 2026 decision (MP-7MCP-07); Claude hosted write is the only v1.0 target; one capability model for all providers |
+| Cloud-tier writes are staged proposals in per-client quarantine collections | owner-approved plan 2026-11-11 — **final acceptance PENDING** with this text |
+| Shared JSON vectors consumable by the JS model and the Rust engine | added in v3.1; validated by the JS reference suite only |
+| Independent review of this v3.1 text | NOT RUN (the v3 review requested these changes; a fresh review is required) |
 | Real endpoint/native tests | NOT RUN |
 | Current ADR-006 read-only | ACCEPTED and unchanged |

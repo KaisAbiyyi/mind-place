@@ -27,6 +27,18 @@ const ELIGIBLE = Object.freeze({
 });
 const CLOUD_LAYERS = new Set(['curated']);
 
+// One capability model for every provider (Claude, ChatGPT, Gemini, ...). Hosted (cloud-tier) write
+// ENABLEMENT is not a different model: it is a per-provider rollout state consulted when a credential is
+// issued (validateGrant) and again at every write (authorizeWrite). Absent or unknown = not enabled
+// (fail closed). ChatGPT and Gemini hosted write stay DEFERRED until the owner's December 2026 decision.
+export const ROLLOUT_STATES = Object.freeze(['ENABLED', 'DEFERRED']);
+const hostedWriteEnabled = (state, client) =>
+  typeof client?.provider === 'string' && state?.rollout?.hostedWrite?.[client.provider] === 'ENABLED';
+// Cloud-tier writes are staged proposals into a per-client quarantine collection (curated layer, owned by
+// exactly one client). A cloud client can never write into an ordinary curated collection.
+const quarantineOf = (state, collectionId, clientId) =>
+  typeof clientId === 'string' && state?.collections?.[collectionId]?.quarantineFor === clientId;
+
 // ---- three-level limit model (C1) ------------------------------------------------------------
 // 1. DEFAULT_LIMITS: safe defaults used when nothing is configured.
 // 2. Owner hard caps (state.ownerPolicy.caps, set only through setOwnerCaps): >= default, <= ceiling.
@@ -201,6 +213,8 @@ export function validateGrant(grant, client, now, state) {
   if (client.tier === 'cloud') {
     if (BULK_OPERATIONS.includes(grant.operation)) return bad('cloud-bulk');
     if (!CLOUD_LAYERS.has(layer)) return bad('cloud-layer');
+    if (!hostedWriteEnabled(state, client)) return bad('hosted-write-deferred');
+    if (!quarantineOf(state, grant.collectionId, grant.clientId)) return bad('cloud-quarantine');
     const allowed = grant.limits?.maxGrantMs ?? DEFAULT_LIMITS.maxGrantMs;
     if (!Number.isFinite(grant.expiresAt) || !Number.isFinite(grant.issuedAt) || grant.issuedAt > now ||
         grant.expiresAt - grant.issuedAt > allowed) return bad('cloud-expiry');
@@ -238,6 +252,8 @@ export function authorizeWrite(state, auth, request, options = {}) {
   const layer = KIND_LAYER[request.objectKind];
   if (!layer || !ELIGIBLE[layer].has(request.operation)) return DENIED;
   if (client.tier === 'cloud' && !CLOUD_LAYERS.has(layer)) return DENIED;
+  if (client.tier === 'cloud' &&
+      (!hostedWriteEnabled(state, client) || !quarantineOf(state, request.collectionId, auth.clientId))) return DENIED;
   if (state.collections?.[request.collectionId]?.layer !== layer) return DENIED;
   const grant = findGrant(state, client, auth, request);
   if (!grant) return DENIED;
@@ -264,6 +280,7 @@ export function authorizeWrite(state, auth, request, options = {}) {
   if (request.operation === 'move') {
     const dest = request.destinationCollectionId;
     if (typeof dest !== 'string' || !dest || state.collections?.[dest]?.layer !== layer ||
+        (client.tier === 'cloud' && !quarantineOf(state, dest, auth.clientId)) ||
         !findGrant(state, client, auth, { collectionId: dest, objectKind: request.objectKind, operation: 'move' })) return DENIED;
   }
   return { ok: true, code: 'ALLOWED', digest, grantId: grant.id };

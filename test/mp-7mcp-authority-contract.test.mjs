@@ -16,11 +16,13 @@ function fixture(operation = 'create_import', kind = 'memory') {
   const state = {
     vaultId: 'vault-A', audience: 'mind-place-mcp', epoch: 17, now: 1000,
     locked: false, paused: false, authorityReadable: true,
+    rollout: { hostedWrite: { claude: 'ENABLED', chatgpt: 'DEFERRED', gemini: 'DEFERRED' } },
     receipts: new Map(), audit: [], writeLog: [], approvals: [], grants: [], readGrants: [], jobs: {}, batches: {},
     ownerPolicy: { version: 1, caps: {}, autoApply: { enabled: false } }, sources: {}, privacy: { redacted: [] },
     collections: {
-      'curated-A': { layer: 'curated', audience: ['owner', 'client-A'] },
-      'curated-B': { layer: 'curated', audience: ['owner', 'client-A'] },
+      'curated-A': { layer: 'curated', quarantineFor: 'client-A', audience: ['owner', 'client-A'] },
+      'curated-B': { layer: 'curated', quarantineFor: 'client-A', audience: ['owner', 'client-A'] },
+      'quarantine-B': { layer: 'curated', quarantineFor: 'client-B', audience: ['owner', 'client-B'] },
       'shared-C': { layer: 'curated', audience: ['owner', 'client-A', 'client-B', 'local-L'] },
       'raw-A': { layer: 'raw', audience: ['owner', 'local-L'] },
       'raw-B': { layer: 'raw', audience: ['owner', 'local-L'] },
@@ -29,8 +31,8 @@ function fixture(operation = 'create_import', kind = 'memory') {
       'graph-A': { layer: 'derived', audience: ['owner'] }
     },
     clients: {
-      'client-A': { enabled: true, tier: 'cloud', writePolicyRevision: 4, readPolicyRevision: 2 },
-      'client-B': { enabled: true, tier: 'cloud', writePolicyRevision: 4, readPolicyRevision: 2 },
+      'client-A': { enabled: true, tier: 'cloud', provider: 'claude', writePolicyRevision: 4, readPolicyRevision: 2 },
+      'client-B': { enabled: true, tier: 'cloud', provider: 'claude', writePolicyRevision: 4, readPolicyRevision: 2 },
       'local-L': { enabled: true, tier: 'local', writePolicyRevision: 4, readPolicyRevision: 2 },
       'local-M': { enabled: true, tier: 'local', writePolicyRevision: 4, readPolicyRevision: 2 }
     },
@@ -418,7 +420,10 @@ test('F8 receipts are bound to the principal: another client cannot borrow or re
   const b = { ...f.auth, clientId: 'client-B' };
   assert.equal(simulateWrite(f.state, b, f.req).code, 'DENIED', 'client-B has no grant and gets no receipt');
   f.grant('create_import', 'curated-A', 'client-B');
-  assert.equal(simulateWrite(f.state, b, f.req).code, 'COMMITTED', 'a separate receipt, not a replay');
+  assert.equal(simulateWrite(f.state, b, f.req).code, 'DENIED', 'quarantine: a client can never write into another client collection');
+  const reqB = { ...f.req, collectionId: 'quarantine-B' };
+  f.grant('create_import', 'quarantine-B', 'client-B');
+  assert.equal(simulateWrite(f.state, b, reqB).code, 'COMMITTED', 'a separate receipt in its own quarantine, not a replay');
   assert.equal(f.state.receipts.size, 2);
 });
 
