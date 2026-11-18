@@ -220,6 +220,30 @@ impl StateStore {
         source_is_redacted(&self.read_connection()?, source_id)
     }
 
+    /// MP-9C: every redacted source ID, each tombstone fully validated, so an
+    /// index read can exclude the whole set in one pass (before LIMIT/ranking)
+    /// instead of opening this store once per candidate. Malformed fails closed.
+    pub fn redacted_source_ids(&self) -> Result<Vec<String>> {
+        let db = self.read_connection()?;
+        let mut statement =
+            db.prepare("SELECT key FROM settings WHERE substr(key,1,length(?1))=?1 ORDER BY key")?;
+        let keys = statement
+            .query_map([PREFIX], |row| row.get::<_, String>(0))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let mut ids = Vec::with_capacity(keys.len());
+        for key in &keys {
+            let id = key.strip_prefix(PREFIX).ok_or(StateError::Corrupt)?;
+            if tombstone(&db, id)
+                .map_err(|_| StateError::Corrupt)?
+                .is_none()
+            {
+                return Err(StateError::Corrupt);
+            }
+            ids.push(id.to_owned());
+        }
+        Ok(ids)
+    }
+
     /// True when ANY source tombstone exists. The legacy plaintext archive
     /// readers (desktop commands, historical import, legacy MCP) carry no
     /// per-source visibility gate, so their boundaries refuse to run while
