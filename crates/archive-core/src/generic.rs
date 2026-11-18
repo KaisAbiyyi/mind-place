@@ -344,7 +344,9 @@ fn parse(format: &str, raw: &[u8], sha: &str) -> Result<Capture> {
         title,
         conversation_created_at: None,
         conversation_updated_at: None,
-        captured_at: chrono::Utc::now().to_rfc3339(),
+        captured_at: time::OffsetDateTime::now_utc()
+            .format(&time::format_description::well_known::Rfc3339)
+            .expect("valid UTC timestamp"),
         capture_method: "generic-import".into(),
         completeness: "partial".into(),
         warnings: vec![

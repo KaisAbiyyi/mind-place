@@ -789,6 +789,7 @@ def require_prerequisites(runs: list[dict], candidate: dict, *, repo: str,
             for name in expected_jobs
         }
         accepted = False
+        last_failure = None
         for run in runs:
             if run.get("path") != path:
                 continue
@@ -800,42 +801,50 @@ def require_prerequisites(runs: list[dict], candidate: dict, *, repo: str,
                     or type(run.get("id")) is not int or run["id"] <= 0
                     or type(run.get("run_attempt")) is not int or run["run_attempt"] <= 0):
                 continue
-            response = fetch_jobs(run)
-            jobs = response.get("jobs") if isinstance(response, dict) else None
-            total_count = response.get("total_count") if isinstance(response, dict) else None
-            if (not isinstance(jobs, list) or type(total_count) is not int
-                    or total_count < 0 or total_count != len(jobs)
-                    or any(not isinstance(job, dict) for job in jobs)):
-                raise ValueError("Incomplete or malformed native prerequisite job listing")
+            try:
+                response = fetch_jobs(run)
+                jobs = response.get("jobs") if isinstance(response, dict) else None
+                total_count = response.get("total_count") if isinstance(response, dict) else None
+                if (not isinstance(jobs, list) or type(total_count) is not int
+                        or total_count < 0 or total_count != len(jobs)
+                        or any(not isinstance(job, dict) for job in jobs)):
+                    raise ValueError("Incomplete or malformed native prerequisite job listing")
 
-            for name, critical_steps in expected_jobs.items():
-                matching_jobs = [job for job in jobs if job.get("name") == name]
-                if len(matching_jobs) != 1:
-                    raise ValueError("Required native job must exist exactly once: " + name)
-                job = matching_jobs[0]
-                if (job.get("run_attempt") != run["run_attempt"]
-                        or job.get("status") != "completed"
-                        or job.get("conclusion") != "success"):
-                    raise ValueError("Required native job did not complete successfully on exact attempt: " + name)
-                native_contract.validate_runner_labels(job, runner_contracts[name])
-                steps = job.get("steps")
-                if not isinstance(steps, list) or any(not isinstance(step, dict) for step in steps):
-                    raise ValueError("Missing or malformed critical steps for native job: " + name)
-                for step_name in critical_steps:
-                    matching_steps = [step for step in steps if step.get("name") == step_name]
-                    if len(matching_steps) != 1:
-                        raise ValueError("Required critical step must exist exactly once: " + step_name)
-                    step = matching_steps[0]
-                    if step.get("status") != "completed" or step.get("conclusion") != "success":
-                        raise ValueError("Required critical step did not complete successfully: " + step_name)
-            if path == ".github/workflows/ci.yml":
-                evidence = fetch_evidence(run)
-                validate_native_evidence(
-                    evidence, run, candidate, repo=repo,
-                    contract_fingerprint=contract_fingerprint, vault=vault)
-            accepted = True
-            break
+                for name, critical_steps in expected_jobs.items():
+                    matching_jobs = [job for job in jobs if job.get("name") == name]
+                    if len(matching_jobs) != 1:
+                        raise ValueError("Required native job must exist exactly once: " + name)
+                    job = matching_jobs[0]
+                    if (job.get("run_attempt") != run["run_attempt"]
+                            or job.get("status") != "completed"
+                            or job.get("conclusion") != "success"):
+                        raise ValueError("Required native job did not complete successfully on exact attempt: " + name)
+                    native_contract.validate_runner_labels(job, runner_contracts[name])
+                    steps = job.get("steps")
+                    if not isinstance(steps, list) or any(not isinstance(step, dict) for step in steps):
+                        raise ValueError("Missing or malformed critical steps for native job: " + name)
+                    for step_name in critical_steps:
+                        matching_steps = [step for step in steps if step.get("name") == step_name]
+                        if len(matching_steps) != 1:
+                            raise ValueError("Required critical step must exist exactly once: " + step_name)
+                        step = matching_steps[0]
+                        if step.get("status") != "completed" or step.get("conclusion") != "success":
+                            raise ValueError("Required critical step did not complete successfully: " + step_name)
+                if path == ".github/workflows/ci.yml":
+                    evidence = fetch_evidence(run)
+                    validate_native_evidence(
+                        evidence, run, candidate, repo=repo,
+                        contract_fingerprint=contract_fingerprint, vault=vault)
+                accepted = True
+                break
+            except ValueError as err:
+                last_failure = err
+                continue
         if not accepted:
+            if last_failure is not None:
+                raise ValueError(
+                    f"Frozen candidate lacks exact successful native workflow jobs/steps: {path} ({last_failure})"
+                ) from last_failure
             raise ValueError("Frozen candidate lacks exact successful native workflow jobs/steps: " + path)
 
 

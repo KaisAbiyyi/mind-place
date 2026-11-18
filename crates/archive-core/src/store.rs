@@ -596,8 +596,7 @@ fn validate_content_bounds(c: &Capture) -> Result<()> {
     if c.title.trim().is_empty() || c.title.len() > 1024 {
         return Err(invalid("Conversation title is missing or too long"));
     }
-    chrono::DateTime::parse_from_rfc3339(&c.captured_at)
-        .map_err(|_| invalid("Invalid capture timestamp"))?;
+    crate::parse_rfc3339(&c.captured_at).ok_or_else(|| invalid("Invalid capture timestamp"))?;
     for timestamp in [
         c.conversation_created_at.as_deref(),
         c.conversation_updated_at.as_deref(),
@@ -605,8 +604,8 @@ fn validate_content_bounds(c: &Capture) -> Result<()> {
     .into_iter()
     .flatten()
     {
-        chrono::DateTime::parse_from_rfc3339(timestamp)
-            .map_err(|_| invalid("Invalid provider conversation timestamp"))?;
+        crate::parse_rfc3339(timestamp)
+            .ok_or_else(|| invalid("Invalid provider conversation timestamp"))?;
     }
     if c.messages.is_empty() || c.messages.len() > 10_000 {
         return Err(invalid(
@@ -633,8 +632,7 @@ fn validate_content_bounds(c: &Capture) -> Result<()> {
             return Err(invalid("Message exceeds its size limit"));
         }
         if let Some(time) = &m.authored_at {
-            chrono::DateTime::parse_from_rfc3339(time)
-                .map_err(|_| invalid("Invalid message timestamp"))?;
+            crate::parse_rfc3339(time).ok_or_else(|| invalid("Invalid message timestamp"))?;
         }
         for a in &m.attachments {
             if a.id.is_empty()
@@ -680,13 +678,13 @@ fn asset_name(name: &str) -> bool {
         .is_some_and(|(hash, ext)| hex_id(hash) && matches!(ext, "png" | "jpg" | "gif" | "webp"))
 }
 fn observation_time(time: &str) -> i64 {
-    chrono::DateTime::parse_from_rfc3339(time)
-        .map(|t| t.timestamp_millis())
+    crate::parse_rfc3339(time)
+        .map(|t| (t.unix_timestamp_nanos() / 1_000_000) as i64)
         .unwrap_or(i64::MIN)
 }
 
-fn parsed_timestamp(time: &str) -> Option<chrono::DateTime<chrono::FixedOffset>> {
-    chrono::DateTime::parse_from_rfc3339(time).ok()
+fn parsed_timestamp(time: &str) -> Option<time::OffsetDateTime> {
+    crate::parse_rfc3339(time)
 }
 
 fn original_conversation_date(capture: &Capture) -> (Option<String>, Option<String>) {

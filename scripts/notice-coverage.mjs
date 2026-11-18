@@ -26,11 +26,11 @@ const TRANSITIVE_NOTICES = [
   },
   {
     crate: 'sqlcipher-src',
-    version: '419.0.6+sqlcipher-4.19.0-sqlite-3.53.4-libtomcrypt-1.18.2',
+    version: '420.0.0+sqlcipher-4.20.0-sqlite-3.54.1-libtomcrypt-1.18.2',
     name: 'sqlcipher/LICENSE-SQLITE-BLESSING',
     declared: 'MIT AND BSD-3-Clause AND blessing AND WTFPL',
     // From the leading notice of sqlcipher/sqlite3.h in the locked crate.
-    // Header SHA-256: 8a9d1bff44d75174ca6dea3ea9bac50a6104d86facb566647b8bb839375b7b3a.
+    // Header SHA-256: e36eb6ed4de77e56a633866a8f84ed339785662d0cf79cf099f420b638bf28ec.
     file: 'SQLITE-BLESSING.txt',
     sha256: '79daf4b950cf73d52a38f062a55a9bedc168e7e86b4e935939854ed9c3277d1b',
   },
@@ -44,8 +44,16 @@ function noticeDigest(text) {
   return createHash('sha256').update(normalizedNotice(text)).digest('hex');
 }
 
-function crateSourceArchive({ crate, version }) {
+export function registrySourceArchive(crate, version) {
   return 'https://crates.io/api/v1/crates/' + crate + '/' + encodeURIComponent(version) + '/download';
+}
+
+export function hasMplLicense(license) {
+  return typeof license === 'string' && /\bMPL-2\.0\b/.test(license);
+}
+
+function crateSourceArchive({ crate, version }) {
+  return registrySourceArchive(crate, version);
 }
 
 /** Supplemental notices for known registry packages in the resolved graph. */
@@ -203,4 +211,30 @@ export function assertPinnedCrateNotices(noticesText, root) {
   }
   if (problems.length) throw new Error(`Third-party notice coverage failed:\n- ${problems.join('\n- ')}`);
   return [...pinned.keys()];
+}
+
+/**
+ * Require every MPL-2.0 notice section to carry both a source-availability URL (MPL-2.0 §3.2)
+ * and the license text.
+ */
+export function assertMplSourceNotices(noticesText) {
+  const sections = noticeSectionEntries(noticesText.replace(/\r\n/g, '\n'));
+  const checked = [];
+  for (const [heading, section] of sections) {
+    if (!hasMplLicense(section.license)) continue;
+    const preamble = section.body.split(/^--- /m, 1)[0];
+    const origins = preamble
+      .split('\n')
+      .filter(line => line.startsWith('Source archive: '))
+      .map(line => line.slice('Source archive: '.length).trim());
+    if (!origins.some(url => url.startsWith('https://') && url.length > 'https://'.length)) {
+      throw new Error(`${heading}: MPL-2.0 package missing source availability URL`);
+    }
+    const licenseText = licenseFileTexts(section.body).join('\n');
+    if (licenseText.replace(/\s+/g, ' ').trim().length < 100) {
+      throw new Error(`${heading}: MPL-2.0 package missing license text`);
+    }
+    checked.push(heading);
+  }
+  return checked;
 }

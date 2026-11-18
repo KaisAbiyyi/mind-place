@@ -300,7 +300,9 @@ impl ChatGptExportParser {
             warnings.push(
                 "Missing conversation create_time and update_time; using import processing time for capture timestamp".into(),
             );
-            chrono::Utc::now().to_rfc3339()
+            time::OffsetDateTime::now_utc()
+                .format(&time::format_description::well_known::Rfc3339)
+                .expect("valid UTC timestamp")
         };
 
         // 3. Collision-resistant duplicate conversation ID handling
@@ -745,9 +747,20 @@ enum BranchProjection {
 }
 
 fn timestamp_to_rfc3339(ts: f64) -> Option<String> {
+    if !ts.is_finite() {
+        return None;
+    }
     let secs = ts as i64;
-    let nsecs = ((ts - secs as f64) * 1_000_000_000.0) as u32;
-    chrono::DateTime::from_timestamp(secs, nsecs).map(|dt| dt.to_rfc3339())
+    let nsecs = ((ts - secs as f64) * 1_000_000_000.0) as i64;
+    let formatted = time::OffsetDateTime::from_unix_timestamp(secs)
+        .ok()?
+        .checked_add(time::Duration::nanoseconds(nsecs))?
+        .format(&time::format_description::well_known::Rfc3339)
+        .ok()?;
+    Some(match formatted.strip_suffix('Z') {
+        Some(prefix) => format!("{prefix}+00:00"),
+        None => formatted,
+    })
 }
 
 #[cfg(test)]
