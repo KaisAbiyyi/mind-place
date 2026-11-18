@@ -116,6 +116,13 @@ class ToolIntegrityTests(unittest.TestCase):
         self.assertTrue(all(isinstance(entry.get("reason"), str) and len(entry["reason"].strip()) >= 20 for entry in ignores))
         self.assertEqual(policy["advisories"]["unmaintained"], "all")
         self.assertEqual(policy["advisories"]["yanked"], "deny")
+        expected_allow = {
+            "MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC",
+            "Unicode-3.0", "Zlib", "CC0-1.0", "BSL-1.0", "OpenSSL",
+            "MPL-2.0", "Apache-2.0 WITH LLVM-exception", "blessing",
+        }
+        self.assertEqual(set(policy["licenses"]["allow"]), expected_allow)
+        self.assertEqual(len(policy["licenses"]["allow"]), len(expected_allow))
         self.assertEqual(policy["licenses"]["exceptions"], [{"allow": ["WTFPL"], "name": "sqlcipher-src"}])
         self.assertFalse(policy["licenses"]["private"]["ignore"])
         self.assertTrue(policy["graph"]["all-features"])

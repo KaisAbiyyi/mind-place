@@ -223,8 +223,11 @@ export function assertMplSourceNotices(noticesText) {
   for (const [heading, section] of sections) {
     if (!hasMplLicense(section.license)) continue;
     const preamble = section.body.split(/^--- /m, 1)[0];
-    const origins = preamble.split('\n').filter(line => line.startsWith('Source archive: '));
-    if (!origins.length) {
+    const origins = preamble
+      .split('\n')
+      .filter(line => line.startsWith('Source archive: '))
+      .map(line => line.slice('Source archive: '.length).trim());
+    if (!origins.some(url => url.startsWith('https://') && url.length > 'https://'.length)) {
       throw new Error(`${heading}: MPL-2.0 package missing source availability URL`);
     }
     const licenseText = licenseFileTexts(section.body).join('\n');

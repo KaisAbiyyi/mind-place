@@ -7,9 +7,17 @@ import { helperPin, helperDirectory, readVerifiedHelperBundle, readVerifiedRegul
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const product=JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8'));
-const metadata=spawnSync('cargo',['metadata','--locked','--format-version','1','--filter-platform',process.platform==='win32'?'x86_64-pc-windows-msvc':process.platform==='darwin'?'aarch64-apple-darwin':'x86_64-unknown-linux-gnu'],{cwd:root,encoding:'utf8',maxBuffer:32*1024*1024});
+const targetTriple=process.platform==='win32'?'x86_64-pc-windows-msvc':process.platform==='darwin'?'aarch64-apple-darwin':'x86_64-unknown-linux-gnu';
+const metadata=spawnSync('cargo',['metadata','--locked','--format-version','1','--filter-platform',targetTriple],{cwd:root,encoding:'utf8',maxBuffer:32*1024*1024});
 if(metadata.status!==0)throw new Error(metadata.stderr||'Cargo metadata failed');
-const packages=JSON.parse(metadata.stdout).packages.filter(p=>p.source);
+const tree=spawnSync('cargo',['tree','--locked','--workspace','--edges','normal,build','--target',targetTriple,'--prefix','none'],{cwd:root,encoding:'utf8',maxBuffer:32*1024*1024});
+if(tree.status!==0)throw new Error(tree.stderr||'Cargo tree failed');
+const activeCrates=new Set();
+for(const line of tree.stdout.split(/\r?\n/)){
+ const match=/^(\S+)\s+v(\S+)/.exec(line.trim());
+ if(match)activeCrates.add(`${match[1]}@${match[2]}`);
+}
+const packages=JSON.parse(metadata.stdout).packages.filter(p=>p.source&&activeCrates.has(`${p.name}@${p.version}`));
 const sections=[`Mind Place ${product.version} — third-party source and license notices\n\nRust dependencies include locked product/build dependencies for the target platform. Frontend notices include the production dependency closure. Development-only tooling is not distributed.`];
 function licenseFiles(dir,depth=0){
  const out=[];

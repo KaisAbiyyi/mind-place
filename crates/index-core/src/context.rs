@@ -4,13 +4,12 @@ use crate::{
     CaptureArchiveReader, FetchBudget, FetchCursor, FetchGranularity, FetchRequest, IndexError,
     IndexStore, QueryTerm, Result, RetrievalFilters, RetrievalHit, RetrievalRequest,
 };
-use mind_place_archive::ArchiveStore;
+use mind_place_archive::{parse_rfc3339, ArchiveStore};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     time::{Duration, Instant},
 };
-use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 const MAX_CONTEXT_BYTES: usize = 64 * 1024;
 const MAX_CONTEXT_TOKENS: usize = 16_384;
@@ -191,11 +190,9 @@ fn apply_policy(request: &ContextRequest) -> Result<RetrievalFilters> {
         }
         ContextPreset::Historical => {
             let as_of = request.as_of.as_deref().ok_or(IndexError::InvalidQuery)?;
-            let timestamp =
-                OffsetDateTime::parse(as_of, &Rfc3339).map_err(|_| IndexError::InvalidQuery)?;
+            let timestamp = parse_rfc3339(as_of).ok_or(IndexError::InvalidQuery)?;
             if let Some(existing) = &filters.captured_to {
-                let existing_date = OffsetDateTime::parse(existing, &Rfc3339)
-                    .map_err(|_| IndexError::InvalidQuery)?;
+                let existing_date = parse_rfc3339(existing).ok_or(IndexError::InvalidQuery)?;
                 if timestamp < existing_date {
                     filters.captured_to = Some(as_of.to_string());
                 }

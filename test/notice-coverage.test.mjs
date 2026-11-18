@@ -163,6 +163,8 @@ test('MPL-2.0 sections require both license text and source archive URL', () => 
   assert.deepEqual(assertMplSourceNotices(`head${withSource}`), ['cssparser 0.37.0']);
   assert.throws(() => assertMplSourceNotices(`head${section('cssparser', '0.37.0', 'MPL-2.0', { LICENSE: mpl.text })}`),
     /missing source availability URL/);
+  assert.throws(() => assertMplSourceNotices(`head${withSource.replace('https://crates.io/api/v1/crates/cssparser/0.37.0/download', 'http://insecure.invalid')}`),
+    /missing source availability URL/);
   assert.throws(() => assertMplSourceNotices(`head${withSource.replace(mpl.text, 'short')}`),
     /missing license text/);
 });

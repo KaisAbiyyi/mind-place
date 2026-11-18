@@ -1,10 +1,10 @@
 //! Phase 2A: bounded, provider-neutral retrieval over the disposable FTS projection.
 //! No derived rowid is returned as a durable source reference.
 use crate::{IndexError, IndexStore, Result};
+use mind_place_archive::parse_rfc3339;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 const MAX_QUERIES: usize = 8;
 const MAX_QUERY_BYTES: usize = 1024;
@@ -201,16 +201,12 @@ impl RetrievalFilters {
         let from = self
             .captured_from
             .as_deref()
-            .map(|value| {
-                OffsetDateTime::parse(value, &Rfc3339).map_err(|_| IndexError::InvalidQuery)
-            })
+            .map(|value| parse_rfc3339(value).ok_or(IndexError::InvalidQuery))
             .transpose()?;
         let to = self
             .captured_to
             .as_deref()
-            .map(|value| {
-                OffsetDateTime::parse(value, &Rfc3339).map_err(|_| IndexError::InvalidQuery)
-            })
+            .map(|value| parse_rfc3339(value).ok_or(IndexError::InvalidQuery))
             .transpose()?;
         if from.zip(to).is_some_and(|(from, to)| from > to) {
             return Err(IndexError::InvalidQuery);
@@ -371,5 +367,19 @@ impl IndexStore {
             candidate_count,
             truncated,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn retrieval_filters_reject_non_rfc3339_date_time_separators() {
+        let filters = RetrievalFilters {
+            captured_from: Some("2026-11-18_12:00:00Z".into()),
+            ..Default::default()
+        };
+        assert!(matches!(filters.validate(), Err(IndexError::InvalidQuery)));
     }
 }
