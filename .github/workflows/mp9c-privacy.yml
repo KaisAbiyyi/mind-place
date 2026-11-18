@@ -53,3 +53,5 @@ jobs:
         run: cargo test --locked -p mind-place-integration --test clients -- --nocapture
       - name: Legacy encrypted migration interruption and restart
         run: cargo test --locked -p mind-place-index --features sqlcipher-preview --test vault_migration_restart -- --nocapture
+      - name: Archive Hive custody and search/count visibility regressions
+        run: cargo test --locked -p mind-place-index --features sqlcipher-preview --test privacy_visibility -- --nocapture

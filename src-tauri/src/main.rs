@@ -476,6 +476,7 @@ async fn refresh_archive_index(state: State<'_, AppState>) -> Result<IndexStats,
     let index_path = state.index_path.clone();
     let write_gate = state.archive_index_write_gate.clone();
     index_task(&state, move |lease, security| {
+        let _privacy = disclosure_fence(&vault)?;
         serialized_archive_index_writer(&write_gate, &security, lease, || {
             let authority = open_owner_state(&vault, &state_path)?;
             let index = open_owner_index(&vault, &index_path)?;
@@ -506,6 +507,7 @@ async fn rebuild_archive_index(state: State<'_, AppState>) -> Result<IndexStats,
     let index_path = state.index_path.clone();
     let write_gate = state.archive_index_write_gate.clone();
     index_task(&state, move |lease, security| {
+        let _privacy = disclosure_fence(&vault)?;
         serialized_archive_index_writer(&write_gate, &security, lease, || {
             let authority = open_owner_state(&vault, &state_path)?;
             let index = open_owner_index(&vault, &index_path)?;

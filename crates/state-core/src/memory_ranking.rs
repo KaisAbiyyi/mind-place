@@ -412,7 +412,8 @@ impl StateStore {
                 }
             }
         }
-        let (relations, resolved_sources) = load_relations(&tx, &ids, cutoff)?;
+        let surviving_ids: BTreeSet<String> = claims.keys().cloned().collect();
+        let (relations, resolved_sources) = load_relations(&tx, &surviving_ids, cutoff)?;
         let mut neighbors = BTreeMap::new();
         for relation in &relations {
             for id in [&relation.from_claim_id, &relation.to_claim_id] {

@@ -207,3 +207,96 @@ fn redacted_sources_reject_late_authenticated_memory_writes() {
     ));
     assert!(db.claim_history("claim:blocked").unwrap().is_none());
 }
+
+#[test]
+fn redacted_relation_source_does_not_break_global_inspection_or_leak_hidden_neighbor() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = open_state(temp.path().join("state.sqlite3"));
+    let owner = "a".repeat(64);
+    db.issue_client("client:v1:owner", "Owner", &owner, &[Cap::Admin])
+        .unwrap();
+    let public = source(&db, "public-thread");
+    let secret = source(&db, "secret-thread");
+    let extra_secret = source(&db, "extra-secret-thread");
+
+    db.create_evidenced_claim(
+        &claim("claim:public", "Public claim"),
+        &[ClaimEvidence {
+            source_ref: public.clone(),
+            evidence_kind: "support".into(),
+        }],
+    )
+    .unwrap();
+    db.create_evidenced_claim(
+        &claim("claim:secret", "Secret claim"),
+        &[ClaimEvidence {
+            source_ref: secret.clone(),
+            evidence_kind: "support".into(),
+        }],
+    )
+    .unwrap();
+    db.create_evidenced_claim(
+        &claim("claim:third", "Third claim"),
+        &[ClaimEvidence {
+            source_ref: public.clone(),
+            evidence_kind: "support".into(),
+        }],
+    )
+    .unwrap();
+    // Public relation from public -> secret (tests P2-1 hidden-neighbor filtering in detail),
+    // plus a redacted-source relation between secret <-> third (tests P1-2 load_relations
+    // not failing global inspection/ranking for unrelated surviving claims).
+    db.add_claim_relation(
+        "claim:public",
+        "claim:secret",
+        mind_place_state::RelationKind::Supports,
+        &public,
+        "Public link to secret claim",
+    )
+    .unwrap();
+    db.add_claim_relation(
+        "claim:secret",
+        "claim:third",
+        mind_place_state::RelationKind::Contradicts,
+        &extra_secret,
+        "Secret link",
+    )
+    .unwrap();
+
+    db.redact_source(&owner, &secret, "Forget secret").unwrap();
+    db.redact_source(&owner, &extra_secret, "Forget relation source")
+        .unwrap();
+
+    let overview = db.memory_inspection_overview("").unwrap();
+    assert_eq!(overview.len(), 1);
+    assert_eq!(overview[0].claim.id, "claim:public");
+
+    let ranked = db
+        .rank_claims(
+            &["claim:secret", "claim:public"],
+            &RankingPolicy {
+                mode: RankingMode::Challenge,
+                as_of_ms: None,
+                scope_id: None,
+                limit: 10,
+            },
+        )
+        .unwrap();
+    assert_eq!(ranked.len(), 1);
+    assert_eq!(ranked[0].claim.id, "claim:public");
+    assert!(ranked[0].related_claim_ids.is_empty());
+
+    let detail = db
+        .memory_inspection_detail("claim:public")
+        .unwrap()
+        .expect("public claim detail stays readable");
+    assert!(detail.relations.is_empty());
+    assert!(db
+        .memory_inspection_detail("claim:secret")
+        .unwrap()
+        .is_none());
+    assert!(db
+        .memory_inspection_detail("claim:third")
+        .unwrap()
+        .is_none());
+}
