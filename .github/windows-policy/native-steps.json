@@ -15,6 +15,7 @@
     "Stage capture sidecar for native desktop tests",
     "Qualify Phase 3E simulated MCP and revocation boundary",
     "Test hosted tunnel desktop boundaries",
+    "Test owner import commands",
     "Build desktop app",
     "Verify portable MIT license and third-party notices",
     "Record native proof",

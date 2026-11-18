@@ -18,22 +18,22 @@ CI_WORKFLOW = ".github/workflows/ci.yml"
 SQLCIPHER_WORKFLOW = ".github/workflows/mp9b-sqlcipher-qualification.yml"
 PRODUCT_WORKFLOW = ".github/workflows/windows-product.yml"
 
-# Explicit candidate policy. The separated Windows Product workflow is used
-# by the reviewed integrated candidates; earlier PRs retain the inline contract.
+# Explicit candidate policy. Current candidates target the separated Windows
+# Product workflow by default; historical pre-separation PRs retain the inline contract.
 CANDIDATE_REQUIREMENTS = {
     ("KaisAbiyyi/mind-place", 127): ("mp9b-vault", True),
     ("KaisAbiyyi/mind-place", 129): ("mp-ci-100k-infrastructure", False),
     ("KaisAbiyyi/mind-place", 131): ("mp-ci-win-policy", False),
     ("KaisAbiyyi/mind-place", 132): ("mp-p0-integration", True),
     ("KaisAbiyyi/mind-place", 141): ("mp-governance-integrated-workflows", True),
+    ("KaisAbiyyi/mind-place", 151): ("mp9c-privacy-vault", True),
+    ("KaisAbiyyi/mind-place", 152): ("mp9e-backup-vault", True),
+    ("KaisAbiyyi/mind-place", 169): ("mp-import-app-backend", False),
+    ("KaisAbiyyi/mind-place", 170): ("mp-import-app-windows-ci", False),
 }
-SEPARATED_PRODUCT_CANDIDATES = {
-    ("KaisAbiyyi/mind-place", 131),
-    ("KaisAbiyyi/mind-place", 132),
-    ("KaisAbiyyi/mind-place", 141),
-    # MP-7MCP-01 is on post-#161 main: the Windows product job is separate,
-    # even though this PR itself changes only the reference model/CI policy.
-    ("KaisAbiyyi/mind-place", 153),
+LEGACY_INLINE_PRODUCT_CANDIDATES = {
+    ("KaisAbiyyi/mind-place", 127),
+    ("KaisAbiyyi/mind-place", 129),
 }
 DEFAULT_REQUIREMENT = ("ordinary-non-vault-pr", False)
 
@@ -681,7 +681,7 @@ def requires_sqlcipher(repo: str, pr: int) -> bool:
 def requires_separated_product(repo: str, pr: int) -> bool:
     if not isinstance(repo, str) or not repo or type(pr) is not int or pr <= 0:
         raise ValueError("Invalid native candidate identity")
-    return (repo, pr) in SEPARATED_PRODUCT_CANDIDATES
+    return (repo, pr) not in LEGACY_INLINE_PRODUCT_CANDIDATES
 
 
 def _tree_entries(root: str, revision: str) -> list[tuple[str, str, str]]:

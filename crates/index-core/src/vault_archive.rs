@@ -3,8 +3,9 @@
 //! native-host IPC and derived search indexing are fully ported and qualified.
 use crate::{documents::DocumentIndex, IndexError, IndexStore, Result};
 use mind_place_archive::{
-    markdown, validate_capture, AssetResult, Capture, Conversation, ConversationSummary,
-    ExportResult, SaveReceipt, SnapshotSummary, MAX_CAPTURE_BYTES,
+    markdown, validate_capture, validate_historical_capture, validate_live_capture,
+    validate_stored_capture, AssetResult, Capture, Conversation, ConversationSummary, ExportResult,
+    SaveReceipt, SnapshotSummary, MAX_CAPTURE_BYTES,
 };
 use mind_place_security::{
     vault::{ContentKind, CryptoVault},
@@ -326,11 +327,10 @@ impl VaultCaptureStore {
         self.gate
             .validate_lease(self.lease)
             .map_err(|_| IndexError::Revoked)?;
-        validate_capture(&mut capture)?;
-        if !migration
-            && (capture.provider == "generic" || capture.capture_method == "legacy-import")
-        {
-            return Err(IndexError::InvalidEvidence);
+        if migration {
+            validate_stored_capture(&capture)?;
+        } else {
+            validate_live_capture(&mut capture)?;
         }
         let id = format!(
             "{:x}",
@@ -427,9 +427,9 @@ impl VaultCaptureStore {
                     identity.as_bytes(),
                 )
                 .map_err(|_| IndexError::InvalidEvidence)?;
-            let mut original: Capture =
+            let original: Capture =
                 serde_json::from_slice(&previous).map_err(|_| IndexError::InvalidEvidence)?;
-            validate_capture(&mut original)?;
+            validate_stored_capture(&original)?;
             let mut original_normalized = original.clone();
             original_normalized.captured_at.clear();
             if serde_json::to_vec(&original_normalized).map_err(|_| IndexError::InvalidEvidence)?
@@ -450,9 +450,9 @@ impl VaultCaptureStore {
                     previous_identity.as_bytes(),
                 )
                 .map_err(|_| IndexError::InvalidEvidence)?;
-            let mut prior: Capture =
+            let prior: Capture =
                 serde_json::from_slice(&previous).map_err(|_| IndexError::InvalidEvidence)?;
-            validate_capture(&mut prior)?;
+            validate_stored_capture(&prior)?;
             let prior_time = chrono::DateTime::parse_from_rfc3339(&prior.captured_at)
                 .map_err(|_| IndexError::InvalidEvidence)?;
             let incoming_time = chrono::DateTime::parse_from_rfc3339(&capture.captured_at)
@@ -556,9 +556,9 @@ impl VaultCaptureStore {
                 row.1.as_bytes(),
             )
             .map_err(|_| IndexError::InvalidEvidence)?;
-        let mut capture: Capture =
+        let capture: Capture =
             serde_json::from_slice(bytes.as_slice()).map_err(|_| IndexError::InvalidEvidence)?;
-        validate_capture(&mut capture)?;
+        validate_stored_capture(&capture)?;
         if capture.provider != row.2
             || capture.conversation_id != row.3
             || capture.title != row.4
@@ -885,9 +885,9 @@ impl VaultCaptureStore {
             let bytes = storage
                 .read(gate, lease, ContentKind::Archive, identity.as_bytes())
                 .map_err(|_| IndexError::InvalidEvidence)?;
-            let mut capture: Capture =
+            let capture: Capture =
                 serde_json::from_slice(&bytes).map_err(|_| IndexError::InvalidEvidence)?;
-            validate_capture(&mut capture)?;
+            validate_stored_capture(&capture)?;
             let expected_id = format!(
                 "{:x}",
                 Sha256::digest(
