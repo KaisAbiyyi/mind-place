@@ -69,10 +69,14 @@ lock (`picomatch 4.0.7`), giving 4 high findings; the KaTeX low finding is uncha
 this PR: main carries the same lock. The advisory range is `<= 4.0.7` with **no first patched version**, 4.0.7
 is the latest release, and the current `vite` 8.x, `tinyglobby` and `fdir` all still depend on `picomatch ^4`.
 `npm audit`'s only suggestion is a `vite` major downgrade, which does not remove the vulnerable package either.
-There is therefore no dependency change that resolves it today. No exception, ignore, threshold change or
-override was added; the job stays red. The package is a build-time tool dependency, but any waiver (a dated,
-scoped acceptance) is an owner decision. Options: wait for an upstream picomatch patch, or the owner authorizes a
-documented time-boxed exception in the gate policy.
+There is therefore no dependency change that resolves it today. The owner explicitly authorized (2026-11-18) a
+**time-boxed acceptance**, not a suppression: `scripts/supply-chain/npm-accepted-advisories.json` names exactly this
+advisory URL on `picomatch`, valid only while npm still reports no fixed range (`*`), up to `high`, scope
+`build-time-dependency`, **expiring 2026-12-18**. The receipt keeps the raw `FAIL` and the four accepted findings;
+transitive packages (`fdir`, `tinyglobby`, `vite`) are covered only while every link of their chain is covered. Any
+other high finding, a different advisory, a published fix, an expired or malformed entry makes the job fail again.
+This is not an independent review and not an assertion that the package is safe; it only lets the unrelated
+supply-chain gate be read for its other findings. Removal on upstream patch or at expiry is required.
 
 ## CodeQL — untriaged findings in unchanged source
 

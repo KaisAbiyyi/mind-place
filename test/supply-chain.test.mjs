@@ -110,3 +110,80 @@ for (const [label, filename, mutate] of [
   const result = spawnSync(process.execPath, [join(fixture, 'scripts/verify-workflow-security.mjs')], { encoding: 'utf8' });
   assert.notEqual(result.status, 0, result.stdout + result.stderr);
 });
+
+// ---- time-boxed acceptance of an advisory with no patched version --------------------------------------------
+import { applyAcceptances, validateAcceptances, acceptanceFile } from '../scripts/supply-chain/npm-audit.mjs';
+
+const PICO_URL = 'https://github.com/advisories/GHSA-fc5q-39xc-vjpf';
+function npmReport(extra = {}, { picoRange = '*' } = {}) {
+  const vulnerabilities = {
+    picomatch: { severity: 'high', range: picoRange, nodes: ['node_modules/picomatch'], via: [{ source: 1247710, url: PICO_URL, title: 'ReDoS', severity: 'high', range: '<=4.0.7' }], fixAvailable: { name: 'vite', version: '6.2.7', isSemVerMajor: true } },
+    tinyglobby: { severity: 'high', range: '*', nodes: ['node_modules/tinyglobby'], via: ['picomatch'], fixAvailable: true },
+    fdir: { severity: 'high', range: '>=5.2.1', nodes: ['node_modules/fdir'], via: ['picomatch'], fixAvailable: true },
+    vite: { severity: 'high', range: '>=6.3.0-beta.0', nodes: ['node_modules/vite'], via: ['fdir', 'picomatch', 'tinyglobby'], fixAvailable: true },
+    katex: { severity: 'low', range: '0.11.0 - 0.18.1', nodes: ['node_modules/katex'], via: [{ source: 5, url: 'https://github.com/advisories/GHSA-238p-pmpm-9mq7', title: 'x', severity: 'low' }], fixAvailable: true },
+    ...extra,
+  };
+  const counts = { info: 0, low: 0, moderate: 0, high: 0, critical: 0, total: 0 };
+  for (const v of Object.values(vulnerabilities)) { counts[v.severity]++; counts.total++; }
+  return evaluateAudit({ status: counts.high + counts.critical ? 1 : 0, stdout: JSON.stringify({ auditReportVersion: 2, vulnerabilities, metadata: { vulnerabilities: counts } }) });
+}
+const entry = (over = {}) => ({
+  url: PICO_URL, package: 'picomatch', noPatchedVersionRange: '*', maxSeverity: 'high', scope: 'build-time-dependency',
+  reason: 'No patched version exists; build-time only; revisit on expiry or upstream patch.', decidedBy: 'owner', expires: '2026-12-18', ...over,
+});
+const doc = (...entries) => ({ schema: 1, accepted: entries });
+const NOW = new Date('2026-11-18T00:00:00Z');
+
+test('acceptance: the unpatched picomatch advisory and its transitive chain pass, raw status stays FAIL', () => {
+  const report = npmReport();
+  assert.equal(report.status, 'FAIL');
+  const r = applyAcceptances(report, doc(entry()), NOW);
+  assert.equal(r.status, 'PASS');
+  assert.equal(r.rawStatus, 'FAIL');
+  assert.deepEqual(r.acceptedFindings.sort(), ['fdir', 'picomatch', 'tinyglobby', 'vite']);
+  assert.deepEqual(r.unaccepted, []);
+  assert.equal(r.activeAcceptances[0].expires, '2026-12-18');
+});
+test('acceptance: expired, missing and mismatched entries cover nothing', () => {
+  const report = npmReport();
+  assert.equal(applyAcceptances(report, doc(entry()), new Date('2026-12-18T00:00:00Z')).status, 'FAIL');
+  assert.equal(applyAcceptances(report, doc(), NOW).status, 'FAIL');
+  assert.equal(applyAcceptances(report, doc(entry({ url: 'https://github.com/advisories/GHSA-other-aaaa-bbbb' })), NOW).status, 'FAIL');
+  assert.equal(applyAcceptances(report, doc(entry({ package: 'vite' })), NOW).status, 'FAIL');
+});
+test('acceptance: a published fix (range no longer "*") ends the acceptance', () => {
+  const r = applyAcceptances(npmReport({}, { picoRange: '<=4.0.7' }), doc(entry()), NOW);
+  assert.equal(r.status, 'FAIL');
+  assert.ok(r.unaccepted.includes('picomatch'));
+});
+test('acceptance: any other high finding, or a partly covered chain, still fails', () => {
+  const other = { severity: 'high', range: '<1', nodes: ['node_modules/other'], via: [{ source: 9, url: 'https://github.com/advisories/GHSA-zzzz-zzzz-zzzz', title: 'y', severity: 'high' }], fixAvailable: true };
+  const r1 = applyAcceptances(npmReport({ other }), doc(entry()), NOW);
+  assert.equal(r1.status, 'FAIL');
+  assert.deepEqual(r1.unaccepted, ['other']);
+  const partly = { severity: 'high', range: '*', nodes: ['node_modules/wrap'], via: ['picomatch', 'other'], fixAvailable: true };
+  const r2 = applyAcceptances(npmReport({ other, wrap: partly }), doc(entry()), NOW);
+  assert.ok(r2.unaccepted.includes('wrap') && r2.unaccepted.includes('other'));
+  const orphan = { severity: 'high', range: '*', nodes: ['node_modules/orphan'], via: [], fixAvailable: true };
+  assert.deepEqual(applyAcceptances(npmReport({ orphan }), doc(entry()), NOW).unaccepted, ['orphan']);
+});
+test('acceptance: a higher severity than the accepted maximum is not covered', () => {
+  const report = npmReport();
+  report.findings.find(f => f.name === 'picomatch').advisories[0].severity = 'critical';
+  assert.equal(applyAcceptances(report, doc(entry()), NOW).status, 'FAIL');
+});
+test('acceptance: a clean report stays PASS and malformed documents fail closed', () => {
+  assert.equal(applyAcceptances(evaluateAudit(result()), doc(), NOW).status, 'PASS');
+  for (const bad of [null, { schema: 2, accepted: [] }, { schema: 1 }, doc(entry({ url: 'http://x' })), doc(entry({ noPatchedVersionRange: '<1' })),
+    doc(entry({ scope: 'runtime' })), doc(entry({ reason: 'short' })), doc(entry({ expires: 'soon' })), doc(entry({ maxSeverity: 'bogus' }))]) {
+    assert.throws(() => validateAcceptances(bad), /NPM_ACCEPTANCE_INVALID/);
+  }
+});
+test('acceptance: the committed file is valid, scoped to the one advisory and carries an expiry', () => {
+  const accepted = validateAcceptances(JSON.parse(readFileSync(acceptanceFile, 'utf8')));
+  assert.equal(accepted.length, 1);
+  assert.equal(accepted[0].url, PICO_URL);
+  assert.equal(accepted[0].package, 'picomatch');
+  assert.equal(accepted[0].expires, '2026-12-18');
+});

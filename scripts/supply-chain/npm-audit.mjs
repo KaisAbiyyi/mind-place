@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -31,12 +31,62 @@ export function evaluateAudit(result) {
       if (!Number.isSafeInteger(v.source) || typeof v.url !== 'string') throw new Error('NPM_AUDIT_INVALID: malformed advisory');
       return { source: v.source, url: v.url, title: v.title, severity: v.severity };
     });
-    return { name, severity: finding.severity, range: finding.range, nodes: finding.nodes, advisories, fixAvailable: finding.fixAvailable };
+    const chain = finding.via.filter(v => typeof v === 'string').sort();
+    return { name, severity: finding.severity, range: finding.range, nodes: finding.nodes, advisories, chain, fixAvailable: finding.fixAvailable };
   }).sort((a, b) => a.name.localeCompare(b.name));
   if (levels.some(level => observed[level] !== counts[level])) throw new Error('NPM_AUDIT_INVALID: severity count mismatch');
   const blocked = counts.high + counts.critical > 0;
   if ((result.status === 1) !== blocked) throw new Error('NPM_AUDIT_INVALID: exit code disagrees with high threshold');
   return { status: blocked ? 'FAIL' : 'PASS', threshold: 'high', includesDevelopment: true, counts, findings };
+}
+
+// Time-boxed, owner-authorized acceptance of an advisory that has NO patched version. It never hides a finding:
+// the raw report and status stay in the receipt, an acceptance covers only the exact advisory URL on the exact
+// package while npm still reports no fixed range (`range: "*"`), and transitive findings are covered only when
+// every link of their chain is covered. Expired, malformed or non-matching entries cover nothing.
+export const acceptanceFile = resolve(dirname(fileURLToPath(import.meta.url)), 'npm-accepted-advisories.json');
+const levelIndex = level => levels.indexOf(level);
+
+export function validateAcceptances(document) {
+  if (!document || document.schema !== 1 || !Array.isArray(document.accepted)) throw new Error('NPM_ACCEPTANCE_INVALID: schema');
+  for (const e of document.accepted) {
+    const ok = e && typeof e === 'object' && /^https:\/\/github\.com\/advisories\/GHSA-[a-z0-9-]+$/.test(e.url) &&
+      typeof e.package === 'string' && e.package && e.noPatchedVersionRange === '*' && levels.includes(e.maxSeverity) &&
+      e.scope === 'build-time-dependency' && typeof e.reason === 'string' && e.reason.length >= 40 &&
+      typeof e.decidedBy === 'string' && e.decidedBy && /^\d{4}-\d{2}-\d{2}$/.test(e.expires) && Number.isFinite(Date.parse(e.expires + 'T00:00:00Z'));
+    if (!ok) throw new Error('NPM_ACCEPTANCE_INVALID: entry');
+  }
+  return document.accepted;
+}
+
+export function applyAcceptances(report, document, now = new Date()) {
+  const entries = validateAcceptances(document).filter(e => Date.parse(e.expires + 'T00:00:00Z') > now.getTime());
+  const blocking = report.findings.filter(f => levelIndex(f.severity) >= levelIndex('high'));
+  const byName = new Map(report.findings.map(f => [f.name, f]));
+  const memo = new Map();
+  const covered = (finding, trail = new Set()) => {
+    if (memo.has(finding.name)) return memo.get(finding.name);
+    if (trail.has(finding.name)) return false;
+    let result;
+    if (finding.advisories.length > 0) {
+      result = finding.advisories.every(a => entries.some(e => e.url === a.url && e.package === finding.name &&
+        finding.range === e.noPatchedVersionRange && levelIndex(a.severity) <= levelIndex(e.maxSeverity)));
+    } else {
+      const next = new Set(trail).add(finding.name);
+      result = finding.chain.length > 0 && finding.chain.every(name => byName.has(name) && covered(byName.get(name), next));
+    }
+    memo.set(finding.name, result);
+    return result;
+  };
+  const acceptedFindings = blocking.filter(f => covered(f)).map(f => f.name);
+  const unaccepted = blocking.filter(f => !covered(f)).map(f => f.name);
+  return {
+    status: report.status === 'PASS' || unaccepted.length === 0 ? 'PASS' : 'FAIL',
+    rawStatus: report.status,
+    acceptedFindings,
+    unaccepted,
+    activeAcceptances: entries.map(e => ({ url: e.url, package: e.package, expires: e.expires, decidedBy: e.decidedBy })),
+  };
 }
 
 export function compareFindings(head, base) {
@@ -70,10 +120,11 @@ function main() {
     writeFileSync(output + '.base.raw.json', base.raw);
     const head = audit(headDirectory);
     writeFileSync(output + '.head.raw.json', head.raw);
-    const receipt = { schema: 1, headSha: process.env.SOURCE_HEAD, baseSha: process.env.SOURCE_BASE, head: head.report, base: base.report, comparison: compareFindings(head.report, base.report) };
+    const acceptance = applyAcceptances(head.report, JSON.parse(readFileSync(acceptanceFile, 'utf8')));
+    const receipt = { schema: 2, headSha: process.env.SOURCE_HEAD, baseSha: process.env.SOURCE_BASE, head: head.report, base: base.report, comparison: compareFindings(head.report, base.report), acceptance };
     writeFileSync(output, JSON.stringify(receipt, null, 2) + '\n');
     console.log(JSON.stringify(receipt, null, 2));
-    process.exitCode = head.report.status === 'PASS' ? 0 : 1;
+    process.exitCode = acceptance.status === 'PASS' ? 0 : 1;
   } catch (error) {
     writeFileSync(output, JSON.stringify({ schema: 1, status: 'BLOCKED', error: error.message }) + '\n');
     throw error;

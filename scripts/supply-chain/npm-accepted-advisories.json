@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "accepted": [
+    {
+      "url": "https://github.com/advisories/GHSA-fc5q-39xc-vjpf",
+      "package": "picomatch",
+      "noPatchedVersionRange": "*",
+      "maxSeverity": "high",
+      "scope": "build-time-dependency",
+      "reason": "ReDoS in picomatch <= 4.0.7 (latest release, no patched version). Reached only through vite, tinyglobby and fdir at build and dev time on trusted repository globs; nothing from it ships in the application. Revisit when upstream patches or on expiry.",
+      "decidedBy": "owner, authorized in the 2026-11-18 session (explicit 'boleh'); not an independent review",
+      "expires": "2026-12-18"
+    }
+  ]
+}
