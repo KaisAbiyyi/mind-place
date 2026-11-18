@@ -94,9 +94,11 @@ enum BackupCheckpoint {
     PayloadCopyChunk,
     ManifestPartiallyWritten,
     BeforeBackupPublish,
+    InsideBackupPublishFence,
     RestoreStagingCreated,
     RestorePayloadCopyChunk,
     BeforeRestorePublish,
+    InsideRestorePublishFence,
 }
 const MAX_FILE_SIZE: u64 = 8 * 1024 * 1024 * 1024;
 const MAX_TOTAL_SIZE: u64 = 512 * 1024 * 1024 * 1024;
@@ -300,7 +302,12 @@ impl PortableBackup {
         verify_package_inventory(&staging, &expected)?;
         gate.validate_lease(lease)?;
         checkpoint(BackupCheckpoint::BeforeBackupPublish, destination)?;
-        crate::vault_fs::publish_new_directory(&staging, destination)?;
+        // Lease validation and the no-replace rename are one operation with
+        // respect to Lock: staging/verification above stays outside the fence.
+        gate.publish_under_lease(lease, || {
+            checkpoint(BackupCheckpoint::InsideBackupPublishFence, destination)?;
+            crate::vault_fs::publish_new_directory(&staging, destination)
+        })?;
         Ok(meta)
     }
 
@@ -449,7 +456,10 @@ impl PortableBackup {
         sync_directory_tree(&staging, &staging, &mut sync_budget)?;
         gate.validate_lease(lease)?;
         checkpoint(BackupCheckpoint::BeforeRestorePublish, destination)?;
-        crate::vault_fs::publish_new_directory(&staging, destination)?;
+        gate.publish_under_lease(lease, || {
+            checkpoint(BackupCheckpoint::InsideRestorePublishFence, destination)?;
+            crate::vault_fs::publish_new_directory(&staging, destination)
+        })?;
         Ok(meta)
     }
 }
@@ -1460,5 +1470,144 @@ mod tests {
         assert!(!destination.exists());
         assert!(!staging.exists());
         drop(listener);
+    }
+
+    /// Revocation before the commit denies publication and leaves nothing
+    /// visible; a commit already inside the fence finishes before Lock
+    /// completes. Both orderings are driven by deterministic hooks.
+    #[test]
+    fn unlock_revocation_is_atomic_with_backup_and_restore_publication() {
+        use std::sync::mpsc::channel;
+        let (temp, gate, lease, vault, _) = fixture();
+        let source = temp.path().join("vault");
+        let good = temp.path().join("good-generation");
+        PortableBackup::create(&gate, lease, &vault, &source, &good, 1).unwrap();
+        let good_manifest = fs::read(good.join("bundle.json")).unwrap();
+
+        // (a) revocation lands after verification but before the commit.
+        let denied = temp.path().join("denied-backup");
+        let result = PortableBackup::create_with_checkpoint(
+            &gate,
+            lease,
+            &vault,
+            &source,
+            &denied,
+            2,
+            |point, _| {
+                if point == BackupCheckpoint::BeforeBackupPublish {
+                    gate.lock();
+                }
+                Ok(())
+            },
+        );
+        assert!(matches!(result, Err(SecurityError::Locked)));
+        assert!(!denied.exists(), "revoked publication became visible");
+        assert_eq!(fs::read(good.join("bundle.json")).unwrap(), good_manifest);
+
+        let (temp2, gate2, lease2, vault2, recovery2) = fixture();
+        let source2 = temp2.path().join("vault");
+        let backup2 = temp2.path().join("backup");
+        PortableBackup::create(&gate2, lease2, &vault2, &source2, &backup2, 1).unwrap();
+        let denied_restore = temp2.path().join("denied-restore");
+        let result = PortableBackup::restore_with_limits_and_checkpoint(
+            &gate2,
+            lease2,
+            &backup2,
+            &denied_restore,
+            &recovery2,
+            PRODUCTION_INVENTORY_LIMITS,
+            |point, _| {
+                if point == BackupCheckpoint::BeforeRestorePublish {
+                    gate2.lock();
+                }
+                Ok(())
+            },
+        );
+        assert!(matches!(result, Err(SecurityError::Locked)));
+        assert!(!denied_restore.exists());
+        assert!(backup2.join("bundle.json").is_file());
+
+        // (b) commit already owns the fence; Lock must wait for it.
+        let (temp3, gate3, lease3, vault3, _) = fixture();
+        let source3 = temp3.path().join("vault");
+        let prior = temp3.path().join("prior");
+        PortableBackup::create(&gate3, lease3, &vault3, &source3, &prior, 1).unwrap();
+        let prior_manifest = fs::read(prior.join("bundle.json")).unwrap();
+        let committed = temp3.path().join("committed-backup");
+        let (entered_tx, entered_rx) = channel::<()>();
+        let (locked_tx, locked_rx) = channel::<bool>();
+        let gate_for_lock = gate3.clone();
+        let committed_probe = committed.clone();
+        let locker = std::thread::spawn(move || {
+            entered_rx.recv().unwrap();
+            gate_for_lock.lock();
+            // Lock completed: the fenced publication must already be visible.
+            locked_tx
+                .send(committed_probe.join("bundle.json").is_file())
+                .unwrap();
+        });
+        let meta = PortableBackup::create_with_checkpoint(
+            &gate3,
+            lease3,
+            &vault3,
+            &source3,
+            &committed,
+            2,
+            |point, _| {
+                if point == BackupCheckpoint::InsideBackupPublishFence {
+                    entered_tx.send(()).unwrap();
+                    // The locker may now be blocked on the gate; it cannot
+                    // have completed while this commit owns the fence.
+                    assert!(locked_rx.try_recv().is_err());
+                }
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(meta.generation, 2);
+        assert!(
+            locked_rx.recv().unwrap(),
+            "Lock completed before publication"
+        );
+        locker.join().unwrap();
+        assert_eq!(fs::read(prior.join("bundle.json")).unwrap(), prior_manifest);
+        assert!(gate3.validate_lease(lease3).is_err());
+
+        // Same ordering for portable restore.
+        let (temp4, gate4, lease4, vault4, recovery4) = fixture();
+        let source4 = temp4.path().join("vault");
+        let backup4 = temp4.path().join("backup");
+        PortableBackup::create(&gate4, lease4, &vault4, &source4, &backup4, 1).unwrap();
+        let restored = temp4.path().join("restored");
+        let (entered_tx, entered_rx) = channel::<()>();
+        let (locked_tx, locked_rx) = channel::<bool>();
+        let gate_for_lock = gate4.clone();
+        let restored_probe = restored.clone();
+        let locker = std::thread::spawn(move || {
+            entered_rx.recv().unwrap();
+            gate_for_lock.lock();
+            locked_tx.send(restored_probe.is_dir()).unwrap();
+        });
+        PortableBackup::restore_with_limits_and_checkpoint(
+            &gate4,
+            lease4,
+            &backup4,
+            &restored,
+            &recovery4,
+            PRODUCTION_INVENTORY_LIMITS,
+            |point, _| {
+                if point == BackupCheckpoint::InsideRestorePublishFence {
+                    entered_tx.send(()).unwrap();
+                    assert!(locked_rx.try_recv().is_err());
+                }
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(
+            locked_rx.recv().unwrap(),
+            "Lock completed before restore publication"
+        );
+        locker.join().unwrap();
     }
 }

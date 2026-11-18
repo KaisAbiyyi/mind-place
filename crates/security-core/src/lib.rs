@@ -296,6 +296,29 @@ impl SecurityGate {
         Ok(())
     }
 
+    /// Run `publish` as one operation with respect to Lock/Unlock.
+    ///
+    /// The live unlock epoch is validated and `publish` runs while the gate
+    /// state mutex is held, so `lock`, `lock_if_lease`, `unlock` and every
+    /// other gate transition either complete before this validation (and the
+    /// publication is denied with `Locked`) or wait until `publish` has
+    /// returned. Staging and integrity verification must happen *before* this
+    /// call; `publish` must be short (an atomic no-replace rename) and must
+    /// not call back into this gate, which would deadlock.
+    pub fn publish_under_lease<T>(
+        &self,
+        lease: UnlockLease,
+        publish: impl FnOnce() -> Result<T>,
+    ) -> Result<T> {
+        let state = self.lock_state();
+        if state.locked || !state.configured || state.epoch != lease.epoch {
+            return Err(SecurityError::Locked);
+        }
+        let outcome = publish();
+        drop(state);
+        outcome
+    }
+
     pub fn instance_id(&self) -> [u8; 16] {
         self.inner.instance_id
     }
@@ -571,6 +594,53 @@ mod tests {
         assert!(gate.validate_lease(owner).is_ok());
         assert!(gate.lock().locked);
         assert!(gate.validate_lease(owner).is_err());
+    }
+
+    #[test]
+    fn publish_under_lease_is_atomic_with_lock() {
+        use std::sync::mpsc::channel;
+        let (_dir, gate) = gate();
+        gate.initialize(b"correct horse battery staple").unwrap();
+        let lease = gate.require_unlocked().unwrap();
+        // Ordering 1: a commit owning the fence finishes before Lock returns.
+        let (entered_tx, entered_rx) = channel::<()>();
+        let (done_tx, done_rx) = channel::<bool>();
+        let published = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let locker = {
+            let gate = gate.clone();
+            let published = published.clone();
+            std::thread::spawn(move || {
+                entered_rx.recv().unwrap();
+                gate.lock();
+                done_tx
+                    .send(published.load(std::sync::atomic::Ordering::SeqCst))
+                    .unwrap();
+            })
+        };
+        gate.publish_under_lease(lease, || {
+            entered_tx.send(()).unwrap();
+            assert!(done_rx.try_recv().is_err());
+            published.store(true, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        })
+        .unwrap();
+        assert!(done_rx.recv().unwrap());
+        locker.join().unwrap();
+        // Ordering 2: revoked before the commit denies it without running it.
+        let mut ran = false;
+        assert!(matches!(
+            gate.publish_under_lease(lease, || {
+                ran = true;
+                Ok(())
+            }),
+            Err(SecurityError::Locked)
+        ));
+        assert!(!ran);
+        gate.unlock(b"correct horse battery staple").unwrap();
+        assert!(matches!(
+            gate.publish_under_lease(lease, || Ok(())),
+            Err(SecurityError::Locked)
+        ));
     }
 
     #[test]
