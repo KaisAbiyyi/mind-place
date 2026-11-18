@@ -2,11 +2,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { transitiveLicenseNotices } from './notice-coverage.mjs';
 import { helperPin, helperDirectory, readVerifiedHelperBundle, readVerifiedRegularFile } from './tunnel-helper.mjs';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const product=JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8'));
-const metadata=spawnSync('cargo',['metadata','--format-version','1','--filter-platform',process.platform==='win32'?'x86_64-pc-windows-msvc':process.platform==='darwin'?'aarch64-apple-darwin':'x86_64-unknown-linux-gnu'],{cwd:root,encoding:'utf8',maxBuffer:32*1024*1024});
+const metadata=spawnSync('cargo',['metadata','--locked','--format-version','1','--filter-platform',process.platform==='win32'?'x86_64-pc-windows-msvc':process.platform==='darwin'?'aarch64-apple-darwin':'x86_64-unknown-linux-gnu'],{cwd:root,encoding:'utf8',maxBuffer:32*1024*1024});
 if(metadata.status!==0)throw new Error(metadata.stderr||'Cargo metadata failed');
 const packages=JSON.parse(metadata.stdout).packages.filter(p=>p.source);
 const sections=[`Mind Place ${product.version} — third-party source and license notices\n\nRust dependencies include locked product/build dependencies for the target platform. Frontend notices include the production dependency closure. Development-only tooling is not distributed.`];
@@ -19,13 +20,18 @@ function licenseFiles(dir,depth=0){
  }
  return out;
 }
-function add(name,version,license,dir){
+function add(name,version,license,dir,supplements=[]){
  sections.push(`\n${'='.repeat(72)}\n${name} ${version}\nDeclared license: ${license||'See source license'}\n`);
+ for (const { sourceUrl } of supplements) sections.push('Source archive: ' + sourceUrl);
  const files=licenseFiles(dir);
  for(const file of files){const body=readVerifiedRegularFile(file,{maxBytes:1024*1024,sizeTypeError:`License file too large: ${name}`}).toString('utf8');sections.push(`--- ${path.relative(dir,file).replaceAll('\\','/')} ---\n${body}`);}
- if(!files.length)sections.push(`License declaration: ${license||'Not declared'}; package source: ${name}`);
+ for(const supplement of supplements)sections.push(`--- ${supplement.name} ---\n${supplement.text}`);
+ if(!files.length&&!supplements.length)sections.push(`License declaration: ${license||'Not declared'}; package source: ${name}`);
 }
-for(const p of packages.sort((a,b)=>a.name.localeCompare(b.name)||a.version.localeCompare(b.version)))add(p.name,p.version,p.license,path.dirname(p.manifest_path));
+for (const p of packages.sort((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version))) {
+ const supplements = p.source.startsWith('registry+') ? transitiveLicenseNotices(p.name, p.version) : [];
+ add(p.name, p.version, p.license, path.dirname(p.manifest_path), supplements);
+}
 const seen=new Set();
 function nodePackage(name,from){
  let parent=from;let dir;
