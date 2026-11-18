@@ -11,7 +11,7 @@ pub const MAX_TAKEOUT_HTML_BYTES: u64 = 64 * 1024 * 1024; // 64 MiB
 
 pub fn parse_takeout_timestamp(s: &str) -> Option<String> {
     let s = s.trim();
-    if chrono::DateTime::parse_from_rfc3339(s).is_ok() {
+    if crate::parse_rfc3339(s).is_some() {
         return Some(s.to_owned());
     }
 
@@ -76,7 +76,7 @@ pub fn parse_takeout_timestamp(s: &str) -> Option<String> {
 
     let formatted =
         format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}{tz_offset}");
-    if chrono::DateTime::parse_from_rfc3339(&formatted).is_ok() {
+    if crate::parse_rfc3339(&formatted).is_some() {
         Some(formatted)
     } else {
         None
@@ -453,7 +453,9 @@ impl GeminiTakeoutParser {
                 "Provider event timestamp unavailable in Takeout card; using import processing time"
                     .into(),
             );
-            chrono::Utc::now().to_rfc3339()
+            time::OffsetDateTime::now_utc()
+                .format(&time::format_description::well_known::Rfc3339)
+                .expect("valid UTC timestamp")
         };
 
         // 4. Structure-aware turn extraction
@@ -1033,5 +1035,11 @@ mod tests {
             .warnings
             .iter()
             .any(|w| w.contains("cannot prove the full conversation")));
+    }
+
+    #[test]
+    fn parse_takeout_timestamp_rejects_non_rfc3339_date_time_separator() {
+        assert!(parse_takeout_timestamp("2026-11-18_12:00:00Z").is_none());
+        assert!(parse_takeout_timestamp("2026-11-18T12:00:00Z").is_some());
     }
 }

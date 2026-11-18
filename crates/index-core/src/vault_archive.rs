@@ -532,10 +532,10 @@ impl VaultCaptureStore {
             let prior: Capture =
                 serde_json::from_slice(&previous).map_err(|_| IndexError::InvalidEvidence)?;
             validate_stored_capture(&prior)?;
-            let prior_time = chrono::DateTime::parse_from_rfc3339(&prior.captured_at)
-                .map_err(|_| IndexError::InvalidEvidence)?;
-            let incoming_time = chrono::DateTime::parse_from_rfc3339(&capture.captured_at)
-                .map_err(|_| IndexError::InvalidEvidence)?;
+            let prior_time = mind_place_archive::parse_rfc3339(&prior.captured_at)
+                .ok_or(IndexError::InvalidEvidence)?;
+            let incoming_time = mind_place_archive::parse_rfc3339(&capture.captured_at)
+                .ok_or(IndexError::InvalidEvidence)?;
             matches!(
                 prior.capture_method.as_str(),
                 "manual-dom" | "automatic-dom"

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { assertPinnedCrateNotices, assertWindowsTransitiveNotices } from './notice-coverage.mjs';
+import { assertMplSourceNotices, assertPinnedCrateNotices, assertWindowsTransitiveNotices } from './notice-coverage.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const portable = path.join(root, 'release', `${process.platform}-${process.arch}`);
@@ -17,6 +17,7 @@ if (!notices.includes('third-party source and license notices') || !notices.incl
 // Dependency-specific coverage: every exact-pinned shipped crate (for example html5gum) needs
 // its own notice section, declared license and license text, not just any notice file.
 const covered = assertPinnedCrateNotices(notices, root);
+assertMplSourceNotices(notices);
 if (process.platform === 'win32') {
   covered.push(...assertWindowsTransitiveNotices(notices, fs.readFileSync(path.join(root, 'Cargo.lock'), 'utf8')));
   for (const name of ['tunnel-client.exe', 'tunnel/receipt.json']) {

@@ -19,6 +19,10 @@ const fullyHardened = new Set([
   "release.yml",
   "workflow-security.yml",
   "brave-registration.yml",
+  "supply-chain.yml",
+  "release-sbom.yml",
+  "codeql.yml",
+  "scorecard.yml",
 ]);
 
 const expectedFiles = [...fullyHardened].sort();
@@ -47,7 +51,7 @@ for (const file of actualFiles) {
   assert.doesNotMatch(source, /^\s*permissions:\s*write-all\s*$/m, `${file}: write-all token permissions are forbidden`);
   assert.doesNotMatch(
     source,
-    /^\s*(?:contents|actions|checks|pull-requests|packages|statuses|deployments|id-token):\s*write\s*$/m,
+    /^\s*(?:contents|actions|checks|pull-requests|packages|statuses|deployments|id-token|security-events):\s*write\s*$/m,
     `${file}: write-scoped token permissions are forbidden in this CI trust boundary`,
   );
 
@@ -58,7 +62,7 @@ for (const file of actualFiles) {
     if (actionRef.startsWith("./")) continue;
     assert.match(
       actionRef,
-      /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+@[0-9a-f]{40}$/,
+      /^(?:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+|github\/codeql-action\/(?:init|analyze))@[0-9a-f]{40}$/,
       `${file}: external action must be pinned to a full commit SHA: ${actionRef}`,
     );
   }
