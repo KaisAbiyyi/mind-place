@@ -60,6 +60,20 @@ range is 0.11.0–0.18.1; its proposed remediation is KaTeX 0.19.1, a major upgr
 High=0, critical=0; introduced/changed=0. The npm gate passes its documented high
 threshold; this is **not** a clean vulnerability inventory. No upgrade performed.
 
+### Update 2026-11-18 — new high advisory, no patched version exists
+
+The npm gate now **fails** at its documented `high` threshold on
+[GHSA-fc5q-39xc-vjpf](https://github.com/advisories/GHSA-fc5q-39xc-vjpf) (picomatch ReDoS through
+single-branch repeated extglobs, published 2026-10-19). It reaches `fdir`, `tinyglobby` and `vite` through the
+lock (`picomatch 4.0.7`), giving 4 high findings; the KaTeX low finding is unchanged. This is not introduced by
+this PR: main carries the same lock. The advisory range is `<= 4.0.7` with **no first patched version**, 4.0.7
+is the latest release, and the current `vite` 8.x, `tinyglobby` and `fdir` all still depend on `picomatch ^4`.
+`npm audit`'s only suggestion is a `vite` major downgrade, which does not remove the vulnerable package either.
+There is therefore no dependency change that resolves it today. No exception, ignore, threshold change or
+override was added; the job stays red. The package is a build-time tool dependency, but any waiver (a dated,
+scoped acceptance) is an owner decision. Options: wait for an upstream picomatch patch, or the owner authorizes a
+documented time-boxed exception in the gate policy.
+
 ## CodeQL — untriaged findings in unchanged source
 
 The first JS/TS `security-extended` scan reported eight findings at checkpoint
