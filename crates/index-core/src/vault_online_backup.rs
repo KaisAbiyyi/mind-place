@@ -120,6 +120,7 @@ enum OnlineCheckpoint {
     RestoreCopied,
     RestoreVerified,
     BeforeRestorePublication,
+    InsideRestorePublicationFence,
     RestorePublished,
 }
 
@@ -354,8 +355,17 @@ impl VaultOnlineBackup {
             .map_err(|_| IndexError::Revoked)?;
         // All SQLite handles above have closed before Windows directory rename.
         checkpoint(OnlineCheckpoint::BeforeRestorePublication)?;
-        mind_place_security::vault_fs::publish_new_directory(&staged, destination)
-            .map_err(|_| IndexError::InvalidEvidence)?;
+        // Live lease validation and the no-replace rename are one operation
+        // with respect to Lock; verification above stays outside the fence.
+        gate.publish_under_lease(lease, || {
+            checkpoint(OnlineCheckpoint::InsideRestorePublicationFence)
+                .map_err(|_| mind_place_security::SecurityError::InvalidConfig)?;
+            mind_place_security::vault_fs::publish_new_directory(&staged, destination)
+        })
+        .map_err(|error| match error {
+            mind_place_security::SecurityError::Locked => IndexError::Revoked,
+            _ => IndexError::InvalidEvidence,
+        })?;
         checkpoint(OnlineCheckpoint::RestorePublished)?;
         Ok(meta)
     }
@@ -1070,6 +1080,68 @@ mod tests {
                 good_before
             );
         }
+    }
+
+    #[test]
+    fn coherent_restore_publication_is_atomic_with_lock() {
+        use std::sync::mpsc::channel;
+        // (a) revocation before the commit: denied, nothing visible, good kept.
+        let f = crash_fixture();
+        let good = f.home.path().join("good");
+        let denied = f.home.path().join("denied-restore");
+        let result = VaultOnlineBackup::restore_with_checkpoint(
+            &f.gate,
+            f.lease,
+            &good,
+            &denied,
+            &f.recovery,
+            |point| {
+                if point == OnlineCheckpoint::BeforeRestorePublication {
+                    f.gate.lock();
+                }
+                Ok(())
+            },
+        );
+        assert!(matches!(result, Err(IndexError::Revoked)));
+        assert!(!denied.exists(), "revoked restore became visible");
+        assert!(good.join("bundle.json").is_file());
+
+        // (b) a commit already owning the fence finishes before Lock returns.
+        let f = crash_fixture();
+        let good = f.home.path().join("good");
+        let restored = f.home.path().join("fenced-restore");
+        let (entered_tx, entered_rx) = channel::<()>();
+        let (locked_tx, locked_rx) = channel::<bool>();
+        let gate = f.gate.clone();
+        let probe = restored.clone();
+        let locker = std::thread::spawn(move || {
+            entered_rx.recv().unwrap();
+            gate.lock();
+            locked_tx
+                .send(probe.join("state.sqlite3").is_file())
+                .unwrap();
+        });
+        VaultOnlineBackup::restore_with_checkpoint(
+            &f.gate,
+            f.lease,
+            &good,
+            &restored,
+            &f.recovery,
+            |point| {
+                if point == OnlineCheckpoint::InsideRestorePublicationFence {
+                    entered_tx.send(()).unwrap();
+                    assert!(locked_rx.try_recv().is_err());
+                }
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(
+            locked_rx.recv().unwrap(),
+            "Lock completed before publication"
+        );
+        locker.join().unwrap();
+        assert!(good.join("bundle.json").is_file());
     }
 
     #[test]
