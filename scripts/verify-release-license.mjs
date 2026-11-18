@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { assertPinnedCrateNotices } from './notice-coverage.mjs';
+import { assertPinnedCrateNotices, assertWindowsTransitiveNotices } from './notice-coverage.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const portable = path.join(root, 'release', `${process.platform}-${process.arch}`);
@@ -18,6 +18,7 @@ if (!notices.includes('third-party source and license notices') || !notices.incl
 // its own notice section, declared license and license text, not just any notice file.
 const covered = assertPinnedCrateNotices(notices, root);
 if (process.platform === 'win32') {
+  covered.push(...assertWindowsTransitiveNotices(notices, fs.readFileSync(path.join(root, 'Cargo.lock'), 'utf8')));
   for (const name of ['tunnel-client.exe', 'tunnel/receipt.json']) {
     if (!fs.statSync(path.join(portable, name)).isFile()) throw new Error(`Missing bundled tunnel helper provenance: ${name}`);
   }
@@ -25,4 +26,4 @@ if (process.platform === 'win32') {
     throw new Error('Missing tunnel-helper third-party license notices');
   }
 }
-console.log(`Portable MIT license and third-party notice resources OK (${covered.length} pinned crates covered)`);
+console.log(`Portable MIT license and third-party notice resources OK (${covered.length} crate notice sections checked)`);
