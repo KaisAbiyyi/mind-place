@@ -25,6 +25,7 @@ this record does not pretend an earlier run certifies a later source.
 | RUSTSEC-2024-0370 | proc-macro-error 1.0.4 | Unmaintained | Upstream no longer maintained |
 | RUSTSEC-2026-0486 | rustix 1.1.5 | Unsound | Extended-attribute calls can mark unwritten bytes initialized with a zero-length buffer |
 | RUSTSEC-2026-0502 | sqlcipher-src 419.0.6+sqlcipher-4.19.0-sqlite-3.53.4-libtomcrypt-1.18.2 | Vulnerability, CVE-2026-119375 | Crafted local database/WAL pair can expose uninitialized SQLite page-cache memory |
+| RUSTSEC-2026-0543 | chrono 0.4.45 | Unmaintained | Observed in RustSec DB `233155b4025b854c68a4b199c0e32d7fd53291a2` on both base (`43763a4`) and head (`396d7c2`); all versions affected, recommended alternatives `jiff` or `time`; resolved for Windows via `mind-place-archive` and `mind-place-index` |
 
 No new advisory IDs were introduced at the audited checkpoint. Platform,
 reachability and exploitability still require independent triage; an all-target,

@@ -100,18 +100,19 @@ contains the unclaimed, separately scoped follow-up work packages.
 The current npm low KaTeX finding is also retained; this continuation does not
 change the justified high/critical threshold or perform an unrelated upgrade.
 
-## Integration status after main `a502bcb` (2026-11-18)
+## Integration status after main `43763a4` (2026-11-18)
 
-This PR was reconciled with main `a502bcb097acb882d0f4254bad0354ba663d4642` (clean merge, no textual conflict, no
+This PR was reconciled with main `43763a4aeda4729481004153f372ca7363cf6cdf` (clean merge, no textual conflict, no
 policy/lock/dependency change in this PR). Remediations already accepted on main are **not** redone here:
 
-| Item | State on main `a502bcb` | What remains |
+| Item | State on main `43763a4` | What remains |
 | --- | --- | --- |
 | RUSTSEC-2026-0486, rustix | `Cargo.lock` locks `rustix 1.1.6` (PR #189). The decision row above that says "not resolved" is historical and superseded. | Nothing in this PR. The gate still compares and reports exactly. |
-| CodeQL JS results | Source remediations merged through #183, #186 and #187. An earlier isolated integration candidate recorded JS PASS (`triage.json` status PASS, zero findings). | The exact-head CodeQL run on this branch is the evidence; do not reuse that candidate result. If any result remains, it stays red. |
+| CodeQL (JS/TS, Rust, Python) | Source remediations merged through #183, #186 and #187. On `396d7c2`, CodeQL `javascript-typescript`, `rust`, and `python` each passed with `findings: 0` in `triage.json` (run `44263381909`). | Re-verify exact-head CodeQL on every subsequent head; if any finding appears, it stays red. |
 | RUSTSEC-2026-0502, sqlcipher-src `419.0.6` | Still locked. | [#179](https://github.com/KaisAbiyyi/mind-place/issues/179): storage compatibility cohort and an owner-assigned `Cargo.lock` window with #151/#152. Not changed here. |
 | RUSTSEC-2024-0429 glib `0.18.5`, RUSTSEC-2024-0370 proc-macro-error `1.0.4` | Still locked (GTK/Tauri macro cohort). | [#180](https://github.com/KaisAbiyyi/mind-place/issues/180) unit 2, serialized with other `Cargo.lock` changes. Not changed here. |
-| Seven license rejections | `deny.toml` unchanged; no allowlist edit. | [#181](https://github.com/KaisAbiyyi/mind-place/issues/181) owner distribution decision. The two packaged-notice corrections (selectors MPL text, SQLite header notice) are implemented separately in [#193](https://github.com/KaisAbiyyi/mind-place/pull/193); they are not an owner disposition. |
+| RUSTSEC-2026-0543, chrono `0.4.45` (`unmaintained`) | Still locked (observed in RustSec DB `233155b4025b854c68a4b199c0e32d7fd53291a2` on both `base` and `head` at `396d7c2`). Resolves for Windows via `mind-place-archive` and `mind-place-index` (`Cargo.toml` workspace dependency; `targetPresence.resolvedForTarget: true`). Upstream advisory (`2026-09-14`) marks all `chrono` versions unmaintained with no safe upgrade and recommends `jiff` or `time`. | Separate migration unit (replacing `chrono` usage in `crates/archive-core` and `crates/index-core` with `jiff` or `time` under a serialized `Cargo.toml`/`Cargo.lock` window with #151/#152/#179/#180) or explicit owner advisory policy decision. No `deny.toml` ignore or `unmaintained` relaxation added here. |
+| Seven license rejections | `deny.toml` unchanged; no allowlist edit. Packaged `selectors` MPL-2.0 and SQLite `blessing`/notice texts are now merged on main via [#193](https://github.com/KaisAbiyyi/mind-place/pull/193) (`43763a4`). | [#181](https://github.com/KaisAbiyyi/mind-place/issues/181) owner distribution-policy decision (whether to explicitly allow `MPL-2.0`, SQLite `blessing`/`WTFPL`, and `Apache-2.0 WITH LLVM-exception` in `deny.toml`, or replace/isolate the crates). |
 
 The Rust advisory and license jobs remain expected to fail until the items above are resolved by their owners. A red
 job is never reclassified as PASS and a skipped job is never counted as PASS.
