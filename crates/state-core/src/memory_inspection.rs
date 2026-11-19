@@ -140,6 +140,16 @@ impl StateStore {
         drop(statement);
         drop(db);
 
+        let mut visible_relations = Vec::with_capacity(relations.len());
+        for relation in relations {
+            if self
+                .claim_as_of(&relation.other_claim_id, i64::MAX)?
+                .is_some_and(|claim| claim.scope_id.is_none())
+            {
+                visible_relations.push(relation);
+            }
+        }
+
         // An interleaved forget wins over earlier reads; never return stale
         // history to the UI if a memory was forgotten during inspection.
         let still_visible: Option<ClaimState> = self.claim_as_of(claim_id, i64::MAX)?;
@@ -149,7 +159,7 @@ impl StateStore {
         Ok(Some(MemoryInspectionDetail {
             ranked,
             history,
-            relations,
+            relations: visible_relations,
         }))
     }
 }

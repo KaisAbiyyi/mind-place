@@ -10,6 +10,10 @@ pub struct CipherKey {
     lease: UnlockLease,
 }
 impl CipherKey {
+    /// Bind owner confirmations to the exact unlocked runtime epoch.
+    pub(crate) fn lease_epoch(&self) -> u64 {
+        self.lease.epoch()
+    }
     pub fn new(raw: [u8; 32], gate: &SecurityGate, lease: UnlockLease) -> Arc<Self> {
         Arc::new(Self {
             material: Zeroizing::new(raw),

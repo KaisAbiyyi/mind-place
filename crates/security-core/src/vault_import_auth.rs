@@ -113,7 +113,38 @@ pub fn validate_import_source(source: &Path) -> Result<()> {
     Ok(())
 }
 
+/// MP-9C: proof that the local owner re-entered the unlock secret during the
+/// given live unlock epoch. Deliberately neither `Clone` nor `Copy` and
+/// constructible only here, so each privileged owner action (forget preview,
+/// forget confirmation) consumes a fresh re-authentication. Never issued to
+/// MCP/model clients; it carries no secret.
+#[derive(Debug)]
+pub struct OwnerReauthentication {
+    lease_epoch: u64,
+}
+
+impl OwnerReauthentication {
+    pub fn lease_epoch(&self) -> u64 {
+        self.lease_epoch
+    }
+}
+
 impl SecurityGate {
+    /// Re-verify the owner secret (sharing the unlock failure backoff) inside
+    /// a still-valid lease, and bind the proof to that lease's epoch.
+    pub fn reauthenticate_owner(
+        &self,
+        lease: UnlockLease,
+        credential: &[u8],
+    ) -> Result<OwnerReauthentication> {
+        self.validate_lease(lease)?;
+        self.verify_owner_credential(credential)?;
+        self.validate_lease(lease)?;
+        Ok(OwnerReauthentication {
+            lease_epoch: lease.epoch(),
+        })
+    }
+
     pub fn verify_owner_credential(&self, credential: &[u8]) -> Result<()> {
         validate_secret(credential)?;
         let mut state = self.lock_state();
