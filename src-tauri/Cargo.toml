@@ -32,4 +32,4 @@ windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Netwo
 
 [dev-dependencies]
 # Test-only raw access for MP-9C tamper regressions (same pinned version as state-core).
-rusqlite = "=0.41.0"
+rusqlite = "=0.43.0"
