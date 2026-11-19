@@ -61,11 +61,22 @@ impl IndexStore {
     pub fn inspect_retrieval_with_check(
         &self,
         request: &RetrievalRequest,
+        check: impl FnMut() -> Result<()>,
+    ) -> Result<SearchInspection> {
+        self.inspect_retrieval_filtered_with_check(request, check, &mut |_: &str| Ok(true))
+    }
+
+    /// MP-9C: the inspection carries evidence snippets, so it must apply the
+    /// same current-authority source filter as ordinary retrieval.
+    pub fn inspect_retrieval_filtered_with_check(
+        &self,
+        request: &RetrievalRequest,
         mut check: impl FnMut() -> Result<()>,
+        visible: &mut (impl crate::SourceVisibility + ?Sized),
     ) -> Result<SearchInspection> {
         check()?;
         let started = Instant::now();
-        let result = self.retrieve(request)?;
+        let result = self.retrieve_filtered(request, visible)?;
         check()?;
         let generation = self.inspect_generation()?;
         check()?;

@@ -1,7 +1,10 @@
 //! MP-6B: bounded, scope-isolated queries over the disposable MP-6A graph.
 //! This module never grants access: callers must verify their unlock/permission
 //! lease in the supplied callback, including after the final SQLite read.
-use crate::{GraphKind, GraphNodeRef, GraphOrigin, GraphRelation, IndexError, IndexStore, Result};
+use crate::{
+    GraphKind, GraphNodeRef, GraphOrigin, GraphRelation, IndexError, IndexStore, Result,
+    SourceVisibility,
+};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -196,6 +199,7 @@ fn graph_edges_for(
     direction: GraphDirection,
     limit: usize,
     seen_ids_json: &str,
+    after_id: &str,
 ) -> Result<Vec<GraphQueryEdge>> {
     // Both endpoints must be members of the SAME requested scope. Merely
     // sharing a global node ID never authorizes reading another scope's edges.
@@ -207,6 +211,7 @@ fn graph_edges_for(
          JOIN graph_scope_nodes t ON t.node_id=e.to_node AND t.scope=e.scope
          WHERE e.scope=?1 AND
              e.id NOT IN (SELECT value FROM json_each(?4)) AND
+             e.id>?6 AND
              ((?3='both' AND (e.from_node=?2 OR e.to_node=?2))
               OR (?3='out' AND e.from_node=?2)
               OR (?3='in' AND e.to_node=?2))
@@ -218,7 +223,8 @@ fn graph_edges_for(
             node_id,
             direction.as_str(),
             seen_ids_json,
-            limit as i64
+            limit as i64,
+            after_id
         ],
         |r| {
             Ok((
@@ -237,13 +243,111 @@ fn graph_edges_for(
     rows.map(|row| edge_from_row(row?)).collect()
 }
 
+/// MP-9C: per-query visibility gate. Hidden sources are removed while the
+/// graph is traversed (seed resolution and every expansion), never after, so
+/// they cannot occupy node/edge budgets or be reached through a stale
+/// projection. A non-canonical Import node carries no source of its own: it
+/// is visible only while at least one `imported_from` edge names a visible
+/// canonical source (all-hidden or edge-less imports are hidden).
+struct Gate<'a, V: SourceVisibility + ?Sized> {
+    visible: &'a mut V,
+    hidden: Option<BTreeSet<String>>,
+    sources: BTreeMap<String, bool>,
+    imports: BTreeMap<String, bool>,
+}
+
+impl<'a, V: SourceVisibility + ?Sized> Gate<'a, V> {
+    fn new(visible: &'a mut V) -> Result<Self> {
+        let hidden = visible
+            .hidden_sources()?
+            .map(|ids| ids.into_iter().collect());
+        Ok(Self {
+            visible,
+            hidden,
+            sources: BTreeMap::new(),
+            imports: BTreeMap::new(),
+        })
+    }
+
+    fn source(&mut self, source_ref: &str) -> Result<bool> {
+        if !source_ref.starts_with("src:v1:") {
+            return Ok(true);
+        }
+        if let Some(hidden) = &self.hidden {
+            return Ok(!hidden.contains(source_ref));
+        }
+        if let Some(shown) = self.sources.get(source_ref) {
+            return Ok(*shown);
+        }
+        let shown = self.visible.is_visible(source_ref)?;
+        self.sources.insert(source_ref.to_owned(), shown);
+        Ok(shown)
+    }
+
+    fn node(&mut self, db: &Connection, scope: &str, node: &GraphQueryNode) -> Result<bool> {
+        if node.source_ref.starts_with("src:v1:") {
+            return self.source(&node.source_ref);
+        }
+        if node.kind != GraphKind::Import {
+            return Ok(true);
+        }
+        if let Some(shown) = self.imports.get(&node.id) {
+            return Ok(*shown);
+        }
+        let mut stmt = db.prepare(
+            "SELECT DISTINCT source_ref FROM graph_edges
+             WHERE scope=?1 AND to_node=?2 AND relation='imported_from' ORDER BY source_ref",
+        )?;
+        let refs = stmt
+            .query_map(params![scope, node.id], |r| r.get::<_, String>(0))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let mut shown = false;
+        for source_ref in refs {
+            if source_ref.starts_with("src:v1:") && self.source(&source_ref)? {
+                shown = true;
+                break;
+            }
+        }
+        self.imports.insert(node.id.clone(), shown);
+        Ok(shown)
+    }
+
+    fn edge(&mut self, edge: &GraphQueryEdge) -> Result<bool> {
+        self.source(&edge.source_ref)
+    }
+}
+
 impl IndexStore {
     /// Read-only graph traversal. The callback must validate current unlock and
     /// scope permission; it is invoked before opening, at every BFS expansion,
     /// and before disclosing results. Revoke causes an error, never partial hits.
+    /// This variant applies NO source visibility; desktop/MCP disclosure must
+    /// use `graph_neighbors_visible_with_check`.
     pub fn graph_neighbors_with_check(
         &self,
         request: &GraphNeighborhoodRequest,
+        check: impl FnMut() -> Result<()>,
+    ) -> Result<GraphNeighborhood> {
+        self.neighbors_inner::<fn(&str) -> Result<bool>>(request, None, check)
+    }
+
+    /// MP-9C: traversal under current source authority. Seeds and every
+    /// expansion are gated, so hidden sources never reach the result or its
+    /// budgets, and `max_hops: 0` returns only visible seeds.
+    pub fn graph_neighbors_visible_with_check(
+        &self,
+        request: &GraphNeighborhoodRequest,
+        visible: &mut (impl SourceVisibility + ?Sized),
+        check: impl FnMut() -> Result<()>,
+    ) -> Result<GraphNeighborhood> {
+        let gate = Gate::new(visible)?;
+        self.neighbors_inner(request, Some(gate), check)
+    }
+
+    fn neighbors_inner<V: SourceVisibility + ?Sized>(
+        &self,
+        request: &GraphNeighborhoodRequest,
+        mut gate: Option<Gate<'_, V>>,
         mut check: impl FnMut() -> Result<()>,
     ) -> Result<GraphNeighborhood> {
         validate_scope(&request.scope)?;
@@ -269,6 +373,11 @@ impl IndexStore {
         let mut queue = VecDeque::<(String, usize)>::new();
         for id in seeds {
             if let Some(node) = load_node(&tx, &request.scope, &id, 0)? {
+                if let Some(gate) = gate.as_mut() {
+                    if !gate.node(&tx, &request.scope, &node)? {
+                        continue;
+                    }
+                }
                 found.insert(id.clone(), node);
                 queue.push_back((id, 0));
             }
@@ -282,42 +391,70 @@ impl IndexStore {
             }
             // One extra row signals possible truncation without scanning a
             // high-degree node or disclosing any out-of-scope information.
-            let remaining = request.max_edges - edges.len();
-            let seen_ids_json = serde_json::to_string(&edges.keys().collect::<Vec<_>>())
-                .map_err(|_| IndexError::InvalidQuery)?;
-            let adjacent = graph_edges_for(
-                &tx,
-                &request.scope,
-                &id,
-                request.direction,
-                remaining + 1,
-                &seen_ids_json,
-            )?;
-            for edge in adjacent {
-                if edges.contains_key(&edge.id) {
-                    continue;
+            // Hidden rows are skipped without consuming budget; paging by
+            // edge ID continues past a page that was entirely hidden.
+            let mut after = String::new();
+            'pages: loop {
+                let remaining = request.max_edges - edges.len();
+                let seen_ids_json = serde_json::to_string(&edges.keys().collect::<Vec<_>>())
+                    .map_err(|_| IndexError::InvalidQuery)?;
+                let page_limit = remaining + 1;
+                let adjacent = graph_edges_for(
+                    &tx,
+                    &request.scope,
+                    &id,
+                    request.direction,
+                    page_limit,
+                    &seen_ids_json,
+                    &after,
+                )?;
+                let page_len = adjacent.len();
+                for edge in adjacent {
+                    after.clone_from(&edge.id);
+                    if edges.contains_key(&edge.id) {
+                        continue;
+                    }
+                    if let Some(gate) = gate.as_mut() {
+                        if !gate.edge(&edge)? {
+                            continue;
+                        }
+                    }
+                    let target = if edge.from_node == id {
+                        edge.to_node.clone()
+                    } else {
+                        edge.from_node.clone()
+                    };
+                    let node = if found.contains_key(&target) {
+                        None
+                    } else {
+                        // Fail closed if the endpoint disappeared from this scope.
+                        Some(
+                            load_node(&tx, &request.scope, &target, depth + 1)?
+                                .ok_or(IndexError::InvalidIndex)?,
+                        )
+                    };
+                    if let (Some(gate), Some(node)) = (gate.as_mut(), node.as_ref()) {
+                        if !gate.node(&tx, &request.scope, node)? {
+                            continue;
+                        }
+                    }
+                    if edges.len() >= request.max_edges {
+                        truncated = true;
+                        break 'pages;
+                    }
+                    if let Some(node) = node {
+                        if found.len() >= request.max_nodes {
+                            truncated = true;
+                            break 'pages;
+                        }
+                        found.insert(target.clone(), node);
+                        queue.push_back((target, depth + 1));
+                    }
+                    edges.insert(edge.id.clone(), edge);
                 }
-                if edges.len() >= request.max_edges {
-                    truncated = true;
+                if page_len < page_limit {
                     break;
                 }
-                let target = if edge.from_node == id {
-                    &edge.to_node
-                } else {
-                    &edge.from_node
-                };
-                if !found.contains_key(target) {
-                    if found.len() >= request.max_nodes {
-                        truncated = true;
-                        break;
-                    }
-                    // Fail closed if the endpoint disappeared from this scope.
-                    let node = load_node(&tx, &request.scope, target, depth + 1)?
-                        .ok_or(IndexError::InvalidIndex)?;
-                    found.insert(target.clone(), node);
-                    queue.push_back((target.clone(), depth + 1));
-                }
-                edges.insert(edge.id.clone(), edge);
             }
             if truncated {
                 break;

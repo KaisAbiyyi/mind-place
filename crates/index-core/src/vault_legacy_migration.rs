@@ -128,6 +128,11 @@ impl LegacyEncryptedConversion<'_> {
         self.verify_archives(source, stage)?;
         self.verify_raw_archive(source, stage)?;
         self.verify_documents(source, stage)?;
+        // Redaction authorization reads open SQLCipher state in WAL mode during
+        // archive verification. Quiesce ONLY the isolated conversion stage
+        // after its last reader closes, before strict inventory/digest checks.
+        // Never silently remove unknown sidecars or weaken layout validation.
+        self.quiesce_state_for_publication(stage)?;
         let vault = self.crypto()?;
         let storage = ImmutableVaultStorage::new(stage, &vault, self.gate, self.lease)?;
         let actual = RawLegacyInventory::read(stage, &vault, &storage, self.gate, self.lease)?
@@ -136,6 +141,77 @@ impl LegacyEncryptedConversion<'_> {
             return Err(SecurityError::Crypto);
         }
         self.verify_layout(source, stage)?;
+        self.gate.validate_lease(self.lease)
+    }
+
+    fn quiesce_one_sqlite(&self, stage: &Path, db_name: &str, key_domain: &[u8]) -> SecResult<()> {
+        let path = stage.join(db_name);
+        safe_regular(&path)?;
+        let wal = stage.join(format!("{db_name}-wal"));
+        if fs::symlink_metadata(&wal).is_ok() {
+            mind_place_security::vault_migration::validate_empty_sqlite_wal_sidecar(&wal)?;
+        }
+        let shm = stage.join(format!("{db_name}-shm"));
+        if fs::symlink_metadata(&shm).is_ok() {
+            mind_place_security::vault_migration::validate_empty_sqlite_shm_sidecar(&shm)?;
+        }
+        let db = sql(Connection::open_with_flags(
+            &path,
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+        ))?;
+        self.derived_cipher_key(key_domain)?
+            .unlock(&db)
+            .map_err(|_| SecurityError::Crypto)?;
+        sqlite_healthy(&db)?;
+        // A busy WAL checkpoint is not a clean shutdown. Fail closed and keep
+        // staging/destination for explicit retry rather than deleting files with live data.
+        let (busy, _, _): (i64, i64, i64) =
+            sql(db.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            }))?;
+        if busy != 0 {
+            return Err(SecurityError::Crypto);
+        }
+        // Preserve the encrypted database's WAL mode. Switching WAL -> DELETE
+        // -> WAL on every verified reopen changes SQLCipher page ciphertext
+        // and breaks the authenticated migration output digest on resume.
+        // The writable pager checkpoints and closes the empty sidecars.
+        sqlite_healthy(&db)?;
+        drop(db);
+        for suffix in ["-wal", "-shm"] {
+            let sidecar = stage.join(format!("{db_name}{suffix}"));
+            if sidecar.exists() || fs::symlink_metadata(&sidecar).is_ok() {
+                // The strict layout verifier must not accept a dirty pager.
+                return Err(SecurityError::Crypto);
+            }
+        }
+        Ok(())
+    }
+
+    fn quiesce_state_for_publication(&self, stage: &Path) -> SecResult<()> {
+        self.gate.validate_lease(self.lease)?;
+        let fences = mind_place_security::vault_fence::acquire_existing_vault_fences(stage)?;
+        let archive_db = stage.join("archive-index.sqlite3");
+        let quiesce_result = (|| -> SecResult<()> {
+            self.quiesce_one_sqlite(stage, "state.sqlite3", b"state/sqlcipher/v1")?;
+            if fs::symlink_metadata(&archive_db).is_ok() {
+                self.quiesce_one_sqlite(
+                    stage,
+                    "archive-index.sqlite3",
+                    b"archive-index/sqlcipher/v1",
+                )?;
+            } else {
+                for suffix in ["-wal", "-shm"] {
+                    let orphan = stage.join(format!("archive-index.sqlite3{suffix}"));
+                    if fs::symlink_metadata(&orphan).is_ok() {
+                        return Err(SecurityError::Crypto);
+                    }
+                }
+            }
+            Ok(())
+        })();
+        drop(fences);
+        quiesce_result?;
         self.gate.validate_lease(self.lease)
     }
 
@@ -277,14 +353,18 @@ impl LegacyEncryptedConversion<'_> {
             .persist(&storage, self.gate, self.lease)
     }
 
-    fn key(&self) -> SecResult<std::sync::Arc<CipherKey>> {
+    fn derived_cipher_key(&self, domain: &[u8]) -> SecResult<std::sync::Arc<CipherKey>> {
         let vault = self.crypto()?;
-        let derived = vault.derived_key(self.gate, self.lease, b"state/sqlcipher/v1")?;
+        let derived = vault.derived_key(self.gate, self.lease, domain)?;
         let mut raw = [0u8; 32];
         raw.copy_from_slice(derived.as_ref());
         let key = CipherKey::new(raw, self.gate, self.lease);
         raw.zeroize();
         Ok(key)
+    }
+
+    fn key(&self) -> SecResult<std::sync::Arc<CipherKey>> {
+        self.derived_cipher_key(b"state/sqlcipher/v1")
     }
 
     fn source_state(&self, source: &Path) -> SecResult<Connection> {

@@ -277,7 +277,21 @@ impl<'a> IntegrationCore<'a> {
     pub fn execute_batch(
         &self,
         batch: &ToolBatch,
+        authorize_read: impl FnMut() -> Result<()>,
+    ) -> Result<ToolBatchResponse> {
+        self.execute_batch_visible(batch, authorize_read, &mut |_: &str| Ok(true))
+    }
+
+    /// MP-9C: as `execute_batch`, with the caller's current source authority.
+    /// `memory_search` drops hidden sources before ranking truncation instead
+    /// of failing the batch, so a stale index cannot act as an existence
+    /// oracle for redacted content. Context building consults the archive's
+    /// own authority (vault) the same way.
+    pub fn execute_batch_visible(
+        &self,
+        batch: &ToolBatch,
         mut authorize_read: impl FnMut() -> Result<()>,
+        visible: &mut (impl mind_place_index::SourceVisibility + ?Sized),
     ) -> Result<ToolBatchResponse> {
         if batch.calls.is_empty() || batch.calls.len() > MAX_BATCH_CALLS {
             return Err(IntegrationError::InvalidRequest);
@@ -286,6 +300,10 @@ impl<'a> IntegrationCore<'a> {
         if encoded.len() > MAX_REQUEST_BYTES {
             return Err(IntegrationError::ResourceLimit);
         }
+        // Held until the complete response is returned (re-entrant when the
+        // credentialed caller already holds it), so no redaction can commit
+        // between a visibility decision and the emitted result.
+        let _privacy = self.disclosure_fence()?;
         let lease = self.security.require_unlocked()?;
         self.check(lease, &mut authorize_read)?;
         let mut results = Vec::with_capacity(batch.calls.len());
@@ -298,7 +316,7 @@ impl<'a> IntegrationCore<'a> {
                 ToolName::MemorySearch => {
                     let request: RetrievalRequest = serde_json::from_value(call.arguments.clone())
                         .map_err(|_| IntegrationError::InvalidArguments)?;
-                    serde_json::to_value(self.index.retrieve(&request)?)
+                    serde_json::to_value(self.index.retrieve_filtered(&request, &mut *visible)?)
                         .map_err(|_| IntegrationError::Serialization)?
                 }
                 ToolName::MemoryFetch => {
@@ -350,6 +368,45 @@ impl<'a> IntegrationCore<'a> {
             schema_version: CONTRACT_VERSION,
             results,
         })
+    }
+
+    /// MP-9C shared privacy disclosure fence for the vault source. The legacy
+    /// plaintext source cannot hold tombstones (redaction requires the vault)
+    /// and its transport refuses to serve if one is ever found.
+    pub fn disclosure_fence(
+        &self,
+    ) -> Result<Option<mind_place_security::vault_fence::PrivacyReadGuard>> {
+        match self.archive {
+            ArchiveSource::Legacy(_) => Ok(None),
+            #[cfg(feature = "vault-mcp")]
+            ArchiveSource::Vault(archive) => archive
+                .disclosure_fence()
+                .map(Some)
+                .map_err(|_| IntegrationError::AccessDenied),
+        }
+    }
+
+    /// MP-9C: reads fail closed with `StaleGeneration` while the derived index
+    /// still holds a redacted source. Prune it through the vault's own sync
+    /// (lease re-checked throughout) so the caller can retry once and the
+    /// client never learns that a hidden source existed. Legacy plaintext
+    /// archives cannot hold tombstones and have nothing to prune.
+    pub(crate) fn prune_stale_projection(
+        &self,
+        state: &mind_place_state::StateStore,
+        mut authorize_read: impl FnMut() -> Result<()>,
+    ) -> Result<()> {
+        let lease = self.security.require_unlocked()?;
+        match self.archive {
+            ArchiveSource::Legacy(_) => Err(IntegrationError::Index(IndexError::StaleGeneration)),
+            #[cfg(feature = "vault-mcp")]
+            ArchiveSource::Vault(archive) => {
+                self.index.sync_vault_with_check(archive, state, || {
+                    self.check_index(lease, &mut authorize_read)
+                })?;
+                Ok(())
+            }
+        }
     }
 
     fn check(

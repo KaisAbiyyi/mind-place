@@ -449,6 +449,12 @@ async fn handle_bounded(request: Request<Incoming>, ctx: ServerContext) -> WireR
                     Ok(value) => value,
                     Err(_) => return error(503),
                 };
+                // MP-9C: the plaintext legacy archive has no per-source
+                // visibility gate; refuse every legacy MCP read while any
+                // tombstone exists (or the policy is unreadable).
+                if !matches!(state.has_source_redactions(), Ok(false)) {
+                    return error(503);
+                }
                 let index = match IndexStore::open(index_path) {
                     Ok(value) => value,
                     Err(_) => return error(503),
@@ -466,6 +472,12 @@ async fn handle_bounded(request: Request<Incoming>, ctx: ServerContext) -> WireR
             }
             #[cfg(feature = "vault-mcp")]
             ServerSource::Vault(archive) => {
+                // MP-9C: hold the shared privacy disclosure fence (before any
+                // state/index connection) until the reply body is serialized.
+                let _privacy = match archive.disclosure_fence() {
+                    Ok(guard) => guard,
+                    Err(_) => return error(503),
+                };
                 let state = match archive.open_state_store() {
                     Ok(value) => value,
                     Err(_) => return error(503),
