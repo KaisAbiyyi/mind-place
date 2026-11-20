@@ -45,6 +45,20 @@ fn vaulted_mcp_read_is_keyed_authorized_and_revoked_on_lock() {
     let grant = ClientAuthority::new(&authority, &security)
         .issue("Synthetic MCP client", &[ClientCapability::Read])
         .unwrap();
+    // Default deny: the client reads only the source the owner grants it.
+    let luminous = index
+        .retrieve(&mind_place_index::RetrievalRequest {
+            queries: vec![mind_place_index::QueryTerm::Text("luminous".into())],
+            limit: 5,
+            ..Default::default()
+        })
+        .unwrap()
+        .hits[0]
+        .source_id
+        .clone();
+    ClientAuthority::new(&authority, &security)
+        .grant_read_sources(&grant.client.id, &[luminous])
+        .unwrap();
     let credential = grant.credential();
     let core = IntegrationCore::new_vault(&archive, &index, &security);
     let request = json!({
@@ -181,11 +195,10 @@ mod mp9c_privacy {
             .sync_vault_with_check(&archive, &authority, || Ok(()))
             .unwrap();
         let owner = ClientAuthority::new(&authority, &security);
-        let reader = owner
+        let issued_reader = owner
             .issue("Model reader", &[ClientCapability::Read])
-            .unwrap()
-            .credential()
-            .to_owned();
+            .unwrap();
+        let reader = issued_reader.credential().to_owned();
         let admin = owner.issue("Owner", &[ClientCapability::Admin]).unwrap();
         let admin_hash = format!("{:x}", sha2::Sha256::digest(admin.credential().as_bytes()));
         let secret = index
@@ -198,6 +211,20 @@ mod mp9c_privacy {
             .hits[0]
             .source_id
             .clone();
+        let kept = index
+            .retrieve(&RetrievalRequest {
+                queries: vec![QueryTerm::Text("kept".into())],
+                limit: 5,
+                ..Default::default()
+            })
+            .unwrap()
+            .hits[0]
+            .source_id
+            .clone();
+        // Both sources are granted while visible; a later redaction still wins.
+        owner
+            .grant_read_sources(&issued_reader.client.id, &[secret.clone(), kept])
+            .unwrap();
         Rig {
             _temp: temp,
             security,

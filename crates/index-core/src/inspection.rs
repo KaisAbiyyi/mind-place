@@ -132,7 +132,7 @@ impl IndexStore {
     ) -> Result<ContextInspection> {
         check()?;
         let started = Instant::now();
-        let result = self.build_context_generic_with_check(archive, request, &mut check)?;
+        let result = self.build_context_generic_with_check(archive, request, None, &mut check)?;
         check()?;
         let generation = self.inspect_generation()?;
         check()?;

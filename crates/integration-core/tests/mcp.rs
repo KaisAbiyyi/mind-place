@@ -18,6 +18,7 @@ struct Fixture {
     state: StateStore,
     security: SecurityGate,
     token: String,
+    source: String,
 }
 impl Fixture {
     fn new() -> Self {
@@ -52,11 +53,29 @@ impl Fixture {
         index.sync(&archive, &state).unwrap();
         let security = SecurityGate::open(temp.path().join("security.json")).unwrap();
         security.initialize(b"test-password-456").unwrap();
-        let token = ClientAuthority::new(&state, &security)
+        let issued = ClientAuthority::new(&state, &security)
             .issue("Claude Code", &[ClientCapability::Read])
+            .unwrap();
+        // Default deny: grant the single fixture source via the trusted path.
+        let probe = IntegrationCore::new(&archive, &index, &security)
+            .execute_batch(
+                &mind_place_integration::ToolBatch {
+                    calls: vec![mind_place_integration::ToolCall {
+                        name: mind_place_integration::ToolName::MemorySearch,
+                        arguments: json!({"queries": ["amber eclipse"]}),
+                    }],
+                },
+                || Ok(()),
+            )
+            .unwrap();
+        let source = probe.results[0].result["hits"][0]["source_id"]
+            .as_str()
             .unwrap()
-            .credential()
-            .to_string();
+            .to_owned();
+        ClientAuthority::new(&state, &security)
+            .grant_read_sources(&issued.client.id, std::slice::from_ref(&source))
+            .unwrap();
+        let token = issued.credential().to_string();
         Self {
             temp,
             archive,
@@ -64,6 +83,7 @@ impl Fixture {
             state,
             security,
             token,
+            source,
         }
     }
     fn core(&self) -> IntegrationCore<'_> {
@@ -416,6 +436,9 @@ async fn real_http_deny_rebinding_origin_and_locked_epoch() {
     // pretending that an external OpenAI account/network has been exercised.
     let hosted = ClientAuthority::new(&f.state, &f.security)
         .issue("Simulated hosted reader", &[ClientCapability::Read])
+        .unwrap();
+    ClientAuthority::new(&f.state, &f.security)
+        .grant_read_sources(&hosted.client.id, std::slice::from_ref(&f.source))
         .unwrap();
     let hosted_id = hosted.client.id.clone();
     let hosted_token = hosted.credential().to_string();

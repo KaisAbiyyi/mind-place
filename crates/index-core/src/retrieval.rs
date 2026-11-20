@@ -237,6 +237,26 @@ impl IndexStore {
         request: &RetrievalRequest,
         visible: &mut (impl SourceVisibility + ?Sized),
     ) -> Result<RetrievalResponse> {
+        self.retrieve_scoped(request, visible, None)
+    }
+
+    /// MP-7MCP-02: retrieval restricted to a server-derived allow-list of
+    /// source ids (a client's read grants). The allow-list is a hard SQL
+    /// constraint applied before ranking and `LIMIT`, so ungranted sources can
+    /// neither appear nor displace granted hits; it is never taken from the
+    /// request. `Some(&[])` is deny-all and returns an empty, ordinary result.
+    /// Residual: `bm25` uses corpus-wide statistics, so scores are computed
+    /// over the whole projection (not only the allow-list).
+    pub fn retrieve_scoped(
+        &self,
+        request: &RetrievalRequest,
+        visible: &mut (impl SourceVisibility + ?Sized),
+        scope: Option<&[String]>,
+    ) -> Result<RetrievalResponse> {
+        let scope_json = match scope {
+            Some(ids) => Some(serde_json::to_string(ids).map_err(|_| IndexError::InvalidQuery)?),
+            None => None,
+        };
         if request.queries.is_empty()
             || request.queries.len() > MAX_QUERIES
             || request.limit == 0
@@ -279,6 +299,7 @@ impl IndexStore {
               AND (?10 IS NULL OR c.message_id IN (SELECT value FROM json_each(?10)))
               AND (?11 IS NULL OR julianday(r.captured_at) >= julianday(?11))
               AND (?12 IS NULL OR julianday(r.captured_at) <= julianday(?12))
+              AND (?14 IS NULL OR c.source_id IN (SELECT value FROM json_each(?14)))
             ORDER BY bm25(chunks_fts),c.source_id,c.snapshot_id,c.message_id,c.part
             LIMIT ?13";
 
@@ -307,6 +328,7 @@ impl IndexStore {
                     request.filters.captured_from.as_deref(),
                     request.filters.captured_to.as_deref(),
                     per_query_limit,
+                    scope_json.as_deref(),
                 ],
                 |row| {
                     let bm25: f64 = row.get(15)?;
