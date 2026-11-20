@@ -1,7 +1,7 @@
 //! Phase 2A: bounded, provider-neutral retrieval over the disposable FTS projection.
 //! No derived rowid is returned as a durable source reference.
-use crate::{IndexError, IndexStore, Result};
-use chrono::DateTime;
+use crate::{assert_projection_current, IndexError, IndexStore, Result, SourceVisibility};
+use mind_place_archive::parse_rfc3339;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -201,12 +201,12 @@ impl RetrievalFilters {
         let from = self
             .captured_from
             .as_deref()
-            .map(|value| DateTime::parse_from_rfc3339(value).map_err(|_| IndexError::InvalidQuery))
+            .map(|value| parse_rfc3339(value).ok_or(IndexError::InvalidQuery))
             .transpose()?;
         let to = self
             .captured_to
             .as_deref()
-            .map(|value| DateTime::parse_from_rfc3339(value).map_err(|_| IndexError::InvalidQuery))
+            .map(|value| parse_rfc3339(value).ok_or(IndexError::InvalidQuery))
             .transpose()?;
         if from.zip(to).is_some_and(|(from, to)| from > to) {
             return Err(IndexError::InvalidQuery);
@@ -220,6 +220,23 @@ impl IndexStore {
     /// and check its unlock lease before disclosing the returned snippets.
     /// Later source adapters must apply root revocation before this point.
     pub fn retrieve(&self, request: &RetrievalRequest) -> Result<RetrievalResponse> {
+        self.retrieve_filtered(request, &mut |_: &str| Ok(true))
+    }
+
+    /// MP-9C: retrieval under current source authority. BM25 ranking, scores
+    /// and the SQL shortlist are all computed over the whole projection, so a
+    /// hidden source that is still indexed could displace visible hits at
+    /// LIMIT and shift their scores. This therefore fails closed with
+    /// `StaleGeneration` (`MP_INDEX_STALE_GENERATION`) while the projection
+    /// holds any hidden source — fully enumerated when the authority provides
+    /// its tombstone list, otherwise detected on surfaced candidates — until a
+    /// sync/rebuild prunes it. Visible-only results, counts and scores
+    /// follow. Callers must not retry with a weaker filter.
+    pub fn retrieve_filtered(
+        &self,
+        request: &RetrievalRequest,
+        visible: &mut (impl SourceVisibility + ?Sized),
+    ) -> Result<RetrievalResponse> {
         if request.queries.is_empty()
             || request.queries.len() > MAX_QUERIES
             || request.limit == 0
@@ -266,6 +283,7 @@ impl IndexStore {
             LIMIT ?13";
 
         let db = self.connection()?;
+        assert_projection_current(&db, visible)?;
         let mut statement = db.prepare(sql)?;
         type Key = (String, String, String, String, i64);
         let mut candidates: BTreeMap<Key, RetrievalHit> = BTreeMap::new();
@@ -349,8 +367,24 @@ impl IndexStore {
                 }
             }
         }
-        let candidate_count = candidates.len();
-        let mut hits: Vec<_> = candidates.into_values().collect();
+        let mut decisions: BTreeMap<String, bool> = BTreeMap::new();
+        let mut hits = Vec::with_capacity(candidates.len());
+        for hit in candidates.into_values() {
+            let shown = match decisions.get(&hit.source_id) {
+                Some(shown) => *shown,
+                None => {
+                    let shown = visible.is_visible(&hit.source_id)?;
+                    decisions.insert(hit.source_id.clone(), shown);
+                    shown
+                }
+            };
+            if !shown {
+                // A hidden source is still indexed: ranking/scores are tainted.
+                return Err(IndexError::StaleGeneration);
+            }
+            hits.push(hit);
+        }
+        let candidate_count = hits.len();
         hits.sort_by(|a, b| {
             b.score
                 .total_cmp(&a.score)
@@ -367,5 +401,19 @@ impl IndexStore {
             candidate_count,
             truncated,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn retrieval_filters_reject_non_rfc3339_date_time_separators() {
+        let filters = RetrievalFilters {
+            captured_from: Some("2026-11-18_12:00:00Z".into()),
+            ..Default::default()
+        };
+        assert!(matches!(filters.validate(), Err(IndexError::InvalidQuery)));
     }
 }

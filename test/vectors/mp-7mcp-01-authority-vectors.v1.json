@@ -1,0 +1,2675 @@
+{
+ "$comment": "Language-neutral conformance vectors: pure JSON, no executable content. The JS reference model and the future Rust engine must both pass every vector (MP-7MCP-01 / MP-PAR-01).",
+ "schema": "mp-7mcp-01/authority-vectors/v1",
+ "contract": "mp-7mcp-01 v3 + provider-neutral rollout + cloud quarantine",
+ "stepSemantics": {
+  "patch": "RFC 7386 JSON merge patch applied to the live state (null deletes a key; arrays and scalars replace). A vector-level 'patch' is applied to the baseline state before the first step.",
+  "authorizeWrite": "Admission decision for the named auth profile and request. expect.code is compared exactly.",
+  "simulateWrite": "Admission, atomic commit, receipt and disclosure re-check. State changes persist to later steps (receipts, approvals consumed, write log).",
+  "ownerApprove": "The owner approves exactly this request in the trusted local UI: a single-use approval bound to client, vault, collection, operation, operation id, canonical body digest, policy revision and epoch. 'overrides' replaces approval fields (for stale or expired cases).",
+  "canRead": "expect.value is true only for an independent read grant on the collection under the current read policy revision; never for a cloud principal on the raw layer.",
+  "validateGrant": "Grant issuance check against the named client at the live 'now'. expect.ok and, when not ok, expect.reason."
+ },
+ "baseline": {
+  "state": {
+   "vaultId": "vault-A",
+   "audience": "mind-place-mcp",
+   "epoch": 17,
+   "now": 1000,
+   "locked": false,
+   "paused": false,
+   "authorityReadable": true,
+   "rollout": {
+    "hostedWrite": {
+     "claude": "ENABLED",
+     "chatgpt": "DEFERRED",
+     "gemini": "DEFERRED"
+    }
+   },
+   "ownerPolicy": {
+    "version": 1,
+    "caps": {},
+    "autoApply": {
+     "enabled": false
+    }
+   },
+   "clients": {
+    "client-claude": {
+     "enabled": true,
+     "tier": "cloud",
+     "provider": "claude",
+     "writePolicyRevision": 4,
+     "readPolicyRevision": 2
+    },
+    "client-chatgpt": {
+     "enabled": true,
+     "tier": "cloud",
+     "provider": "chatgpt",
+     "writePolicyRevision": 4,
+     "readPolicyRevision": 2
+    },
+    "client-gemini": {
+     "enabled": true,
+     "tier": "cloud",
+     "provider": "gemini",
+     "writePolicyRevision": 4,
+     "readPolicyRevision": 2
+    },
+    "local-L": {
+     "enabled": true,
+     "tier": "local",
+     "provider": "claude-code",
+     "writePolicyRevision": 4,
+     "readPolicyRevision": 2
+    }
+   },
+   "collections": {
+    "q-claude": {
+     "layer": "curated",
+     "quarantineFor": "client-claude"
+    },
+    "q-claude-2": {
+     "layer": "curated",
+     "quarantineFor": "client-claude"
+    },
+    "q-chatgpt": {
+     "layer": "curated",
+     "quarantineFor": "client-chatgpt"
+    },
+    "q-gemini": {
+     "layer": "curated",
+     "quarantineFor": "client-gemini"
+    },
+    "curated-main": {
+     "layer": "curated"
+    },
+    "raw-A": {
+     "layer": "raw"
+    }
+   },
+   "objects": {
+    "prior": {
+     "vaultId": "vault-A",
+     "collectionId": "q-claude",
+     "objectKind": "memory",
+     "revision": 3,
+     "data": "v3",
+     "history": []
+    },
+    "raw1": {
+     "vaultId": "vault-A",
+     "collectionId": "raw-A",
+     "objectKind": "raw_capture",
+     "revision": 1,
+     "data": "raw",
+     "history": []
+    }
+   },
+   "grants": [],
+   "readGrants": [],
+   "approvals": [],
+   "writeLog": []
+  },
+  "auths": {
+   "claude": {
+    "valid": true,
+    "revoked": false,
+    "clientId": "client-claude",
+    "vaultId": "vault-A",
+    "audience": "mind-place-mcp",
+    "epoch": 17,
+    "credentialClass": "cloud",
+    "transport": "tunnel"
+   },
+   "chatgpt": {
+    "valid": true,
+    "revoked": false,
+    "clientId": "client-chatgpt",
+    "vaultId": "vault-A",
+    "audience": "mind-place-mcp",
+    "epoch": 17,
+    "credentialClass": "cloud",
+    "transport": "tunnel"
+   },
+   "gemini": {
+    "valid": true,
+    "revoked": false,
+    "clientId": "client-gemini",
+    "vaultId": "vault-A",
+    "audience": "mind-place-mcp",
+    "epoch": 17,
+    "credentialClass": "cloud",
+    "transport": "tunnel"
+   },
+   "local": {
+    "valid": true,
+    "revoked": false,
+    "clientId": "local-L",
+    "vaultId": "vault-A",
+    "audience": "mind-place-mcp",
+    "epoch": 17,
+    "credentialClass": "local",
+    "transport": "loopback"
+   },
+   "local-over-tunnel": {
+    "valid": true,
+    "revoked": false,
+    "clientId": "local-L",
+    "vaultId": "vault-A",
+    "audience": "mind-place-mcp",
+    "epoch": 17,
+    "credentialClass": "local",
+    "transport": "tunnel"
+   },
+   "claude-presenting-local-class": {
+    "valid": true,
+    "revoked": false,
+    "clientId": "client-claude",
+    "vaultId": "vault-A",
+    "audience": "mind-place-mcp",
+    "epoch": 17,
+    "credentialClass": "local",
+    "transport": "loopback"
+   }
+  }
+ },
+ "vectors": [
+  {
+   "id": "deny-by-default",
+   "title": "No grant means DENIED; a write grant never confers read",
+   "tags": [
+    "grant"
+   ],
+   "steps": [
+    {
+     "call": "authorizeWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "p1"
+     },
+     "expect": {
+      "code": "DENIED"
+     }
+    },
+    {
+     "call": "patch",
+     "patch": {
+      "grants": [
+       {
+        "id": "g1",
+        "enabled": true,
+        "revoked": false,
+        "clientId": "client-claude",
+        "vaultId": "vault-A",
+        "collectionId": "q-claude",
+        "objectKind": "memory",
+        "operation": "create_import",
+        "mode": "allow",
+        "policyRevision": 4,
+        "issuedAt": 0,
+        "expiresAt": 3000
+       }
+      ]
+     }
+    },
+    {
+     "call": "authorizeWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "p1"
+     },
+     "expect": {
+      "code": "ALLOWED"
+     }
+    },
+    {
+     "call": "canRead",
+     "auth": "claude",
+     "collectionId": "q-claude",
+     "expect": {
+      "value": false
+     }
+    },
+    {
+     "call": "patch",
+     "patch": {
+      "readGrants": [
+       {
+        "enabled": true,
+        "revoked": false,
+        "clientId": "client-claude",
+        "vaultId": "vault-A",
+        "collectionId": "q-claude",
+        "policyRevision": 2
+       }
+      ]
+     }
+    },
+    {
+     "call": "canRead",
+     "auth": "claude",
+     "collectionId": "q-claude",
+     "expect": {
+      "value": true
+     }
+    },
+    {
+     "call": "canRead",
+     "auth": "claude",
+     "collectionId": "curated-main",
+     "expect": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "grant-is-exact-operation-and-kind",
+   "title": "A grant for another operation or object kind does not authorize",
+   "tags": [
+    "grant"
+   ],
+   "patch": {
+    "grants": [
+     {
+      "id": "g1",
+      "enabled": true,
+      "revoked": false,
+      "clientId": "client-claude",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operation": "append",
+      "mode": "allow",
+      "policyRevision": 4,
+      "issuedAt": 0,
+      "expiresAt": 3000
+     },
+     {
+      "id": "g2",
+      "enabled": true,
+      "revoked": false,
+      "clientId": "client-claude",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "route",
+      "operation": "create_import",
+      "mode": "allow",
+      "policyRevision": 4,
+      "issuedAt": 0,
+      "expiresAt": 3000
+     }
+    ]
+   },
+   "steps": [
+    {
+     "call": "authorizeWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "p1"
+     },
+     "expect": {
+      "code": "DENIED"
+     }
+    },
+    {
+     "call": "authorizeWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "note",
+      "operationId": "op-1",
+      "payload": "p1"
+     },
+     "expect": {
+      "code": "DENIED"
+     }
+    },
+    {
+     "call": "authorizeWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "route",
+      "operationId": "op-1",
+      "payload": "p1"
+     },
+     "expect": {
+      "code": "ALLOWED"
+     }
+    }
+   ]
+  },
+  {
+   "id": "grant-mode-deny-and-missing-mode",
+   "title": "Mode deny, or an absent mode, means DENIED",
+   "tags": [
+    "grant"
+   ],
+   "patch": {
+    "grants": [
+     {
+      "id": "g1",
+      "enabled": true,
+      "revoked": false,
+      "clientId": "client-claude",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operation": "create_import",
+      "policyRevision": 4,
+      "issuedAt": 0,
+      "expiresAt": 3000
+     }
+    ]
+   },
+   "steps": [
+    {
+     "call": "authorizeWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "p1"
+     },
+     "expect": {
+      "code": "DENIED"
+     }
+    },
+    {
+     "call": "patch",
+     "patch": {
+      "grants": [
+       {
+        "id": "g1",
+        "enabled": true,
+        "revoked": false,
+        "clientId": "client-claude",
+        "vaultId": "vault-A",
+        "collectionId": "q-claude",
+        "objectKind": "memory",
+        "operation": "create_import",
+        "mode": "deny",
+        "policyRevision": 4,
+        "issuedAt": 0,
+        "expiresAt": 3000
+       }
+      ]
+     }
+    },
+    {
+     "call": "authorizeWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "p1"
+     },
+     "expect": {
+      "code": "DENIED"
+     }
+    }
+   ]
+  },
+  {
+   "id": "ask-first-single-use-approval",
+   "title": "ask_first needs a server-side owner approval bound to the exact request, consumed once",
+   "tags": [
+    "approval"
+   ],
+   "patch": {
+    "grants": [
+     {
+      "id": "g1",
+      "enabled": true,
+      "revoked": false,
+      "clientId": "client-claude",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operation": "create_import",
+      "mode": "ask_first",
+      "policyRevision": 4,
+      "issuedAt": 0,
+      "expiresAt": 3000
+     }
+    ]
+   },
+   "steps": [
+    {
+     "call": "authorizeWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "p1"
+     },
+     "expect": {
+      "code": "APPROVAL_REQUIRED"
+     }
+    },
+    {
+     "call": "ownerApprove",
+     "auth": "claude",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "p1"
+     },
+     "overrides": {}
+    },
+    {
+     "call": "simulateWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "p1"
+     },
+     "expect": {
+      "code": "COMMITTED"
+     }
+    },
+    {
+     "call": "authorizeWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "op-2",
+      "payload": "p1"
+     },
+     "expect": {
+      "code": "APPROVAL_REQUIRED"
+     }
+    }
+   ]
+  },
+  {
+   "id": "approval-bound-to-body",
+   "title": "An approval for one body cannot authorize a different body or operation id",
+   "tags": [
+    "approval"
+   ],
+   "patch": {
+    "grants": [
+     {
+      "id": "g1",
+      "enabled": true,
+      "revoked": false,
+      "clientId": "client-claude",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operation": "create_import",
+      "mode": "ask_first",
+      "policyRevision": 4,
+      "issuedAt": 0,
+      "expiresAt": 3000
+     }
+    ]
+   },
+   "steps": [
+    {
+     "call": "ownerApprove",
+     "auth": "claude",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "approved"
+     },
+     "overrides": {}
+    },
+    {
+     "call": "authorizeWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "tampered"
+     },
+     "expect": {
+      "code": "APPROVAL_REQUIRED"
+     }
+    },
+    {
+     "call": "authorizeWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "op-other",
+      "payload": "approved"
+     },
+     "expect": {
+      "code": "APPROVAL_REQUIRED"
+     }
+    },
+    {
+     "call": "authorizeWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "approved"
+     },
+     "expect": {
+      "code": "ALLOWED"
+     }
+    }
+   ]
+  },
+  {
+   "id": "approval-expired-or-stale-epoch",
+   "title": "An expired approval, or one from a previous epoch, is not accepted",
+   "tags": [
+    "approval"
+   ],
+   "patch": {
+    "grants": [
+     {
+      "id": "g1",
+      "enabled": true,
+      "revoked": false,
+      "clientId": "client-claude",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operation": "create_import",
+      "mode": "ask_first",
+      "policyRevision": 4,
+      "issuedAt": 0,
+      "expiresAt": 3000
+     }
+    ]
+   },
+   "steps": [
+    {
+     "call": "ownerApprove",
+     "auth": "claude",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "p1"
+     },
+     "overrides": {
+      "expiresAt": 999
+     }
+    },
+    {
+     "call": "authorizeWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "p1"
+     },
+     "expect": {
+      "code": "APPROVAL_REQUIRED"
+     }
+    },
+    {
+     "call": "ownerApprove",
+     "auth": "claude",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "p1"
+     },
+     "overrides": {
+      "epoch": 16
+     }
+    },
+    {
+     "call": "authorizeWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "p1"
+     },
+     "expect": {
+      "code": "APPROVAL_REQUIRED"
+     }
+    }
+   ]
+  },
+  {
+   "id": "tombstone-needs-approval-and-is-final",
+   "title": "Delete is a tombstone that always needs approval; tombstoned objects are immutable over MCP",
+   "tags": [
+    "approval",
+    "tombstone"
+   ],
+   "patch": {
+    "grants": [
+     {
+      "id": "g1",
+      "enabled": true,
+      "revoked": false,
+      "clientId": "client-claude",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operation": "delete",
+      "mode": "allow",
+      "policyRevision": 4,
+      "issuedAt": 0,
+      "expiresAt": 3000
+     },
+     {
+      "id": "g2",
+      "enabled": true,
+      "revoked": false,
+      "clientId": "client-claude",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operation": "update",
+      "mode": "allow",
+      "policyRevision": 4,
+      "issuedAt": 0,
+      "expiresAt": 3000
+     }
+    ]
+   },
+   "steps": [
+    {
+     "call": "authorizeWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "delete",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "d1",
+      "payload": "p1",
+      "objectId": "prior",
+      "expectedRevision": 3
+     },
+     "expect": {
+      "code": "APPROVAL_REQUIRED"
+     }
+    },
+    {
+     "call": "ownerApprove",
+     "auth": "claude",
+     "request": {
+      "operation": "delete",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "d1",
+      "payload": "p1",
+      "objectId": "prior",
+      "expectedRevision": 3
+     },
+     "overrides": {}
+    },
+    {
+     "call": "simulateWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "delete",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "d1",
+      "payload": "p1",
+      "objectId": "prior",
+      "expectedRevision": 3
+     },
+     "expect": {
+      "code": "COMMITTED"
+     }
+    },
+    {
+     "call": "authorizeWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "update",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "u1",
+      "payload": "p1",
+      "objectId": "prior",
+      "expectedRevision": 4
+     },
+     "expect": {
+      "code": "DENIED"
+     }
+    }
+   ]
+  },
+  {
+   "id": "idempotent-replay-and-conflict",
+   "title": "Same operation id and body replays the receipt; a different body is a CONFLICT",
+   "tags": [
+    "idempotency"
+   ],
+   "patch": {
+    "grants": [
+     {
+      "id": "g2",
+      "enabled": true,
+      "revoked": false,
+      "clientId": "client-claude",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operation": "create_import",
+      "mode": "allow",
+      "policyRevision": 4,
+      "issuedAt": 0,
+      "expiresAt": 3000
+     }
+    ]
+   },
+   "steps": [
+    {
+     "call": "simulateWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "a"
+     },
+     "expect": {
+      "code": "COMMITTED"
+     }
+    },
+    {
+     "call": "simulateWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "a"
+     },
+     "expect": {
+      "code": "REPLAY"
+     }
+    },
+    {
+     "call": "simulateWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "b"
+     },
+     "expect": {
+      "code": "CONFLICT"
+     }
+    }
+   ]
+  },
+  {
+   "id": "expected-revision-conflict",
+   "title": "update with a stale expectedRevision is a CONFLICT, the current revision is accepted",
+   "tags": [
+    "idempotency"
+   ],
+   "patch": {
+    "grants": [
+     {
+      "id": "g1",
+      "enabled": true,
+      "revoked": false,
+      "clientId": "client-claude",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operation": "update",
+      "mode": "allow",
+      "policyRevision": 4,
+      "issuedAt": 0,
+      "expiresAt": 3000
+     }
+    ]
+   },
+   "steps": [
+    {
+     "call": "authorizeWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "update",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "u1",
+      "payload": "p1",
+      "objectId": "prior",
+      "expectedRevision": 2
+     },
+     "expect": {
+      "code": "CONFLICT"
+     }
+    },
+    {
+     "call": "simulateWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "update",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "u1",
+      "payload": "p1",
+      "objectId": "prior",
+      "expectedRevision": 3
+     },
+     "expect": {
+      "code": "COMMITTED"
+     }
+    }
+   ]
+  },
+  {
+   "id": "server-assigns-object-ids",
+   "title": "create_import may not carry a client-chosen object id",
+   "tags": [
+    "integrity"
+   ],
+   "patch": {
+    "grants": [
+     {
+      "id": "g2",
+      "enabled": true,
+      "revoked": false,
+      "clientId": "client-claude",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operation": "create_import",
+      "mode": "allow",
+      "policyRevision": 4,
+      "issuedAt": 0,
+      "expiresAt": 3000
+     }
+    ]
+   },
+   "steps": [
+    {
+     "call": "authorizeWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "p1",
+      "objectId": "chosen"
+     },
+     "expect": {
+      "code": "DENIED"
+     }
+    }
+   ]
+  },
+  {
+   "id": "revocation-and-lock-win",
+   "title": "Revoking the grant, bumping the epoch, locking, pausing or an unreadable authority store all deny the next call",
+   "tags": [
+    "revocation",
+    "fail-closed"
+   ],
+   "patch": {
+    "grants": [
+     {
+      "id": "g2",
+      "enabled": true,
+      "revoked": false,
+      "clientId": "client-claude",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operation": "create_import",
+      "mode": "allow",
+      "policyRevision": 4,
+      "issuedAt": 0,
+      "expiresAt": 3000
+     }
+    ]
+   },
+   "steps": [
+    {
+     "call": "authorizeWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "p1"
+     },
+     "expect": {
+      "code": "ALLOWED"
+     }
+    },
+    {
+     "call": "patch",
+     "patch": {
+      "grants": [
+       {
+        "id": "g1",
+        "enabled": true,
+        "revoked": true,
+        "clientId": "client-claude",
+        "vaultId": "vault-A",
+        "collectionId": "q-claude",
+        "objectKind": "memory",
+        "operation": "create_import",
+        "mode": "allow",
+        "policyRevision": 4,
+        "issuedAt": 0,
+        "expiresAt": 3000
+       }
+      ]
+     }
+    },
+    {
+     "call": "authorizeWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "p1"
+     },
+     "expect": {
+      "code": "DENIED"
+     }
+    },
+    {
+     "call": "patch",
+     "patch": {
+      "grants": [
+       {
+        "id": "g1",
+        "enabled": true,
+        "revoked": false,
+        "clientId": "client-claude",
+        "vaultId": "vault-A",
+        "collectionId": "q-claude",
+        "objectKind": "memory",
+        "operation": "create_import",
+        "mode": "allow",
+        "policyRevision": 4,
+        "issuedAt": 0,
+        "expiresAt": 3000
+       }
+      ]
+     }
+    },
+    {
+     "call": "authorizeWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "p1"
+     },
+     "expect": {
+      "code": "ALLOWED"
+     }
+    },
+    {
+     "call": "patch",
+     "patch": {
+      "epoch": 18
+     }
+    },
+    {
+     "call": "authorizeWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "p1"
+     },
+     "expect": {
+      "code": "DENIED"
+     }
+    },
+    {
+     "call": "patch",
+     "patch": {
+      "epoch": 17,
+      "locked": true
+     }
+    },
+    {
+     "call": "authorizeWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "p1"
+     },
+     "expect": {
+      "code": "DENIED"
+     }
+    },
+    {
+     "call": "patch",
+     "patch": {
+      "locked": false,
+      "paused": true
+     }
+    },
+    {
+     "call": "authorizeWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "p1"
+     },
+     "expect": {
+      "code": "DENIED"
+     }
+    },
+    {
+     "call": "patch",
+     "patch": {
+      "paused": false,
+      "authorityReadable": false
+     }
+    },
+    {
+     "call": "authorizeWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "p1"
+     },
+     "expect": {
+      "code": "DENIED"
+     }
+    },
+    {
+     "call": "canRead",
+     "auth": "claude",
+     "collectionId": "q-claude",
+     "expect": {
+      "value": false
+     }
+    },
+    {
+     "call": "patch",
+     "patch": {
+      "authorityReadable": true
+     }
+    },
+    {
+     "call": "authorizeWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "p1"
+     },
+     "expect": {
+      "code": "ALLOWED"
+     }
+    }
+   ]
+  },
+  {
+   "id": "policy-revision-stale",
+   "title": "Editing write policy invalidates older grants",
+   "tags": [
+    "revocation"
+   ],
+   "patch": {
+    "grants": [
+     {
+      "id": "g2",
+      "enabled": true,
+      "revoked": false,
+      "clientId": "client-claude",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operation": "create_import",
+      "mode": "allow",
+      "policyRevision": 4,
+      "issuedAt": 0,
+      "expiresAt": 3000
+     }
+    ]
+   },
+   "steps": [
+    {
+     "call": "authorizeWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "p1"
+     },
+     "expect": {
+      "code": "ALLOWED"
+     }
+    },
+    {
+     "call": "patch",
+     "patch": {
+      "clients": {
+       "client-claude": {
+        "writePolicyRevision": 5
+       }
+      }
+     }
+    },
+    {
+     "call": "authorizeWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "p1"
+     },
+     "expect": {
+      "code": "DENIED"
+     }
+    }
+   ]
+  },
+  {
+   "id": "grant-expiry",
+   "title": "A cloud grant past expiresAt is denied",
+   "tags": [
+    "grant"
+   ],
+   "patch": {
+    "grants": [
+     {
+      "id": "g2",
+      "enabled": true,
+      "revoked": false,
+      "clientId": "client-claude",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operation": "create_import",
+      "mode": "allow",
+      "policyRevision": 4,
+      "issuedAt": 0,
+      "expiresAt": 3000
+     }
+    ]
+   },
+   "steps": [
+    {
+     "call": "authorizeWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "p1"
+     },
+     "expect": {
+      "code": "ALLOWED"
+     }
+    },
+    {
+     "call": "patch",
+     "patch": {
+      "now": 3000
+     }
+    },
+    {
+     "call": "authorizeWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "p1"
+     },
+     "expect": {
+      "code": "DENIED"
+     }
+    }
+   ]
+  },
+  {
+   "id": "tier-and-transport",
+   "title": "Local credentials never work through the tunnel; a cloud principal cannot present a local credential class",
+   "tags": [
+    "tier"
+   ],
+   "patch": {
+    "grants": [
+     {
+      "id": "g1",
+      "enabled": true,
+      "revoked": false,
+      "clientId": "local-L",
+      "vaultId": "vault-A",
+      "collectionId": "raw-A",
+      "objectKind": "raw_capture",
+      "operation": "append",
+      "mode": "allow",
+      "policyRevision": 4,
+      "issuedAt": 0,
+      "expiresAt": null
+     },
+     {
+      "id": "g2",
+      "enabled": true,
+      "revoked": false,
+      "clientId": "client-claude",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operation": "create_import",
+      "mode": "allow",
+      "policyRevision": 4,
+      "issuedAt": 0,
+      "expiresAt": 3000
+     }
+    ]
+   },
+   "steps": [
+    {
+     "call": "authorizeWrite",
+     "auth": "local",
+     "request": {
+      "operation": "append",
+      "vaultId": "vault-A",
+      "collectionId": "raw-A",
+      "objectKind": "raw_capture",
+      "operationId": "op-1",
+      "payload": "p1",
+      "objectId": "raw1",
+      "expectedRevision": 1
+     },
+     "expect": {
+      "code": "ALLOWED"
+     }
+    },
+    {
+     "call": "authorizeWrite",
+     "auth": "local-over-tunnel",
+     "request": {
+      "operation": "append",
+      "vaultId": "vault-A",
+      "collectionId": "raw-A",
+      "objectKind": "raw_capture",
+      "operationId": "op-1",
+      "payload": "p1",
+      "objectId": "raw1",
+      "expectedRevision": 1
+     },
+     "expect": {
+      "code": "DENIED"
+     }
+    },
+    {
+     "call": "authorizeWrite",
+     "auth": "claude-presenting-local-class",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "p1"
+     },
+     "expect": {
+      "code": "DENIED"
+     }
+    }
+   ]
+  },
+  {
+   "id": "raw-evidence-immutable-over-mcp",
+   "title": "Raw layer permits only create_import and append, even for a local client",
+   "tags": [
+    "tier",
+    "integrity"
+   ],
+   "patch": {
+    "grants": [
+     {
+      "id": "g1",
+      "enabled": true,
+      "revoked": false,
+      "clientId": "local-L",
+      "vaultId": "vault-A",
+      "collectionId": "raw-A",
+      "objectKind": "raw_capture",
+      "operation": "update",
+      "mode": "allow",
+      "policyRevision": 4,
+      "issuedAt": 0,
+      "expiresAt": null
+     },
+     {
+      "id": "g2",
+      "enabled": true,
+      "revoked": false,
+      "clientId": "local-L",
+      "vaultId": "vault-A",
+      "collectionId": "raw-A",
+      "objectKind": "raw_capture",
+      "operation": "delete",
+      "mode": "allow",
+      "policyRevision": 4,
+      "issuedAt": 0,
+      "expiresAt": null
+     },
+     {
+      "id": "g3",
+      "enabled": true,
+      "revoked": false,
+      "clientId": "local-L",
+      "vaultId": "vault-A",
+      "collectionId": "raw-A",
+      "objectKind": "raw_capture",
+      "operation": "append",
+      "mode": "allow",
+      "policyRevision": 4,
+      "issuedAt": 0,
+      "expiresAt": null
+     }
+    ]
+   },
+   "steps": [
+    {
+     "call": "authorizeWrite",
+     "auth": "local",
+     "request": {
+      "operation": "update",
+      "vaultId": "vault-A",
+      "collectionId": "raw-A",
+      "objectKind": "raw_capture",
+      "operationId": "op-1",
+      "payload": "p1",
+      "objectId": "raw1",
+      "expectedRevision": 1
+     },
+     "expect": {
+      "code": "DENIED"
+     }
+    },
+    {
+     "call": "authorizeWrite",
+     "auth": "local",
+     "request": {
+      "operation": "delete",
+      "vaultId": "vault-A",
+      "collectionId": "raw-A",
+      "objectKind": "raw_capture",
+      "operationId": "op-1",
+      "payload": "p1",
+      "objectId": "raw1",
+      "expectedRevision": 1
+     },
+     "expect": {
+      "code": "DENIED"
+     }
+    },
+    {
+     "call": "authorizeWrite",
+     "auth": "local",
+     "request": {
+      "operation": "append",
+      "vaultId": "vault-A",
+      "collectionId": "raw-A",
+      "objectKind": "raw_capture",
+      "operationId": "op-1",
+      "payload": "p1",
+      "objectId": "raw1",
+      "expectedRevision": 1
+     },
+     "expect": {
+      "code": "ALLOWED"
+     }
+    }
+   ]
+  },
+  {
+   "id": "cloud-never-touches-raw",
+   "title": "A cloud client is denied raw writes and raw reads even with grants",
+   "tags": [
+    "tier"
+   ],
+   "patch": {
+    "grants": [
+     {
+      "id": "g1",
+      "enabled": true,
+      "revoked": false,
+      "clientId": "client-claude",
+      "vaultId": "vault-A",
+      "collectionId": "raw-A",
+      "objectKind": "raw_capture",
+      "operation": "append",
+      "mode": "allow",
+      "policyRevision": 4,
+      "issuedAt": 0,
+      "expiresAt": 3000
+     }
+    ],
+    "readGrants": [
+     {
+      "enabled": true,
+      "revoked": false,
+      "clientId": "client-claude",
+      "vaultId": "vault-A",
+      "collectionId": "raw-A",
+      "policyRevision": 2
+     },
+     {
+      "enabled": true,
+      "revoked": false,
+      "clientId": "local-L",
+      "vaultId": "vault-A",
+      "collectionId": "raw-A",
+      "policyRevision": 2
+     }
+    ]
+   },
+   "steps": [
+    {
+     "call": "authorizeWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "append",
+      "vaultId": "vault-A",
+      "collectionId": "raw-A",
+      "objectKind": "raw_capture",
+      "operationId": "op-1",
+      "payload": "p1",
+      "objectId": "raw1",
+      "expectedRevision": 1
+     },
+     "expect": {
+      "code": "DENIED"
+     }
+    },
+    {
+     "call": "canRead",
+     "auth": "claude",
+     "collectionId": "raw-A",
+     "expect": {
+      "value": false
+     }
+    },
+    {
+     "call": "canRead",
+     "auth": "local",
+     "collectionId": "raw-A",
+     "expect": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "cloud-quarantine",
+   "title": "Cloud writes are confined to the client's own quarantine collection",
+   "tags": [
+    "quarantine"
+   ],
+   "patch": {
+    "grants": [
+     {
+      "id": "g1",
+      "enabled": true,
+      "revoked": false,
+      "clientId": "client-claude",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operation": "create_import",
+      "mode": "allow",
+      "policyRevision": 4,
+      "issuedAt": 0,
+      "expiresAt": 3000
+     },
+     {
+      "id": "g2",
+      "enabled": true,
+      "revoked": false,
+      "clientId": "client-claude",
+      "vaultId": "vault-A",
+      "collectionId": "curated-main",
+      "objectKind": "memory",
+      "operation": "create_import",
+      "mode": "allow",
+      "policyRevision": 4,
+      "issuedAt": 0,
+      "expiresAt": 3000
+     },
+     {
+      "id": "g3",
+      "enabled": true,
+      "revoked": false,
+      "clientId": "client-claude",
+      "vaultId": "vault-A",
+      "collectionId": "q-chatgpt",
+      "objectKind": "memory",
+      "operation": "create_import",
+      "mode": "allow",
+      "policyRevision": 4,
+      "issuedAt": 0,
+      "expiresAt": 3000
+     }
+    ]
+   },
+   "steps": [
+    {
+     "call": "authorizeWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "p1"
+     },
+     "expect": {
+      "code": "ALLOWED"
+     }
+    },
+    {
+     "call": "authorizeWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "curated-main",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "p1"
+     },
+     "expect": {
+      "code": "DENIED"
+     }
+    },
+    {
+     "call": "authorizeWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-chatgpt",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "p1"
+     },
+     "expect": {
+      "code": "DENIED"
+     }
+    },
+    {
+     "call": "validateGrant",
+     "auth": null,
+     "grant": {
+      "id": "gx",
+      "enabled": true,
+      "revoked": false,
+      "clientId": "client-claude",
+      "vaultId": "vault-A",
+      "collectionId": "curated-main",
+      "objectKind": "memory",
+      "operation": "create_import",
+      "mode": "allow",
+      "policyRevision": 4,
+      "issuedAt": 0,
+      "expiresAt": 100
+     },
+     "client": "client-claude",
+     "expect": {
+      "ok": false,
+      "reason": "cloud-quarantine"
+     }
+    }
+   ]
+  },
+  {
+   "id": "move-needs-quarantine-destination",
+   "title": "A cloud move needs grants on source and destination, and the destination must be the client's own quarantine",
+   "tags": [
+    "quarantine"
+   ],
+   "patch": {
+    "grants": [
+     {
+      "id": "g1",
+      "enabled": true,
+      "revoked": false,
+      "clientId": "client-claude",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operation": "move",
+      "mode": "allow",
+      "policyRevision": 4,
+      "issuedAt": 0,
+      "expiresAt": 3000
+     }
+    ]
+   },
+   "steps": [
+    {
+     "call": "authorizeWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "move",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "m1",
+      "payload": "p1",
+      "destinationCollectionId": "q-claude-2",
+      "objectId": "prior",
+      "expectedRevision": 3
+     },
+     "expect": {
+      "code": "DENIED"
+     }
+    },
+    {
+     "call": "patch",
+     "patch": {
+      "grants": [
+       {
+        "id": "g1",
+        "enabled": true,
+        "revoked": false,
+        "clientId": "client-claude",
+        "vaultId": "vault-A",
+        "collectionId": "q-claude",
+        "objectKind": "memory",
+        "operation": "move",
+        "mode": "allow",
+        "policyRevision": 4,
+        "issuedAt": 0,
+        "expiresAt": 3000
+       },
+       {
+        "id": "g2",
+        "enabled": true,
+        "revoked": false,
+        "clientId": "client-claude",
+        "vaultId": "vault-A",
+        "collectionId": "q-claude-2",
+        "objectKind": "memory",
+        "operation": "move",
+        "mode": "allow",
+        "policyRevision": 4,
+        "issuedAt": 0,
+        "expiresAt": 3000
+       }
+      ]
+     }
+    },
+    {
+     "call": "authorizeWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "move",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "m1",
+      "payload": "p1",
+      "destinationCollectionId": "q-claude-2",
+      "objectId": "prior",
+      "expectedRevision": 3
+     },
+     "expect": {
+      "code": "ALLOWED"
+     }
+    },
+    {
+     "call": "authorizeWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "move",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "m1",
+      "payload": "p1",
+      "destinationCollectionId": "curated-main",
+      "objectId": "prior",
+      "expectedRevision": 3
+     },
+     "expect": {
+      "code": "DENIED"
+     }
+    }
+   ]
+  },
+  {
+   "id": "hosted-write-deferred-chatgpt-gemini",
+   "title": "ChatGPT and Gemini hosted write is DEFERRED: no grant can be issued and an existing credential is denied; one capability model, rollout is credential state",
+   "tags": [
+    "rollout",
+    "deferred"
+   ],
+   "patch": {
+    "grants": [
+     {
+      "id": "g1",
+      "enabled": true,
+      "revoked": false,
+      "clientId": "client-claude",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operation": "create_import",
+      "mode": "allow",
+      "policyRevision": 4,
+      "issuedAt": 0,
+      "expiresAt": 3000
+     },
+     {
+      "id": "g2",
+      "enabled": true,
+      "revoked": false,
+      "clientId": "client-chatgpt",
+      "vaultId": "vault-A",
+      "collectionId": "q-chatgpt",
+      "objectKind": "memory",
+      "operation": "create_import",
+      "mode": "allow",
+      "policyRevision": 4,
+      "issuedAt": 0,
+      "expiresAt": 3000
+     },
+     {
+      "id": "g3",
+      "enabled": true,
+      "revoked": false,
+      "clientId": "client-gemini",
+      "vaultId": "vault-A",
+      "collectionId": "q-gemini",
+      "objectKind": "memory",
+      "operation": "create_import",
+      "mode": "allow",
+      "policyRevision": 4,
+      "issuedAt": 0,
+      "expiresAt": 3000
+     }
+    ]
+   },
+   "steps": [
+    {
+     "call": "validateGrant",
+     "auth": null,
+     "grant": {
+      "id": "gc",
+      "enabled": true,
+      "revoked": false,
+      "clientId": "client-chatgpt",
+      "vaultId": "vault-A",
+      "collectionId": "q-chatgpt",
+      "objectKind": "memory",
+      "operation": "create_import",
+      "mode": "allow",
+      "policyRevision": 4,
+      "issuedAt": 0,
+      "expiresAt": 100
+     },
+     "client": "client-chatgpt",
+     "expect": {
+      "ok": false,
+      "reason": "hosted-write-deferred"
+     }
+    },
+    {
+     "call": "validateGrant",
+     "auth": null,
+     "grant": {
+      "id": "gg",
+      "enabled": true,
+      "revoked": false,
+      "clientId": "client-gemini",
+      "vaultId": "vault-A",
+      "collectionId": "q-gemini",
+      "objectKind": "memory",
+      "operation": "create_import",
+      "mode": "allow",
+      "policyRevision": 4,
+      "issuedAt": 0,
+      "expiresAt": 100
+     },
+     "client": "client-gemini",
+     "expect": {
+      "ok": false,
+      "reason": "hosted-write-deferred"
+     }
+    },
+    {
+     "call": "validateGrant",
+     "auth": null,
+     "grant": {
+      "id": "gk",
+      "enabled": true,
+      "revoked": false,
+      "clientId": "client-claude",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operation": "create_import",
+      "mode": "allow",
+      "policyRevision": 4,
+      "issuedAt": 0,
+      "expiresAt": 100
+     },
+     "client": "client-claude",
+     "expect": {
+      "ok": true
+     }
+    },
+    {
+     "call": "authorizeWrite",
+     "auth": "chatgpt",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-chatgpt",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "p1"
+     },
+     "expect": {
+      "code": "DENIED"
+     }
+    },
+    {
+     "call": "authorizeWrite",
+     "auth": "gemini",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-gemini",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "p1"
+     },
+     "expect": {
+      "code": "DENIED"
+     }
+    },
+    {
+     "call": "authorizeWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "p1"
+     },
+     "expect": {
+      "code": "ALLOWED"
+     }
+    }
+   ]
+  },
+  {
+   "id": "hosted-write-deferred-keeps-read",
+   "title": "Deferring hosted write does not change curated read for ChatGPT or Gemini",
+   "tags": [
+    "rollout",
+    "deferred"
+   ],
+   "patch": {
+    "readGrants": [
+     {
+      "enabled": true,
+      "revoked": false,
+      "clientId": "client-chatgpt",
+      "vaultId": "vault-A",
+      "collectionId": "curated-main",
+      "policyRevision": 2
+     },
+     {
+      "enabled": true,
+      "revoked": false,
+      "clientId": "client-gemini",
+      "vaultId": "vault-A",
+      "collectionId": "curated-main",
+      "policyRevision": 2
+     },
+     {
+      "enabled": true,
+      "revoked": false,
+      "clientId": "client-chatgpt",
+      "vaultId": "vault-A",
+      "collectionId": "raw-A",
+      "policyRevision": 2
+     }
+    ],
+    "grants": [
+     {
+      "id": "g1",
+      "enabled": true,
+      "revoked": false,
+      "clientId": "client-chatgpt",
+      "vaultId": "vault-A",
+      "collectionId": "q-chatgpt",
+      "objectKind": "memory",
+      "operation": "create_import",
+      "mode": "allow",
+      "policyRevision": 4,
+      "issuedAt": 0,
+      "expiresAt": 3000
+     }
+    ]
+   },
+   "steps": [
+    {
+     "call": "canRead",
+     "auth": "chatgpt",
+     "collectionId": "curated-main",
+     "expect": {
+      "value": true
+     }
+    },
+    {
+     "call": "canRead",
+     "auth": "gemini",
+     "collectionId": "curated-main",
+     "expect": {
+      "value": true
+     }
+    },
+    {
+     "call": "canRead",
+     "auth": "chatgpt",
+     "collectionId": "raw-A",
+     "expect": {
+      "value": false
+     }
+    },
+    {
+     "call": "authorizeWrite",
+     "auth": "chatgpt",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-chatgpt",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "p1"
+     },
+     "expect": {
+      "code": "DENIED"
+     }
+    }
+   ]
+  },
+  {
+   "id": "rollout-enable-is-credential-state-only",
+   "title": "Enabling a provider changes only rollout state; the same operation and grant shape then works; removing the rollout entry fails closed",
+   "tags": [
+    "rollout"
+   ],
+   "patch": {
+    "grants": [
+     {
+      "id": "g1",
+      "enabled": true,
+      "revoked": false,
+      "clientId": "client-chatgpt",
+      "vaultId": "vault-A",
+      "collectionId": "q-chatgpt",
+      "objectKind": "memory",
+      "operation": "create_import",
+      "mode": "allow",
+      "policyRevision": 4,
+      "issuedAt": 0,
+      "expiresAt": 3000
+     }
+    ]
+   },
+   "steps": [
+    {
+     "call": "authorizeWrite",
+     "auth": "chatgpt",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-chatgpt",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "p1"
+     },
+     "expect": {
+      "code": "DENIED"
+     }
+    },
+    {
+     "call": "patch",
+     "patch": {
+      "rollout": {
+       "hostedWrite": {
+        "chatgpt": "ENABLED"
+       }
+      }
+     }
+    },
+    {
+     "call": "authorizeWrite",
+     "auth": "chatgpt",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-chatgpt",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "p1"
+     },
+     "expect": {
+      "code": "ALLOWED"
+     }
+    },
+    {
+     "call": "patch",
+     "patch": {
+      "rollout": {
+       "hostedWrite": {
+        "chatgpt": null
+       }
+      }
+     }
+    },
+    {
+     "call": "authorizeWrite",
+     "auth": "chatgpt",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-chatgpt",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "p1"
+     },
+     "expect": {
+      "code": "DENIED"
+     }
+    }
+   ]
+  },
+  {
+   "id": "cloud-request-limits",
+   "title": "Cloud per-request object count and per-hour write limits",
+   "tags": [
+    "limits"
+   ],
+   "patch": {
+    "grants": [
+     {
+      "id": "g1",
+      "enabled": true,
+      "revoked": false,
+      "clientId": "client-claude",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operation": "create_import",
+      "mode": "allow",
+      "policyRevision": 4,
+      "issuedAt": 0,
+      "expiresAt": 3000
+     }
+    ]
+   },
+   "steps": [
+    {
+     "call": "authorizeWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "p1",
+      "objectCount": 21
+     },
+     "expect": {
+      "code": "LIMIT"
+     }
+    },
+    {
+     "call": "authorizeWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "p1",
+      "objectCount": 20
+     },
+     "expect": {
+      "code": "ALLOWED"
+     }
+    },
+    {
+     "call": "patch",
+     "patch": {
+      "writeLog": [
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       },
+       {
+        "grantId": "g1",
+        "at": 999
+       }
+      ]
+     }
+    },
+    {
+     "call": "authorizeWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operationId": "op-1",
+      "payload": "p1"
+     },
+     "expect": {
+      "code": "LIMIT"
+     }
+    }
+   ]
+  },
+  {
+   "id": "cloud-grant-lifetime-cap",
+   "title": "Cloud grant issuance requires an expiry within the 30-day default cap",
+   "tags": [
+    "limits",
+    "grant"
+   ],
+   "steps": [
+    {
+     "call": "validateGrant",
+     "auth": null,
+     "grant": {
+      "id": "gx",
+      "enabled": true,
+      "revoked": false,
+      "clientId": "client-claude",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operation": "create_import",
+      "mode": "allow",
+      "policyRevision": 4,
+      "issuedAt": 0,
+      "expiresAt": 2592000001
+     },
+     "client": "client-claude",
+     "expect": {
+      "ok": false,
+      "reason": "cloud-expiry"
+     }
+    },
+    {
+     "call": "validateGrant",
+     "auth": null,
+     "grant": {
+      "id": "gy",
+      "enabled": true,
+      "revoked": false,
+      "clientId": "client-claude",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operation": "create_import",
+      "mode": "allow",
+      "policyRevision": 4,
+      "issuedAt": 0,
+      "expiresAt": null
+     },
+     "client": "client-claude",
+     "expect": {
+      "ok": false,
+      "reason": "cloud-expiry"
+     }
+    },
+    {
+     "call": "validateGrant",
+     "auth": null,
+     "grant": {
+      "id": "gz",
+      "enabled": true,
+      "revoked": false,
+      "clientId": "client-claude",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operation": "create_import",
+      "mode": "allow",
+      "policyRevision": 4,
+      "issuedAt": 0,
+      "expiresAt": 2592000000
+     },
+     "client": "client-claude",
+     "expect": {
+      "ok": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "cloud-bulk-and-unknown-kind-denied",
+   "title": "Cloud principals cannot hold bulk grants; unknown object kinds are denied",
+   "tags": [
+    "tier",
+    "grant"
+   ],
+   "patch": {
+    "grants": [
+     {
+      "id": "g2",
+      "enabled": true,
+      "revoked": false,
+      "clientId": "client-claude",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operation": "create_import",
+      "mode": "allow",
+      "policyRevision": 4,
+      "issuedAt": 0,
+      "expiresAt": 3000
+     }
+    ]
+   },
+   "steps": [
+    {
+     "call": "validateGrant",
+     "auth": null,
+     "grant": {
+      "id": "gb",
+      "enabled": true,
+      "revoked": false,
+      "clientId": "client-claude",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "memory",
+      "operation": "bulk_stage",
+      "mode": "allow",
+      "policyRevision": 4,
+      "issuedAt": 0,
+      "expiresAt": 100
+     },
+     "client": "client-claude",
+     "expect": {
+      "ok": false,
+      "reason": "cloud-bulk"
+     }
+    },
+    {
+     "call": "authorizeWrite",
+     "auth": "claude",
+     "request": {
+      "operation": "create_import",
+      "vaultId": "vault-A",
+      "collectionId": "q-claude",
+      "objectKind": "mystery",
+      "operationId": "op-1",
+      "payload": "p1"
+     },
+     "expect": {
+      "code": "DENIED"
+     }
+    }
+   ]
+  }
+ ]
+}

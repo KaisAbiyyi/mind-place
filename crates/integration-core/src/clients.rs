@@ -3,6 +3,7 @@
 use crate::{IntegrationCore, IntegrationError, Result, ToolBatch, ToolBatchResponse};
 use mind_place_security::SecurityGate;
 use mind_place_state::{ClientCapability, ClientRecord, StateStore};
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
@@ -107,6 +108,46 @@ impl<'a> ClientAuthority<'a> {
     }
 }
 
+/* Strict post-result privacy guard for the credentialed MCP dispatcher.
+A stale FTS generation may still contain pre-redaction snippets; never
+serialize those snippets to a model even if source indexing has not caught
+up. Fail closed on malformed source references. */
+fn reject_redacted_sources(state: &StateStore, value: &Value) -> Result<()> {
+    let mut pending = vec![value];
+    let mut visited = 0usize;
+    while let Some(node) = pending.pop() {
+        visited += 1;
+        if visited > 20_000 {
+            return Err(IntegrationError::ResourceLimit);
+        }
+        match node {
+            Value::Object(map) => {
+                for (name, value) in map {
+                    if matches!(name.as_str(), "source_id" | "source_ref") {
+                        let source = value.as_str().ok_or(IntegrationError::AccessDenied)?;
+                        if state.source_is_redacted(source)? {
+                            return Err(IntegrationError::AccessDenied);
+                        }
+                    } else if name == "source_ids" {
+                        let ids = value.as_array().ok_or(IntegrationError::AccessDenied)?;
+                        for source in ids {
+                            let source = source.as_str().ok_or(IntegrationError::AccessDenied)?;
+                            if state.source_is_redacted(source)? {
+                                return Err(IntegrationError::AccessDenied);
+                            }
+                        }
+                    } else {
+                        pending.push(value);
+                    }
+                }
+            }
+            Value::Array(values) => pending.extend(values),
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 impl IntegrationCore<'_> {
     /// Read requests use the SAME unlock lease as Phase 3A, and current
     /// authoritative client capability is checked at every callback.
@@ -117,6 +158,12 @@ impl IntegrationCore<'_> {
         credential: &str,
         batch: &ToolBatch,
     ) -> Result<ToolBatchResponse> {
+        // MP-9C: one shared privacy disclosure fence spans the argument
+        // pre-check, every tool call, the post-result authority check and the
+        // returned response. A redaction commit (exclusive) therefore either
+        // completes before this batch's first visibility decision or waits
+        // until its response exists. Acquired before any state connection.
+        let _privacy = self.disclosure_fence()?;
         self.security.require_unlocked()?;
         let hash = credential_hash(credential)?;
         let client = match state.authorize_client_hash(&hash, ClientCapability::Read)? {
@@ -127,7 +174,13 @@ impl IntegrationCore<'_> {
             }
         };
         state.audit_client_read(Some(&client), "read_attempt")?;
-        let result = self.execute_batch(batch, || {
+        // Check direct source filters before accessing any raw/index bytes.
+        for call in &batch.calls {
+            reject_redacted_sources(state, &call.arguments)?;
+        }
+        // Stale index hits for redacted sources are dropped (not rejected) so
+        // the response is indistinguishable from "no match".
+        let authorize = || {
             if state
                 .authorize_client_hash(&hash, ClientCapability::Read)?
                 .as_deref()
@@ -137,6 +190,37 @@ impl IntegrationCore<'_> {
             } else {
                 Err(IntegrationError::AccessDenied)
             }
+        };
+        // MP-9C: hidden sources are excluded from ranking by failing closed
+        // on a stale projection; prune it and retry once so the client sees
+        // only visible results and no stale-generation signal.
+        let run = || {
+            self.execute_batch_visible(
+                batch,
+                authorize,
+                &mut mind_place_index::AuthorityVisibility(state),
+            )
+        };
+        let result = match run() {
+            Err(IntegrationError::Index(mind_place_index::IndexError::StaleGeneration)) => self
+                .prune_stale_projection(state, authorize)
+                .and_then(|()| run()),
+            other => other,
+        };
+        // Defense in depth: recheck every returned source against fresh
+        // authority. Anything still naming a redacted source fails closed.
+        let result = result.and_then(|response| {
+            for item in &response.results {
+                reject_redacted_sources(state, &item.result)?;
+            }
+            if state
+                .authorize_client_hash(&hash, ClientCapability::Read)?
+                .as_deref()
+                != Some(client.as_str())
+            {
+                return Err(IntegrationError::AccessDenied);
+            }
+            Ok(response)
         });
         state.audit_client_read(
             Some(&client),

@@ -4,8 +4,7 @@ use crate::{
     CaptureArchiveReader, FetchBudget, FetchCursor, FetchGranularity, FetchRequest, IndexError,
     IndexStore, QueryTerm, Result, RetrievalFilters, RetrievalHit, RetrievalRequest,
 };
-use chrono::DateTime;
-use mind_place_archive::ArchiveStore;
+use mind_place_archive::{parse_rfc3339, ArchiveStore};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
@@ -191,11 +190,9 @@ fn apply_policy(request: &ContextRequest) -> Result<RetrievalFilters> {
         }
         ContextPreset::Historical => {
             let as_of = request.as_of.as_deref().ok_or(IndexError::InvalidQuery)?;
-            let timestamp =
-                DateTime::parse_from_rfc3339(as_of).map_err(|_| IndexError::InvalidQuery)?;
+            let timestamp = parse_rfc3339(as_of).ok_or(IndexError::InvalidQuery)?;
             if let Some(existing) = &filters.captured_to {
-                let existing_date =
-                    DateTime::parse_from_rfc3339(existing).map_err(|_| IndexError::InvalidQuery)?;
+                let existing_date = parse_rfc3339(existing).ok_or(IndexError::InvalidQuery)?;
                 if timestamp < existing_date {
                     filters.captured_to = Some(as_of.to_string());
                 }
@@ -281,11 +278,17 @@ impl IndexStore {
         }
         let filters = apply_policy(request)?;
         check()?;
-        let search = self.retrieve(&RetrievalRequest {
-            queries: request.queries.clone(),
-            filters,
-            limit: SEARCH_POOL,
-        })?;
+        // MP-9C: a stale index hit for a redacted source is skipped here, not
+        // fetched; fetching it would fail and turn the match into an oracle.
+        let authority = archive.source_authority()?;
+        let search = self.retrieve_filtered(
+            &RetrievalRequest {
+                queries: request.queries.clone(),
+                filters,
+                limit: SEARCH_POOL,
+            },
+            &mut crate::OptionalAuthorityVisibility(&authority),
+        )?;
         check()?;
 
         let mut groups: Vec<ContextGroup> = Vec::new();
@@ -361,7 +364,23 @@ impl IndexStore {
             };
             // Phase 2B checks canonical identity, exact snapshot, raw digest
             // and match against index metadata before any text is emitted.
-            let fetched = self.fetch_generic_with_check(archive, &fetch_request, &mut check)?;
+            let fetched = match self.fetch_generic_with_check(archive, &fetch_request, &mut check) {
+                Ok(fetched) => fetched,
+                // A redaction that committed after retrieval surfaces as
+                // Revoked from the archive's own visibility gate. Skip it
+                // silently (no reason code) only when current authority
+                // confirms the tombstone; lease revocation still propagates
+                // because re-reading authority then fails.
+                Err(IndexError::Revoked)
+                    if !crate::SourceVisibility::is_visible(
+                        &mut crate::OptionalAuthorityVisibility(&authority),
+                        &hit.source_id,
+                    )? =>
+                {
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
             let key = (fetched.source_id.clone(), fetched.snapshot_id.clone());
             let group_at = groups.iter().position(|g| {
                 (g.source_id.as_str(), g.snapshot_id.as_str()) == (key.0.as_str(), key.1.as_str())

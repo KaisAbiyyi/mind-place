@@ -3,8 +3,9 @@
 //! native-host IPC and derived search indexing are fully ported and qualified.
 use crate::{documents::DocumentIndex, IndexError, IndexStore, Result};
 use mind_place_archive::{
-    markdown, validate_capture, AssetResult, Capture, Conversation, ConversationSummary,
-    ExportResult, SaveReceipt, SnapshotSummary, MAX_CAPTURE_BYTES,
+    markdown, validate_capture, validate_historical_capture, validate_live_capture,
+    validate_stored_capture, AssetResult, Capture, Conversation, ConversationSummary, ExportResult,
+    SaveReceipt, SnapshotSummary, MAX_CAPTURE_BYTES,
 };
 use mind_place_security::{
     vault::{ContentKind, CryptoVault},
@@ -12,7 +13,7 @@ use mind_place_security::{
     vault_storage::ImmutableVaultStorage,
     SecurityError, SecurityGate, UnlockLease,
 };
-use mind_place_state::{CipherKey, StateStore};
+use mind_place_state::{canonical_source_id, CipherKey, SourceDescriptor, SourceKey, StateStore};
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use sha2::{Digest, Sha256};
 use std::{
@@ -128,6 +129,15 @@ impl VaultCaptureStore {
         let mut raw = [0u8; 32];
         raw.copy_from_slice(key.as_ref());
         Ok(raw)
+    }
+
+    /// MP-9C disclosure fence for a whole command (query -> materialized
+    /// response): shared with every other reader, exclusive against source
+    /// redaction commits. Acquire FIRST, before opening state/index (lock
+    /// order: privacy -> writer -> SQLite), and keep it on the same thread
+    /// until the response value is complete. Nested archive reads re-enter it.
+    pub fn disclosure_fence(&self) -> Result<mind_place_security::vault_fence::PrivacyReadGuard> {
+        VaultWriterFence::privacy_reader(&self.root).map_err(|_| IndexError::Revoked)
     }
 
     pub fn open_state_store(&self) -> Result<StateStore> {
@@ -307,6 +317,40 @@ impl VaultCaptureStore {
         format!("capture/{archive_id}/{snapshot_id}")
     }
 
+    /// Map an archive conversation back to its versioned state authority.
+    /// Unindexed legacy import types have no provider canonical identity here;
+    /// migration/unsupported-provider policy is a separate release gate.
+    fn capture_redacted(
+        &self,
+        authority: &StateStore,
+        provider: &str,
+        conversation_id: &str,
+    ) -> Result<bool> {
+        // Unknown/legacy provider types must never bypass source authority.
+        // Generic imports have their own explicit, canonical namespace.
+        let namespace =
+            crate::namespace_for_provider(provider).ok_or(IndexError::InvalidEvidence)?;
+        let source_id = canonical_source_id(&SourceDescriptor {
+            provider,
+            source_namespace: namespace,
+            source_kind: "conversation",
+            key: SourceKey::External(conversation_id),
+        })?;
+        Ok(authority.source_is_redacted(&source_id)?)
+    }
+
+    fn require_visible(
+        &self,
+        authority: &StateStore,
+        provider: &str,
+        conversation_id: &str,
+    ) -> Result<()> {
+        if self.capture_redacted(authority, provider, conversation_id)? {
+            return Err(IndexError::Revoked);
+        }
+        Ok(())
+    }
+
     pub fn save(&self, capture: Capture) -> Result<SaveReceipt> {
         self.save_internal(capture, false)
     }
@@ -322,15 +366,25 @@ impl VaultCaptureStore {
         self.save_internal(capture, true)
     }
 
-    fn save_internal(&self, mut capture: Capture, migration: bool) -> Result<SaveReceipt> {
+    fn save_internal(&self, capture: Capture, migration: bool) -> Result<SaveReceipt> {
+        self.save_internal_with_checkpoint(capture, migration, || {})
+    }
+
+    // Test checkpoint is invoked under the exact production privacy fence,
+    // immediately after authority visibility and before ciphertext publication.
+    fn save_internal_with_checkpoint(
+        &self,
+        mut capture: Capture,
+        migration: bool,
+        after_visibility_check: impl FnOnce(),
+    ) -> Result<SaveReceipt> {
         self.gate
             .validate_lease(self.lease)
             .map_err(|_| IndexError::Revoked)?;
-        validate_capture(&mut capture)?;
-        if !migration
-            && (capture.provider == "generic" || capture.capture_method == "legacy-import")
-        {
-            return Err(IndexError::InvalidEvidence);
+        if migration {
+            validate_stored_capture(&capture)?;
+        } else {
+            validate_live_capture(&mut capture)?;
         }
         let id = format!(
             "{:x}",
@@ -346,8 +400,33 @@ impl VaultCaptureStore {
             )
         );
         let identity = Self::identity(&id, &snapshot_id);
+        // Lock order: privacy exclusive -> nested shared writer leases.
+        // The writer fence alone is SHARED and cannot serialize redaction.
+        // Keep this lock across the visibility check, immutable publication,
+        // and catalog commit; redaction takes the same exclusive privacy lock
+        // BEFORE it opens a writable state connection.
+        let _privacy =
+            VaultWriterFence::privacy(&self.root).map_err(|_| IndexError::InvalidEvidence)?;
+        let authority = self.open_state_store()?;
         let _writer =
             VaultWriterFence::writer(&self.root).map_err(|_| IndexError::InvalidEvidence)?;
+        // New live captures establish canonical owner authority. An explicit
+        // offline migration MUST preserve source-state rows byte-for-byte:
+        // registration during conversion breaks independently verified legacy
+        // SQLite equality. Migrated records can be registered through the
+        // trusted owner-state API before owner-authorized redaction.
+        if !migration {
+            let namespace = crate::namespace_for_provider(&capture.provider)
+                .ok_or(IndexError::InvalidEvidence)?;
+            authority.register_source(&SourceDescriptor {
+                provider: &capture.provider,
+                source_namespace: namespace,
+                source_kind: "conversation",
+                key: SourceKey::External(&capture.conversation_id),
+            })?;
+        }
+        self.require_visible(&authority, &capture.provider, &capture.conversation_id)?;
+        after_visibility_check();
         let mut db = self.connection()?;
         if db
             .query_row(
@@ -427,9 +506,9 @@ impl VaultCaptureStore {
                     identity.as_bytes(),
                 )
                 .map_err(|_| IndexError::InvalidEvidence)?;
-            let mut original: Capture =
+            let original: Capture =
                 serde_json::from_slice(&previous).map_err(|_| IndexError::InvalidEvidence)?;
-            validate_capture(&mut original)?;
+            validate_stored_capture(&original)?;
             let mut original_normalized = original.clone();
             original_normalized.captured_at.clear();
             if serde_json::to_vec(&original_normalized).map_err(|_| IndexError::InvalidEvidence)?
@@ -450,13 +529,13 @@ impl VaultCaptureStore {
                     previous_identity.as_bytes(),
                 )
                 .map_err(|_| IndexError::InvalidEvidence)?;
-            let mut prior: Capture =
+            let prior: Capture =
                 serde_json::from_slice(&previous).map_err(|_| IndexError::InvalidEvidence)?;
-            validate_capture(&mut prior)?;
-            let prior_time = chrono::DateTime::parse_from_rfc3339(&prior.captured_at)
-                .map_err(|_| IndexError::InvalidEvidence)?;
-            let incoming_time = chrono::DateTime::parse_from_rfc3339(&capture.captured_at)
-                .map_err(|_| IndexError::InvalidEvidence)?;
+            validate_stored_capture(&prior)?;
+            let prior_time = mind_place_archive::parse_rfc3339(&prior.captured_at)
+                .ok_or(IndexError::InvalidEvidence)?;
+            let incoming_time = mind_place_archive::parse_rfc3339(&capture.captured_at)
+                .ok_or(IndexError::InvalidEvidence)?;
             matches!(
                 prior.capture_method.as_str(),
                 "manual-dom" | "automatic-dom"
@@ -509,6 +588,32 @@ impl VaultCaptureStore {
     }
 
     pub fn read(&self, archive_id: &str, revision: Option<&str>) -> Result<Conversation> {
+        self.read_with_checkpoint(archive_id, revision, || {})
+    }
+
+    // Test-only checkpoints use the same production shared disclosure fence.
+    // Unlike the shared writer fence, this conflicts with source redaction's
+    // exclusive privacy transition. The lock is acquired BEFORE opening state.
+    fn read_with_checkpoint(
+        &self,
+        archive_id: &str,
+        revision: Option<&str>,
+        after_visibility_check: impl FnOnce(),
+    ) -> Result<Conversation> {
+        let _privacy = VaultWriterFence::privacy_reader(&self.root)
+            .map_err(|_| IndexError::InvalidEvidence)?;
+        self.read_under_privacy(archive_id, revision, after_visibility_check)
+    }
+
+    // The caller must already hold privacy_reader. Used by export/assets to
+    // avoid a second shared lock after an exclusive writer has queued.
+    fn read_under_privacy(
+        &self,
+        archive_id: &str,
+        revision: Option<&str>,
+        after_visibility_check: impl FnOnce(),
+    ) -> Result<Conversation> {
+        let authority = self.open_state_store()?;
         let _writer =
             VaultWriterFence::writer(&self.root).map_err(|_| IndexError::InvalidEvidence)?;
         let db = self.connection()?;
@@ -542,6 +647,10 @@ impl VaultCaptureStore {
             })
             .optional()?
             .ok_or(IndexError::InvalidEvidence)?;
+        // Direct archive-id + revision fetch cannot bypass logical redaction.
+        // Hold privacy_reader through decrypt, validation and the return handoff.
+        self.require_visible(&authority, &row.2, &row.3)?;
+        after_visibility_check();
         let snapshot_count: i64 = db.query_row(
             "SELECT count(*) FROM vault_captures WHERE archive_id=?1",
             [archive_id],
@@ -556,9 +665,9 @@ impl VaultCaptureStore {
                 row.1.as_bytes(),
             )
             .map_err(|_| IndexError::InvalidEvidence)?;
-        let mut capture: Capture =
+        let capture: Capture =
             serde_json::from_slice(bytes.as_slice()).map_err(|_| IndexError::InvalidEvidence)?;
-        validate_capture(&mut capture)?;
+        validate_stored_capture(&capture)?;
         if capture.provider != row.2
             || capture.conversation_id != row.3
             || capture.title != row.4
@@ -652,7 +761,17 @@ impl VaultCaptureStore {
         archive_id: &str,
         revision: Option<&str>,
     ) -> Result<ExportResult> {
-        let conversation = self.read(archive_id, revision)?;
+        let _privacy = VaultWriterFence::privacy_reader(&self.root)
+            .map_err(|_| IndexError::InvalidEvidence)?;
+        let authority = self.open_state_store()?;
+        let conversation = self.read_under_privacy(archive_id, revision, || {})?;
+        let _writer =
+            VaultWriterFence::writer(&self.root).map_err(|_| IndexError::InvalidEvidence)?;
+        self.require_visible(
+            &authority,
+            &conversation.capture.provider,
+            &conversation.capture.conversation_id,
+        )?;
         if conversation.capture.messages.iter().any(|message| {
             message
                 .attachments
@@ -672,6 +791,8 @@ impl VaultCaptureStore {
     }
 
     pub fn asset(&self, archive_id: &str, name: &str) -> Result<AssetResult> {
+        let _privacy = VaultWriterFence::privacy_reader(&self.root)
+            .map_err(|_| IndexError::InvalidEvidence)?;
         self.gate
             .validate_lease(self.lease)
             .map_err(|_| IndexError::Revoked)?;
@@ -688,7 +809,15 @@ impl VaultCaptureStore {
         {
             return Err(IndexError::InvalidEvidence);
         }
-        self.read(archive_id, None)?;
+        let authority = self.open_state_store()?;
+        let conversation = self.read_under_privacy(archive_id, None, || {})?;
+        let _writer =
+            VaultWriterFence::writer(&self.root).map_err(|_| IndexError::InvalidEvidence)?;
+        self.require_visible(
+            &authority,
+            &conversation.capture.provider,
+            &conversation.capture.conversation_id,
+        )?;
         let storage = self.storage()?;
         let inventory = crate::vault_legacy_objects::RawLegacyInventory::read(
             &self.root,
@@ -721,9 +850,12 @@ impl VaultCaptureStore {
     }
 
     fn list_catalog(&self, query: &str, complete: bool) -> Result<Vec<ConversationSummary>> {
+        let _privacy = VaultWriterFence::privacy_reader(&self.root)
+            .map_err(|_| IndexError::InvalidEvidence)?;
         if query.len() > 1024 {
             return Err(IndexError::InvalidQuery);
         }
+        let authority = self.open_state_store()?;
         let _writer =
             VaultWriterFence::writer(&self.root).map_err(|_| IndexError::InvalidEvidence)?;
         let mut db = self.connection()?;
@@ -731,11 +863,19 @@ impl VaultCaptureStore {
         // or updates a conversation between keyset pages.
         let tx = db.transaction()?;
         let result = Self::catalog_rows(&tx, query, complete)?;
+        // Hide even historical catalogue titles and metadata for a redacted
+        // source; the complete reindex inventory drops these derived rows.
+        let mut filtered = Vec::with_capacity(result.len());
+        for summary in result {
+            if !self.capture_redacted(&authority, &summary.provider, &summary.conversation_id)? {
+                filtered.push(summary);
+            }
+        }
         self.gate
             .validate_lease(self.lease)
             .map_err(|_| IndexError::Revoked)?;
         tx.commit()?;
-        Ok(result)
+        Ok(filtered)
     }
 
     fn catalog_rows(
@@ -885,9 +1025,9 @@ impl VaultCaptureStore {
             let bytes = storage
                 .read(gate, lease, ContentKind::Archive, identity.as_bytes())
                 .map_err(|_| IndexError::InvalidEvidence)?;
-            let mut capture: Capture =
+            let capture: Capture =
                 serde_json::from_slice(&bytes).map_err(|_| IndexError::InvalidEvidence)?;
-            validate_capture(&mut capture)?;
+            validate_stored_capture(&capture)?;
             let expected_id = format!(
                 "{:x}",
                 Sha256::digest(
@@ -922,9 +1062,23 @@ impl VaultCaptureStore {
     }
 
     pub fn snapshots(&self, archive_id: &str) -> Result<Vec<SnapshotSummary>> {
+        let _privacy = VaultWriterFence::privacy_reader(&self.root)
+            .map_err(|_| IndexError::InvalidEvidence)?;
+        let authority = self.open_state_store()?;
         let _writer =
             VaultWriterFence::writer(&self.root).map_err(|_| IndexError::InvalidEvidence)?;
         let db = self.connection()?;
+        let identity: Option<(String, String)> = db
+            .query_row(
+                "SELECT provider,conversation_id FROM vault_captures
+             WHERE archive_id=?1 LIMIT 1",
+                [archive_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        if let Some((provider, conversation_id)) = identity {
+            self.require_visible(&authority, &provider, &conversation_id)?;
+        }
         let mut statement = db.prepare(
             "SELECT snapshot_id,captured_at,message_count,completeness
              FROM vault_captures WHERE archive_id=?1 ORDER BY captured_at DESC",
@@ -1054,5 +1208,652 @@ mod vault_catalog_pagination_tests {
         let vault = CryptoVault::restore_with_recovery(&gate, lease, &manifest, &recovery).unwrap();
         assert!(VaultCaptureStore::verify_backup_catalog(&root, &vault, &gate, lease).is_err());
         assert!(!root.join("archive-index.sqlite3").exists());
+    }
+}
+
+#[cfg(test)]
+mod privacy_capture_race_tests {
+    use super::*;
+    use mind_place_security::vault::CryptoVault;
+    use mind_place_state::ClientCapability;
+    use std::{
+        sync::{mpsc, Arc},
+        thread,
+        time::Duration,
+    };
+
+    fn synthetic_capture(title: &str) -> Capture {
+        serde_json::from_value(serde_json::json!({
+            "schema_version": 1,
+            "provider": "chatgpt",
+            "conversation_id": "123e4567-e89b-12d3-a456-426614174099",
+            "source_url": "https://chatgpt.com/c/123e4567-e89b-12d3-a456-426614174099",
+            "title": title,
+            "captured_at": "2026-11-07T10:00:00Z",
+            "capture_method": "manual-dom",
+            "completeness": "partial",
+            "warnings": [],
+            "messages": [{
+                "id": "synthetic-message",
+                "role": "user",
+                "text": "synthetic privacy fence evidence",
+                "format": "plain",
+                "attachments": []
+            }]
+        }))
+        .unwrap()
+    }
+
+    fn fixture() -> (
+        tempfile::TempDir,
+        SecurityGate,
+        UnlockLease,
+        mind_place_security::vault::VaultManifest,
+        mind_place_security::vault::RecoverySecret,
+        Arc<VaultCaptureStore>,
+        String,
+        String,
+    ) {
+        let home = tempfile::tempdir().unwrap();
+        let gate = SecurityGate::open(home.path().join("security.json")).unwrap();
+        gate.initialize(b"synthetic-redaction-race-password")
+            .unwrap();
+        let lease = gate.require_unlocked().unwrap();
+        let (vault, recovery, manifest) = CryptoVault::provision(&gate, lease).unwrap();
+        let root = home.path().join("vault");
+        manifest.persist_new(&root).unwrap();
+        let archive = Arc::new(VaultCaptureStore::open(&root, vault, &gate, lease).unwrap());
+        let state = archive.open_state_store().unwrap();
+        let admin = "a".repeat(64);
+        state
+            .issue_client(
+                "client:v1:owner",
+                "Synthetic owner",
+                &admin,
+                &[ClientCapability::Admin],
+            )
+            .unwrap();
+        let source = state
+            .register_source(&SourceDescriptor {
+                provider: "chatgpt",
+                source_namespace: crate::namespace_for_provider("chatgpt").unwrap(),
+                source_kind: "conversation",
+                key: SourceKey::External("123e4567-e89b-12d3-a456-426614174099"),
+            })
+            .unwrap();
+        (
+            home, gate, lease, manifest, recovery, archive, admin, source,
+        )
+    }
+
+    #[test]
+    fn redaction_waits_for_inflight_archive_disclosure_and_denies_subsequent_reads() {
+        let (_home, _gate, _lease, _manifest, _recovery, archive, admin, source) = fixture();
+        let saved = archive
+            .save(synthetic_capture("sensitive synthetic read"))
+            .unwrap();
+        let (checked_tx, checked_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let reader = Arc::clone(&archive);
+        let snapshot_id = saved.snapshot_id.clone();
+        let id = saved.id.clone();
+        let reading = thread::spawn(move || {
+            reader.read_with_checkpoint(&id, Some(&snapshot_id), || {
+                checked_tx.send(()).unwrap();
+                release_rx.recv_timeout(Duration::from_secs(30)).unwrap();
+            })
+        });
+        checked_rx.recv_timeout(Duration::from_secs(30)).unwrap();
+
+        let state = archive.open_state_store().unwrap();
+        let (attempt_tx, attempt_rx) = mpsc::channel();
+        let (redacted_tx, redacted_rx) = mpsc::channel();
+        let redacting = thread::spawn(move || {
+            attempt_tx.send(()).unwrap();
+            redacted_tx
+                .send(state.redact_source(&admin, &source, "Synthetic in-flight read"))
+                .unwrap();
+        });
+        attempt_rx.recv_timeout(Duration::from_secs(30)).unwrap();
+        assert!(matches!(
+            redacted_rx.recv_timeout(Duration::from_millis(150)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
+        release_tx.send(()).unwrap();
+        let prior = reading.join().unwrap().unwrap();
+        assert_eq!(prior.summary.id, saved.id);
+        redacting.join().unwrap();
+        assert!(redacted_rx
+            .recv_timeout(Duration::from_secs(30))
+            .unwrap()
+            .is_ok());
+
+        // After the exclusive commit returns, every public archive disclosure
+        // path denies the source even when addressed by immutable snapshot ID.
+        assert!(archive.read(&saved.id, Some(&saved.snapshot_id)).is_err());
+        assert!(archive.export_markdown(&saved.id, None).is_err());
+        assert!(archive.snapshots(&saved.id).is_err());
+        assert!(archive.list("").unwrap().is_empty());
+    }
+
+    #[test]
+    fn redaction_waits_for_checked_capture_publication_then_denies_later_writes() {
+        let (_home, _gate, _lease, _manifest, _recovery, archive, admin, source) = fixture();
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (resume_tx, resume_rx) = mpsc::channel();
+        let producer = Arc::clone(&archive);
+        let capturing = thread::spawn(move || {
+            producer.save_internal_with_checkpoint(synthetic_capture("first"), false, || {
+                entered_tx.send(()).unwrap();
+                resume_rx.recv_timeout(Duration::from_secs(30)).unwrap();
+            })
+        });
+        entered_rx.recv_timeout(Duration::from_secs(30)).unwrap();
+
+        let state = archive.open_state_store().unwrap();
+        let (began_tx, began_rx) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel();
+        let redactor = thread::spawn(move || {
+            began_tx.send(()).unwrap();
+            done_tx
+                .send(state.redact_source(&admin, &source, "Synthetic owner redaction"))
+                .unwrap();
+        });
+        began_rx.recv_timeout(Duration::from_secs(30)).unwrap();
+        // The mutation cannot commit while capture is between its visibility
+        // check and immutable publication. The old shared-only fence failed here.
+        assert!(matches!(
+            done_rx.recv_timeout(Duration::from_millis(150)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
+        resume_tx.send(()).unwrap();
+        let saved = capturing.join().unwrap().unwrap();
+        redactor.join().unwrap();
+        assert!(done_rx
+            .recv_timeout(Duration::from_secs(30))
+            .unwrap()
+            .is_ok());
+
+        assert!(archive.read(&saved.id, Some(&saved.snapshot_id)).is_err());
+        assert!(archive.save(synthetic_capture("new revision")).is_err());
+        let state = archive.open_state_store().unwrap();
+        let source_id = state.register_source(&SourceDescriptor {
+            provider: "chatgpt",
+            source_namespace: crate::namespace_for_provider("chatgpt").unwrap(),
+            source_kind: "conversation",
+            key: SourceKey::External("123e4567-e89b-12d3-a456-426614174099"),
+        });
+        assert!(
+            source_id.is_err(),
+            "redacted source cannot re-enter ingestion"
+        );
+    }
+
+    #[test]
+    fn raw_capture_and_consented_generic_import_register_redactable_authority() {
+        let (_home, _gate, _lease, _manifest, _recovery, archive, admin, _) = fixture();
+        let raw_id = "123e4567-e89b-12d3-a456-426614174098";
+        let mut raw = synthetic_capture("unregistered browser source");
+        raw.conversation_id = raw_id.to_owned();
+        raw.source_url = format!("https://chatgpt.com/c/{raw_id}");
+        let saved = archive.save(raw.clone()).unwrap();
+        let state = archive.open_state_store().unwrap();
+        let raw_source = canonical_source_id(&SourceDescriptor {
+            provider: "chatgpt",
+            source_namespace: crate::namespace_for_provider("chatgpt").unwrap(),
+            source_kind: "conversation",
+            key: SourceKey::External(raw_id),
+        })
+        .unwrap();
+        assert!(state.source(&raw_source).unwrap().is_some());
+        state
+            .redact_source(&admin, &raw_source, "Synthetic capture")
+            .unwrap();
+        assert!(archive.read(&saved.id, None).is_err());
+        assert!(archive.save(raw).is_err());
+
+        let generic_key = "f".repeat(64);
+        let mut generic = synthetic_capture("consented generic import");
+        generic.provider = "generic".to_owned();
+        generic.conversation_id = generic_key.clone();
+        generic.source_url = format!("mindplace-import://generic/{generic_key}");
+        generic.capture_method = "generic-import".to_owned();
+        let imported = archive.save_internal(generic.clone(), true).unwrap();
+        let generic_source = canonical_source_id(&SourceDescriptor {
+            provider: "generic",
+            source_namespace: crate::namespace_for_provider("generic").unwrap(),
+            source_kind: "conversation",
+            key: SourceKey::External(&generic_key),
+        })
+        .unwrap();
+        // Owner-consented migration preserves its original state DB exactly.
+        // Register provenance only after the import verification boundary.
+        assert!(state.source(&generic_source).unwrap().is_none());
+        assert_eq!(
+            state
+                .register_source(&SourceDescriptor {
+                    provider: "generic",
+                    source_namespace: crate::namespace_for_provider("generic").unwrap(),
+                    source_kind: "conversation",
+                    key: SourceKey::External(&generic_key),
+                })
+                .unwrap(),
+            generic_source
+        );
+        state
+            .redact_source(&admin, &generic_source, "Synthetic generic import")
+            .unwrap();
+        assert!(archive.read(&imported.id, None).is_err());
+        assert!(archive.save_internal(generic, true).is_err());
+    }
+
+    #[test]
+    fn redacted_source_is_pruned_from_encrypted_fts_sync_and_rebuild() {
+        let (_home, _gate, _lease, _manifest, _recovery, archive, admin, source) = fixture();
+        archive.save(synthetic_capture("fts")).unwrap();
+        let state = archive.open_state_store().unwrap();
+        let index = archive.open_index_store().unwrap();
+        index
+            .sync_vault_with_check(&archive, &state, || Ok(()))
+            .unwrap();
+        assert!(!index.search("privacy", false, 20).unwrap().is_empty());
+
+        state
+            .redact_source(&admin, &source, "Synthetic FTS redaction")
+            .unwrap();
+        index
+            .sync_vault_with_check(&archive, &state, || Ok(()))
+            .unwrap();
+        assert!(index.search("privacy", true, 20).unwrap().is_empty());
+
+        index
+            .rebuild_vault_with_check(&archive, &state, || Ok(()))
+            .unwrap();
+        assert!(index.search("privacy", true, 20).unwrap().is_empty());
+    }
+
+    #[test]
+    fn interrupted_capture_releases_privacy_lock_and_restart_preserves_denial() {
+        let (home, gate, lease, manifest, recovery, archive, admin, source) = fixture();
+        let interrupted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            archive
+                .save_internal_with_checkpoint(synthetic_capture("interrupted"), false, || {
+                    panic!("synthetic interruption before immutable publication")
+                })
+                .unwrap();
+        }));
+        assert!(interrupted.is_err());
+        let authority = archive.open_state_store().unwrap();
+        authority
+            .redact_source(&admin, &source, "After interrupted capture")
+            .unwrap();
+        assert!(archive
+            .save(synthetic_capture("after interruption"))
+            .is_err());
+        drop(archive);
+
+        let vault = CryptoVault::restore_with_recovery(&gate, lease, &manifest, &recovery).unwrap();
+        let reopened =
+            VaultCaptureStore::open(home.path().join("vault"), vault, &gate, lease).unwrap();
+        assert!(reopened
+            .open_state_store()
+            .unwrap()
+            .source_is_redacted(&source)
+            .unwrap());
+        assert!(reopened.save(synthetic_capture("after restart")).is_err());
+        assert!(!home.path().join("vault").join("archive").exists());
+    }
+
+    fn capture_with(conversation_id: &str, title: &str, text: &str) -> Capture {
+        let mut capture = synthetic_capture(title);
+        capture.conversation_id = conversation_id.to_owned();
+        capture.source_url = format!("https://chatgpt.com/c/{conversation_id}");
+        capture.messages[0].text = text.to_owned();
+        capture
+    }
+
+    fn zebra(limit: usize) -> crate::RetrievalRequest {
+        crate::RetrievalRequest {
+            queries: vec![crate::QueryTerm::Text("zebracorn".into())],
+            limit,
+            ..Default::default()
+        }
+    }
+
+    fn file_count(path: &Path) -> usize {
+        let mut count = 0;
+        for entry in std::fs::read_dir(path).unwrap() {
+            let entry = entry.unwrap();
+            if entry.file_type().unwrap().is_dir() {
+                count += file_count(&entry.path());
+            } else {
+                count += 1;
+            }
+        }
+        count
+    }
+
+    /// MP-9C stale-index adversarial: redaction commits but the FTS/graph
+    /// projection is NOT resynchronized. Every index-derived surface must hide
+    /// the redacted source and must not turn its match into an error.
+    #[test]
+    fn stale_index_never_discloses_or_signals_a_redacted_source() {
+        let (_home, _gate, _lease, _manifest, _recovery, archive, admin, secret) = fixture();
+        const VISIBLE_ID: &str = "123e4567-e89b-12d3-a456-426614174098";
+        archive
+            .save(capture_with(
+                "123e4567-e89b-12d3-a456-426614174099",
+                "Secret forgotten title",
+                "zebracorn secret evidence",
+            ))
+            .unwrap();
+        archive
+            .save(capture_with(VISIBLE_ID, "Visible title", "zebracorn kept"))
+            .unwrap();
+        let state = archive.open_state_store().unwrap();
+        let index = archive.open_index_store().unwrap();
+        index
+            .sync_vault_with_check(&archive, &state, || Ok(()))
+            .unwrap();
+        state
+            .redact_source(&admin, &secret, "Synthetic stale index")
+            .unwrap();
+
+        // The projection is deliberately stale: raw retrieval still sees it.
+        let raw = index.retrieve(&zebra(20)).unwrap();
+        assert!(raw.hits.iter().any(|hit| hit.source_id == secret));
+
+        // MP-9C: a hidden source still indexed would displace visible hits at
+        // LIMIT and shift BM25 scores, so every authority-aware read fails
+        // closed (enumerated tombstones) instead of filtering after ranking.
+        let stale = |result: crate::Result<crate::RetrievalResponse>| {
+            matches!(result, Err(crate::IndexError::StaleGeneration))
+        };
+        assert!(stale(index.retrieve_filtered(
+            &zebra(20),
+            &mut crate::AuthorityVisibility(&state)
+        )));
+        // A bare predicate fails closed when a surfaced candidate is hidden.
+        assert!(stale(
+            index.retrieve_filtered(
+                &zebra(1),
+                &mut |id: &str| Ok(!state.source_is_redacted(id)?)
+            )
+        ));
+        assert!(matches!(
+            index.inspect_retrieval_filtered_with_check(
+                &zebra(20),
+                || Ok(()),
+                &mut crate::AuthorityVisibility(&state)
+            ),
+            Err(crate::IndexError::StaleGeneration)
+        ));
+        assert!(matches!(
+            index.search_visible(
+                "zebracorn",
+                false,
+                20,
+                &mut crate::AuthorityVisibility(&state)
+            ),
+            Err(crate::IndexError::StaleGeneration)
+        ));
+        // Aggregates exclude the hidden source exactly, even while stale.
+        let raw_stats = index.stats().unwrap();
+        let visible_stats = index
+            .stats_visible(&mut crate::AuthorityVisibility(&state))
+            .unwrap();
+        assert_eq!(visible_stats.sources, raw_stats.sources - 1);
+        assert!(visible_stats.revisions < raw_stats.revisions);
+        assert!(visible_stats.chunks < raw_stats.chunks);
+
+        // Context building consults the same authority and also fails closed.
+        assert!(matches!(
+            index.build_context_vault_with_check(
+                &archive,
+                &crate::ContextRequest {
+                    queries: vec![crate::QueryTerm::Text("zebracorn".into())],
+                    ..Default::default()
+                },
+                || Ok(()),
+            ),
+            Err(crate::IndexError::StaleGeneration)
+        ));
+        // Graph traversal needs no prune: it is visibility-gated while walking.
+        let mut visible_graph = index
+            .graph_neighbors_visible_with_check(
+                &crate::GraphNeighborhoodRequest {
+                    scope: "archive:chatgpt".into(),
+                    seeds: vec![crate::GraphNodeRef::new(
+                        crate::GraphKind::Conversation,
+                        &secret,
+                    )],
+                    direction: crate::GraphDirection::Both,
+                    max_hops: 2,
+                    max_nodes: 120,
+                    max_edges: 240,
+                },
+                &mut crate::AuthorityVisibility(&state),
+                || Ok(()),
+            )
+            .unwrap();
+        assert!(visible_graph.nodes.is_empty() && visible_graph.edges.is_empty());
+        visible_graph.truncated = false;
+
+        // Pruning the stale projection restores visible-only retrieval.
+        index
+            .sync_vault_with_check(&archive, &state, || Ok(()))
+            .unwrap();
+        let pruned = index
+            .retrieve_filtered(&zebra(20), &mut crate::AuthorityVisibility(&state))
+            .unwrap();
+        assert!(!pruned.hits.is_empty());
+        assert!(pruned.hits.iter().all(|hit| hit.source_id != secret
+            && !hit.title.contains("Secret")
+            && !hit.snippet.contains("secret")));
+        assert_eq!(pruned.candidate_count, pruned.hits.len());
+        let one = index
+            .retrieve_filtered(&zebra(1), &mut crate::AuthorityVisibility(&state))
+            .unwrap();
+        assert_eq!(one.hits.len(), 1);
+        assert!(!one.truncated);
+        let inspection = index
+            .inspect_retrieval_filtered_with_check(
+                &zebra(20),
+                || Ok(()),
+                &mut crate::AuthorityVisibility(&state),
+            )
+            .unwrap();
+        assert!(inspection
+            .result
+            .hits
+            .iter()
+            .all(|hit| hit.source_id != secret));
+        assert_eq!(
+            inspection.trace.candidate_count,
+            inspection.result.hits.len()
+        );
+        assert_eq!(
+            index
+                .stats_visible(&mut crate::AuthorityVisibility(&state))
+                .unwrap()
+                .chunks,
+            index.stats().unwrap().chunks
+        );
+        let resynced = index.retrieve(&zebra(20)).unwrap();
+        assert!(resynced.hits.iter().all(|hit| hit.source_id != secret));
+
+        // Context building (desktop and MCP vault) succeeds without the source.
+        let context = index
+            .build_context_vault_with_check(
+                &archive,
+                &crate::ContextRequest {
+                    queries: vec![crate::QueryTerm::Text("zebracorn".into())],
+                    ..Default::default()
+                },
+                || Ok(()),
+            )
+            .unwrap();
+        assert!(!context.groups.is_empty());
+        assert!(context
+            .groups
+            .iter()
+            .all(|group| group.source_id != secret && !group.title.contains("Secret")));
+        let encoded = serde_json::to_string(&context).unwrap();
+        assert!(!encoded.contains("secret evidence") && !encoded.contains(&secret));
+    }
+
+    /// Forgotten-source reimport through the owner one-time confirmation:
+    /// no capture of the same canonical source may re-enter the vault,
+    /// including after a restart, and nothing of it is disclosed. Immutable
+    /// encrypted evidence is retained (logical redaction, never erasure).
+    #[test]
+    fn forgotten_source_cannot_be_reimported_or_read_after_restart() {
+        let (home, gate, lease, manifest, recovery, archive, admin, secret) = fixture();
+        let first = archive.save(synthetic_capture("before forget")).unwrap();
+        let files_before = file_count(&home.path().join("vault"));
+        let state = archive.open_state_store().unwrap();
+        let preview = state
+            .preview_source_forget(&admin, &secret, "Synthetic owner forget")
+            .unwrap();
+        state
+            .confirm_source_forget(
+                &admin,
+                &secret,
+                &preview.one_time_token,
+                &preview.preview_sha256,
+            )
+            .unwrap();
+        // Refused at source registration or the visibility gate; either is
+        // fail-closed and nothing is published.
+        assert!(archive
+            .save(synthetic_capture("changed after forget"))
+            .is_err());
+        assert!(archive.read(&first.id, None).is_err());
+        assert!(archive.list("").unwrap().is_empty());
+        drop(state);
+        drop(archive);
+
+        let vault = CryptoVault::restore_with_recovery(&gate, lease, &manifest, &recovery).unwrap();
+        let reopened =
+            VaultCaptureStore::open(home.path().join("vault"), vault, &gate, lease).unwrap();
+        assert!(reopened.save(synthetic_capture("after restart")).is_err());
+        assert!(reopened.read(&first.id, None).is_err());
+        assert!(reopened.export_markdown(&first.id, None).is_err());
+        assert!(reopened.snapshots(&first.id).is_err());
+        assert!(reopened.list("").unwrap().is_empty());
+        assert!(file_count(&home.path().join("vault")) >= files_before);
+    }
+
+    /// Review P1 (desktop path): a command holds `disclosure_fence` from its
+    /// first authority read to its materialized result, exactly as the
+    /// desktop retrieval/inspection/graph/archive commands now do. Ordering A:
+    /// a concurrent redaction waits for the in-flight command, and a NESTED
+    /// archive read made while that redaction is already waiting neither
+    /// deadlocks nor lets it in. Ordering B: later commands hide the source.
+    #[test]
+    fn desktop_disclosure_command_serializes_against_redaction_without_deadlock() {
+        let (_home, _gate, _lease, _manifest, _recovery, archive, admin, secret) = fixture();
+        let receipt = archive
+            .save(capture_with(
+                "123e4567-e89b-12d3-a456-426614174099",
+                "Secret forgotten title",
+                "zebracorn secret evidence",
+            ))
+            .unwrap();
+        archive
+            .save(capture_with(
+                "123e4567-e89b-12d3-a456-426614174098",
+                "Visible title",
+                "zebracorn kept",
+            ))
+            .unwrap();
+        let state = archive.open_state_store().unwrap();
+        let index = archive.open_index_store().unwrap();
+        index
+            .sync_vault_with_check(&archive, &state, || Ok(()))
+            .unwrap();
+        drop(state);
+
+        let (decided_tx, decided_rx) = mpsc::channel();
+        let (nested_tx, nested_rx) = mpsc::channel::<()>();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let (redacted_tx, redacted_rx) = mpsc::channel();
+        let command_archive = archive.clone();
+        let archive_id = receipt.id.clone();
+        let command = thread::spawn(move || {
+            // == desktop command body ==
+            let _privacy = command_archive.disclosure_fence().unwrap();
+            let authority = command_archive.open_state_store().unwrap();
+            let index = command_archive.open_index_store().unwrap();
+            let mut paused = false;
+            let hits = index
+                .retrieve_filtered(&zebra(20), &mut |id: &str| {
+                    let visible = !authority.source_is_redacted(id)?;
+                    if !paused {
+                        paused = true;
+                        decided_tx.send(()).unwrap();
+                        // Wait until the redactor is blocked on the fence,
+                        // then perform a nested archive read (re-entrant).
+                        let _ = nested_rx.recv_timeout(Duration::from_secs(20));
+                        let nested = command_archive.read(&archive_id, None);
+                        assert!(nested.is_ok(), "nested read under the fence failed");
+                        let _ = release_rx.recv_timeout(Duration::from_secs(20));
+                    }
+                    Ok(visible)
+                })
+                .unwrap();
+            hits
+        });
+        decided_rx.recv_timeout(Duration::from_secs(30)).unwrap();
+        let redactor_archive = archive.clone();
+        let (admin_hash, source) = (admin.clone(), secret.clone());
+        let redactor = thread::spawn(move || {
+            let result = redactor_archive.open_state_store().unwrap().redact_source(
+                &admin_hash,
+                &source,
+                "Concurrent owner redaction",
+            );
+            redacted_tx.send(()).unwrap();
+            result
+        });
+        assert!(
+            redacted_rx
+                .recv_timeout(Duration::from_millis(300))
+                .is_err(),
+            "redaction committed during an in-flight desktop disclosure"
+        );
+        nested_tx.send(()).unwrap();
+        assert!(
+            redacted_rx
+                .recv_timeout(Duration::from_millis(300))
+                .is_err(),
+            "nested read released the fence early"
+        );
+        release_tx.send(()).unwrap();
+        let hits = command.join().unwrap();
+        // Linearized before the redaction commit.
+        assert!(hits.hits.iter().any(|hit| hit.source_id == secret));
+        redacted_rx.recv_timeout(Duration::from_secs(30)).unwrap();
+        redactor.join().unwrap().unwrap();
+
+        // Ordering B: a command starting after the commit sees no trace.
+        let _privacy = archive.disclosure_fence().unwrap();
+        let authority = archive.open_state_store().unwrap();
+        let index = archive.open_index_store().unwrap();
+        // The projection is stale, so the read fails closed until pruned.
+        assert!(matches!(
+            index.retrieve_filtered(&zebra(20), &mut crate::AuthorityVisibility(&authority)),
+            Err(crate::IndexError::StaleGeneration)
+        ));
+        index
+            .sync_vault_with_check(&archive, &authority, || Ok(()))
+            .unwrap();
+        let after = index
+            .retrieve_filtered(&zebra(20), &mut crate::AuthorityVisibility(&authority))
+            .unwrap();
+        assert!(!after.hits.is_empty());
+        assert!(after.hits.iter().all(|hit| hit.source_id != secret));
+        assert_eq!(after.candidate_count, after.hits.len());
+        assert!(archive.read(&receipt.id, None).is_err());
     }
 }

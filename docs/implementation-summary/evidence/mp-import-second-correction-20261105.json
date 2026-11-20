@@ -1,0 +1,332 @@
+{
+  "schema_version": 1,
+  "task_id": "MP-IMPORT-SECOND-CORRECTION",
+  "status": "READY FOR INDEPENDENT RE-REVIEW",
+  "execution": "cloud-only",
+  "base_sha": "13f3ba59843bed4bc06ad5fa00d7cfc7c48c19cc",
+  "branch": "feat/mp-import-core-01",
+  "implementation_sha": "aa505bb858f196129a2b4d97e82a215664c00384",
+  "implementation_tree": "3b8087a7da094bc02f96eb9ccc3545425ce10da7",
+  "toolchain": {
+    "rustc": "1.90.0",
+    "cargo": "1.90.0",
+    "host": "x86_64-unknown-linux-gnu"
+  },
+  "windows_sqlcipher_qualification": "NOT_RUN",
+  "synthetic_fixtures_only": true,
+  "checks": [
+    {
+      "command": "cargo test --locked -p mind-place-security",
+      "exit_code": 0,
+      "passed": 45,
+      "failed": 0,
+      "ignored": 0,
+      "suites": [
+        {
+          "suite": "Running unittests src/lib.rs",
+          "result": "ok",
+          "passed": 45,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "Doc-tests mind_place_security",
+          "result": "ok",
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "output_sha256": "2995d16db84473eaf48481f322fa3b7cf50754a6d8f00ec17446496ad2007ca6"
+    },
+    {
+      "command": "cargo test --locked -p mind-place-archive",
+      "exit_code": 0,
+      "passed": 88,
+      "failed": 0,
+      "ignored": 0,
+      "suites": [
+        {
+          "suite": "Running unittests src/lib.rs",
+          "result": "ok",
+          "passed": 28,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "Running tests/archive.rs",
+          "result": "ok",
+          "passed": 19,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "Running tests/generic.rs",
+          "result": "ok",
+          "passed": 5,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "Running tests/import_second_correction.rs",
+          "result": "ok",
+          "passed": 18,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "Running tests/legacy.rs",
+          "result": "ok",
+          "passed": 7,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "Running tests/registration.rs",
+          "result": "ok",
+          "passed": 2,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "Running tests/validation_boundaries.rs",
+          "result": "ok",
+          "passed": 9,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "Doc-tests mind_place_archive",
+          "result": "ok",
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "output_sha256": "1a440996a1fed95f4e492cd37aa422e758daaed17f4a0c438a533b86df9432d5"
+    },
+    {
+      "command": "cargo test --locked -p mind-place-index",
+      "exit_code": 0,
+      "passed": 61,
+      "failed": 0,
+      "ignored": 1,
+      "suites": [
+        {
+          "suite": "Running unittests src/lib.rs",
+          "result": "ok",
+          "passed": 5,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "Running tests/context.rs",
+          "result": "ok",
+          "passed": 7,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "Running tests/continuity_bakeoff.rs",
+          "result": "ok",
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "Running tests/document_scale_qualification.rs",
+          "result": "ok",
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "Running tests/encrypted_index.rs",
+          "result": "ok",
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "Running tests/fetch.rs",
+          "result": "ok",
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "Running tests/graph.rs",
+          "result": "ok",
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "Running tests/graph_generations.rs",
+          "result": "ok",
+          "passed": 5,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "Running tests/graph_maintenance.rs",
+          "result": "ok",
+          "passed": 4,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "Running tests/graph_query.rs",
+          "result": "ok",
+          "passed": 5,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "Running tests/graphify.rs",
+          "result": "ok",
+          "passed": 4,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "Running tests/index.rs",
+          "result": "ok",
+          "passed": 8,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "Running tests/inspection.rs",
+          "result": "ok",
+          "passed": 4,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "Running tests/retrieval.rs",
+          "result": "ok",
+          "passed": 5,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "Running tests/sqlcipher_index_backup.rs",
+          "result": "ok",
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "Running tests/storage_qualification.rs",
+          "result": "ok",
+          "passed": 0,
+          "failed": 0,
+          "ignored": 1
+        },
+        {
+          "suite": "Running tests/vault_backup_consistency.rs",
+          "result": "ok",
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "Running tests/vault_capture_encrypted.rs",
+          "result": "ok",
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "Running tests/vault_document_objects.rs",
+          "result": "ok",
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "Running tests/vault_failclosed.rs",
+          "result": "ok",
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "Running tests/vault_legacy_migration.rs",
+          "result": "ok",
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "Running tests/vault_migration_restart.rs",
+          "result": "ok",
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "Running tests/vault_online_backup.rs",
+          "result": "ok",
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "Running tests/vault_owner_migration.rs",
+          "result": "ok",
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        },
+        {
+          "suite": "Doc-tests mind_place_index",
+          "result": "ok",
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        }
+      ],
+      "output_sha256": "0cd2a6495a47710df2a56f3f1590b45eae1f99e83a5a4f81b5f21a2bfd2cd1cf"
+    },
+    {
+      "command": "cargo fmt --all -- --check",
+      "exit_code": 0
+    },
+    {
+      "command": "node scripts/verify-repo.mjs",
+      "exit_code": 0
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0
+    }
+  ],
+  "initial_six_regressions": {
+    "command": "cargo test --locked -p mind-place-archive --test import_second_correction",
+    "base_sha": "13f3ba59843bed4bc06ad5fa00d7cfc7c48c19cc",
+    "passed": 0,
+    "failed": 6,
+    "exit_code": 101,
+    "output_sha256": "0e9af6e5369a3693e6122ef09618eef51475a87091355f555a1b1dd786a65d2f"
+  },
+  "regression_tests": [
+    "unauthenticated_historical_write_is_rejected_without_side_effects",
+    "nonreciprocal_selected_leaf_is_not_complete",
+    "duplicate_message_ids_never_emit_an_invalid_capture",
+    "single_quoted_html_cards_remain_separate_occurrences",
+    "prompted_inside_assistant_text_cannot_fabricate_a_user_turn",
+    "traversal_suffix_cannot_supply_an_official_gemini_identity"
+  ],
+  "review": {
+    "skill": "superpowers:requesting-code-review",
+    "mode": "read-only",
+    "final_verdict": "READY FOR INDEPENDENT RE-REVIEW",
+    "not_acceptance": true
+  },
+  "ignored_index_test": {
+    "name": "qualifies_archive_scale",
+    "reason": "explicit Windows CI/storage qualification only"
+  }
+}

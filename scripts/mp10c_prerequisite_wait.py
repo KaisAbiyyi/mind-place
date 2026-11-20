@@ -40,7 +40,7 @@ def classify(runs, candidate, repo, vault, contract_fingerprint, fetch_jobs, fet
             "Frozen candidate lacks exact successful native workflow jobs/steps: "
         )
         missing_workflow = (
-            error_text[len(missing_workflow_prefix):]
+            error_text[len(missing_workflow_prefix):].split(" (", 1)[0]
             if error_text.startswith(missing_workflow_prefix) else None
         )
         pending = []

@@ -524,10 +524,16 @@ class NativeContractFingerprintTests(unittest.TestCase):
         self.assertFalse(native_contract.requires_sqlcipher(REPO, 129))
         self.assertFalse(native_contract.requires_sqlcipher(REPO, 131))
         self.assertTrue(native_contract.requires_sqlcipher(REPO, 132))
+        self.assertTrue(native_contract.requires_sqlcipher(REPO, 151))
+        self.assertTrue(native_contract.requires_sqlcipher(REPO, 152))
         self.assertFalse(native_contract.requires_sqlcipher(REPO, 9001))
+        self.assertFalse(native_contract.requires_separated_product(REPO, 127))
         self.assertFalse(native_contract.requires_separated_product(REPO, 129))
         self.assertTrue(native_contract.requires_separated_product(REPO, 131))
         self.assertTrue(native_contract.requires_separated_product(REPO, 132))
+        self.assertTrue(native_contract.requires_separated_product(REPO, 151))
+        self.assertTrue(native_contract.requires_separated_product(REPO, 152))
+        self.assertTrue(native_contract.requires_separated_product(REPO, 9001))
         # PR 129 is not a vault candidate: absence of the optional workflow is valid.
         self.assertEqual(len(self.fp(129)), 64)
         # PR 127 is a vault candidate: absence of its mandatory workflow fails closed.
@@ -665,7 +671,7 @@ class NativeIdentityAndPrerequisiteTests(unittest.TestCase):
       - name: Capture native execution provenance
 """
     def setUp(self):
-        self.candidate = candidate()
+        self.candidate = candidate(head_repo=REPO, base_repo=REPO)
         self.run = native_run(self.candidate)
         self.jobs = ci_jobs()
         self.evidence = native_evidence(self.candidate, self.run)
@@ -673,7 +679,7 @@ class NativeIdentityAndPrerequisiteTests(unittest.TestCase):
             native_contract.CI_WORKFLOW: self.LEGACY_CI_SOURCE,
         }
         self.args = {
-            "repo": "owner/repo", "vault": False, "contract_fingerprint": CONTRACT,
+            "repo": REPO, "vault": False, "contract_fingerprint": CONTRACT,
             "fetch_jobs": lambda _: {"total_count": len(self.jobs), "jobs": self.jobs},
             "fetch_evidence": lambda _: self.evidence,
             "workflow_sources": self.workflow_sources,
@@ -720,7 +726,7 @@ class NativeIdentityAndPrerequisiteTests(unittest.TestCase):
             dict(self.run, pull_requests=[{
                 "number": 129,
                 "head": {"ref": "feature/native", "sha": HEAD, "repo": {"full_name": "foreign/repo", "id": 2}},
-                "base": {"ref": "main", "sha": BASE, "repo": {"full_name": "owner/repo"}},
+                "base": {"ref": "main", "sha": BASE, "repo": {"full_name": REPO}},
             }]),
         ):
             with self.subTest(altered=altered), self.assertRaises(ValueError):
@@ -736,12 +742,12 @@ class NativeIdentityAndPrerequisiteTests(unittest.TestCase):
             dict(self.run, pull_requests=[{
                 "number": 129,
                 "head": self.run["pull_requests"][0]["head"],
-                "base": {"ref": "release", "sha": BASE, "repo": {"full_name": "owner/repo", "id": 1}},
+                "base": {"ref": "release", "sha": BASE, "repo": {"full_name": REPO, "id": 1}},
             }]),
             dict(self.run, pull_requests=[{
                 "number": 129,
                 "head": self.run["pull_requests"][0]["head"],
-                "base": {"ref": "main", "sha": "f"*40, "repo": {"full_name": "owner/repo", "id": 1}},
+                "base": {"ref": "main", "sha": "f"*40, "repo": {"full_name": REPO, "id": 1}},
             }]),
         ):
             with self.subTest(altered=altered), self.assertRaises(ValueError):
@@ -952,13 +958,13 @@ class NativeIdentityAndPrerequisiteTests(unittest.TestCase):
 
     def test_missing_native_workflow_times_out_and_cannot_accept_cached_proof(self):
         state, reason = coordinator.classify(
-            [], self.candidate, "owner/repo", False, CONTRACT,
+            [], self.candidate, REPO, False, CONTRACT,
             self.args["fetch_jobs"], self.args["fetch_evidence"],
             workflow_sources=self.workflow_sources)
         self.assertEqual(state, "pending")
         with self.assertRaises(TimeoutError):
             coordinator.wait(
-                "owner/repo", self.candidate, "token", False, CONTRACT,
+                REPO, self.candidate, "token", False, CONTRACT,
                 timeout=0, inspect=lambda *_: (state, reason))
         with self.assertRaises(ValueError):
             gate.select_acceptance_evidence(
@@ -970,21 +976,21 @@ class NativeIdentityAndPrerequisiteTests(unittest.TestCase):
         fetch_jobs = self.args["fetch_jobs"]
         fetch_evidence = self.args["fetch_evidence"]
         self.assertEqual(coordinator.classify(
-            [in_progress], self.candidate, "owner/repo", False, CONTRACT,
+            [in_progress], self.candidate, REPO, False, CONTRACT,
             fetch_jobs, fetch_evidence, workflow_sources=self.workflow_sources)[0], "pending")
         self.assertEqual(coordinator.classify(
-            [self.run], self.candidate, "owner/repo", False, CONTRACT,
+            [self.run], self.candidate, REPO, False, CONTRACT,
             fetch_jobs, fetch_evidence, workflow_sources=self.workflow_sources)[0], "ready")
         failed = dict(self.run, conclusion="failure")
         self.assertEqual(coordinator.classify(
-            [failed], self.candidate, "owner/repo", False, CONTRACT,
+            [failed], self.candidate, REPO, False, CONTRACT,
             fetch_jobs, fetch_evidence, workflow_sources=self.workflow_sources)[0], "failed")
         self.assertEqual(coordinator.classify(
-            [], self.candidate, "owner/repo", False, CONTRACT,
+            [], self.candidate, REPO, False, CONTRACT,
             fetch_jobs, fetch_evidence, workflow_sources=self.workflow_sources)[0], "pending")
         self.jobs[2]["steps"][0]["conclusion"] = "skipped"
         self.assertEqual(coordinator.classify(
-            [self.run], self.candidate, "owner/repo", False, CONTRACT,
+            [self.run], self.candidate, REPO, False, CONTRACT,
             fetch_jobs, fetch_evidence, workflow_sources=self.workflow_sources)[0], "failed")
 
     def test_candidate_head_or_base_mutation_during_wait_fails_closed(self):
@@ -992,22 +998,22 @@ class NativeIdentityAndPrerequisiteTests(unittest.TestCase):
             {
                 "number": 129, "state": "open",
                 "head": {"sha": "e"*40, "ref": "feature/native",
-                         "repo": {"full_name": "owner/repo", "id": 1}},
+                         "repo": {"full_name": REPO, "id": 1}},
                 "base": {"sha": BASE, "ref": "main",
-                         "repo": {"full_name": "owner/repo", "id": 1}},
+                         "repo": {"full_name": REPO, "id": 1}},
             },
             {
                 "number": 129, "state": "open",
                 "head": {"sha": HEAD, "ref": "feature/native",
-                         "repo": {"full_name": "owner/repo", "id": 1}},
+                         "repo": {"full_name": REPO, "id": 1}},
                 "base": {"sha": "f"*40, "ref": "main",
-                         "repo": {"full_name": "owner/repo", "id": 1}},
+                         "repo": {"full_name": REPO, "id": 1}},
             },
         )
         for changed in mutations:
             with self.subTest(changed=changed), patch.object(gate, "api_json", return_value=changed):
                 state, reason = coordinator.snapshot(
-                    "owner/repo", self.candidate, "token", False, CONTRACT)
+                    REPO, self.candidate, "token", False, CONTRACT)
                 self.assertEqual(state, "failed")
                 self.assertIn("identity", reason.lower())
 
@@ -1015,18 +1021,18 @@ class NativeIdentityAndPrerequisiteTests(unittest.TestCase):
         results = iter([("pending", "queued"), ("ready", "verified")])
         sleeps = []
         coordinator.wait(
-            "owner/repo", self.candidate, "token", False, CONTRACT,
+            REPO, self.candidate, "token", False, CONTRACT,
             timeout=60, poll=10, clock=lambda: len(sleeps)*10,
             sleep=lambda duration: sleeps.append(duration),
             inspect=lambda *_: next(results))
         self.assertEqual(sleeps, [10])
         with self.assertRaises(TimeoutError):
             coordinator.wait(
-                "owner/repo", self.candidate, "token", False, CONTRACT,
+                REPO, self.candidate, "token", False, CONTRACT,
                 timeout=0, inspect=lambda *_: (_ for _ in ()).throw(OSError("API unavailable")))
         with self.assertRaises(TimeoutError):
             coordinator.wait(
-                "owner/repo", self.candidate, "token", False, CONTRACT,
+                REPO, self.candidate, "token", False, CONTRACT,
                 timeout=0, inspect=lambda *_: ("pending", "missing"))
 
 
@@ -1091,6 +1097,7 @@ class SeparatedProductPrerequisiteTests(unittest.TestCase):
       - name: Stage capture sidecar for native desktop tests
       - name: Qualify Phase 3E simulated MCP and revocation boundary
       - name: Test hosted tunnel desktop boundaries
+      - name: Test owner import commands
       - name: Build desktop app
       - name: Verify portable MIT license and third-party notices
       - name: Qualify native capture encrypted IPC and revoked owner epoch
@@ -1161,7 +1168,8 @@ class SeparatedProductPrerequisiteTests(unittest.TestCase):
                 "Qualify bundled SQLite runtime", "Test",
                 "Stage capture sidecar for native desktop tests",
                 "Qualify Phase 3E simulated MCP and revocation boundary",
-                "Test hosted tunnel desktop boundaries", "Build desktop app",
+                "Test hosted tunnel desktop boundaries", "Test owner import commands",
+                "Build desktop app",
                 "Verify portable MIT license and third-party notices",
                 "Qualify native capture encrypted IPC and revoked owner epoch",
                 "Record native proof", "Upload native proof"),
@@ -1257,9 +1265,9 @@ class SeparatedProductPrerequisiteTests(unittest.TestCase):
         self.assertEqual(state, "pending")
         self.assertIn("windows-product.yml", reason)
 
-    def _mp_ci_win_01_fixture(self):
+    def _mp_ci_win_01_fixture(self, pr=131):
         cand = candidate(
-            131, head_repo=REPO, base_repo=REPO,
+            pr, head_repo=REPO, base_repo=REPO,
             head_repo_id=99, base_repo_id=99,
         )
         ci_run = native_run(cand, run_id=401)
@@ -1280,6 +1288,93 @@ class SeparatedProductPrerequisiteTests(unittest.TestCase):
             return {"total_count": len(jobs), "jobs": jobs}
 
         return cand, ci_run, product_run, jobs_by_run, sources, evidence, fetch_jobs
+
+    def test_mp_import_app_01_backend_is_registered_for_the_separated_windows_product(self):
+        # PR 169 (MP-IMPORT-APP-01) runs its native proof in windows-product.yml, like 131/132/141.
+        # Left unregistered, the coordinator looked for "Verify Windows product" in ci.yml and
+        # failed a green candidate ("Workflow job name is missing or ambiguous").
+        self.assertEqual(
+            native_contract.candidate_requirement(REPO, 169), ("mp-import-app-backend", False))
+        self.assertEqual(
+            native_contract.candidate_requirement(REPO, 170), ("mp-import-app-windows-ci", False))
+        for pr in (169, 170):
+            self.assertTrue(native_contract.requires_separated_product(REPO, pr))
+            self.assertFalse(native_contract.requires_sqlcipher(REPO, pr))
+        cand, ci_run, product_run, jobs_by_run, sources, evidence, fetch_jobs = (
+            self._mp_ci_win_01_fixture(170))
+        state, reason = coordinator.classify(
+            [ci_run, product_run], cand, REPO, False, CONTRACT,
+            fetch_jobs, lambda run: evidence, workflow_sources=sources)
+        self.assertEqual(state, "ready", reason)
+        # No weakening: without the exact Windows Product run the candidate is not ready.
+        state, reason = coordinator.classify(
+            [ci_run], cand, REPO, False, CONTRACT,
+            fetch_jobs, lambda run: evidence, workflow_sources=sources)
+        self.assertEqual(state, "pending", reason)
+        self.assertIn("windows-product.yml", reason)
+        # A failed Windows Product job still fails the candidate.
+        for job in jobs_by_run[product_run["id"]]:
+            if job["name"] == "Verify Windows product":
+                job["conclusion"] = "failure"
+        state, _ = coordinator.classify(
+            [ci_run, product_run], cand, REPO, False, CONTRACT,
+            fetch_jobs, lambda run: evidence, workflow_sources=sources)
+        self.assertEqual(state, "failed")
+
+    def test_ordinary_pr_uses_separated_product_by_default_without_bypassing_windows(self):
+        # Current non-vault PRs targeting main execute native checks in windows-product.yml
+        # by default instead of requiring manual per-PR registration in CANDIDATE_REQUIREMENTS.
+        self.assertTrue(native_contract.requires_separated_product(REPO, 9001))
+        self.assertFalse(native_contract.requires_sqlcipher(REPO, 9001))
+        cand, ci_run, product_run, jobs_by_run, sources, evidence, fetch_jobs = (
+            self._mp_ci_win_01_fixture(9001))
+        state, reason = coordinator.classify(
+            [ci_run, product_run], cand, REPO, False, CONTRACT,
+            fetch_jobs, lambda run: evidence, workflow_sources=sources)
+        self.assertEqual(state, "ready", reason)
+        # No weakening: missing or failing windows-product.yml still blocks the candidate.
+        state, reason = coordinator.classify(
+            [ci_run], cand, REPO, False, CONTRACT,
+            fetch_jobs, lambda run: evidence, workflow_sources=sources)
+        self.assertEqual(state, "pending", reason)
+        self.assertIn("windows-product.yml", reason)
+        for job in jobs_by_run[product_run["id"]]:
+            if job["name"] == "Verify Windows product":
+                job["conclusion"] = "failure"
+        state, _ = coordinator.classify(
+            [ci_run, product_run], cand, REPO, False, CONTRACT,
+            fetch_jobs, lambda run: evidence, workflow_sources=sources)
+        self.assertEqual(state, "failed")
+
+    def test_legacy_inline_pr_with_separated_product_runs_still_fails_closed(self):
+        # Historical pre-separation PRs (127, 129) retain the inline ci.yml contract and
+        # are NOT accepted solely because windows-product.yml succeeded.
+        self.assertFalse(native_contract.requires_separated_product(REPO, 129))
+        cand, ci_run, product_run, jobs_by_run, sources, evidence, fetch_jobs = (
+            self._mp_ci_win_01_fixture(129))
+        state, reason = coordinator.classify(
+            [ci_run, product_run], cand, REPO, False, CONTRACT,
+            fetch_jobs, lambda run: evidence, workflow_sources=sources)
+        self.assertEqual(state, "failed", reason)
+        self.assertIn("Verify Windows product", reason)
+
+    def test_open_vault_prs_151_and_152_require_sqlcipher_and_separated_product(self):
+        self.assertEqual(
+            native_contract.candidate_requirement(REPO, 151), ("mp9c-privacy-vault", True))
+        self.assertEqual(
+            native_contract.candidate_requirement(REPO, 152), ("mp9e-backup-vault", True))
+        for pr in (151, 152):
+            self.assertTrue(native_contract.requires_separated_product(REPO, pr))
+            self.assertTrue(native_contract.requires_sqlcipher(REPO, pr))
+            cand, ci_run, product_run, jobs_by_run, sources, _evidence, fetch_jobs = (
+                self._mp_ci_win_01_fixture(pr))
+            sources[native_contract.SQLCIPHER_WORKFLOW] = self.SQL_SOURCE
+            evidence = native_evidence(cand, ci_run, fingerprint=CONTRACT, vault=True)
+            state, reason = coordinator.classify(
+                [ci_run, product_run], cand, REPO, True, CONTRACT,
+                fetch_jobs, lambda run, ev=evidence: ev, workflow_sources=sources)
+            self.assertEqual(state, "pending", reason)
+            self.assertIn("mp9b-sqlcipher-qualification.yml", reason)
 
     def test_mp_ci_win_01_uses_separate_authoritative_windows_product_source(self):
         cand, ci_run, product_run, jobs_by_run, sources, evidence, fetch_jobs = (
@@ -1372,6 +1467,46 @@ class SeparatedProductPrerequisiteTests(unittest.TestCase):
                 "total_count": len(without_windows[run["id"]]),
                 "jobs": without_windows[run["id"]],
             })
+
+    def test_draft_skipped_product_run_does_not_fail_ready_run_or_blame_ci(self):
+        cand, ci_run, product_run, jobs_by_run, sources, evidence, _ = (
+            self._mp_ci_win_01_fixture(178))
+        draft_product_run = native_run(
+            cand, run_id=400, path=native_contract.PRODUCT_WORKFLOW,
+            status="completed", conclusion="success")
+        draft_jobs = json.loads(json.dumps(jobs_by_run[product_run["id"]]))
+        for item in draft_jobs:
+            if item["name"] != "Windows Product / candidate result":
+                item["conclusion"] = "skipped"
+        jobs_by_run[draft_product_run["id"]] = draft_jobs
+
+        def fetch_jobs(run):
+            jobs = jobs_by_run[run["id"]]
+            return {"total_count": len(jobs), "jobs": jobs}
+
+        # While the promoted Ready run is actively running on the same head_sha,
+        # an earlier completed Draft run with skipped jobs must keep coordination pending.
+        ready_in_progress = dict(product_run, status="in_progress", conclusion=None)
+        state, reason = coordinator.classify(
+            [ci_run, ready_in_progress, draft_product_run], cand, REPO, False, CONTRACT,
+            fetch_jobs, lambda run: evidence, workflow_sources=sources)
+        self.assertEqual(state, "pending", reason)
+        self.assertIn(native_contract.PRODUCT_WORKFLOW, reason)
+        self.assertNotIn(native_contract.CI_WORKFLOW, reason)
+
+        # Once the Ready run succeeds, the older Draft run must not prevent acceptance.
+        state, reason = coordinator.classify(
+            [ci_run, draft_product_run, product_run], cand, REPO, False, CONTRACT,
+            fetch_jobs, lambda run: evidence, workflow_sources=sources)
+        self.assertEqual(state, "ready", reason)
+
+        # Fail closed: if only the Draft-skipped run exists with no active/green Ready run,
+        # coordination must fail against windows-product.yml.
+        state, reason = coordinator.classify(
+            [ci_run, draft_product_run], cand, REPO, False, CONTRACT,
+            fetch_jobs, lambda run: evidence, workflow_sources=sources)
+        self.assertEqual(state, "failed", reason)
+        self.assertIn(native_contract.PRODUCT_WORKFLOW, reason)
 
 
 if __name__ == "__main__":

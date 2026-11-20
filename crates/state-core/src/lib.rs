@@ -20,6 +20,9 @@ mod memory_inspection;
 mod memory_ranking;
 mod memory_writes;
 mod ntfs;
+mod private_scopes;
+mod source_forget;
+mod source_redaction;
 #[cfg(feature = "sqlcipher-preview")]
 pub mod vault_bootstrap;
 pub use clients::{ClientAuditEvent, ClientCapability, ClientRecord};
@@ -37,6 +40,9 @@ pub use memory_ranking::{
     RankingPolicy, RelationKind,
 };
 pub use memory_writes::{MemoryWrite, MemoryWriteReceipt};
+pub use private_scopes::PrivateScope;
+pub use source_forget::{SourceForgetPreview, SourceForgetProgress};
+pub use source_redaction::SourceRedactionReceipt;
 
 pub const APPLICATION_ID: i64 = 0x4D504C43;
 pub const SCHEMA_VERSION: i64 = 9;
@@ -83,6 +89,8 @@ pub enum StateError {
     SqliteTooOld,
     #[error("invalid durable identifier or value")]
     InvalidValue,
+    #[error("source redaction requires the encrypted vault")]
+    VaultRequired,
 }
 impl StateError {
     pub fn code(&self) -> &'static str {
@@ -101,6 +109,7 @@ impl StateError {
             Self::Busy => "MP_STATE_BUSY",
             Self::SqliteTooOld => "MP_STATE_SQLITE_TOO_OLD",
             Self::InvalidValue => "MP_STATE_INVALID_VALUE",
+            Self::VaultRequired => "MP_PRIVACY_REQUIRES_VAULT",
         }
     }
 }
@@ -469,6 +478,7 @@ impl StateStore {
         let (key_type, key) = source.key.parts();
         let mut db = self.connection()?;
         let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        source_redaction::assert_source_not_redacted(&tx, &id)?;
         tx.execute(
             "INSERT INTO source_identities(id,provider,source_namespace,source_kind,key_type,source_key)
              VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT DO NOTHING",
@@ -506,8 +516,8 @@ impl StateStore {
     /// Resolve authority identity independently from index.sqlite3.
     pub fn source(&self, id: &str) -> Result<Option<SourceRecord>> {
         valid_id(id)?;
-        let saved = self
-            .connection()?
+        let db = self.read_connection()?;
+        let saved = db
             .query_row(
                 "SELECT id,provider,source_namespace,source_kind,key_type,source_key
                  FROM source_identities WHERE id=?1",
@@ -515,10 +525,17 @@ impl StateStore {
                 source_record,
             )
             .optional()?;
-        if let Some(ref record) = saved {
-            verify_source_record(record)?;
+        let Some(record) = saved else {
+            // Unknown or non-canonical IDs (e.g. a derived index ID) resolve
+            // to None, as before MP-9C; they can never carry a tombstone.
+            return Ok(None);
+        };
+        verify_source_record(&record)?;
+        // A registered (hence canonical) but redacted source is hidden.
+        if source_redaction::source_is_redacted(&db, &record.id)? {
+            return Ok(None);
         }
-        Ok(saved)
+        Ok(Some(record))
     }
 
     /// Evidence must name an authority-registered canonical source. The FK
@@ -535,14 +552,24 @@ impl StateStore {
         if evidence_kind.len() > 64 || !source_id.starts_with("src:v1:") {
             return Err(StateError::InvalidValue);
         }
-        let source = self.source(source_id)?;
-        if source.is_none() {
-            return Err(StateError::InvalidValue);
-        }
-        self.connection()?.execute(
+        let mut db = self.connection()?;
+        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        source_redaction::assert_source_not_redacted(&tx, source_id)?;
+        let source = tx
+            .query_row(
+                "SELECT id,provider,source_namespace,source_kind,key_type,source_key
+             FROM source_identities WHERE id=?1",
+                [source_id],
+                source_record,
+            )
+            .optional()?
+            .ok_or(StateError::InvalidValue)?;
+        verify_source_record(&source)?;
+        tx.execute(
             "INSERT INTO claim_evidence(claim_id,source_ref,evidence_kind) VALUES(?1,?2,?3)",
             params![claim_id, source_id, evidence_kind],
         )?;
+        tx.commit()?;
         Ok(())
     }
 

@@ -771,7 +771,7 @@ fn build_capture(
                 .max()
                 .cloned()
         })
-        .unwrap_or_else(|| chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true));
+        .unwrap_or_else(|| format_rfc3339_millis(time::OffsetDateTime::now_utc()));
     let title = meta
         .get("title")
         .and_then(Value::as_str)
@@ -1481,12 +1481,27 @@ fn is_safe_identity(value: &str) -> bool {
     })
 }
 
+fn format_rfc3339_millis(dt: time::OffsetDateTime) -> String {
+    let utc = dt.to_offset(time::UtcOffset::UTC);
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
+        utc.year(),
+        u8::from(utc.month()),
+        utc.day(),
+        utc.hour(),
+        utc.minute(),
+        utc.second(),
+        utc.millisecond()
+    )
+}
+
 fn milliseconds_to_rfc3339(value: &Value) -> Option<String> {
     let millis = value
         .as_i64()
         .or_else(|| value.as_u64().and_then(|v| i64::try_from(v).ok()))?;
-    chrono::DateTime::<chrono::Utc>::from_timestamp_millis(millis)
-        .map(|date| date.to_rfc3339_opts(chrono::SecondsFormat::Millis, true))
+    time::OffsetDateTime::from_unix_timestamp_nanos(i128::from(millis) * 1_000_000)
+        .ok()
+        .map(format_rfc3339_millis)
 }
 
 fn number_u64(value: Option<&Value>) -> Option<u64> {
