@@ -19,6 +19,10 @@ test('AI review policy defines a read-only, advisory, fail-closed boundary', () 
   assert.match(policy, /do not connect it to the reviewer environment/i);
   assert.match(policy, /must not be described as a compliant read-only reviewer/i);
   assert.match(policy, /do not echo it, copy it into the report, or attempt to validate or use it/i);
+  assert.match(policy, /\*\*NOT DEPLOYED\*\*/);
+  assert.match(policy, /repository owner alone gives final approval and performs the final merge/);
+  assert.match(policy, /Auto-merge stays disabled and the branch-ruleset bypass list stays empty/);
+  assert.match(policy, /runtime adversarial evaluation of the reviewer remains NOT_RUN/i);
 });
 
 test('adversarial matrix covers Markdown, source comments, test output, and workflow logs', async () => {

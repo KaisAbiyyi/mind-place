@@ -144,3 +144,5 @@ Before connecting any AI reviewer to GitHub:
 - [ ] Obtain owner approval for the reviewer connection separately.
 
 Until every applicable gate is evidenced, the reviewer is **NOT DEPLOYED**. This policy does not authorize autonomous merge, a Merge Broker, a GitHub App installation, production enforcement, or any change to main protection.
+
+Consistent with the owner-controlled merge model in `AGENTS.md`: the repository owner alone gives final approval and performs the final merge; repository Auto-merge stays disabled and the branch-ruleset bypass list stays empty; the reviewer can never approve on the owner's behalf. A runtime adversarial evaluation of the reviewer remains NOT_RUN.
