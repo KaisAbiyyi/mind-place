@@ -171,10 +171,10 @@ test("Indonesian copy ships with English, product names stay untranslated, Escap
   const { tick, dialog, dom } = setup({ locale: "id" });
   await tick();
   const text = dialog.dialog.textContent ?? "";
-  assert.match(text, /Pilih chat untuk Claude Code/);
-  assert.match(text, /1 dari 3 chat diizinkan/);
+  assert.match(text, /Pilih obrolan untuk Claude Code/);
+  assert.match(text, /1 dari 3 obrolan diizinkan/);
   assert.match(text, /ChatGPT/);
-  assert.doesNotMatch(text, /Choose chats|chats allowed/);
+  assert.doesNotMatch(text, /Choose chats|chats allowed|Pilih chat/);
   dialog.dialog.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   assert.equal(dialog.isOpen(), false);
 });

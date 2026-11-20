@@ -33,6 +33,8 @@ export interface ChooseChatsOptions {
   invoke: Invoke;
   client: { id: string; displayName: string };
   opener?: HTMLElement | null;
+  /** Where to mount; defaults to the UI2 root so tokens, font and reset apply. */
+  parent?: HTMLElement;
   /** Called once after access was saved or removed, so the host can refresh. */
   onSaved?: () => void;
 }
@@ -77,7 +79,7 @@ export function openChooseChatsDialog(options: ChooseChatsOptions): Ui2DialogHan
   const metaFor = (chat: GrantableChat): string =>
     i18n.t("grants.rowMeta", {
       provider: providerLabel(chat.provider),
-      date: i18n.formatDate(chat.captured_at, "short"),
+      date: i18n.formatDate(chat.captured_at, "medium"),
     });
 
   const desired = (chat: GrantableChat): boolean => pending.get(chat.source_id) ?? chat.granted;
@@ -139,6 +141,7 @@ export function openChooseChatsDialog(options: ChooseChatsOptions): Ui2DialogHan
   removeAll.element.hidden = true;
 
   const chooseMessage = doc.createElement("div");
+  chooseMessage.hidden = true;
 
   const cancelButton = createUi2Button(doc, {
     label: i18n.t("action.cancel"),
@@ -153,6 +156,7 @@ export function openChooseChatsDialog(options: ChooseChatsOptions): Ui2DialogHan
   });
 
   function showChooseError(message: string): void {
+    chooseMessage.hidden = false;
     chooseMessage.replaceChildren(
       createUi2Banner(doc, { tone: "danger", title: message, message: i18n.t("state.errorHint") }),
     );
@@ -229,6 +233,7 @@ export function openChooseChatsDialog(options: ChooseChatsOptions): Ui2DialogHan
       loaded = 0;
     }
     loadState = "loading";
+    chooseMessage.hidden = true;
     chooseMessage.replaceChildren();
     paintList();
     updateChrome();
@@ -281,6 +286,7 @@ export function openChooseChatsDialog(options: ChooseChatsOptions): Ui2DialogHan
     intro.className = "ui2-lead";
     intro.textContent = i18n.t("grants.reviewBody", { app });
     const reviewMessage = doc.createElement("div");
+    reviewMessage.hidden = true;
     const sections: HTMLElement[] = [head, intro];
     const section = (key: "grants.willAllow" | "grants.willRemove", rows: GrantableChat[]) => {
       if (rows.length === 0) return;
@@ -323,6 +329,7 @@ export function openChooseChatsDialog(options: ChooseChatsOptions): Ui2DialogHan
             options.onSaved?.();
             dialog.close();
           } catch {
+            reviewMessage.hidden = false;
             reviewMessage.replaceChildren(
               createUi2Banner(doc, {
                 tone: "danger",
@@ -341,8 +348,10 @@ export function openChooseChatsDialog(options: ChooseChatsOptions): Ui2DialogHan
   }
 
   renderChoose();
-  doc.body.append(dialog.backdrop);
+  (options.parent ?? doc.querySelector<HTMLElement>(".ui2-root") ?? doc.body).append(dialog.backdrop);
   dialog.open(options.opener ?? null);
+  // Start in the search field, not on the close button.
+  search.input.focus();
   void load(true);
   return dialog;
 }
