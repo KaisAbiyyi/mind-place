@@ -240,8 +240,19 @@ impl IntegrationCore<'_> {
         granted.dedup();
         state.audit_client_read(Some(&client), "read_attempt")?;
         // Check direct source filters before accessing any raw/index bytes.
+        // Only ids the client is GRANTED are tested for redaction: an ungranted
+        // id must behave exactly like an unknown one (empty result or
+        // InvalidQuery), so a forgotten source it never had access to is not
+        // distinguishable from a source that was merely never granted.
         for call in &batch.calls {
-            reject_redacted_sources(state, &call.arguments)?;
+            for_each_source_ref(&call.arguments, |source| {
+                if granted.binary_search(&source.to_owned()).is_ok()
+                    && state.source_is_redacted(source)?
+                {
+                    return Err(IntegrationError::AccessDenied);
+                }
+                Ok(())
+            })?;
         }
         // Every authorization callback re-reads live authority: the credential
         // must still resolve to this client AND the client's policy revision

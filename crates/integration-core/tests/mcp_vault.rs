@@ -283,6 +283,77 @@ mod mp9c_privacy {
         ));
     }
 
+    /// MP-7MCP-02 review P2: whether an UNGRANTED source was redacted must not
+    /// be observable; ungranted ids behave exactly like unknown ones.
+    #[test]
+    fn redaction_of_an_ungranted_source_is_not_an_oracle() {
+        let r = rig();
+        let state = r.archive.open_state_store().unwrap();
+        let owner = ClientAuthority::new(&state, &r.security);
+        let hit = |term: &str| {
+            let hit = r
+                .index
+                .retrieve(&RetrievalRequest {
+                    queries: vec![QueryTerm::Text(term.into())],
+                    limit: 5,
+                    ..Default::default()
+                })
+                .unwrap()
+                .hits[0]
+                .clone();
+            hit
+        };
+        let (secret, kept) = (hit("secret"), hit("kept"));
+        // Granted to KEPT only; SECRET is ungranted.
+        let narrow = owner
+            .issue("Kept-only reader", &[ClientCapability::Read])
+            .unwrap();
+        owner
+            .grant_read_sources(&narrow.client.id, std::slice::from_ref(&kept.source_id))
+            .unwrap();
+        let core = IntegrationCore::new_vault(&r.archive, &r.index, &r.security);
+        let fetch_secret = || {
+            core.execute_client_batch(
+                &state,
+                narrow.credential(),
+                &ToolBatch {
+                    calls: vec![ToolCall {
+                        name: ToolName::MemoryFetch,
+                        arguments: json!({
+                            "source_id": secret.source_id, "archive_id": secret.archive_id,
+                            "snapshot_id": secret.snapshot_id, "granularity": "revision"
+                        }),
+                    }],
+                },
+            )
+        };
+        let before = fetch_secret().unwrap_err();
+        state
+            .redact_source(&r.admin_hash, &r.secret, "Owner redaction")
+            .unwrap();
+        let after = fetch_secret().unwrap_err();
+        assert!(matches!(
+            before,
+            IntegrationError::Index(mind_place_index::IndexError::InvalidQuery)
+        ));
+        assert_eq!(before.code(), after.code());
+        assert_eq!(before.to_string(), after.to_string());
+        let named = ToolBatch {
+            calls: vec![ToolCall {
+                name: ToolName::MemorySearch,
+                arguments: json!({"queries": ["violet"], "filters": {"source_ids": [secret.source_id]}}),
+            }],
+        };
+        assert!(!matches!(
+            core.execute_client_batch(&state, narrow.credential(), &named),
+            Err(IntegrationError::AccessDenied)
+        ));
+        // A redacted source can never be granted afterwards.
+        assert!(owner
+            .grant_read_sources(&narrow.client.id, std::slice::from_ref(&secret.source_id))
+            .is_err());
+    }
+
     /// MP-9C review P1: a stale hidden row must not displace the visible hit at
     /// LIMIT nor shape ranking/counts. The credentialed read prunes the stale
     /// projection (fail closed first) and the client sees only visible rows.
