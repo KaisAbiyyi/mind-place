@@ -536,3 +536,18 @@ fn grant_bookkeeping_is_idempotent_sorted_bounded_and_audited() {
         limit
     );
 }
+
+#[test]
+fn owner_ui_source_id_matches_the_id_the_index_and_mcp_use() {
+    let f = Fixture::new();
+    assert_eq!(
+        mind_place_index::conversation_source_id("chatgpt", CONV_A).unwrap(),
+        f.evidence(TEXT_A).source
+    );
+    assert_eq!(
+        mind_place_index::conversation_source_id("chatgpt", CONV_B).unwrap(),
+        f.evidence(TEXT_B).source
+    );
+    // Providers without a canonical namespace are never offered for grants.
+    assert!(mind_place_index::conversation_source_id("unknown-provider", CONV_A).is_none());
+}
