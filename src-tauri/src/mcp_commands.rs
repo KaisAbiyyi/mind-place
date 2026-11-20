@@ -134,3 +134,71 @@ pub(super) fn revoke_local_mcp_client(
         .map_err(|_| "MP_MCP_CLIENT:Cannot revoke client".to_string())?;
     finish_unlocked(&state, lease)
 }
+
+// MP-7MCP-02 / MP-ADR-006: owner-only read grants. A read credential discloses
+// nothing until the owner grants it individual sources (no wildcard). These are
+// trusted desktop commands; MCP clients can never reach them. A malformed id is
+// rejected by the state layer, and failures are deliberately opaque.
+
+#[tauri::command]
+pub(super) fn grant_local_mcp_client_sources(
+    state: State<'_, AppState>,
+    client_id: String,
+    source_ids: Vec<String>,
+) -> Result<usize, String> {
+    let lease = begin_unlocked(&state)?;
+    let authority = super::open_owner_state(&owner_vault(&state), &state.state_path)
+        .map_err(|_| "MP_MCP_AUTHORITY:Unavailable".to_string())?;
+    let changed = ClientAuthority::new(&authority, &state.security)
+        .grant_read_sources(&client_id, &source_ids)
+        .map_err(|_| "MP_MCP_GRANT:Cannot grant read access".to_string())?;
+    finish_unlocked(&state, lease)?;
+    Ok(changed)
+}
+
+#[tauri::command]
+pub(super) fn revoke_local_mcp_client_sources(
+    state: State<'_, AppState>,
+    client_id: String,
+    source_ids: Vec<String>,
+) -> Result<usize, String> {
+    let lease = begin_unlocked(&state)?;
+    let authority = super::open_owner_state(&owner_vault(&state), &state.state_path)
+        .map_err(|_| "MP_MCP_AUTHORITY:Unavailable".to_string())?;
+    let changed = ClientAuthority::new(&authority, &state.security)
+        .revoke_read_sources(&client_id, &source_ids)
+        .map_err(|_| "MP_MCP_GRANT:Cannot revoke read access".to_string())?;
+    finish_unlocked(&state, lease)?;
+    Ok(changed)
+}
+
+#[tauri::command]
+pub(super) fn revoke_all_local_mcp_client_sources(
+    state: State<'_, AppState>,
+    client_id: String,
+) -> Result<usize, String> {
+    let lease = begin_unlocked(&state)?;
+    let authority = super::open_owner_state(&owner_vault(&state), &state.state_path)
+        .map_err(|_| "MP_MCP_AUTHORITY:Unavailable".to_string())?;
+    let changed = ClientAuthority::new(&authority, &state.security)
+        .revoke_all_read_sources(&client_id)
+        .map_err(|_| "MP_MCP_GRANT:Cannot revoke read access".to_string())?;
+    finish_unlocked(&state, lease)?;
+    Ok(changed)
+}
+
+/// Sorted canonical source ids this client may read (at most 10,000).
+#[tauri::command]
+pub(super) fn list_local_mcp_client_sources(
+    state: State<'_, AppState>,
+    client_id: String,
+) -> Result<Vec<String>, String> {
+    let lease = begin_unlocked(&state)?;
+    let authority = super::open_owner_state(&owner_vault(&state), &state.state_path)
+        .map_err(|_| "MP_MCP_AUTHORITY:Unavailable".to_string())?;
+    let sources = ClientAuthority::new(&authority, &state.security)
+        .read_sources(&client_id)
+        .map_err(|_| "MP_MCP_GRANT:Could not list read access".to_string())?;
+    finish_unlocked(&state, lease)?;
+    Ok(sources)
+}
