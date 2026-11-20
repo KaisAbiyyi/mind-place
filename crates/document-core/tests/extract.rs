@@ -378,3 +378,225 @@ fn pdf_revoke_after_first_expanded_decode_discards_text() {
     assert_eq!(result, Err(ExtractionError::Revoked));
     assert_eq!(checks, 5);
 }
+
+#[test]
+fn pdf_long_literal_cancellation_and_depth_fail_closed() {
+    // The authorization callback must run DURING a long PDF token, not only
+    // before and after decoding a potentially expensive untrusted literal.
+    let mut long = b"%PDF-1.7\nBT (".to_vec();
+    long.extend(std::iter::repeat_n(b'A', 128 * 1024));
+    long.extend_from_slice(b") Tj ET\n");
+    let mut checks = 0usize;
+    let denied = extract_with_check(
+        DocumentFormat::Pdf,
+        &long,
+        ExtractionLimits::default(),
+        || {
+            checks += 1;
+            checks < 10
+        },
+    );
+    assert_eq!(denied, Err(ExtractionError::Revoked));
+    assert_eq!(checks, 10);
+
+    // Nested PDF string delimiters must not consume unbounded parser work.
+    let nested = format!(
+        "%PDF-1.7\nBT ({}X{}) Tj ET\n",
+        "(".repeat(65),
+        ")".repeat(65)
+    );
+    assert_eq!(
+        extract_bytes(
+            DocumentFormat::Pdf,
+            nested.as_bytes(),
+            ExtractionLimits::default()
+        ),
+        Err(ExtractionError::Limit("pdf_string_depth"))
+    );
+}
+
+#[test]
+fn deterministic_adversarial_document_mutations_remain_bounded() {
+    // Reproducible, synthetic mutation corpus: no owner documents are read.
+    // Every accepted result must respect caps; corrupt inputs may fail closed
+    // with any structured extractor error but must never panic or leak text.
+    let source = make_zip(&[(
+        "word/document.xml",
+        b"<w:document><w:t>synthetic fixture</w:t></w:document>",
+        true,
+    )]);
+    let cases = [
+        (DocumentFormat::Docx, source),
+        (
+            DocumentFormat::Pdf,
+            b"%PDF-1.7\n1 0 obj\n<< /Length 22 >>\nstream\nBT (fixture) Tj ET\nendstream\nendobj"
+                .to_vec(),
+        ),
+        (
+            DocumentFormat::Markdown,
+            b"# Fixture\nsynthetic text".to_vec(),
+        ),
+    ];
+    let limits = ExtractionLimits {
+        max_input_bytes: 128 * 1024,
+        max_expanded_bytes: 128 * 1024,
+        max_output_bytes: 4096,
+        max_chunks: 16,
+        ..ExtractionLimits::default()
+    };
+    for (format, sample) in cases {
+        for mutation in 0..96usize {
+            let mut input = sample.clone();
+            let index = (mutation * 977 + 17) % input.len();
+            input[index] ^= (mutation as u8).wrapping_mul(31).wrapping_add(1);
+            if let Ok(document) = extract_bytes(format, &input, limits) {
+                assert!(document.text.len() <= limits.max_output_bytes);
+                assert!(document.chunks.len() <= limits.max_chunks);
+                assert!(document
+                    .chunks
+                    .iter()
+                    .all(|chunk| { !chunk.text.contains('\0') }));
+            }
+        }
+    }
+}
+
+#[test]
+fn pdf_long_dictionary_and_content_skips_preserve_visible_text() {
+    use flate2::write::ZlibEncoder;
+
+    let content = format!(
+        "BT %{}\n(visible PDF text) Tj ET",
+        "content-comment".repeat(700)
+    );
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+    encoder.write_all(content.as_bytes()).unwrap();
+    let compressed = encoder.finish().unwrap();
+
+    let dictionary = format!(
+        "<< %{}\n /{} /Length {} /Filter{} /FlateDecode >>",
+        "dictionary-comment".repeat(700),
+        "UnusedName".repeat(700),
+        compressed.len(),
+        " ".repeat(8192)
+    );
+    let mut pdf = format!("%PDF-1.7\n1 0 obj\n{dictionary}\nstream\n").into_bytes();
+    pdf.extend_from_slice(&compressed);
+    pdf.extend_from_slice(b"\nendstream\nendobj\n%%EOF");
+
+    let extracted = extract_bytes(DocumentFormat::Pdf, &pdf, ExtractionLimits::default()).unwrap();
+    assert_eq!(extracted.text, "visible PDF text");
+    assert!(extracted
+        .warnings
+        .iter()
+        .any(|warning| warning.contains("no OCR")));
+}
+
+#[test]
+fn authorization_wait_does_not_trip_extraction_elapsed_limit() {
+    use std::{thread, time::Duration};
+
+    let input = b"# First\nalpha\n## Second\nbeta\n";
+    let limits = ExtractionLimits {
+        max_millis: 150,
+        max_total_millis: 2_000,
+        ..ExtractionLimits::default()
+    };
+    let mut polls = 0usize;
+    let mut injected = false;
+    let doc = extract_with_check(DocumentFormat::Markdown, input, limits, || {
+        polls += 1;
+        if polls == 2 {
+            injected = true;
+            thread::sleep(Duration::from_millis(300));
+        }
+        true
+    })
+    .expect("bounded host authorization callback wait must not trip parser elapsed_millis");
+    assert!(injected);
+    assert!(polls >= 3);
+    assert!(doc.text.contains("alpha") && doc.text.contains("beta"));
+
+    // Denied authorization still fails closed immediately even if wait exceeded max_total_millis.
+    let tight_total = ExtractionLimits {
+        max_millis: 150,
+        max_total_millis: 100,
+        ..ExtractionLimits::default()
+    };
+    let mut denied_polls = 0usize;
+    let denied = extract_with_check(DocumentFormat::Markdown, input, tight_total, || {
+        denied_polls += 1;
+        if denied_polls == 2 {
+            thread::sleep(Duration::from_millis(140));
+            return false;
+        }
+        true
+    });
+    assert_eq!(denied, Err(ExtractionError::Revoked));
+}
+
+#[test]
+fn authorization_wait_exceeding_total_limit_fails_closed() {
+    use std::{thread, time::Duration};
+
+    let mut markdown = String::new();
+    for section in 0..8 {
+        markdown.push_str(&format!("# Section {section}\nbody {section}\n"));
+    }
+
+    // Repeated short authorization waits accumulate against max_total_millis even
+    // though each call and total parser work remain below max_millis.
+    let cumulative_limits = ExtractionLimits {
+        max_millis: 500,
+        max_total_millis: 120,
+        ..ExtractionLimits::default()
+    };
+    let mut polls = 0usize;
+    let cumulative = extract_with_check(
+        DocumentFormat::Markdown,
+        markdown.as_bytes(),
+        cumulative_limits,
+        || {
+            polls += 1;
+            thread::sleep(Duration::from_millis(45));
+            true
+        },
+    );
+    assert!(polls >= 3);
+    assert_eq!(
+        cumulative,
+        Err(ExtractionError::Limit("total_elapsed_millis"))
+    );
+
+    // Zero total budget configuration fails closed before parsing.
+    let invalid_cfg = ExtractionLimits {
+        max_total_millis: 0,
+        ..ExtractionLimits::default()
+    };
+    assert_eq!(
+        extract_bytes(DocumentFormat::Markdown, b"# Title\nbody", invalid_cfg),
+        Err(ExtractionError::Limit("configuration"))
+    );
+}
+
+#[test]
+fn parser_work_timeout_fails_closed_within_total_budget() {
+    let mut stream = String::from("BT\n");
+    for _ in 0..80_000 {
+        stream.push_str("0 0 m\n");
+    }
+    stream.push_str("(tail) Tj\nET");
+    let pdf = format!(
+        "%PDF-1.7\n1 0 obj\n<< /Length {} >>\nstream\n{stream}\nendstream\nendobj\n%%EOF",
+        stream.len()
+    );
+    let limits = ExtractionLimits {
+        max_millis: 1,
+        max_total_millis: 10_000,
+        ..ExtractionLimits::default()
+    };
+    assert_eq!(
+        extract_with_check(DocumentFormat::Pdf, pdf.as_bytes(), limits, || true),
+        Err(ExtractionError::Limit("elapsed_millis"))
+    );
+}

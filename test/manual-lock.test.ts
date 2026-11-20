@@ -40,7 +40,7 @@ test("owner Lock is reachable from both reader toolbar and open setup", async ()
   try {
     await reader.ready;
     lockButton(root).click();
-    root.querySelector<HTMLButtonElement>("[data-action='open-setup']")!.click();
+    openSetupFromWizard(root);
     await delay(0);
     lockButton(root, true).click();
     assert.equal(locks, 2);
@@ -67,7 +67,7 @@ test("Lock clears archive and setup secrets before native acknowledgement and ig
   try {
     await mountApp(root, invoke);
     await delay(0);
-    root.querySelector<HTMLButtonElement>("[data-action='open-setup']")!.click();
+    openSetupFromWizard(root);
     await delay(0);
     root.querySelector<HTMLInputElement>("#hosted-runtime-key")!.value = "fixture-runtime-secret";
     root.querySelector<HTMLButtonElement>("[data-mcp-action='issue']")!.click();
@@ -180,3 +180,11 @@ test("cold unlock loads native library before starting derived indexing", async 
       ["list_conversations", "refresh_archive_index"]);
   } finally { dom.window.close(); }
 });
+
+
+/** The sidebar's Setup & Onboarding entry opens the wizard; the detailed dialog is reached from its capture step. */
+function openSetupFromWizard(root: HTMLElement) {
+  root.querySelector<HTMLButtonElement>("[data-route='setup-onboarding']")!.click();
+  root.querySelector<HTMLButtonElement>(".onboarding-workspace [data-step='providers']")!.click();
+  root.querySelector<HTMLButtonElement>(".onboarding-workspace [data-focus-key='open-details']")!.click();
+}

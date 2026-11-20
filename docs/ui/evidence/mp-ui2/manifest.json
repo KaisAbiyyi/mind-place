@@ -1,0 +1,35 @@
+{
+  "name": "MP-UI2 human-first wireframe",
+  "version": "v1 (revision 2)",
+  "date": "2026-11-11",
+  "file": "wireframe-v1.html",
+  "sha256": "2b4bbce50a079516e7db2326345cfd0bd227ff7b6a5dd347616fc9c790bc3a8c",
+  "bytes": 84173,
+  "status": "PROPOSED FOR OWNER GATE SIGN-OFF (MP-UI2-00 / PR #172). Ground-truth wireframe candidate for MP-UI2-01..12; becomes locked upon owner approval and manual merge of PR #172. Revision 2 (2026-11-11) applies owner-approved decisions: Archive, Home-rooted breadcrumb, Import in the Archive, translatable memory text, user-selectable map name.",
+  "design_lock_task": "MP-UI2-00",
+  "signoff_state": "pending_owner_gate_merge",
+  "covers": [
+    "shell (top bar toggle, breadcrumb, logo-only sidebar)",
+    "Home with self-hiding setup",
+    "Memory (list + cards, detail page)",
+    "Archive (formerly Chats) + chat reader with Info aside",
+    "Constellation (memory-only graph, empty state)",
+    "Sources (folder + file pickers, review step)",
+    "Connections (capture options, AI access, advanced collapsed)",
+    "Settings",
+    "Search (scopes, memory first)",
+    "Lock screen",
+    "EN + ID",
+    "Import dialog concept (wireframe only; MP-IMPORT-APP-01 backend supports ChatGPT and Gemini export folders/zips on plaintext legacy archives, while arbitrary transcript files remain deferred)",
+    "Memory text translation note and View original",
+    "Map page name selectable in Settings"
+  ],
+  "does_not_cover": [
+    "Memory editing/pin/forget (not built)",
+    "Backup restore and legacy migration (not built)",
+    "Recovery ceremony screens",
+    "Onboarding wizard inner steps beyond the Home checklist",
+    "Error/loading states beyond the shown empty states"
+  ],
+  "note": "Sample data only. Chat text is not translated by design. Prototype switches (memories exist) are not product features. Owner import commands currently support ChatGPT and Gemini export folders/zips only (requiring MP-UI2-06's native selection-grant picker on plaintext legacy archives) and do not support arbitrary transcript-file import."
+}

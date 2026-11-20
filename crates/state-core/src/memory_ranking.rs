@@ -2,8 +2,8 @@
 //! No external write surface is exposed here. MP-5C owns authorization and forget.
 use crate::{
     memory::{claim_as_of_connection, next_claim_clock},
-    source_record, valid_id, valid_text, verify_source_record, ClaimState, Result, StateError,
-    StateStore,
+    source_record, source_redaction, valid_id, valid_text, verify_source_record, ClaimState,
+    Result, StateError, StateStore,
 };
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::Serialize;
@@ -219,6 +219,7 @@ impl StateStore {
             .optional()?
             .ok_or(StateError::InvalidValue)?;
         verify_source_record(&source)?;
+        source_redaction::assert_source_not_redacted(&tx, source_ref)?;
 
         let mut bounds = Vec::new();
         for id in [from_id, to_id] {
@@ -344,6 +345,7 @@ impl StateStore {
             .optional()?
             .ok_or(StateError::InvalidValue)?;
         verify_source_record(&source)?;
+        source_redaction::assert_source_not_redacted(&tx, source_ref)?;
         let original: i64 = tx
             .query_row(
                 "SELECT recorded_at_ms FROM memory_claim_relations
@@ -410,7 +412,8 @@ impl StateStore {
                 }
             }
         }
-        let (relations, resolved_sources) = load_relations(&tx, &ids, cutoff)?;
+        let surviving_ids: BTreeSet<String> = claims.keys().cloned().collect();
+        let (relations, resolved_sources) = load_relations(&tx, &surviving_ids, cutoff)?;
         let mut neighbors = BTreeMap::new();
         for relation in &relations {
             for id in [&relation.from_claim_id, &relation.to_claim_id] {
@@ -444,6 +447,7 @@ impl StateStore {
                 .optional()?
                 .ok_or(StateError::Corrupt)?;
             verify_source_record(&record)?;
+            source_redaction::assert_source_not_redacted(&tx, &source_id)?;
         }
         let newest = claims
             .values()

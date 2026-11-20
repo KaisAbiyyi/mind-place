@@ -259,8 +259,15 @@ fn revoke_ephemeral(state: &AppState, client_id: &str) -> Result<(), String> {
     {
         // The persisted grant is not known to be revoked. Lock the entire
         // reader authority instead of leaving a still-valid hosted token.
+        // MP-9C: revoke under the Lock gate so it serializes with in-flight
+        // owner forget commits (no caller holds this gate here).
+        let _lock_authority = state
+            .document_authority_gate
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         state.authority_ready.store(false, Ordering::Release);
         state.security.lock();
+        drop(_lock_authority);
         state.mcp.lock().unwrap_or_else(|e| e.into_inner()).take();
         return Err("MP_TUNNEL_REVOKE:Authority unavailable; Mind Place locked".into());
     }
@@ -652,6 +659,8 @@ mod tests {
                 client_id: id,
                 tunnel_id: format!("tunnel_{}", "c".repeat(32)),
             }))),
+            running_import: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            forget_intents: crate::forget_commands::ForgetIntents::default(),
             extension_path: dir.path().join("extension"),
             host_path: dir.path().join("host"),
             legacy_path: dir.path().join("legacy"),

@@ -128,6 +128,17 @@ The three pending baseline files and these in-flight files must be reconciled af
 - Repository secret inventory was not read. The finding is that the audited workflow source contains no secret references, not that the repository contains no configured secrets.
 - Final acceptance requires the active MP-CI workflow lock to be released, all in-flight workflow changes to be integrated/reconciled, the remaining checkouts and action references to be hardened, the temporary exceptions removed, and the resulting exact head to pass actionlint and regression CI.
 
+## MP-9D parser/transport requalification — 7 November 2026
+
+MP-9D changes only Rust parser/transport source, focused tests, and implementation
+documentation. Its existing PR CI runs the document and integration Rust test
+targets with read-only workflow permissions and non-persistent checkout. No
+workflow YAML, event trigger, token permission, secret reference, action pin,
+artifact consumer, or checkout trust setting is changed by this task. The
+workflow-security audit is rerun on the MP-9D pull-request merge ref to verify
+that the repository-wide trust boundary remains intact at the requalified head.
+
+
 ## References
 
 - [GitHub Actions security hardening](https://docs.github.com/en/actions/how-tos/secure-your-work)

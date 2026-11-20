@@ -1,0 +1,46 @@
+[
+  {
+    "id": "12345678-1234-4123-8123-123456789abc",
+    "title": "Synthetic regression",
+    "create_time": 1700000000,
+    "current_node": "leaf",
+    "mapping": {
+      "root": {
+        "id": "root",
+        "parent": null,
+        "children": [
+          "leaf"
+        ],
+        "message": {
+          "id": "m-root",
+          "author": {
+            "role": "user"
+          },
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "question"
+            ]
+          }
+        }
+      },
+      "leaf": {
+        "id": "leaf",
+        "parent": "root",
+        "children": [],
+        "message": {
+          "id": "m-root",
+          "author": {
+            "role": "assistant"
+          },
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "answer"
+            ]
+          }
+        }
+      }
+    }
+  }
+]

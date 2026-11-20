@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
-import { prepareTunnelHelper, verifyHelperBundle } from './tunnel-helper.mjs';
+import { prepareTunnelHelper, readVerifiedHelperBundle, verifyHelperBundle, writeVerifiedFileAtomically } from './tunnel-helper.mjs';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 function run(command,args){return new Promise((resolve,reject)=>{
@@ -10,9 +10,26 @@ function run(command,args){return new Promise((resolve,reject)=>{
  child.on('error',reject);child.on('exit',(code,signal)=>code===0?resolve():reject(new Error(`${command} exited ${code??signal}`)));
 });}
 
-export function stageProduct(source,output,extension,notices,license,helper){
+function ensureRealDirectory(dir){
+ try{
+  const fd=fs.openSync(dir,fs.constants.O_RDONLY|(fs.constants.O_NOFOLLOW??0));
+  try{
+   const stat=fs.fstatSync(fd,{bigint:true});
+   const leaf=fs.lstatSync(dir,{bigint:true});
+   if(!stat.isDirectory()||!leaf.isDirectory()||leaf.isSymbolicLink()||stat.ino===0n||stat.dev!==leaf.dev||stat.ino!==leaf.ino){
+    throw new Error('Invalid helper resources directory');
+   }
+  }finally{fs.closeSync(fd);}
+ }catch(error){
+  if(error?.code!=='ENOENT')throw error;
+  fs.mkdirSync(dir,{recursive:true});
+ }
+}
+
+export function stageProduct(source,output,extension,notices,license,helper,options={}){
+ const{onBeforeStageVerify}=options;
  if(process.platform==='win32'&&!helper)throw new Error('Missing verified tunnel helper for Windows package');
- if(helper)verifyHelperBundle(helper.directory,helper.pin);
+ const verifiedBundle=helper?readVerifiedHelperBundle(helper.directory,helper.pin):null;
  fs.mkdirSync(output,{recursive:true});
  const exe=process.platform==='win32'?'.exe':'';
  for(const name of [`mind-place${exe}`,`mind-place-capture-host${exe}`]){
@@ -22,9 +39,19 @@ export function stageProduct(source,output,extension,notices,license,helper){
  fs.cpSync(extension,path.join(output,'extension'),{recursive:true,filter:source=>!fs.lstatSync(source).isSymbolicLink()});
  fs.copyFileSync(notices,path.join(output,'THIRD-PARTY-NOTICES.txt'));
  fs.copyFileSync(license,path.join(output,'LICENSE'));
- if(helper){
-  fs.copyFileSync(path.join(helper.directory,helper.pin.executable.name),path.join(output,'tunnel-client.exe'));
-  fs.cpSync(path.join(helper.directory,'resources'),path.join(output,'tunnel'),{recursive:true});
+ if(helper&&verifiedBundle){
+  if(helper.pin.executable.name!=='tunnel-client.exe')throw new Error('Unexpected helper executable name');
+  const hook=onBeforeStageVerify?{onBeforeVerify:onBeforeStageVerify}:undefined;
+  writeVerifiedFileAtomically(path.join(output,helper.pin.executable.name),verifiedBundle.executable,helper.pin.executable.sha256,helper.pin.executable.bytes,hook);
+  const tunnelDir=path.join(output,'tunnel');
+  ensureRealDirectory(tunnelDir);
+  for(const [name,hash] of Object.entries(helper.pin.resources)){
+   const resourceTarget=path.join(tunnelDir,name);
+   if(path.basename(name)!==name||name==='receipt.json')throw new Error('Unexpected tunnel helper resource name');
+   writeVerifiedFileAtomically(resourceTarget,verifiedBundle.resources.get(name),hash,undefined,hook);
+  }
+  writeVerifiedFileAtomically(path.join(tunnelDir,'receipt.json'),verifiedBundle.receipt,verifiedBundle.receiptSha256,verifiedBundle.receipt.length,hook);
+  verifyHelperBundle(output,helper.pin,'tunnel');
  }
  const manifest=JSON.parse(fs.readFileSync(path.join(output,'extension/manifest.json'),'utf8'));
  if(manifest.content_scripts?.length||manifest.host_permissions?.length)throw new Error('Capture package cannot contain unconditional page scripts or host access');

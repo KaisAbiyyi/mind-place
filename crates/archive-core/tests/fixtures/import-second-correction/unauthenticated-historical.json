@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "provider": "chatgpt",
+  "conversation_id": "12345678-1234-4123-8123-123456789abc",
+  "source_url": "https://chatgpt.com/c/12345678-1234-4123-8123-123456789abc",
+  "title": "Synthetic historical write",
+  "captured_at": "2026-11-05T00:00:00Z",
+  "capture_method": "export-import",
+  "completeness": "complete",
+  "warnings": [],
+  "messages": [
+    {
+      "id": "m1",
+      "role": "user",
+      "text": "synthetic",
+      "format": "plain",
+      "attachments": []
+    }
+  ]
+}

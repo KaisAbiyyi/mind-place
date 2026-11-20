@@ -1,13 +1,30 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-mod generic;
+pub mod generic;
+pub mod historical;
+pub mod importers;
 mod legacy;
 mod store;
 pub use generic::{GenericImportReceipt, MAX_GENERIC_IMPORT_BYTES};
-pub use store::{
-    conversation_id_from_url, markdown, validate_capture, verified_image_asset, MAX_CAPTURE_BYTES,
+pub use importers::{
+    stream_top_level_array, BatchImportReceipt, DiscoveredAsset, ImportSourceInventory,
+    RawEvidenceEnvelope, ReconciledItem, RecordSpan,
 };
+pub use store::{
+    conversation_id_from_url, markdown, validate_capture, validate_historical_capture,
+    validate_live_capture, validate_stored_capture, verified_image_asset,
+    HistoricalImportAuthorization, MAX_CAPTURE_BYTES,
+};
+
+/// Parses an RFC 3339 timestamp while restricting the date-time separator to `T`, `t`, or ASCII
+/// space to match SQLite `julianday()` and strict `chrono` parsing.
+pub fn parse_rfc3339(value: &str) -> Option<time::OffsetDateTime> {
+    if !matches!(value.as_bytes().get(10), Some(b'T' | b't' | b' ')) {
+        return None;
+    }
+    time::OffsetDateTime::parse(value, &time::format_description::well_known::Rfc3339).ok()
+}
 
 pub const NATIVE_HOST_NAME: &str = "com.mindplace.capture";
 

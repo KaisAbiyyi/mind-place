@@ -1,5 +1,8 @@
+import { createBrowserProgressStore, hasFinishedOnboarding } from "./onboarding-workspace.js";
 import { mountReader, type ClipboardWriter, type Invoke, type ReaderHandle } from "./reader.js";
 import { mountSecurityGate, type SecurityStatus } from "./security.js";
+import { isUi2ShellEnabled, setUi2ShellEnabled } from "./ui2/shell/feature-flag.js";
+import type { Ui2ShellHandle } from "./ui2/shell/shell.js";
 
 interface ApplicationOptions {
   root: HTMLElement;
@@ -10,8 +13,11 @@ interface ApplicationOptions {
 /** Own the reader's authorization lifetime; a disposed reader never serves a new epoch. */
 export async function mountApplication({ root, invoke, clipboard }: ApplicationOptions): Promise<void> {
   let reader: ReaderHandle | undefined;
+  let ui2Shell: Ui2ShellHandle | undefined;
   let generation = 0;
   let locking = false;
+  // True only for a session in which the owner created the unlock secret on the lock screen.
+  let firstRunSession = false;
 
   const showGate = async (requireLocked = false) => {
     const expectedGeneration = generation;
@@ -19,6 +25,7 @@ export async function mountApplication({ root, invoke, clipboard }: ApplicationO
       if (generation !== expectedGeneration) throw new Error("MP_UI_SESSION_EXPIRED");
       const result = await invoke<T>(command, args);
       if (generation !== expectedGeneration) throw new Error("MP_UI_SESSION_EXPIRED");
+      if (command === "get_security_status" && (result as SecurityStatus).configured === false) firstRunSession = true;
       if (requireLocked && command === "get_security_status" && !(result as SecurityStatus).locked) {
         throw new Error("MP_UI_LOCK_UNCONFIRMED");
       }
@@ -31,7 +38,31 @@ export async function mountApplication({ root, invoke, clipboard }: ApplicationO
         if (generation !== expectedGeneration) return;
         generation++;
         const epoch = generation;
-        const currentReader = mountReader({ root, invoke, clipboard, onLock: () => { void lock(); } });
+        const openOnboarding = firstRunSession;
+        firstRunSession = false;
+        // UI2-11 has not implemented onboarding yet: preserve the existing first-run wizard
+        // in the classic reader while keeping the preview flag intact for subsequent unlocks.
+        const preserveClassicOnboarding =
+          openOnboarding && !hasFinishedOnboarding(createBrowserProgressStore(root.ownerDocument.defaultView));
+        if (isUi2ShellEnabled() && !preserveClassicOnboarding) {
+          // Only load UI2 styles and code after the existing native gate has unlocked.
+          // A late import must not resurrect a shell after Lock or a later epoch.
+          void import("./ui2/shell/entry.js").then(async ({ mountUi2Shell, ensureUi2Styles }) => {
+            await ensureUi2Styles();
+            if (generation !== epoch || locking) return;
+            ui2Shell = mountUi2Shell(root, {
+              onLock: () => { void lock(); },
+              onSwitchClassic: () => {
+                if (setUi2ShellEnabled(false)) root.ownerDocument.defaultView?.location.reload();
+              },
+            });
+          }).catch(() => {
+            // A failed shell load is not permission to fall back to the reader.
+            if (generation === epoch) void lock();
+          });
+          return;
+        }
+        const currentReader = mountReader({ root, invoke, clipboard, openOnboarding, onLock: () => { void lock(); } });
         reader = currentReader;
         // The first library read and the derived index would otherwise scan
         // the same thousands of archive files concurrently on cold unlock.
@@ -49,8 +80,11 @@ export async function mountApplication({ root, invoke, clipboard }: ApplicationO
     if (locking) return;
     locking = true;
     generation++;
+    firstRunSession = false;
     reader?.destroy();
     reader = undefined;
+    ui2Shell?.destroy();
+    ui2Shell = undefined;
     root.replaceChildren();
     const status = root.ownerDocument.createElement("p");
     status.setAttribute("role", "status");

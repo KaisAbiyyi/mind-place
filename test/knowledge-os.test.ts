@@ -185,8 +185,10 @@ test("reader virtualizes large archives and navigates visible rows without loadi
     assert.ok(list.querySelector('[data-row-index="100"]'));
     assert.equal(list.querySelector('[data-row-index="0"]'), null);
     const row100 = list.querySelector<HTMLButtonElement>('[data-row-index="100"]')!;
-    row100.focus();
-    row100.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }));
+    row100.click();
+    const selectedRow = list.querySelector<HTMLButtonElement>('[data-row-index="100"]')!;
+    selectedRow.focus();
+    selectedRow.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }));
     assert.equal(dom.window.document.activeElement?.getAttribute("data-row-index"), "101");
     assert.ok(reading > 0);
   } finally {

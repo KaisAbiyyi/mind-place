@@ -1,0 +1,215 @@
+/* Mind Place — Monochrome Knowledge OS Settings & Diagnostics Workspace (Canonical HTML Fidelity) */
+
+.settings-workspace {
+  display: grid;
+  gap: 20px;
+}
+
+.settings-workspace-header {
+  display: grid;
+  gap: 6px;
+}
+
+.settings-workspace-header h1 {
+  margin: 0;
+  font-size: 24px;
+  line-height: 30px;
+  font-weight: 650;
+  letter-spacing: -0.025em;
+  color: var(--text-primary);
+}
+
+.settings-workspace-header p {
+  margin: 0;
+  max-width: 72ch;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--text-secondary);
+}
+
+/* Settings layout: 220px left category nav + right content area matching reference.html .settings-layout */
+.settings-workspace {
+  grid-template-columns: 220px minmax(0, 1fr);
+  align-items: start;
+}
+
+.settings-workspace-header {
+  grid-column: 1 / -1;
+}
+
+.settings-sections-nav {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  padding: 6px;
+  display: grid;
+  gap: 2px;
+}
+
+.settings-section-tab {
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.settings-section-tab:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.settings-section-tab[aria-selected="true"] {
+  background: var(--bg-inverse);
+  color: var(--text-inverse);
+  border-color: var(--bg-inverse);
+}
+
+.settings-content-area {
+  min-width: 0;
+  display: grid;
+  gap: 14px;
+}
+
+.settings-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.settings-control-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.settings-control-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.settings-control-row strong {
+  color: var(--text-primary);
+  font-weight: 600;
+  margin-right: auto;
+  margin-left: 6px;
+}
+
+.settings-status-grid {
+  display: grid;
+  grid-template-columns: minmax(150px, auto) 1fr;
+  align-items: center;
+  gap: 10px 16px;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+  font-size: 12.5px;
+}
+
+.settings-status-grid > span {
+  color: var(--text-tertiary);
+  font-weight: 500;
+}
+
+.settings-status-grid > strong {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.settings-backup-form {
+  display: grid;
+  gap: 10px;
+}
+
+.settings-backup-form label {
+  display: grid;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.settings-input {
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-size: 12.5px;
+}
+
+.settings-boundary-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  line-height: 19px;
+}
+
+.settings-diagnostics-action-row {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.settings-tracer-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.settings-tracer-form .settings-input {
+  flex: 1 1 240px;
+}
+
+.settings-trace-result-panel {
+  margin-top: 8px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.settings-confirm-message {
+  margin: 0;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--text-secondary);
+}
+
+.settings-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+@media (max-width: 1120px) {
+  .settings-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-sections-nav {
+    display: flex;
+    flex-wrap: wrap;
+  }
+
+  .settings-section-tab {
+    width: auto;
+  }
+}

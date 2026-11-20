@@ -32,12 +32,22 @@ const ROUTE_ICON_PATHS: Readonly<Record<UiRouteId, string>> = {
   "setup-onboarding": "M12 3v3 M12 18v3 M3 12h3 M18 12h3 M5.6 5.6l2.1 2.1 M16.3 16.3l2.1 2.1 M18.4 5.6l-2.1 2.1 M7.7 16.3l-2.1 2.1 M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z",
   settings: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z M4 12h2 M18 12h2 M12 4v2 M12 18v2 M6.3 6.3l1.4 1.4 M16.3 16.3l1.4 1.4 M17.7 6.3l-1.4 1.4 M7.7 16.3l-1.4 1.4",
 };
+const ROUTE_DEFAULT_BADGES: Readonly<Record<UiRouteId, string>> = {
+  overview: "",
+  conversations: "0",
+  "curated-memory": "0",
+  "hive-mind-graph": "",
+  "files-secure-vault": "0",
+  "ai-providers-mcp": "",
+  "setup-onboarding": "",
+  settings: "",
+};
 function createRouteIcon(document: Document, route: UiRouteId): SVGSVGElement {
   const svg=document.createElementNS("http://www.w3.org/2000/svg","svg");
   svg.setAttribute("viewBox","0 0 24 24"); svg.setAttribute("aria-hidden","true"); svg.setAttribute("focusable","false");
   const path=document.createElementNS("http://www.w3.org/2000/svg","path");
   path.setAttribute("d",ROUTE_ICON_PATHS[route]); path.setAttribute("fill","none"); path.setAttribute("stroke","currentColor");
-  path.setAttribute("stroke-width","1.6"); path.setAttribute("stroke-linecap","round"); path.setAttribute("stroke-linejoin","round");
+  path.setAttribute("stroke-width","1.75"); path.setAttribute("stroke-linecap","round"); path.setAttribute("stroke-linejoin","round");
   svg.append(path); return svg;
 }
 function createSecondaryButton(document: Document,label: string,workspace: WorkspaceId,action: string): HTMLButtonElement {
@@ -46,21 +56,23 @@ function createSecondaryButton(document: Document,label: string,workspace: Works
   button.setAttribute("aria-pressed","false"); button.textContent=label; return button;
 }
 export function createWorkspaceNavigation(document: Document): HTMLElement {
-  const nav=document.createElement("nav"); nav.id="knowledge-os-nav"; nav.className="knowledge-os-nav";
+  const nav=document.createElement("nav"); nav.id="knowledge-os-nav"; nav.className="knowledge-os-nav nav";
   nav.setAttribute("aria-label","Main navigation");
   const groups=[...new Set(UI_ROUTES.map((route)=>route.group))];
   for(const groupName of groups){
     const group=document.createElement("section"); group.className="knowledge-os-nav-group"; group.dataset.routeGroup=groupName;
-    const heading=document.createElement("div"); heading.className="knowledge-os-nav-group-label"; heading.textContent=groupName; group.append(heading);
+    const heading=document.createElement("div"); heading.className="knowledge-os-nav-group-label nav-section-label"; heading.textContent=groupName; group.append(heading);
     for(const route of UI_ROUTES.filter((item)=>item.group===groupName)){
-      const button=document.createElement("button"); button.type="button"; button.className="knowledge-os-nav-item";
+      const button=document.createElement("button"); button.type="button"; button.className="knowledge-os-nav-item nav-item";
       button.dataset.navItem="primary"; button.dataset.route=route.id;
       // Keep the Library secondary action and Setup distinct from their parent route's legacy aliases.
       if(route.id!=="overview"&&route.id!=="setup-onboarding")button.dataset.workspace=route.defaultWorkspace;
       button.dataset.action=route.id==="files-secure-vault"?"open-document-search":route.id==="setup-onboarding"?"open-setup":"navigate-route";
       button.title=route.label; button.setAttribute("aria-label",route.label);
       const icon=document.createElement("span"); icon.className="knowledge-os-nav-icon"; icon.append(createRouteIcon(document,route.id));
-      const label=document.createElement("span"); label.className="nav-label"; label.textContent=route.label; button.append(icon,label); group.append(button);
+      const label=document.createElement("span"); label.className="nav-label"; label.textContent=route.label;
+      const count=document.createElement("span"); count.className="nav-count"; count.dataset.routeBadge=route.id; count.textContent=ROUTE_DEFAULT_BADGES[route.id];
+      button.append(icon,label,count); group.append(button);
       if(route.id==="overview"){
         const secondary=document.createElement("div"); secondary.className="knowledge-os-nav-secondary-group"; secondary.dataset.subnavFor=route.id;
         secondary.append(createSecondaryButton(document,"Search all sources","library","open-library-workspace")); group.append(secondary);
