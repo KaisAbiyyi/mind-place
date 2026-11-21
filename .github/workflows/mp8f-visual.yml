@@ -36,7 +36,7 @@ jobs:
         run: node scripts/ui2-shell-visual.mjs
       - name: Save UI2 shell screenshot evidence
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ui2-shell-visual-${{ github.sha }}
           path: docs/ui/evidence/mp-ui2/shell/
@@ -44,7 +44,7 @@ jobs:
           retention-days: 14
       - name: Save synthetic screenshot evidence
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: mp8f-visual-${{ github.sha }}
           path: artifacts/mp8f-visual/
