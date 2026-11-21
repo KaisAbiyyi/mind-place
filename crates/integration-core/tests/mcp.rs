@@ -18,6 +18,7 @@ struct Fixture {
     state: StateStore,
     security: SecurityGate,
     token: String,
+    source: String,
 }
 impl Fixture {
     fn new() -> Self {
@@ -52,11 +53,29 @@ impl Fixture {
         index.sync(&archive, &state).unwrap();
         let security = SecurityGate::open(temp.path().join("security.json")).unwrap();
         security.initialize(b"test-password-456").unwrap();
-        let token = ClientAuthority::new(&state, &security)
+        let issued = ClientAuthority::new(&state, &security)
             .issue("Claude Code", &[ClientCapability::Read])
+            .unwrap();
+        // Default deny: grant the single fixture source via the trusted path.
+        let probe = IntegrationCore::new(&archive, &index, &security)
+            .execute_batch(
+                &mind_place_integration::ToolBatch {
+                    calls: vec![mind_place_integration::ToolCall {
+                        name: mind_place_integration::ToolName::MemorySearch,
+                        arguments: json!({"queries": ["amber eclipse"]}),
+                    }],
+                },
+                || Ok(()),
+            )
+            .unwrap();
+        let source = probe.results[0].result["hits"][0]["source_id"]
+            .as_str()
             .unwrap()
-            .credential()
-            .to_string();
+            .to_owned();
+        ClientAuthority::new(&state, &security)
+            .grant_read_sources(&issued.client.id, std::slice::from_ref(&source))
+            .unwrap();
+        let token = issued.credential().to_string();
         Self {
             temp,
             archive,
@@ -64,6 +83,7 @@ impl Fixture {
             state,
             security,
             token,
+            source,
         }
     }
     fn core(&self) -> IntegrationCore<'_> {
@@ -160,6 +180,151 @@ fn legacy_handshake_and_modern_header_guards() {
         200
     );
 }
+#[test]
+fn claude_handshake_versions_keep_authenticated_read_and_cursor_contract() {
+    let f = Fixture::new();
+    // Simulate Claude's initial POST without MCP-Protocol-Version. The
+    // client's requested handshake version must be negotiated and echoed.
+    for version in [mcp::FIRST_HTTP_LEGACY, mcp::CLAUDE_LEGACY, LEGACY] {
+        let hello = dispatch(
+            &f.core(),
+            &f.state,
+            &f.token,
+            json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
+                "protocolVersion":version,"capabilities":{},
+                "clientInfo":{"name":"claude-code","version":"synthetic"}
+            }}),
+            mcp::FIRST_HTTP_LEGACY,
+            None,
+            None,
+        );
+        assert_eq!(hello.status, 200, "{version}");
+        assert_eq!(hello.body.unwrap()["result"]["protocolVersion"], version);
+        let listed = dispatch(
+            &f.core(),
+            &f.state,
+            &f.token,
+            json!({"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}),
+            version,
+            None,
+            None,
+        );
+        assert_eq!(listed.status, 200, "{version}");
+        let tools = listed.body.unwrap()["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .clone();
+        assert_eq!(tools.len(), 3);
+        assert!(tools
+            .iter()
+            .all(|tool| tool["annotations"]["readOnlyHint"] == true));
+
+        let search = dispatch(
+            &f.core(),
+            &f.state,
+            &f.token,
+            json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{
+                "name":"memory_search","arguments":{"queries":["amber eclipse"]}
+            }}),
+            version,
+            None,
+            None,
+        );
+        assert_eq!(search.status, 200, "{version}");
+        let body = search.body.unwrap();
+        let hit = &body["result"]["structuredContent"]["hits"][0];
+        assert_eq!(hit["message_id"], "m1");
+        let source_id = hit["source_id"].clone();
+        let archive_id = hit["archive_id"].clone();
+        let snapshot_id = hit["snapshot_id"].clone();
+        let mut cursor = Value::Null;
+        let mut assembled = String::new();
+        let mut saw_continuation = false;
+        for _ in 0..16 {
+            let fetch = dispatch(
+                &f.core(),
+                &f.state,
+                &f.token,
+                json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{
+                    "name":"memory_fetch","arguments":{
+                        "source_id":source_id,"archive_id":archive_id,
+                        "snapshot_id":snapshot_id,"granularity":"revision",
+                        "budget":{"max_bytes":8,"max_estimated_tokens":2,"max_latency_ms":2000},
+                        "cursor":cursor
+                    }
+                }}),
+                version,
+                None,
+                None,
+            );
+            assert_eq!(fetch.status, 200, "{version}");
+            let result = fetch.body.unwrap()["result"]["structuredContent"].clone();
+            for segment in result["segments"].as_array().unwrap() {
+                assembled.push_str(segment["text"].as_str().unwrap());
+            }
+            if result["truncated"] == false {
+                assert!(result["next_cursor"].is_null());
+                break;
+            }
+            saw_continuation = true;
+            cursor = result["next_cursor"].clone();
+            assert!(!cursor.is_null(), "truncated result needs next_cursor");
+        }
+        assert!(saw_continuation, "{version}");
+        assert_eq!(assembled, "amber eclipse knowledge", "{version}");
+
+        let context = dispatch(
+            &f.core(),
+            &f.state,
+            &f.token,
+            json!({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{
+                "name":"context_build","arguments":{"queries":["amber eclipse"]}
+            }}),
+            version,
+            None,
+            None,
+        );
+        assert_eq!(context.status, 200, "{version}");
+        assert!(context.body.unwrap().to_string().contains("m1"));
+
+        let initialized = dispatch(
+            &f.core(),
+            &f.state,
+            &f.token,
+            json!({"jsonrpc":"2.0","method":"notifications/initialized","params":{}}),
+            version,
+            None,
+            None,
+        );
+        assert_eq!(initialized.status, 202);
+        assert!(initialized.body.is_none());
+    }
+
+    let unsupported = dispatch(
+        &f.core(),
+        &f.state,
+        &f.token,
+        json!({"jsonrpc":"2.0","id":9,"method":"tools/list","params":{}}),
+        "2025-01-01",
+        None,
+        None,
+    );
+    assert_eq!(unsupported.status, 400);
+    assert_eq!(unsupported.body.unwrap()["error"]["code"], -32022);
+
+    let unauthenticated = dispatch(
+        &f.core(),
+        &f.state,
+        "not-a-token",
+        json!({"jsonrpc":"2.0","id":10,"method":"initialize",
+            "params":{"protocolVersion":mcp::CLAUDE_LEGACY,"capabilities":{}}}),
+        mcp::FIRST_HTTP_LEGACY,
+        None,
+        None,
+    );
+    assert_eq!(unauthenticated.status, 401);
+}
+
 fn tcp_request_result(payload: String) -> std::io::Result<String> {
     let mut connection = std::net::TcpStream::connect(("127.0.0.1", mcp::MCP_PORT))?;
     connection.set_read_timeout(Some(std::time::Duration::from_secs(8)))?;
@@ -229,6 +394,27 @@ async fn real_http_deny_rebinding_origin_and_locked_epoch() {
             .unwrap();
     assert!(response.starts_with("HTTP/1.1 200"), "{response}");
     assert!(response.contains("supportedVersions"));
+    // Actual TCP contract for a handshake-era client: the first HTTP POST
+    // does not require a version header or modern Mcp-Method mirrors.
+    for requested in [mcp::FIRST_HTTP_LEGACY, mcp::CLAUDE_LEGACY, LEGACY] {
+        let body = json!({"jsonrpc":"2.0","id":41,"method":"initialize","params":{
+            "protocolVersion":requested,"capabilities":{},
+            "clientInfo":{"name":"claude-code","version":"synthetic"}
+        }})
+        .to_string();
+        let request = format!(
+            "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:43731\r\nContent-Type: application/json\r\nAccept: application/json, text/event-stream\r\nAuthorization: Bearer {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            f.token, body.len(), body
+        );
+        let reply = tokio::task::spawn_blocking(move || tcp_request(request))
+            .await
+            .unwrap();
+        assert!(reply.starts_with("HTTP/1.1 200"), "{requested}: {reply}");
+        assert_eq!(
+            response_json(&reply)["result"]["protocolVersion"],
+            requested
+        );
+    }
     let token = f.token.clone();
     let denied = tokio::task::spawn_blocking(move || tcp_request(raw(&token, "evil.example", "")))
         .await
@@ -250,6 +436,9 @@ async fn real_http_deny_rebinding_origin_and_locked_epoch() {
     // pretending that an external OpenAI account/network has been exercised.
     let hosted = ClientAuthority::new(&f.state, &f.security)
         .issue("Simulated hosted reader", &[ClientCapability::Read])
+        .unwrap();
+    ClientAuthority::new(&f.state, &f.security)
+        .grant_read_sources(&hosted.client.id, std::slice::from_ref(&f.source))
         .unwrap();
     let hosted_id = hosted.client.id.clone();
     let hosted_token = hosted.credential().to_string();

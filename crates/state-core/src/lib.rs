@@ -10,6 +10,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 mod cipher;
+mod client_read_grants;
 mod clients;
 mod document_objects;
 mod document_roots;
@@ -25,6 +26,7 @@ mod source_forget;
 mod source_redaction;
 #[cfg(feature = "sqlcipher-preview")]
 pub mod vault_bootstrap;
+pub use client_read_grants::{ClientReadScope, MAX_READ_GRANTS_PER_CLIENT};
 pub use clients::{ClientAuditEvent, ClientCapability, ClientRecord};
 pub use document_objects::{
     DocumentMetadata, DocumentObjectStore, DocumentPreserveReceipt, DocumentVersion,

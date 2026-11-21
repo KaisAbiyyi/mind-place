@@ -19,6 +19,7 @@ const fullyHardened = new Set([
   "release.yml",
   "workflow-security.yml",
   "brave-registration.yml",
+  "mp-7mcp-02-claude-read.yml",
   "supply-chain.yml",
   "release-sbom.yml",
   "codeql.yml",

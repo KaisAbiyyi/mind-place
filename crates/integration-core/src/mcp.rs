@@ -6,6 +6,14 @@ use serde_json::{json, Value};
 
 pub const MODERN: &str = "2026-07-28";
 pub const LEGACY: &str = "2025-11-25";
+/// Claude Code and other handshake-era MCP clients may negotiate earlier
+/// Streamable HTTP protocol revisions without changing the read authority.
+pub const CLAUDE_LEGACY: &str = "2025-06-18";
+pub const FIRST_HTTP_LEGACY: &str = "2025-03-26";
+
+fn supported_legacy(version: &str) -> bool {
+    matches!(version, LEGACY | CLAUDE_LEGACY | FIRST_HTTP_LEGACY)
+}
 pub const MCP_PORT: u16 = 43731;
 pub const BODY_LIMIT: usize = 64 * 1024;
 
@@ -94,10 +102,21 @@ pub fn dispatch(
     if !params.is_object() {
         return McpReply::error(400, id, -32602, "Invalid params");
     }
-    if !matches!(protocol, MODERN | LEGACY) {
+    if protocol != MODERN && !supported_legacy(protocol) {
         return McpReply::error(400, id, -32022, "Unsupported protocol version");
     }
     let modern = protocol == MODERN;
+    // initialize is version negotiation, not an ordinary request. Handshake
+    // clients commonly omit MCP-Protocol-Version on their first HTTP POST.
+    // Select their supported revision, not the transport's safe default.
+    let negotiated = if !modern && method == "initialize" {
+        match params.get("protocolVersion").and_then(Value::as_str) {
+            Some(version) if supported_legacy(version) => version,
+            _ => LEGACY,
+        }
+    } else {
+        protocol
+    };
     if modern {
         let request_meta = params.get("_meta");
         if request_meta
@@ -141,7 +160,7 @@ pub fn dispatch(
     }
     let result = match method {
         "initialize" if !modern => json!({
-            "protocolVersion": LEGACY,
+            "protocolVersion": negotiated,
             "capabilities":{"tools":{"listChanged":false}},
             "serverInfo":{"name":"mind-place","version":"0.2.5"}
         }),

@@ -379,7 +379,9 @@ async fn handle_bounded(request: Request<Incoming>, ctx: ServerContext) -> WireR
         request.headers(),
         hyper::header::HeaderName::from_static("mcp-protocol-version"),
     )
-    .unwrap_or(mcp::LEGACY)
+    // Without a version header, Streamable HTTP clients use the earliest
+    // handshake revision (2025-03-26). initialize negotiates independently.
+    .unwrap_or(mcp::FIRST_HTTP_LEGACY)
     .to_string();
     let method = exactly_one(
         request.headers(),

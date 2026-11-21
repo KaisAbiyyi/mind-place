@@ -96,6 +96,32 @@ impl<'a> ClientAuthority<'a> {
         self.security.validate_lease(lease)?;
         Ok(())
     }
+    /// MP-7MCP-02: grant a client read access to individual archive sources
+    /// (default deny, no wildcard). Owner-only, requires a live unlock lease.
+    pub fn grant_read_sources(&self, id: &str, sources: &[String]) -> Result<usize> {
+        let lease = self.security.require_unlocked()?;
+        let changed = self.state.grant_client_read_sources(id, sources)?;
+        self.security.validate_lease(lease)?;
+        Ok(changed)
+    }
+    pub fn revoke_read_sources(&self, id: &str, sources: &[String]) -> Result<usize> {
+        let lease = self.security.require_unlocked()?;
+        let changed = self.state.revoke_client_read_sources(id, sources)?;
+        self.security.validate_lease(lease)?;
+        Ok(changed)
+    }
+    pub fn revoke_all_read_sources(&self, id: &str) -> Result<usize> {
+        let lease = self.security.require_unlocked()?;
+        let changed = self.state.revoke_all_client_read_sources(id)?;
+        self.security.validate_lease(lease)?;
+        Ok(changed)
+    }
+    pub fn read_sources(&self, id: &str) -> Result<Vec<String>> {
+        let lease = self.security.require_unlocked()?;
+        let sources = self.state.client_read_sources(id)?;
+        self.security.validate_lease(lease)?;
+        Ok(sources)
+    }
     pub fn authorize(&self, token: &str, capability: ClientCapability) -> Result<String> {
         let lease = self.security.require_unlocked()?;
         let hash = credential_hash(token)?;
@@ -108,11 +134,9 @@ impl<'a> ClientAuthority<'a> {
     }
 }
 
-/* Strict post-result privacy guard for the credentialed MCP dispatcher.
-A stale FTS generation may still contain pre-redaction snippets; never
-serialize those snippets to a model even if source indexing has not caught
-up. Fail closed on malformed source references. */
-fn reject_redacted_sources(state: &StateStore, value: &Value) -> Result<()> {
+/// Visit every source reference in a request or result tree. Fails closed on a
+/// malformed reference. Shared by the redaction and the read-scope guards.
+fn for_each_source_ref(value: &Value, mut visit: impl FnMut(&str) -> Result<()>) -> Result<()> {
     let mut pending = vec![value];
     let mut visited = 0usize;
     while let Some(node) = pending.pop() {
@@ -124,17 +148,11 @@ fn reject_redacted_sources(state: &StateStore, value: &Value) -> Result<()> {
             Value::Object(map) => {
                 for (name, value) in map {
                     if matches!(name.as_str(), "source_id" | "source_ref") {
-                        let source = value.as_str().ok_or(IntegrationError::AccessDenied)?;
-                        if state.source_is_redacted(source)? {
-                            return Err(IntegrationError::AccessDenied);
-                        }
+                        visit(value.as_str().ok_or(IntegrationError::AccessDenied)?)?;
                     } else if name == "source_ids" {
                         let ids = value.as_array().ok_or(IntegrationError::AccessDenied)?;
                         for source in ids {
-                            let source = source.as_str().ok_or(IntegrationError::AccessDenied)?;
-                            if state.source_is_redacted(source)? {
-                                return Err(IntegrationError::AccessDenied);
-                            }
+                            visit(source.as_str().ok_or(IntegrationError::AccessDenied)?)?;
                         }
                     } else {
                         pending.push(value);
@@ -148,6 +166,30 @@ fn reject_redacted_sources(state: &StateStore, value: &Value) -> Result<()> {
     Ok(())
 }
 
+/* Strict post-result privacy guard for the credentialed MCP dispatcher.
+A stale FTS generation may still contain pre-redaction snippets; never
+serialize those snippets to a model even if source indexing has not caught
+up. Fail closed on malformed source references. */
+fn reject_redacted_sources(state: &StateStore, value: &Value) -> Result<()> {
+    for_each_source_ref(value, |source| {
+        if state.source_is_redacted(source)? {
+            return Err(IntegrationError::AccessDenied);
+        }
+        Ok(())
+    })
+}
+
+/// MP-7MCP-02 defense in depth: no result may name a source outside the
+/// client's read grants, even if an upstream filter were bypassed.
+fn reject_out_of_scope_results(scope: &[String], value: &Value) -> Result<()> {
+    for_each_source_ref(value, |source| {
+        if scope.binary_search(&source.to_owned()).is_err() {
+            return Err(IntegrationError::AccessDenied);
+        }
+        Ok(())
+    })
+}
+
 impl IntegrationCore<'_> {
     /// Read requests use the SAME unlock lease as Phase 3A, and current
     /// authoritative client capability is checked at every callback.
@@ -158,6 +200,21 @@ impl IntegrationCore<'_> {
         credential: &str,
         batch: &ToolBatch,
     ) -> Result<ToolBatchResponse> {
+        self.execute_client_batch_observed(state, credential, batch, &mut || {})
+    }
+
+    /// Test seam (not for production callers): `observe` runs at the start of
+    /// every live-authority recheck, so a test can mutate grants or the client
+    /// mid-request and prove the batch fails closed.
+    #[doc(hidden)]
+    pub fn execute_client_batch_observed(
+        &self,
+        state: &StateStore,
+        credential: &str,
+        batch: &ToolBatch,
+        observe: &mut dyn FnMut(),
+    ) -> Result<ToolBatchResponse> {
+        let observe = std::cell::RefCell::new(observe);
         // MP-9C: one shared privacy disclosure fence spans the argument
         // pre-check, every tool call, the post-result authority check and the
         // returned response. A redaction commit (exclusive) therefore either
@@ -166,39 +223,65 @@ impl IntegrationCore<'_> {
         let _privacy = self.disclosure_fence()?;
         self.security.require_unlocked()?;
         let hash = credential_hash(credential)?;
-        let client = match state.authorize_client_hash(&hash, ClientCapability::Read)? {
-            Some(id) => id,
+        // One consistent snapshot of the credential, its policy revision and
+        // its read grants. A credential with no grants reads nothing (default
+        // deny) but is otherwise a normal, authenticated client.
+        let scope = match state.authorize_client_read_scope(&hash)? {
+            Some(scope) => scope,
             None => {
                 state.audit_client_read(None, "read_denied")?;
                 return Err(IntegrationError::AccessDenied);
             }
         };
+        let client = scope.client_id.clone();
+        let revision = scope.policy_revision;
+        let mut granted = scope.sources;
+        granted.sort();
+        granted.dedup();
         state.audit_client_read(Some(&client), "read_attempt")?;
         // Check direct source filters before accessing any raw/index bytes.
+        // Only ids the client is GRANTED are tested for redaction: an ungranted
+        // id must behave exactly like an unknown one (empty result or
+        // InvalidQuery), so a forgotten source it never had access to is not
+        // distinguishable from a source that was merely never granted.
         for call in &batch.calls {
-            reject_redacted_sources(state, &call.arguments)?;
+            for_each_source_ref(&call.arguments, |source| {
+                if granted.binary_search(&source.to_owned()).is_ok()
+                    && state.source_is_redacted(source)?
+                {
+                    return Err(IntegrationError::AccessDenied);
+                }
+                Ok(())
+            })?;
         }
-        // Stale index hits for redacted sources are dropped (not rejected) so
-        // the response is indistinguishable from "no match".
+        // Every authorization callback re-reads live authority: the credential
+        // must still resolve to this client AND the client's policy revision
+        // must be unchanged, so a grant, revoke, disable, rotation or capability
+        // change during the request fails the whole batch closed.
         let authorize = || {
+            (observe.borrow_mut())();
             if state
                 .authorize_client_hash(&hash, ClientCapability::Read)?
                 .as_deref()
                 == Some(client.as_str())
+                && state.client_policy_revision(&client)? == Some(revision)
             {
                 Ok(())
             } else {
                 Err(IntegrationError::AccessDenied)
             }
         };
+        // Stale index hits for redacted sources are dropped (not rejected) so
+        // the response is indistinguishable from "no match".
         // MP-9C: hidden sources are excluded from ranking by failing closed
         // on a stale projection; prune it and retry once so the client sees
         // only visible results and no stale-generation signal.
         let run = || {
-            self.execute_batch_visible(
+            self.execute_batch_scoped(
                 batch,
                 authorize,
                 &mut mind_place_index::AuthorityVisibility(state),
+                Some(&granted),
             )
         };
         let result = match run() {
@@ -208,18 +291,14 @@ impl IntegrationCore<'_> {
             other => other,
         };
         // Defense in depth: recheck every returned source against fresh
-        // authority. Anything still naming a redacted source fails closed.
+        // authority and the read grants. Anything still naming a redacted or
+        // ungranted source fails closed.
         let result = result.and_then(|response| {
             for item in &response.results {
                 reject_redacted_sources(state, &item.result)?;
+                reject_out_of_scope_results(&granted, &item.result)?;
             }
-            if state
-                .authorize_client_hash(&hash, ClientCapability::Read)?
-                .as_deref()
-                != Some(client.as_str())
-            {
-                return Err(IntegrationError::AccessDenied);
-            }
+            authorize()?;
             Ok(response)
         });
         state.audit_client_read(

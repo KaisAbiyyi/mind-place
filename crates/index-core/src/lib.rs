@@ -34,6 +34,20 @@ pub(crate) fn namespace_for_provider(provider: &str) -> Option<&'static str> {
         _ => None,
     }
 }
+
+/// Canonical source id that the index and MCP use for one archived
+/// conversation, or `None` for an unknown provider. The owner UI uses it to
+/// match saved chats to a client's read grants; it is never shown to people.
+pub fn conversation_source_id(provider: &str, conversation_id: &str) -> Option<String> {
+    let namespace = namespace_for_provider(provider)?;
+    mind_place_state::canonical_source_id(&mind_place_state::SourceDescriptor {
+        provider,
+        source_namespace: namespace,
+        source_kind: "conversation",
+        key: mind_place_state::SourceKey::External(conversation_id),
+    })
+    .ok()
+}
 const MAX_CHUNK_BYTES: usize = 4096;
 const SCHEMA: &str = include_str!("schema_v1.sql");
 const GRAPH_SCHEMA: &str = include_str!("schema_v2.sql");

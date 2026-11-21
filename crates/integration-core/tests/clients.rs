@@ -65,6 +65,18 @@ impl Fixture {
     fn unlock(&self) {
         self.security.initialize(b"test-secret-123").unwrap();
     }
+    /// Canonical id of the single fixture source, read through the trusted
+    /// unscoped internal path.
+    fn source_id(&self) -> String {
+        let reply = self
+            .core()
+            .execute_batch(&Fixture::batch(), || Ok(()))
+            .unwrap();
+        reply.results[0].result["hits"][0]["source_id"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    }
     fn batch() -> ToolBatch {
         ToolBatch {
             calls: vec![ToolCall {
@@ -123,6 +135,18 @@ fn read_is_not_write_or_admin_and_admin_is_not_implicit_read() {
             .execute_client_batch(&f.state, admin.credential(), &Fixture::batch()),
         Err(IntegrationError::AccessDenied)
     ));
+    // Default deny: a read credential with no source grants discloses nothing.
+    let denied = f
+        .core()
+        .execute_client_batch(&f.state, reader.credential(), &Fixture::batch())
+        .unwrap();
+    assert!(denied.results[0].result["hits"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    f.owner()
+        .grant_read_sources(&reader.client.id, &[f.source_id()])
+        .unwrap();
     let result = f
         .core()
         .execute_client_batch(&f.state, reader.credential(), &Fixture::batch())
@@ -131,7 +155,10 @@ fn read_is_not_write_or_admin_and_admin_is_not_implicit_read() {
     let audit = f.state.client_audit(&reader.client.id, 10).unwrap();
     assert_eq!(audit[0].event, "read_completed");
     assert_eq!(audit[1].event, "read_attempt");
-    assert_eq!(audit[2].event, "issued");
+    assert_eq!(audit[2].event, "capability_granted");
+    assert_eq!(audit[3].event, "read_completed");
+    assert_eq!(audit[4].event, "read_attempt");
+    assert_eq!(audit[5].event, "issued");
 }
 
 #[test]

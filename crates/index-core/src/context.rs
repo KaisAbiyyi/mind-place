@@ -249,7 +249,30 @@ impl IndexStore {
         request: &ContextRequest,
         check: impl FnMut() -> Result<()>,
     ) -> Result<ContextPack> {
-        self.build_context_generic_with_check(archive, request, check)
+        self.build_context_generic_with_check(archive, request, None, check)
+    }
+
+    /// MP-7MCP-02: context restricted to a client's server-derived read-grant
+    /// allow-list (see `retrieve_scoped`); `Some(&[])` yields an empty pack.
+    pub fn build_context_scoped_with_check(
+        &self,
+        archive: &ArchiveStore,
+        request: &ContextRequest,
+        scope: &[String],
+        check: impl FnMut() -> Result<()>,
+    ) -> Result<ContextPack> {
+        self.build_context_generic_with_check(archive, request, Some(scope), check)
+    }
+
+    #[cfg(feature = "sqlcipher-preview")]
+    pub fn build_context_vault_scoped_with_check(
+        &self,
+        archive: &crate::vault_archive::VaultCaptureStore,
+        request: &ContextRequest,
+        scope: &[String],
+        check: impl FnMut() -> Result<()>,
+    ) -> Result<ContextPack> {
+        self.build_context_generic_with_check(archive, request, Some(scope), check)
     }
 
     #[cfg(feature = "sqlcipher-preview")]
@@ -259,13 +282,14 @@ impl IndexStore {
         request: &ContextRequest,
         check: impl FnMut() -> Result<()>,
     ) -> Result<ContextPack> {
-        self.build_context_generic_with_check(archive, request, check)
+        self.build_context_generic_with_check(archive, request, None, check)
     }
 
     pub(crate) fn build_context_generic_with_check(
         &self,
         archive: &impl CaptureArchiveReader,
         request: &ContextRequest,
+        scope: Option<&[String]>,
         mut check: impl FnMut() -> Result<()>,
     ) -> Result<ContextPack> {
         let started = Instant::now();
@@ -281,13 +305,14 @@ impl IndexStore {
         // MP-9C: a stale index hit for a redacted source is skipped here, not
         // fetched; fetching it would fail and turn the match into an oracle.
         let authority = archive.source_authority()?;
-        let search = self.retrieve_filtered(
+        let search = self.retrieve_scoped(
             &RetrievalRequest {
                 queries: request.queries.clone(),
                 filters,
                 limit: SEARCH_POOL,
             },
             &mut crate::OptionalAuthorityVisibility(&authority),
+            scope,
         )?;
         check()?;
 

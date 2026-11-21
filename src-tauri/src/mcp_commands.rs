@@ -134,3 +134,151 @@ pub(super) fn revoke_local_mcp_client(
         .map_err(|_| "MP_MCP_CLIENT:Cannot revoke client".to_string())?;
     finish_unlocked(&state, lease)
 }
+
+// MP-7MCP-02 / MP-ADR-006: owner-only read grants. A read credential discloses
+// nothing until the owner grants it individual sources (no wildcard). These are
+// trusted desktop commands; MCP clients can never reach them. A malformed id is
+// rejected by the state layer, and failures are deliberately opaque.
+
+#[tauri::command]
+pub(super) fn grant_local_mcp_client_sources(
+    state: State<'_, AppState>,
+    client_id: String,
+    source_ids: Vec<String>,
+) -> Result<usize, String> {
+    let lease = begin_unlocked(&state)?;
+    let authority = super::open_owner_state(&owner_vault(&state), &state.state_path)
+        .map_err(|_| "MP_MCP_AUTHORITY:Unavailable".to_string())?;
+    let changed = ClientAuthority::new(&authority, &state.security)
+        .grant_read_sources(&client_id, &source_ids)
+        .map_err(|_| "MP_MCP_GRANT:Cannot grant read access".to_string())?;
+    finish_unlocked(&state, lease)?;
+    Ok(changed)
+}
+
+#[tauri::command]
+pub(super) fn revoke_local_mcp_client_sources(
+    state: State<'_, AppState>,
+    client_id: String,
+    source_ids: Vec<String>,
+) -> Result<usize, String> {
+    let lease = begin_unlocked(&state)?;
+    let authority = super::open_owner_state(&owner_vault(&state), &state.state_path)
+        .map_err(|_| "MP_MCP_AUTHORITY:Unavailable".to_string())?;
+    let changed = ClientAuthority::new(&authority, &state.security)
+        .revoke_read_sources(&client_id, &source_ids)
+        .map_err(|_| "MP_MCP_GRANT:Cannot revoke read access".to_string())?;
+    finish_unlocked(&state, lease)?;
+    Ok(changed)
+}
+
+#[tauri::command]
+pub(super) fn revoke_all_local_mcp_client_sources(
+    state: State<'_, AppState>,
+    client_id: String,
+) -> Result<usize, String> {
+    let lease = begin_unlocked(&state)?;
+    let authority = super::open_owner_state(&owner_vault(&state), &state.state_path)
+        .map_err(|_| "MP_MCP_AUTHORITY:Unavailable".to_string())?;
+    let changed = ClientAuthority::new(&authority, &state.security)
+        .revoke_all_read_sources(&client_id)
+        .map_err(|_| "MP_MCP_GRANT:Cannot revoke read access".to_string())?;
+    finish_unlocked(&state, lease)?;
+    Ok(changed)
+}
+
+/// Sorted canonical source ids this client may read (at most 10,000).
+#[tauri::command]
+pub(super) fn list_local_mcp_client_sources(
+    state: State<'_, AppState>,
+    client_id: String,
+) -> Result<Vec<String>, String> {
+    let lease = begin_unlocked(&state)?;
+    let authority = super::open_owner_state(&owner_vault(&state), &state.state_path)
+        .map_err(|_| "MP_MCP_AUTHORITY:Unavailable".to_string())?;
+    let sources = ClientAuthority::new(&authority, &state.security)
+        .read_sources(&client_id)
+        .map_err(|_| "MP_MCP_GRANT:Could not list read access".to_string())?;
+    finish_unlocked(&state, lease)?;
+    Ok(sources)
+}
+
+/// One saved chat as the owner grant screen needs it. `source_id` is the
+/// opaque handle sent back to the grant commands; it is never displayed.
+#[derive(Serialize)]
+pub struct GrantableChat {
+    source_id: String,
+    title: String,
+    provider: String,
+    captured_at: String,
+    granted: bool,
+}
+
+#[derive(Serialize)]
+pub struct GrantableChats {
+    total: usize,
+    /// How many of the `total` chats this client may currently read.
+    allowed: usize,
+    rows: Vec<GrantableChat>,
+}
+
+const GRANTABLE_PAGE_MAX: usize = 100;
+
+/// Saved chats (optionally filtered by title/text like the Archive list) with
+/// whether this client may read each one. Paged; at most 100 rows per call.
+#[tauri::command]
+pub(super) async fn list_local_mcp_grantable_chats(
+    state: State<'_, AppState>,
+    client_id: String,
+    query: Option<String>,
+    offset: Option<usize>,
+    limit: Option<usize>,
+) -> Result<GrantableChats, String> {
+    let q = query.unwrap_or_default();
+    let vault_query = q.clone();
+    let conversations = if let Some(list) =
+        super::vaulted_blocking(&state, move |vault| vault.list(&vault_query)).await?
+    {
+        list
+    } else {
+        let store = legacy_archive(&state)?;
+        super::gated_blocking(&state, move || store.list(&q)).await?
+    };
+    let lease = begin_unlocked(&state)?;
+    let authority = super::open_owner_state(&owner_vault(&state), &state.state_path)
+        .map_err(|_| "MP_MCP_AUTHORITY:Unavailable".to_string())?;
+    let granted: std::collections::HashSet<String> =
+        ClientAuthority::new(&authority, &state.security)
+            .read_sources(&client_id)
+            .map_err(|_| "MP_MCP_GRANT:Could not list read access".to_string())?
+            .into_iter()
+            .collect();
+    finish_unlocked(&state, lease)?;
+    let limit = limit.unwrap_or(25).clamp(1, GRANTABLE_PAGE_MAX);
+    let offset = offset.unwrap_or(0);
+    let mut chats = Vec::new();
+    for summary in &conversations {
+        // Providers without a canonical source namespace are not readable
+        // through MCP at all, so they are not offered.
+        let Some(source_id) =
+            mind_place_index::conversation_source_id(&summary.provider, &summary.conversation_id)
+        else {
+            continue;
+        };
+        chats.push(GrantableChat {
+            granted: granted.contains(&source_id),
+            source_id,
+            title: summary.title.clone(),
+            provider: summary.provider.clone(),
+            captured_at: summary.captured_at.clone(),
+        });
+    }
+    let total = chats.len();
+    let allowed = chats.iter().filter(|chat| chat.granted).count();
+    let rows = chats.into_iter().skip(offset).take(limit).collect();
+    Ok(GrantableChats {
+        total,
+        allowed,
+        rows,
+    })
+}
