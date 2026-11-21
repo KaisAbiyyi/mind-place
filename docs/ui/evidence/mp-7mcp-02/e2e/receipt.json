@@ -43,6 +43,11 @@
       "detail": "Only the granted conversation is returned; hit titles seen for the other conversation words: Rust archive decision"
     },
     {
+      "gate": "real-claude-client-reads-only-granted",
+      "result": "PASS",
+      "detail": "Claude Code 2.1.322 (Claude Code) (model alias haiku) connected over Streamable HTTP, discovered 3 mindplace tools, made 2 search calls; hit counts per result [0,2,0]; every hit belonged to the granted chat"
+    },
+    {
       "gate": "ungranted-fetch-looks-unknown",
       "result": "PASS",
       "detail": "Ungranted fetch and unknown-id fetch both answer 400 with the same error; granted fetch answers 200"

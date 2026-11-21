@@ -201,6 +201,55 @@ try {
     return 'Only the granted conversation is returned; hit titles seen for the other conversation words: ' + ([...titles].join(', ') || 'none');
   });
 
+  // Optional: a REAL Claude client (Claude Code CLI) as the MCP client, over the same
+  // listener. The access key reaches it only through an environment variable that
+  // the MCP config expands, never on a command line or in a file.
+  if (process.env.MP_REAL_CLAUDE === '1') {
+    await gate('real-claude-client-reads-only-granted', async () => {
+      const claude = spawnSync('where.exe', ['claude'], { encoding: 'utf8' }).stdout.split(/\r?\n/).find((line) => /\.exe$/i.test(line.trim()))?.trim() ?? 'claude';
+      const version = spawnSync(claude, ['--version'], { encoding: 'utf8' }).stdout.trim();
+      const config = path.join(runtime, 'claude-mcp.json');
+      fs.writeFileSync(config, JSON.stringify({
+        mcpServers: { mindplace: { type: 'http', url: 'http://127.0.0.1:43731/mcp', headers: { Authorization: 'Bearer ${MP_E2E_TOKEN}' } } },
+      }));
+      const prompt = 'Call the mindplace memory_search tool twice, once with queries ["Rust"] and once with queries ["reading"]. Reply with one short line per call: the query and the number of hits. Do not call any other tool.';
+      const run = spawnSync(claude, ['-p', '--mcp-config', config, '--strict-mcp-config',
+        '--allowedTools', 'mcp__mindplace__memory_search', '--model', 'haiku', '--max-turns', '5',
+        '--output-format', 'stream-json', '--verbose'], {
+        input: prompt, encoding: 'utf8', timeout: 180000, maxBuffer: 8 * 1024 * 1024,
+        env: { ...process.env, MP_E2E_TOKEN: token },
+      });
+      const events = String(run.stdout).split('\n').filter(Boolean).map((line) => { try { return JSON.parse(line); } catch { return null; } }).filter(Boolean);
+      const init = events.find((e) => e.type === 'system' && e.subtype === 'init');
+      assert.ok(init, 'Claude Code did not start: ' + String(run.stderr).slice(0, 200));
+      const server = (init.mcp_servers ?? []).find((m) => m.name === 'mindplace');
+      assert.equal(server?.status, 'connected', 'MCP server status: ' + server?.status);
+      const toolNames = (init.tools ?? []).filter((t) => String(t).startsWith('mcp__mindplace__'));
+      assert.ok(toolNames.includes('mcp__mindplace__memory_search'), 'tools discovered: ' + toolNames.join(','));
+      const uses = [];
+      const results = [];
+      for (const event of events) {
+        for (const block of event.message?.content ?? []) {
+          if (block.type === 'tool_use') uses.push(block);
+          if (block.type === 'tool_result') results.push(block);
+        }
+      }
+      const searches = uses.filter((u) => u.name === 'mcp__mindplace__memory_search');
+      const finalResult = events.find((e) => e.type === 'result');
+      assert.ok(searches.length >= 2, 'Claude issued ' + searches.length + ' search calls; tool uses: ' + uses.map((u) => u.name).join(',') + '; denials: ' + JSON.stringify(finalResult?.permission_denials ?? []).slice(0, 200) + '; reply: ' + String(finalResult?.result).slice(0, 200));
+      const summary = [];
+      for (const result of results) {
+        const text = Array.isArray(result.content) ? result.content.map((c) => c.text ?? '').join('') : String(result.content);
+        let hits = [];
+        try { hits = JSON.parse(text).hits ?? []; } catch { /* non-JSON result */ }
+        summary.push(hits.length);
+        assert.ok(hits.every((h) => h.title === 'Rust archive decision'), 'Claude received a hit from an ungranted chat');
+      }
+      assert.ok(summary.some((n) => n > 0), 'Claude received no hit for the granted chat');
+      return `Claude Code ${version} (model alias haiku) connected over Streamable HTTP, discovered ${toolNames.length} mindplace tools, made ${searches.length} search calls; hit counts per result ${JSON.stringify(summary)}; every hit belonged to the granted chat`;
+    });
+  }
+
   await gate('ungranted-fetch-looks-unknown', async () => {
     const granted = (await search(token, 'Rust')).hits[0];
     const invoke = (command, args) => page.evaluate(([c, a]) => window.__TAURI_INTERNALS__.invoke(c, a), [command, args]);
