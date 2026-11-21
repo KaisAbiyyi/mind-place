@@ -17,6 +17,9 @@ import { chromium } from '@playwright/test';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const out = path.join(root, 'outputs', 'mp-8l1');
+// MP_SMOKE_OUTPUT keeps archive paths short (capture file names are 64+64 hex characters,
+// so a deep checkout path can exceed MAX_PATH). Receipts still go to outputs/.
+const dataBase = process.env.MP_SMOKE_OUTPUT ? path.resolve(process.env.MP_SMOKE_OUTPUT) : path.join(root, 'outputs');
 const executable = path.join(root, 'release', 'win32-x64', 'mind-place.exe');
 const host = path.join(root, 'release', 'win32-x64', 'mind-place-capture-host.exe');
 const receiptPath = path.join(out, 'native-webview2-receipt.json');
@@ -90,17 +93,18 @@ try {
   // immutable revisions through the real packaged native-messaging host.
   const fixture = spawnSync(process.execPath, [path.join(root, 'scripts', 'smoke-native.mjs'), host], {
     cwd: root, encoding: 'utf8', windowsHide: true, timeout: 30_000, maxBuffer: 1024 * 1024,
+    env: { ...process.env, ...(process.env.MP_SMOKE_OUTPUT ? { MP_SMOKE_OUTPUT: dataBase } : {}) },
   });
   assert.equal(fixture.status, 0, `Fixture failed: ${fixture.stderr.slice(-400)}`);
   const fixtureReceipt = JSON.parse(fixture.stdout.trim().split(/\r?\n/).at(-1));
   assert.equal(fixtureReceipt.conversations, 2);
   const fixtureArchive = fixtureReceipt.archive_path;
-  assert.ok(path.isAbsolute(fixtureArchive) && fixtureArchive.startsWith(path.join(root, 'outputs')),
-    'Synthetic data root must remain beneath the isolated D: qualification worktree');
+  assert.ok(path.isAbsolute(fixtureArchive) && fixtureArchive.startsWith(dataBase),
+    'Synthetic data root must remain beneath the isolated qualification output root');
   // Security and authoritative/index SQLite state live in the archive's
   // parent directory. Isolate that parent too, to avoid sharing test secrets
   // across smoke runs or with any existing Mind Place process.
-  const testParent = fs.mkdtempSync(path.join(out, 'isolated-runtime-'));
+  const testParent = fs.mkdtempSync(path.join(dataBase, 'l1-'));
   const archive = path.join(testParent, 'archive-v1');
   fs.renameSync(fixtureArchive, archive);
   const profile = path.join(testParent, 'webview-profile');
@@ -124,6 +128,8 @@ try {
   await page.locator('#security-secret-confirm').fill(syntheticSecret);
   await page.locator('#security-submit').click();
   await page.locator('#knowledge-os-nav').waitFor({ timeout: 60_000 });
+  // After UI-09 the landing page is Overview; the conversation list lives in the Conversations workspace.
+  await page.locator('[data-workspace="conversations"]').click();
   await page.locator('#conversation-list').waitFor();
   record('native-initialize-unlock', 'PASS', 'First-run secret creation unlocked the native reader');
 
