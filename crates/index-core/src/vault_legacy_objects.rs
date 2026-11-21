@@ -137,6 +137,28 @@ impl RawLegacyInventory {
         Ok(bytes)
     }
 
+    /// Map every authenticated legacy reference to its opaque object filename.
+    /// Backup inventory must preserve both archive and document legacy objects.
+    pub(crate) fn referenced_storage_names(
+        &self,
+        vault: &CryptoVault,
+        gate: &SecurityGate,
+        lease: UnlockLease,
+    ) -> Result<(Vec<String>, Vec<String>)> {
+        let mut archive = Vec::new();
+        let mut documents = Vec::new();
+        for file in &self.files {
+            let (kind, identity) = file.binding()?;
+            let name = vault.storage_name(gate, lease, kind, identity.as_bytes())?;
+            match kind {
+                ContentKind::Archive => archive.push(name),
+                ContentKind::DocumentObject => documents.push(name),
+                _ => return Err(SecurityError::Crypto),
+            }
+        }
+        Ok((archive, documents))
+    }
+
     pub fn verify_all(
         &self,
         storage: &ImmutableVaultStorage<'_>,
