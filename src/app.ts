@@ -47,10 +47,14 @@ export async function mountApplication({ root, invoke, clipboard }: ApplicationO
         if (isUi2ShellEnabled() && !preserveClassicOnboarding) {
           // Only load UI2 styles and code after the existing native gate has unlocked.
           // A late import must not resurrect a shell after Lock or a later epoch.
-          void import("./ui2/shell/entry.js").then(async ({ mountUi2Shell, ensureUi2Styles }) => {
+          void import("./ui2/shell/entry.js").then(async ({ mountUi2Shell, ensureUi2Styles, createUi2Pages, fenceUi2EpochInvoke }) => {
             await ensureUi2Styles();
             if (generation !== epoch || locking) return;
+            // Pages only ever get the epoch-fenced invoke: a call that starts or
+            // finishes after Lock or a new unlock fails instead of disclosing.
+            const pageInvoke = fenceUi2EpochInvoke(invoke, () => generation === epoch && !locking);
             ui2Shell = mountUi2Shell(root, {
+              pages: createUi2Pages({ invoke: pageInvoke, ...(clipboard ? { clipboard } : {}) }),
               onLock: () => { void lock(); },
               onSwitchClassic: () => {
                 if (setUi2ShellEnabled(false)) root.ownerDocument.defaultView?.location.reload();
