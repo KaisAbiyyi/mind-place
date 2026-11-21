@@ -5,7 +5,9 @@ export async function ensureUi2Styles(): Promise<void> {
       import("../ui-kit/tokens.css"),
       import("../ui-kit/primitives.css"),
       import("./shell.css"),
+      import("../connections/connections.css"),
     ]);
   }
 }
-export { mountUi2Shell } from "./shell.js";
+export { fenceUi2EpochInvoke, mountUi2Shell } from "./shell.js";
+export { createUi2Pages } from "./pages.js";

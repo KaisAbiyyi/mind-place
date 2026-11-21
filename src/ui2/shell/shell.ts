@@ -5,11 +5,14 @@ import {
   createUi2Icon, createUi2Segmented, ensureUi2IconSprite,
 } from "../ui-kit/index.js";
 import { UI2_SHELL_DESTINATIONS, readUi2Hash, ui2HashForPath, resolveUi2Route, type Ui2ResolvedRoute } from "./routes.js";
+import type { Ui2PageHandle, Ui2PageMap } from "./page.js";
 
 export interface Ui2ShellOptions {
   onLock(): void | Promise<void>;
   onSwitchClassic?(): void;
   i18n?: Ui2I18nController;
+  /** Pages that replace the "not ready" placeholder for a destination's root path. */
+  pages?: Ui2PageMap;
 }
 
 export interface Ui2ShellHandle {
@@ -45,6 +48,26 @@ export function mountUi2Shell(root: HTMLElement, options: Ui2ShellOptions): Ui2S
   let mobileOpen = false;
   let disposed = false;
   let searchDialog: ReturnType<typeof createUi2Dialog> | undefined;
+  // At most one live page: the one for the destination the owner is on.
+  // Leaving the destination destroys it, so secrets a page holds never outlive it.
+  let livePage: { destination: string; handle: Ui2PageHandle } | undefined;
+
+  function destroyLivePage(): void {
+    livePage?.handle.destroy();
+    livePage = undefined;
+  }
+
+  function pageForRoute(): Ui2PageHandle | undefined {
+    const factory = route.recognized ? options.pages?.[route.destination] : undefined;
+    const root = UI2_SHELL_DESTINATIONS.find((item) => item.destination === route.destination);
+    if (!factory || !root || route.path !== root.path) {
+      destroyLivePage();
+      return undefined;
+    }
+    if (livePage && livePage.destination !== route.destination) destroyLivePage();
+    if (!livePage) livePage = { destination: route.destination, handle: factory({ doc, i18n }) };
+    return livePage.handle;
+  }
 
   const isNarrow = () => win.matchMedia?.("(max-width: 780px)").matches ?? false;
 
@@ -298,19 +321,25 @@ export function mountUi2Shell(root: HTMLElement, options: Ui2ShellOptions): Ui2S
     const last = route.breadcrumbs[route.breadcrumbs.length - 1];
     heading.textContent = route.recognized ? i18n.t(last.labelKey) : i18n.t("shell.invalidTitle");
     header.append(heading);
-    const lead = doc.createElement("p");
-    lead.className = "ui2-lead";
-    lead.textContent = i18n.t("shell.previewLead");
-    header.append(lead);
-    const placeholder = createUi2EmptyState(doc, {
-      icon: "info", title: route.recognized ? i18n.t("shell.previewTitle") : i18n.t("shell.invalidTitle"),
-      body: route.recognized ? i18n.t("shell.previewBody") : i18n.t("shell.invalidBody"),
-      ...(options.onSwitchClassic
-        ? { actionLabel: i18n.t("shell.openClassic"), onAction: options.onSwitchClassic }
-        : {}),
-    });
-    placeholder.classList.add("ui2-shell-placeholder");
-    main.append(header, placeholder);
+    const page = pageForRoute();
+    if (page) {
+      // The page owns everything below the heading, including its lead.
+      main.append(header, page.element);
+    } else {
+      const lead = doc.createElement("p");
+      lead.className = "ui2-lead";
+      lead.textContent = i18n.t("shell.previewLead");
+      header.append(lead);
+      const placeholder = createUi2EmptyState(doc, {
+        icon: "info", title: route.recognized ? i18n.t("shell.previewTitle") : i18n.t("shell.invalidTitle"),
+        body: route.recognized ? i18n.t("shell.previewBody") : i18n.t("shell.invalidBody"),
+        ...(options.onSwitchClassic
+          ? { actionLabel: i18n.t("shell.openClassic"), onAction: options.onSwitchClassic }
+          : {}),
+      });
+      placeholder.classList.add("ui2-shell-placeholder");
+      main.append(header, placeholder);
+    }
     mainColumn.append(main);
     shell.append(skip, aside, scrim, mainColumn);
     syncNavigationAccessibility();
@@ -349,6 +378,7 @@ export function mountUi2Shell(root: HTMLElement, options: Ui2ShellOptions): Ui2S
       win.removeEventListener("hashchange", onHashChange);
       win.removeEventListener("resize", onResize);
       searchDialog?.destroy();
+      destroyLivePage();
       shell.remove();
       doc.documentElement.lang = previousDocumentLanguage;
     },

@@ -94,7 +94,11 @@ fs.mkdirSync(outDir, { recursive: true });
 const server = await createServer({
   root: rootDir,
   plugins: [previewPlugin],
-  server: { host: "127.0.0.1", port: 0, strictPort: false },
+  // No file watching or HMR: a one-shot render must not crawl target/ and release/.
+  server: { host: "127.0.0.1", port: 0, strictPort: false, watch: null, hmr: false },
+  // The preview imports only dependency-free UI2 modules. Scanning every HTML
+  // file in the repo (build output, fixtures) would take minutes for nothing.
+  optimizeDeps: { entries: [], noDiscovery: true },
   logLevel: "error",
 });
 await server.listen();
