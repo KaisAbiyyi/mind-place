@@ -6,7 +6,8 @@ import { JSDOM } from 'jsdom';
 import { captureConversation } from '../extension/capture.mjs';
 
 const project=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
-const output=path.join(project,'outputs');fs.mkdirSync(output,{recursive:true});
+// MP_SMOKE_OUTPUT keeps archive paths short: capture file names are 64+64 hex characters, so a deep checkout path can pass MAX_PATH.
+const output=process.env.MP_SMOKE_OUTPUT?path.resolve(process.env.MP_SMOKE_OUTPUT):path.join(project,'outputs');fs.mkdirSync(output,{recursive:true});
 const archive=fs.mkdtempSync(path.join(output,'native-smoke-'));
 const host=path.resolve(process.argv[2]||path.join(project,`release/${process.platform}-${process.arch}/mind-place-capture-host${process.platform==='win32'?'.exe':''}`));
 const origin='chrome-extension://dninfeidggaaioioficnigfpfjkdicjh/';
@@ -23,7 +24,7 @@ function capture(id,title,answer){
  fixture.window.close();if(!result?.ok)throw new Error(result?.error||'Production DOM capture failed');return result.capture;
 }
 const first=capture('12345678-1234-4123-8123-123456789abc','Rust archive decision','Use Rust and Tauri. Keep the raw JSONL source locally.');
-const saved=roundtrip({protocol:1,operation:'save',capture:first});if(!saved.ok||saved.message_count!==2)throw new Error('Initial save not acknowledged');
+const saved=roundtrip({protocol:1,operation:'save',capture:first});if(!saved.ok||saved.message_count!==2)throw new Error('Initial save not acknowledged: '+JSON.stringify(saved).slice(0,300));
 const duplicate=roundtrip({protocol:1,operation:'save',capture:first});if(!duplicate.unchanged)throw new Error('Identical save was not deduplicated');
 const changed=capture('12345678-1234-4123-8123-123456789abc','Rust archive decision','Use Rust and Tauri. Manual capture is now the chosen policy.');
 const revised=roundtrip({protocol:1,operation:'save',capture:changed});if(!revised.ok||revised.snapshot_id===saved.snapshot_id)throw new Error('Changed snapshot was not retained');
@@ -33,7 +34,9 @@ const avifDom=new JSDOM('<main><div data-message-id="avif-1" data-message-author
 avifDom.window.TextEncoder=TextEncoder;
 const avif=avifDom.window.eval(`(${captureConversation.toString()})()`);avifDom.window.close();
 if(!avif.ok||avif.capture.messages[0].attachments[0].data_url||!avif.capture.messages[0].attachments[0].unavailable_reason)throw new Error('Unsupported inline media was not made explicit');
-const avifSaved=roundtrip({protocol:1,operation:'save',capture:avif.capture},path.join(archive,'avif-regression'));
+// The capture host refuses an archive root that does not exist (MP-9B hardening), so create the sub-root first.
+const avifRoot=path.join(archive,'avif-regression');fs.mkdirSync(avifRoot,{recursive:true});
+const avifSaved=roundtrip({protocol:1,operation:'save',capture:avif.capture},avifRoot);
 if(!avifSaved.ok)throw new Error(`Unsupported-media fallback rejected the text: ${avifSaved.error}`);
 const raw=JSON.parse(fs.readFileSync(path.join(archive,'conversations',saved.id,'captures',`${saved.snapshot_id}.jsonl`),'utf8'));
 if(!raw.messages[1].text.includes('Keep the raw JSONL'))throw new Error('Prior raw snapshot was overwritten');
