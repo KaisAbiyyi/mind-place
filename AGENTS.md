@@ -14,7 +14,24 @@
 
 Mind Place is developed **cloud-first and agentic-workflow first**. GitHub is the implementation source of truth. Local Windows checkouts are primarily qualification targets unless the user explicitly authorizes local implementation.
 
-Read `README.md`, `docs/current-product.md`, `docs/BIG-IMPLEMENTATION-PLAN.md`, and `docs/implementation-plan/CURRENT-PHASE.md` before changing product behavior. For current agentic runtime/import direction also read `docs/implementation-plan/2026-10-18-agentic-first-runtime-and-imports.md`. `CURRENT-PHASE.md` wins when older roadmap labels disagree about the current execution order.
+Read `README.md`, `docs/current-product.md`, `docs/MAIN-PLAN.md`, `docs/BIG-IMPLEMENTATION-PLAN.md`, and `docs/implementation-plan/CURRENT-PHASE.md` before changing product behavior. For current agentic runtime/import direction also read `docs/implementation-plan/2026-10-18-agentic-first-runtime-and-imports.md`.
+
+## Main plan and owner decisions (2026-11-10)
+
+**[docs/MAIN-PLAN.md](docs/MAIN-PLAN.md) is the owner-approved main plan.** Precedence: live task status, claims and Focus Lane come only from the Notion database *Mind Place · Execution Tasks*; scope, prerequisites, locks, gates and target release of remaining work come from `docs/MAIN-PLAN.md`; `CURRENT-PHASE.md`, `PARALLEL-EXECUTION-BOARD.md` and the BIG plan are history and pointers. Where they disagree with the main plan about remaining work, the main plan wins. This supersedes the earlier sentence that `CURRENT-PHASE.md` wins.
+
+Binding direction from the owner:
+
+- **Mind Place is the brain and the data; work runs in agents.** Do not add model execution, model comparison or agent orchestration to the app. Expose data and tools through MCP; ship agent-side skills where needed.
+- **Topic first.** The primary organizing object is the topic; a project is a topic that also carries work state. Scope curation, retrieval, Resume Packs and navigation by topic.
+- **Cloud tier reads the curated layer only**, never raw conversation hits. Tier is decided by transport and credential class, not by product name.
+- **Curation runs in agent swarms outside the app.** Mind Place shards the work, issues narrow credentials and rejects curated items that cannot cite their evidence.
+- **Provider parity (2026-11-11).** Claude, ChatGPT and Gemini get the same capabilities: all can read and write, through one tool catalog and one conformance suite. Never branch engine behaviour on provider name, and never rely on a vendor client's own confirmation prompt as authorization. Whether a vendor client can actually connect or write is recorded in the Parity Matrix (`docs/MAIN-PLAN.md` §6) as `PASS`, `PROVIDER_BLOCKED`, `DEFERRED` (owner decision) or `NOT_RUN`. ChatGPT and Gemini hosted write are `DEFERRED`: the owner re-evaluates them in December 2026, and no ChatGPT or Gemini credential receives hosted-write grants until then. Local agents of every vendor, including Gemini CLI, write as before.
+- **Strict unlock is the default:** the owner password must cryptographically wrap the vault key.
+- **The Workspace is a locked mirror of GitHub** and never inherits GitHub visibility.
+- **Risk-tiered review.** Work under the locks `mcp-write-authority`, `privacy-deletion`, `crypto-migration`, `backup`, `folder-authority`, `remote-gateway`, `mcp-parity-contract`, or any change to `crates/security-core`, requires an independent read-only review by a different session or agent before acceptance. Other work may use implementor self-review. This narrows the general self-review rule; it does not change merge authority.
+- **Task pages carry current state only** (status, exact SHA, latest evidence, blockers, next action). Move older checkpoints to PR comments or the archive.
+- Several accepted directions amend existing invariants (public endpoint, outbound HTTP, eight-route shell). Each amendment needs its ADR first; until then the current invariant below stays in force. See main plan §5.
 
 ## Repository merge authority (owner update, 2026-11-06)
 
