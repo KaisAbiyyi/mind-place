@@ -308,6 +308,10 @@ struct ServerContext {
     security: SecurityGate,
     active: Arc<AtomicBool>,
     dispatch_slots: Arc<Semaphore>,
+    /// One request touches the encrypted stores at a time. Opening them takes a short exclusive schema lock
+    /// that fails fast with `Busy`; without this queue, parallel tool calls from one client (normal for
+    /// real clients) raced and all but one received HTTP 503.
+    serial: Arc<tokio::sync::Mutex<()>>,
 }
 
 async fn handle(
@@ -427,6 +431,9 @@ async fn handle_bounded(request: Request<Incoming>, ctx: ServerContext) -> WireR
     if !ctx.active.load(Ordering::Acquire) {
         return error(503);
     }
+    // Wait for our turn (bounded by the request deadline). The guard is moved into the blocking worker so a
+    // disconnect cannot release the turn while the store connections are still open.
+    let serial_turn = ctx.serial.clone().lock_owned().await;
     // Unlike a per-connection limit, this permit is owned by the blocking
     // worker. Disconnects and Tokio deadlines cannot release it prematurely.
     let dispatch_permit = match acquire_dispatch_permit(&ctx.dispatch_slots) {
@@ -438,6 +445,7 @@ async fn handle_bounded(request: Request<Incoming>, ctx: ServerContext) -> WireR
     let active_for_task = active.clone();
     let task = tokio::task::spawn_blocking(move || {
         let _dispatch_permit = dispatch_permit;
+        let _serial_turn = serial_turn;
         if !active_for_task.load(Ordering::Acquire) {
             return error(503);
         }
@@ -569,6 +577,7 @@ impl LocalMcpServer {
             security,
             active: active.clone(),
             dispatch_slots: Arc::new(Semaphore::new(MAX_DISPATCH_TASKS)),
+            serial: Arc::new(tokio::sync::Mutex::new(())),
         };
         let keep_active = active.clone();
         let stop = shutdown.clone();

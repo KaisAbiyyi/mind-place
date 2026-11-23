@@ -96,7 +96,7 @@ export async function runRealClient(clientId, { startSession, log = () => {} }) 
       const c = claims.C1;
       const init = r1.exs.find((e) => e.rpcMethod === 'initialize') ?? proxy.exchanges.find((e) => e.rpcMethod === 'initialize');
       const discover = proxy.exchanges.find((e) => e.rpcMethod === 'server/discover');
-      c.check('the client announced its own name and version on the wire', Boolean(identity?.name && identity?.version) || Boolean(discover), JSON.stringify(identity));
+      c.check('the client announced its own name and version on the wire', Boolean(identity?.name && identity?.version), JSON.stringify(identity));
       c.check('the server accepted the client handshake', Boolean((init && init.status === 200) || (discover && discover.status === 200)), init ? `initialize ${init.status}` : discover ? `discover ${discover.status}` : 'no handshake seen');
       const negotiated = init?.result?.protocolVersion ?? null;
       c.check('a protocol revision was negotiated', Boolean(negotiated) || Boolean(discover), String(negotiated));
@@ -223,6 +223,7 @@ export async function runRealClient(clientId, { startSession, log = () => {} }) 
       at: e.at, http: e.http, rpc: e.rpcMethod, tool: e.toolName, status: e.status, upstreamError: e.upstreamError ?? undefined,
       hits: e.result?.structuredContent?.hits ? e.result.structuredContent.hits.length : undefined,
       segments: e.result?.structuredContent?.segments ? e.result.structuredContent.segments.length : undefined,
+      error: e.error ? { code: e.error.code, message: e.error.message } : undefined,
       truncated: e.result?.structuredContent?.truncated, bytes: e.responseBytes, snapshot: e.params?.arguments?.snapshot_id ? String(e.params.arguments.snapshot_id).slice(0, 12) : undefined,
     })),
     sourceKey: session.exe,

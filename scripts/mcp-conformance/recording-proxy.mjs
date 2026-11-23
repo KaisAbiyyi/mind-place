@@ -104,10 +104,26 @@ export async function startRecordingProxy(options = {}) {
   };
 }
 
-/** Extract the client identity a real client announced on the wire. */
+/**
+ * Extract the client identity a real client announced on the wire. Handshake-era clients send it in
+ * `initialize`; modern stateless clients carry it per request in `_meta`, and every HTTP client sends a
+ * User-Agent. The source is returned so a reader can see how strong the evidence is.
+ */
 export function observedClientIdentity(exchanges) {
   const init = exchanges.find((e) => e.initialize?.clientInfo);
-  if (!init) return null;
-  const { name, version } = init.initialize.clientInfo;
-  return { name: String(name ?? ''), version: String(version ?? ''), protocolVersion: init.initialize.protocolVersion ?? null };
+  if (init) {
+    const { name, version } = init.initialize.clientInfo;
+    return { name: String(name ?? ''), version: String(version ?? ''), protocolVersion: init.initialize.protocolVersion ?? null, source: 'initialize.clientInfo' };
+  }
+  for (const e of exchanges) {
+    const meta = e.params?._meta ?? {};
+    const key = Object.keys(meta).find((k) => /clientInfo$/i.test(k));
+    if (key && meta[key]?.name) {
+      return { name: String(meta[key].name), version: String(meta[key].version ?? ''), protocolVersion: meta['io.modelcontextprotocol/protocolVersion'] ?? e.protocolHeader ?? null, source: '_meta.clientInfo' };
+    }
+  }
+  const ua = exchanges.map((e) => e.userAgent).find(Boolean);
+  const m = ua && /^([A-Za-z][\w.-]*)\/(\d[\w.+-]*)/.exec(ua);
+  if (m) return { name: m[1], version: m[2], protocolVersion: exchanges.find((e) => e.protocolHeader)?.protocolHeader ?? null, source: 'user-agent' };
+  return null;
 }

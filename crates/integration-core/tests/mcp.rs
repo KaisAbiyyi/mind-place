@@ -394,6 +394,20 @@ async fn real_http_deny_rebinding_origin_and_locked_epoch() {
             .unwrap();
     assert!(response.starts_with("HTTP/1.1 200"), "{response}");
     assert!(response.contains("supportedVersions"));
+    // Real clients issue parallel tool calls. They must queue, never fail with 503.
+    let parallel: Vec<_> = (0..6)
+        .map(|_| {
+            let token = f.token.clone();
+            tokio::task::spawn_blocking(move || tcp_request(raw(&token, "127.0.0.1:43731", "")))
+        })
+        .collect();
+    for reply in parallel {
+        let reply = reply.await.unwrap();
+        assert!(
+            reply.starts_with("HTTP/1.1 200"),
+            "parallel request refused: {reply}"
+        );
+    }
     // Actual TCP contract for a handshake-era client: the first HTTP POST
     // does not require a version header or modern Mcp-Method mirrors.
     for requested in [mcp::FIRST_HTTP_LEGACY, mcp::CLAUDE_LEGACY, LEGACY] {
