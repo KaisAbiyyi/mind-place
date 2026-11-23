@@ -1,20 +1,20 @@
 {
   "kind": "REAL_CLIENT run: the actual provider client behind a recording proxy against the packaged app (disposable synthetic corpus). Verdicts come from the wire log, not the model transcript.",
   "source": {
-    "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
+    "sha": "dd50987b82c494c125711156535282f856a54bf3",
     "dirty": false,
     "trees": {
-      "crates": "b3101cee0080dba2ab7267ad5dbcf1e3efe59993",
+      "crates": "0fde859bda4eeddb5d24f573af21c28947c4215e",
       "src_tauri": "43380c0c461fd1b07bfb6cab5bba010c3c35e73e",
       "cargo_lock": "d205240176426ffeec45956f651c92729e5bf1f0",
       "src": "3eb1dc4ac7bc1768ca24fcf52621f4315a631106"
     },
     "harness": {
-      "conformance": "60d3ea14fdaeccfd234bea6bd981c4f9db031001",
+      "conformance": "469d0167d75322d22364634730200fe90d0c2fe3",
       "lib": "6810a45c3b08a128f2083a5542ba43d5a7b49bc5"
     }
   },
-  "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
+  "executable_sha256": "4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301",
   "dirty_tree": false,
   "clientId": "codex",
   "label": "Codex",
@@ -27,6 +27,20 @@
     "version": "0.164.0",
     "protocolVersion": "2026-07-28",
     "source": "_meta.clientInfo"
+  },
+  "permission_proof": {
+    "canonical_full_digest": "c8339224e6fb",
+    "identity_digest": "c8339224e6fb",
+    "valid_granted_200": true,
+    "r0": {
+      "mode": "complete_args_equal",
+      "client_full_digest": "c8339224e6fb",
+      "replayed_while_granted_200": true
+    },
+    "r3": {
+      "mode": "complete_args_equal",
+      "client_full_digest": "c8339224e6fb"
+    }
   },
   "c4_scope": "Medium multi-byte two-revision chat: latest revision 20102 bytes read in 7 pages of at most 3000 bytes, earlier revision also read. The long chat over 256 KB was NOT read by this real client (NOT_RUN for real clients; covered by the synthetic reference only).",
   "transcript": [
@@ -203,19 +217,19 @@
           "detail": "200:0"
         },
         {
-          "name": "before any grant the harness, with the proven-valid fetch arguments, is denied exactly like an unknown id",
+          "name": "before any grant the harness, with the proven-valid canonical fetch arguments, is denied exactly like an unknown id",
           "ok": true,
-          "detail": "400:{\"code\":-32602,\"message\":\"Invalid params\"} vs 400:{\"code\":-32602,\"message\":\"Invalid params\"}"
+          "detail": "canonical_full c8339224e6fb: 400:{\"code\":-32602,\"message\":\"Invalid params\"} vs 400:{\"code\":-32602,\"message\":\"Invalid params\"}"
         },
         {
-          "name": "the real client fetched with those same valid arguments before any grant and was denied like an unknown id",
+          "name": "the real client fetched with valid arguments before any grant and was denied like an unknown id",
           "ok": true,
-          "detail": "args digest c8339224e6fb: 400:{\"code\":-32602,\"message\":\"Invalid params\"}"
+          "detail": "complete_args_equal (client_full c8339224e6fb vs canonical_full c8339224e6fb, identity c8339224e6fb): 400:{\"code\":-32602,\"message\":\"Invalid params\"}"
         },
         {
           "name": "the same arguments are valid once granted: HTTP 200 with the revision content (so the denial was permission, not malformed input)",
           "ok": true,
-          "detail": "args digest c8339224e6fb: 200:null"
+          "detail": "complete_args_equal (canonical_full c8339224e6fb, client_full c8339224e6fb): 200:null"
         },
         {
           "name": "after the grant the canary and second collections stay invisible to the real client",
@@ -234,14 +248,14 @@
           "detail": "0"
         },
         {
-          "name": "after the revoke the same arguments that were accepted (HTTP 200) while granted are denied exactly like an unknown id",
+          "name": "after the revoke the canonical arguments that were accepted (HTTP 200) while granted are denied exactly like an unknown id",
           "ok": true,
-          "detail": "400:{\"code\":-32602,\"message\":\"Invalid params\"} vs 400:{\"code\":-32602,\"message\":\"Invalid params\"}"
+          "detail": "canonical_full c8339224e6fb: 400:{\"code\":-32602,\"message\":\"Invalid params\"} vs 400:{\"code\":-32602,\"message\":\"Invalid params\"}"
         },
         {
-          "name": "the very next fetch by the real client, with those same valid arguments, is denied like an unknown id",
+          "name": "the very next fetch by the real client, with valid arguments, is denied like an unknown id",
           "ok": true,
-          "detail": "args digest c8339224e6fb: 400:{\"code\":-32602,\"message\":\"Invalid params\"}"
+          "detail": "complete_args_equal (client_full c8339224e6fb vs canonical_full c8339224e6fb, identity c8339224e6fb): 400:{\"code\":-32602,\"message\":\"Invalid params\"}"
         },
         {
           "name": "a second real-client credential worked before it was revoked",
@@ -300,7 +314,7 @@
   },
   "exchange_summary": [
     {
-      "at": "2026-11-23T22:00:44.241Z",
+      "at": "2026-11-23T23:19:34.359Z",
       "http": "POST",
       "rpc": "server/discover",
       "tool": null,
@@ -308,7 +322,7 @@
       "bytes": 261
     },
     {
-      "at": "2026-11-23T22:00:44.284Z",
+      "at": "2026-11-23T23:19:34.391Z",
       "http": "POST",
       "rpc": "tools/list",
       "tool": null,
@@ -316,7 +330,7 @@
       "bytes": 4868
     },
     {
-      "at": "2026-11-23T22:01:16.553Z",
+      "at": "2026-11-23T23:19:57.214Z",
       "http": "POST",
       "rpc": "tools/call",
       "tool": "memory_search",
@@ -326,7 +340,7 @@
       "bytes": 309
     },
     {
-      "at": "2026-11-23T22:01:17.443Z",
+      "at": "2026-11-23T23:20:02.900Z",
       "http": "POST",
       "rpc": "tools/call",
       "tool": "memory_fetch",
@@ -339,7 +353,7 @@
       "snapshot": "4b23d9625423"
     },
     {
-      "at": "2026-11-23T22:01:26.828Z",
+      "at": "2026-11-23T23:20:14.425Z",
       "http": "POST",
       "rpc": "server/discover",
       "tool": null,
@@ -347,7 +361,7 @@
       "bytes": 261
     },
     {
-      "at": "2026-11-23T22:01:26.848Z",
+      "at": "2026-11-23T23:20:14.452Z",
       "http": "POST",
       "rpc": "tools/list",
       "tool": null,
@@ -355,7 +369,17 @@
       "bytes": 4868
     },
     {
-      "at": "2026-11-23T22:01:50.987Z",
+      "at": "2026-11-23T23:20:33.583Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_search",
+      "status": 200,
+      "hits": 0,
+      "truncated": false,
+      "bytes": 309
+    },
+    {
+      "at": "2026-11-23T23:20:33.638Z",
       "http": "POST",
       "rpc": "tools/call",
       "tool": "memory_search",
@@ -365,7 +389,7 @@
       "bytes": 2261
     },
     {
-      "at": "2026-11-23T22:01:51.027Z",
+      "at": "2026-11-23T23:20:33.685Z",
       "http": "POST",
       "rpc": "tools/call",
       "tool": "memory_search",
@@ -375,17 +399,7 @@
       "bytes": 309
     },
     {
-      "at": "2026-11-23T22:01:51.062Z",
-      "http": "POST",
-      "rpc": "tools/call",
-      "tool": "memory_search",
-      "status": 200,
-      "hits": 0,
-      "truncated": false,
-      "bytes": 309
-    },
-    {
-      "at": "2026-11-23T22:02:08.225Z",
+      "at": "2026-11-23T23:20:41.431Z",
       "http": "POST",
       "rpc": "server/discover",
       "tool": null,
@@ -393,7 +407,7 @@
       "bytes": 261
     },
     {
-      "at": "2026-11-23T22:02:08.250Z",
+      "at": "2026-11-23T23:20:41.476Z",
       "http": "POST",
       "rpc": "tools/list",
       "tool": null,
@@ -401,7 +415,7 @@
       "bytes": 4868
     },
     {
-      "at": "2026-11-23T22:02:37.958Z",
+      "at": "2026-11-23T23:21:09.032Z",
       "http": "POST",
       "rpc": "tools/call",
       "tool": "memory_fetch",
@@ -412,7 +426,7 @@
       "snapshot": "4b23d9625423"
     },
     {
-      "at": "2026-11-23T22:02:38.860Z",
+      "at": "2026-11-23T23:21:09.528Z",
       "http": "POST",
       "rpc": "tools/call",
       "tool": "memory_fetch",
@@ -423,7 +437,7 @@
       "snapshot": "4b23d9625423"
     },
     {
-      "at": "2026-11-23T22:02:39.871Z",
+      "at": "2026-11-23T23:21:10.038Z",
       "http": "POST",
       "rpc": "tools/call",
       "tool": "memory_fetch",
@@ -434,7 +448,7 @@
       "snapshot": "4b23d9625423"
     },
     {
-      "at": "2026-11-23T22:02:40.768Z",
+      "at": "2026-11-23T23:21:10.505Z",
       "http": "POST",
       "rpc": "tools/call",
       "tool": "memory_fetch",
@@ -445,7 +459,7 @@
       "snapshot": "4b23d9625423"
     },
     {
-      "at": "2026-11-23T22:02:41.616Z",
+      "at": "2026-11-23T23:21:10.997Z",
       "http": "POST",
       "rpc": "tools/call",
       "tool": "memory_fetch",
@@ -456,7 +470,7 @@
       "snapshot": "4b23d9625423"
     },
     {
-      "at": "2026-11-23T22:02:42.519Z",
+      "at": "2026-11-23T23:21:11.483Z",
       "http": "POST",
       "rpc": "tools/call",
       "tool": "memory_fetch",
@@ -467,7 +481,7 @@
       "snapshot": "4b23d9625423"
     },
     {
-      "at": "2026-11-23T22:02:43.409Z",
+      "at": "2026-11-23T23:21:11.949Z",
       "http": "POST",
       "rpc": "tools/call",
       "tool": "memory_fetch",
@@ -478,7 +492,7 @@
       "snapshot": "4b23d9625423"
     },
     {
-      "at": "2026-11-23T22:02:53.225Z",
+      "at": "2026-11-23T23:21:12.425Z",
       "http": "POST",
       "rpc": "tools/call",
       "tool": "memory_fetch",
@@ -489,7 +503,7 @@
       "snapshot": "50a731683b07"
     },
     {
-      "at": "2026-11-23T22:02:54.128Z",
+      "at": "2026-11-23T23:21:12.932Z",
       "http": "POST",
       "rpc": "tools/call",
       "tool": "memory_fetch",
@@ -500,7 +514,7 @@
       "snapshot": "50a731683b07"
     },
     {
-      "at": "2026-11-23T22:02:55.014Z",
+      "at": "2026-11-23T23:21:13.429Z",
       "http": "POST",
       "rpc": "tools/call",
       "tool": "memory_fetch",
@@ -511,7 +525,7 @@
       "snapshot": "50a731683b07"
     },
     {
-      "at": "2026-11-23T22:02:55.978Z",
+      "at": "2026-11-23T23:21:13.912Z",
       "http": "POST",
       "rpc": "tools/call",
       "tool": "memory_fetch",
@@ -522,7 +536,7 @@
       "snapshot": "50a731683b07"
     },
     {
-      "at": "2026-11-23T22:02:56.874Z",
+      "at": "2026-11-23T23:21:14.478Z",
       "http": "POST",
       "rpc": "tools/call",
       "tool": "memory_fetch",
@@ -533,7 +547,7 @@
       "snapshot": "50a731683b07"
     },
     {
-      "at": "2026-11-23T22:03:21.039Z",
+      "at": "2026-11-23T23:21:28.100Z",
       "http": "POST",
       "rpc": "server/discover",
       "tool": null,
@@ -541,7 +555,7 @@
       "bytes": 261
     },
     {
-      "at": "2026-11-23T22:03:21.064Z",
+      "at": "2026-11-23T23:21:28.121Z",
       "http": "POST",
       "rpc": "tools/list",
       "tool": null,
@@ -549,7 +563,7 @@
       "bytes": 4868
     },
     {
-      "at": "2026-11-23T22:03:49.197Z",
+      "at": "2026-11-23T23:21:55.867Z",
       "http": "POST",
       "rpc": "tools/call",
       "tool": "memory_search",
@@ -559,7 +573,7 @@
       "bytes": 309
     },
     {
-      "at": "2026-11-23T22:03:50.160Z",
+      "at": "2026-11-23T23:21:56.291Z",
       "http": "POST",
       "rpc": "tools/call",
       "tool": "memory_fetch",
@@ -572,7 +586,7 @@
       "snapshot": "4b23d9625423"
     },
     {
-      "at": "2026-11-23T22:04:02.587Z",
+      "at": "2026-11-23T23:22:01.981Z",
       "http": "POST",
       "rpc": "server/discover",
       "tool": null,
@@ -580,7 +594,7 @@
       "bytes": 261
     },
     {
-      "at": "2026-11-23T22:04:02.611Z",
+      "at": "2026-11-23T23:22:02.004Z",
       "http": "POST",
       "rpc": "tools/list",
       "tool": null,
@@ -588,7 +602,7 @@
       "bytes": 4868
     },
     {
-      "at": "2026-11-23T22:04:23.433Z",
+      "at": "2026-11-23T23:22:21.562Z",
       "http": "POST",
       "rpc": "tools/call",
       "tool": "memory_search",
@@ -598,7 +612,7 @@
       "bytes": 2261
     },
     {
-      "at": "2026-11-23T22:04:29.678Z",
+      "at": "2026-11-23T23:22:27.863Z",
       "http": "POST",
       "rpc": "server/discover",
       "tool": null,
@@ -610,7 +624,7 @@
       "bytes": 73
     },
     {
-      "at": "2026-11-23T22:04:32.179Z",
+      "at": "2026-11-23T23:22:29.402Z",
       "http": "POST",
       "rpc": "server/discover",
       "tool": null,
@@ -622,49 +636,49 @@
       "bytes": 73
     },
     {
-      "at": "2026-11-23T22:05:28.441Z",
+      "at": "2026-11-23T23:23:12.294Z",
       "http": "POST",
       "rpc": "server/discover",
       "status": 502,
       "upstreamError": true
     },
     {
-      "at": "2026-11-23T22:05:28.708Z",
+      "at": "2026-11-23T23:23:12.560Z",
       "http": "POST",
       "rpc": "server/discover",
       "status": 502,
       "upstreamError": true
     },
     {
-      "at": "2026-11-23T22:05:29.715Z",
+      "at": "2026-11-23T23:23:13.564Z",
       "http": "POST",
       "rpc": "server/discover",
       "status": 502,
       "upstreamError": true
     },
     {
-      "at": "2026-11-23T22:05:32.898Z",
+      "at": "2026-11-23T23:23:14.163Z",
       "http": "POST",
       "rpc": "server/discover",
       "status": 502,
       "upstreamError": true
     },
     {
-      "at": "2026-11-23T22:05:33.160Z",
+      "at": "2026-11-23T23:23:14.418Z",
       "http": "POST",
       "rpc": "server/discover",
       "status": 502,
       "upstreamError": true
     },
     {
-      "at": "2026-11-23T22:05:34.176Z",
+      "at": "2026-11-23T23:23:15.427Z",
       "http": "POST",
       "rpc": "server/discover",
       "status": 502,
       "upstreamError": true
     },
     {
-      "at": "2026-11-23T22:06:44.094Z",
+      "at": "2026-11-23T23:23:34.217Z",
       "http": "POST",
       "rpc": "server/discover",
       "tool": null,
@@ -672,7 +686,7 @@
       "bytes": 261
     },
     {
-      "at": "2026-11-23T22:06:44.121Z",
+      "at": "2026-11-23T23:23:34.232Z",
       "http": "POST",
       "rpc": "tools/list",
       "tool": null,
@@ -680,7 +694,7 @@
       "bytes": 4868
     },
     {
-      "at": "2026-11-23T22:07:16.628Z",
+      "at": "2026-11-23T23:23:51.572Z",
       "http": "POST",
       "rpc": "tools/call",
       "tool": "memory_search",
@@ -690,7 +704,7 @@
       "bytes": 2261
     },
     {
-      "at": "2026-11-23T22:07:19.872Z",
+      "at": "2026-11-23T23:23:52.031Z",
       "http": "POST",
       "rpc": "tools/call",
       "tool": "memory_search",
@@ -700,5 +714,5 @@
       "bytes": 309
     }
   ],
-  "sourceKey": "D:\\projects\\mind-place\\.claude\\worktrees\\mind-place-mcp-release-64c842\\release\\win32-x64\\mind-place.exe"
+  "sourceKey": "C:\\Users\\kaisa\\.gemini\\antigravity\\worktrees\\mind-place\\mcp_release1_remediation\\release\\win32-x64\\mind-place.exe"
 }

@@ -1,11 +1,11 @@
 {
-  "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
-  "product_tree_id": "4344d1e7c28540ae",
-  "harness_tree_id": "456481fd0dc6c9ea",
-  "generated_at": "2026-11-23T22:09:13.727Z",
-  "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
+  "sha": "dd50987b82c494c125711156535282f856a54bf3",
+  "product_tree_id": "7deaa1b3f7e67857",
+  "harness_tree_id": "0c707fbe626c2f67",
+  "generated_at": "2026-11-23T23:40:01.666Z",
+  "executable_sha256": "4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301",
   "rust_trees": {
-    "crates": "b3101cee0080dba2ab7267ad5dbcf1e3efe59993",
+    "crates": "0fde859bda4eeddb5d24f573af21c28947c4215e",
     "src_tauri": "43380c0c461fd1b07bfb6cab5bba010c3c35e73e",
     "cargo_lock": "d205240176426ffeec45956f651c92729e5bf1f0",
     "src": "3eb1dc4ac7bc1768ca24fcf52621f4315a631106"
@@ -14,142 +14,142 @@
     "synthetic-http": {
       "C1": {
         "result": "PASS",
-        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
-        "product_tree_id": "4344d1e7c28540ae",
-        "harness_tree_id": "456481fd0dc6c9ea",
+        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "product_tree_id": "7deaa1b3f7e67857",
+        "harness_tree_id": "0c707fbe626c2f67",
         "evidence": {
           "kind": "SYNTHETIC_HTTP",
           "receipt": "receipts/synthetic.json",
-          "receipt_sha256": "0a39d8e0ede1d99e9821efdc77ca0539b4245185d0443ae102577ad757274d81",
+          "receipt_sha256": "73b732bc4506d31364235c9b7d71a671e4b4c3ce0023847cb7d1b2ddf1cf4e70",
           "transport": "streamable-http-loopback"
         },
         "note": "13/13 checks",
-        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c"
+        "executable_sha256": "4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301"
       },
       "C2": {
         "result": "PASS",
-        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
-        "product_tree_id": "4344d1e7c28540ae",
-        "harness_tree_id": "456481fd0dc6c9ea",
+        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "product_tree_id": "7deaa1b3f7e67857",
+        "harness_tree_id": "0c707fbe626c2f67",
         "evidence": {
           "kind": "SYNTHETIC_HTTP",
           "receipt": "receipts/synthetic.json",
-          "receipt_sha256": "0a39d8e0ede1d99e9821efdc77ca0539b4245185d0443ae102577ad757274d81",
+          "receipt_sha256": "73b732bc4506d31364235c9b7d71a671e4b4c3ce0023847cb7d1b2ddf1cf4e70",
           "transport": "streamable-http-loopback"
         },
         "note": "15/15 checks",
-        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c"
+        "executable_sha256": "4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301"
       },
       "C3": {
         "result": "PASS",
-        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
-        "product_tree_id": "4344d1e7c28540ae",
-        "harness_tree_id": "456481fd0dc6c9ea",
+        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "product_tree_id": "7deaa1b3f7e67857",
+        "harness_tree_id": "0c707fbe626c2f67",
         "evidence": {
           "kind": "SYNTHETIC_HTTP",
           "receipt": "receipts/synthetic.json",
-          "receipt_sha256": "0a39d8e0ede1d99e9821efdc77ca0539b4245185d0443ae102577ad757274d81",
+          "receipt_sha256": "73b732bc4506d31364235c9b7d71a671e4b4c3ce0023847cb7d1b2ddf1cf4e70",
           "transport": "streamable-http-loopback"
         },
         "note": "12/12 checks",
-        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c"
+        "executable_sha256": "4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301"
       },
       "C4": {
         "result": "PASS",
-        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
-        "product_tree_id": "4344d1e7c28540ae",
-        "harness_tree_id": "456481fd0dc6c9ea",
+        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "product_tree_id": "7deaa1b3f7e67857",
+        "harness_tree_id": "0c707fbe626c2f67",
         "scope": "Long chat (over 256 KB, 3 revisions, multi-byte, astral-plane and right-to-left text): latest revision at 64 KB and 9 KB pages in two protocol eras and every earlier revision; medium chat in 4 KB pages. A server reference, not a provider client.",
         "evidence": {
           "kind": "SYNTHETIC_HTTP",
           "receipt": "receipts/synthetic.json",
-          "receipt_sha256": "0a39d8e0ede1d99e9821efdc77ca0539b4245185d0443ae102577ad757274d81",
+          "receipt_sha256": "73b732bc4506d31364235c9b7d71a671e4b4c3ce0023847cb7d1b2ddf1cf4e70",
           "transport": "streamable-http-loopback"
         },
         "note": "8/8 checks",
-        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c"
+        "executable_sha256": "4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301"
       },
       "C5": {
         "result": "PASS",
-        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
-        "product_tree_id": "4344d1e7c28540ae",
-        "harness_tree_id": "456481fd0dc6c9ea",
+        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "product_tree_id": "7deaa1b3f7e67857",
+        "harness_tree_id": "0c707fbe626c2f67",
         "evidence": {
           "kind": "SYNTHETIC_HTTP",
           "receipt": "receipts/synthetic.json",
-          "receipt_sha256": "0a39d8e0ede1d99e9821efdc77ca0539b4245185d0443ae102577ad757274d81",
+          "receipt_sha256": "73b732bc4506d31364235c9b7d71a671e4b4c3ce0023847cb7d1b2ddf1cf4e70",
           "transport": "streamable-http-loopback"
         },
         "note": "15/15 checks",
-        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c"
+        "executable_sha256": "4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301"
       },
       "C6": {
         "result": "PASS",
-        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
-        "product_tree_id": "4344d1e7c28540ae",
-        "harness_tree_id": "456481fd0dc6c9ea",
+        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "product_tree_id": "7deaa1b3f7e67857",
+        "harness_tree_id": "0c707fbe626c2f67",
         "evidence": {
           "kind": "SYNTHETIC_HTTP",
           "receipt": "receipts/synthetic.json",
-          "receipt_sha256": "0a39d8e0ede1d99e9821efdc77ca0539b4245185d0443ae102577ad757274d81",
+          "receipt_sha256": "73b732bc4506d31364235c9b7d71a671e4b4c3ce0023847cb7d1b2ddf1cf4e70",
           "transport": "streamable-http-loopback"
         },
         "note": "23/23 checks",
-        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c"
+        "executable_sha256": "4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301"
       },
       "C7": {
         "result": "PASS",
-        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
-        "product_tree_id": "4344d1e7c28540ae",
-        "harness_tree_id": "456481fd0dc6c9ea",
+        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "product_tree_id": "7deaa1b3f7e67857",
+        "harness_tree_id": "0c707fbe626c2f67",
         "evidence": {
           "kind": "SYNTHETIC_HTTP",
           "receipt": "receipts/synthetic.json",
-          "receipt_sha256": "0a39d8e0ede1d99e9821efdc77ca0539b4245185d0443ae102577ad757274d81",
+          "receipt_sha256": "73b732bc4506d31364235c9b7d71a671e4b4c3ce0023847cb7d1b2ddf1cf4e70",
           "transport": "streamable-http-loopback"
         },
         "note": "6/6 checks",
-        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c"
+        "executable_sha256": "4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301"
       },
       "C8": {
         "result": "PASS",
-        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
-        "product_tree_id": "4344d1e7c28540ae",
-        "harness_tree_id": "456481fd0dc6c9ea",
+        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "product_tree_id": "7deaa1b3f7e67857",
+        "harness_tree_id": "0c707fbe626c2f67",
         "evidence": {
           "kind": "SYNTHETIC_HTTP",
           "receipt": "receipts/synthetic.json",
-          "receipt_sha256": "0a39d8e0ede1d99e9821efdc77ca0539b4245185d0443ae102577ad757274d81",
+          "receipt_sha256": "73b732bc4506d31364235c9b7d71a671e4b4c3ce0023847cb7d1b2ddf1cf4e70",
           "transport": "streamable-http-loopback"
         },
         "note": "4/4 checks",
-        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c"
+        "executable_sha256": "4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301"
       },
       "C9": {
         "result": "PASS",
-        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
-        "product_tree_id": "4344d1e7c28540ae",
-        "harness_tree_id": "456481fd0dc6c9ea",
+        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "product_tree_id": "7deaa1b3f7e67857",
+        "harness_tree_id": "0c707fbe626c2f67",
         "evidence": {
           "kind": "SYNTHETIC_HTTP",
           "receipt": "receipts/synthetic.json",
-          "receipt_sha256": "0a39d8e0ede1d99e9821efdc77ca0539b4245185d0443ae102577ad757274d81",
+          "receipt_sha256": "73b732bc4506d31364235c9b7d71a671e4b4c3ce0023847cb7d1b2ddf1cf4e70",
           "transport": "streamable-http-loopback"
         },
         "note": "8/8 checks",
-        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c"
+        "executable_sha256": "4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301"
       }
     },
     "claude-code": {
       "C1": {
         "result": "PASS",
-        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
-        "product_tree_id": "4344d1e7c28540ae",
-        "harness_tree_id": "456481fd0dc6c9ea",
+        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "product_tree_id": "7deaa1b3f7e67857",
+        "harness_tree_id": "0c707fbe626c2f67",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-claude-code.json",
-          "receipt_sha256": "90de4f750af4c0f7c6b6f627942a135f9b02597524a4dd9adc2dc6ce03ae6958",
+          "receipt_sha256": "7e5110b189721d6c7021f5c581940608058eb78149521b7051db91740aaa61b5",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "claude-code",
@@ -159,18 +159,18 @@
           }
         },
         "note": "3/3 checks",
-        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
+        "executable_sha256": "4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301",
         "client_version": "2.1.322 (Claude Code)"
       },
       "C2": {
         "result": "PASS",
-        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
-        "product_tree_id": "4344d1e7c28540ae",
-        "harness_tree_id": "456481fd0dc6c9ea",
+        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "product_tree_id": "7deaa1b3f7e67857",
+        "harness_tree_id": "0c707fbe626c2f67",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-claude-code.json",
-          "receipt_sha256": "90de4f750af4c0f7c6b6f627942a135f9b02597524a4dd9adc2dc6ce03ae6958",
+          "receipt_sha256": "7e5110b189721d6c7021f5c581940608058eb78149521b7051db91740aaa61b5",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "claude-code",
@@ -180,18 +180,18 @@
           }
         },
         "note": "3/3 checks",
-        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
+        "executable_sha256": "4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301",
         "client_version": "2.1.322 (Claude Code)"
       },
       "C3": {
         "result": "PASS",
-        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
-        "product_tree_id": "4344d1e7c28540ae",
-        "harness_tree_id": "456481fd0dc6c9ea",
+        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "product_tree_id": "7deaa1b3f7e67857",
+        "harness_tree_id": "0c707fbe626c2f67",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-claude-code.json",
-          "receipt_sha256": "90de4f750af4c0f7c6b6f627942a135f9b02597524a4dd9adc2dc6ce03ae6958",
+          "receipt_sha256": "7e5110b189721d6c7021f5c581940608058eb78149521b7051db91740aaa61b5",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "claude-code",
@@ -201,19 +201,19 @@
           }
         },
         "note": "4/4 checks",
-        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
+        "executable_sha256": "4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301",
         "client_version": "2.1.322 (Claude Code)"
       },
       "C4": {
         "result": "PASS",
-        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
-        "product_tree_id": "4344d1e7c28540ae",
-        "harness_tree_id": "456481fd0dc6c9ea",
+        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "product_tree_id": "7deaa1b3f7e67857",
+        "harness_tree_id": "0c707fbe626c2f67",
         "scope": "Medium multi-byte two-revision chat: latest revision 20102 bytes read in 7 pages of at most 3000 bytes, earlier revision also read. The long chat over 256 KB was NOT read by this real client (NOT_RUN for real clients; covered by the synthetic reference only).",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-claude-code.json",
-          "receipt_sha256": "90de4f750af4c0f7c6b6f627942a135f9b02597524a4dd9adc2dc6ce03ae6958",
+          "receipt_sha256": "7e5110b189721d6c7021f5c581940608058eb78149521b7051db91740aaa61b5",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "claude-code",
@@ -223,18 +223,18 @@
           }
         },
         "note": "2/2 checks",
-        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
+        "executable_sha256": "4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301",
         "client_version": "2.1.322 (Claude Code)"
       },
       "C5": {
         "result": "PASS",
-        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
-        "product_tree_id": "4344d1e7c28540ae",
-        "harness_tree_id": "456481fd0dc6c9ea",
+        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "product_tree_id": "7deaa1b3f7e67857",
+        "harness_tree_id": "0c707fbe626c2f67",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-claude-code.json",
-          "receipt_sha256": "90de4f750af4c0f7c6b6f627942a135f9b02597524a4dd9adc2dc6ce03ae6958",
+          "receipt_sha256": "7e5110b189721d6c7021f5c581940608058eb78149521b7051db91740aaa61b5",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "claude-code",
@@ -244,18 +244,18 @@
           }
         },
         "note": "4/4 checks",
-        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
+        "executable_sha256": "4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301",
         "client_version": "2.1.322 (Claude Code)"
       },
       "C6": {
         "result": "PASS",
-        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
-        "product_tree_id": "4344d1e7c28540ae",
-        "harness_tree_id": "456481fd0dc6c9ea",
+        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "product_tree_id": "7deaa1b3f7e67857",
+        "harness_tree_id": "0c707fbe626c2f67",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-claude-code.json",
-          "receipt_sha256": "90de4f750af4c0f7c6b6f627942a135f9b02597524a4dd9adc2dc6ce03ae6958",
+          "receipt_sha256": "7e5110b189721d6c7021f5c581940608058eb78149521b7051db91740aaa61b5",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "claude-code",
@@ -265,18 +265,18 @@
           }
         },
         "note": "5/5 checks",
-        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
+        "executable_sha256": "4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301",
         "client_version": "2.1.322 (Claude Code)"
       },
       "C7": {
         "result": "PASS",
-        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
-        "product_tree_id": "4344d1e7c28540ae",
-        "harness_tree_id": "456481fd0dc6c9ea",
+        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "product_tree_id": "7deaa1b3f7e67857",
+        "harness_tree_id": "0c707fbe626c2f67",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-claude-code.json",
-          "receipt_sha256": "90de4f750af4c0f7c6b6f627942a135f9b02597524a4dd9adc2dc6ce03ae6958",
+          "receipt_sha256": "7e5110b189721d6c7021f5c581940608058eb78149521b7051db91740aaa61b5",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "claude-code",
@@ -286,18 +286,18 @@
           }
         },
         "note": "5/5 checks",
-        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
+        "executable_sha256": "4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301",
         "client_version": "2.1.322 (Claude Code)"
       },
       "C8": {
         "result": "PASS",
-        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
-        "product_tree_id": "4344d1e7c28540ae",
-        "harness_tree_id": "456481fd0dc6c9ea",
+        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "product_tree_id": "7deaa1b3f7e67857",
+        "harness_tree_id": "0c707fbe626c2f67",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-claude-code.json",
-          "receipt_sha256": "90de4f750af4c0f7c6b6f627942a135f9b02597524a4dd9adc2dc6ce03ae6958",
+          "receipt_sha256": "7e5110b189721d6c7021f5c581940608058eb78149521b7051db91740aaa61b5",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "claude-code",
@@ -307,18 +307,18 @@
           }
         },
         "note": "2/2 checks",
-        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
+        "executable_sha256": "4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301",
         "client_version": "2.1.322 (Claude Code)"
       },
       "C9": {
         "result": "PASS",
-        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
-        "product_tree_id": "4344d1e7c28540ae",
-        "harness_tree_id": "456481fd0dc6c9ea",
+        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "product_tree_id": "7deaa1b3f7e67857",
+        "harness_tree_id": "0c707fbe626c2f67",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-claude-code.json",
-          "receipt_sha256": "90de4f750af4c0f7c6b6f627942a135f9b02597524a4dd9adc2dc6ce03ae6958",
+          "receipt_sha256": "7e5110b189721d6c7021f5c581940608058eb78149521b7051db91740aaa61b5",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "claude-code",
@@ -328,20 +328,20 @@
           }
         },
         "note": "4/4 checks",
-        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
+        "executable_sha256": "4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301",
         "client_version": "2.1.322 (Claude Code)"
       }
     },
     "codex": {
       "C1": {
         "result": "PASS",
-        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
-        "product_tree_id": "4344d1e7c28540ae",
-        "harness_tree_id": "456481fd0dc6c9ea",
+        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "product_tree_id": "7deaa1b3f7e67857",
+        "harness_tree_id": "0c707fbe626c2f67",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-codex.json",
-          "receipt_sha256": "0ea030b4b6d24d5982039fbee233acdca89c3f2239fb6bfc477babd19645602b",
+          "receipt_sha256": "c652140885693d022794f0b0d23b3fede5e77313f8246a567331f65fdc215e52",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "codex-mcp-client",
@@ -351,18 +351,18 @@
           }
         },
         "note": "3/3 checks",
-        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
+        "executable_sha256": "4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301",
         "client_version": "codex-cli 0.164.0"
       },
       "C2": {
         "result": "PASS",
-        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
-        "product_tree_id": "4344d1e7c28540ae",
-        "harness_tree_id": "456481fd0dc6c9ea",
+        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "product_tree_id": "7deaa1b3f7e67857",
+        "harness_tree_id": "0c707fbe626c2f67",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-codex.json",
-          "receipt_sha256": "0ea030b4b6d24d5982039fbee233acdca89c3f2239fb6bfc477babd19645602b",
+          "receipt_sha256": "c652140885693d022794f0b0d23b3fede5e77313f8246a567331f65fdc215e52",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "codex-mcp-client",
@@ -372,18 +372,18 @@
           }
         },
         "note": "2/2 checks",
-        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
+        "executable_sha256": "4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301",
         "client_version": "codex-cli 0.164.0"
       },
       "C3": {
         "result": "PASS",
-        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
-        "product_tree_id": "4344d1e7c28540ae",
-        "harness_tree_id": "456481fd0dc6c9ea",
+        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "product_tree_id": "7deaa1b3f7e67857",
+        "harness_tree_id": "0c707fbe626c2f67",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-codex.json",
-          "receipt_sha256": "0ea030b4b6d24d5982039fbee233acdca89c3f2239fb6bfc477babd19645602b",
+          "receipt_sha256": "c652140885693d022794f0b0d23b3fede5e77313f8246a567331f65fdc215e52",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "codex-mcp-client",
@@ -393,19 +393,19 @@
           }
         },
         "note": "4/4 checks",
-        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
+        "executable_sha256": "4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301",
         "client_version": "codex-cli 0.164.0"
       },
       "C4": {
         "result": "PASS",
-        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
-        "product_tree_id": "4344d1e7c28540ae",
-        "harness_tree_id": "456481fd0dc6c9ea",
+        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "product_tree_id": "7deaa1b3f7e67857",
+        "harness_tree_id": "0c707fbe626c2f67",
         "scope": "Medium multi-byte two-revision chat: latest revision 20102 bytes read in 7 pages of at most 3000 bytes, earlier revision also read. The long chat over 256 KB was NOT read by this real client (NOT_RUN for real clients; covered by the synthetic reference only).",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-codex.json",
-          "receipt_sha256": "0ea030b4b6d24d5982039fbee233acdca89c3f2239fb6bfc477babd19645602b",
+          "receipt_sha256": "c652140885693d022794f0b0d23b3fede5e77313f8246a567331f65fdc215e52",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "codex-mcp-client",
@@ -415,18 +415,18 @@
           }
         },
         "note": "2/2 checks",
-        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
+        "executable_sha256": "4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301",
         "client_version": "codex-cli 0.164.0"
       },
       "C5": {
         "result": "PASS",
-        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
-        "product_tree_id": "4344d1e7c28540ae",
-        "harness_tree_id": "456481fd0dc6c9ea",
+        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "product_tree_id": "7deaa1b3f7e67857",
+        "harness_tree_id": "0c707fbe626c2f67",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-codex.json",
-          "receipt_sha256": "0ea030b4b6d24d5982039fbee233acdca89c3f2239fb6bfc477babd19645602b",
+          "receipt_sha256": "c652140885693d022794f0b0d23b3fede5e77313f8246a567331f65fdc215e52",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "codex-mcp-client",
@@ -436,18 +436,18 @@
           }
         },
         "note": "4/4 checks",
-        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
+        "executable_sha256": "4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301",
         "client_version": "codex-cli 0.164.0"
       },
       "C6": {
         "result": "PASS",
-        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
-        "product_tree_id": "4344d1e7c28540ae",
-        "harness_tree_id": "456481fd0dc6c9ea",
+        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "product_tree_id": "7deaa1b3f7e67857",
+        "harness_tree_id": "0c707fbe626c2f67",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-codex.json",
-          "receipt_sha256": "0ea030b4b6d24d5982039fbee233acdca89c3f2239fb6bfc477babd19645602b",
+          "receipt_sha256": "c652140885693d022794f0b0d23b3fede5e77313f8246a567331f65fdc215e52",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "codex-mcp-client",
@@ -457,18 +457,18 @@
           }
         },
         "note": "5/5 checks",
-        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
+        "executable_sha256": "4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301",
         "client_version": "codex-cli 0.164.0"
       },
       "C7": {
         "result": "PASS",
-        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
-        "product_tree_id": "4344d1e7c28540ae",
-        "harness_tree_id": "456481fd0dc6c9ea",
+        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "product_tree_id": "7deaa1b3f7e67857",
+        "harness_tree_id": "0c707fbe626c2f67",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-codex.json",
-          "receipt_sha256": "0ea030b4b6d24d5982039fbee233acdca89c3f2239fb6bfc477babd19645602b",
+          "receipt_sha256": "c652140885693d022794f0b0d23b3fede5e77313f8246a567331f65fdc215e52",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "codex-mcp-client",
@@ -478,18 +478,18 @@
           }
         },
         "note": "5/5 checks",
-        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
+        "executable_sha256": "4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301",
         "client_version": "codex-cli 0.164.0"
       },
       "C8": {
         "result": "PASS",
-        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
-        "product_tree_id": "4344d1e7c28540ae",
-        "harness_tree_id": "456481fd0dc6c9ea",
+        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "product_tree_id": "7deaa1b3f7e67857",
+        "harness_tree_id": "0c707fbe626c2f67",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-codex.json",
-          "receipt_sha256": "0ea030b4b6d24d5982039fbee233acdca89c3f2239fb6bfc477babd19645602b",
+          "receipt_sha256": "c652140885693d022794f0b0d23b3fede5e77313f8246a567331f65fdc215e52",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "codex-mcp-client",
@@ -499,18 +499,18 @@
           }
         },
         "note": "2/2 checks",
-        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
+        "executable_sha256": "4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301",
         "client_version": "codex-cli 0.164.0"
       },
       "C9": {
         "result": "PASS",
-        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
-        "product_tree_id": "4344d1e7c28540ae",
-        "harness_tree_id": "456481fd0dc6c9ea",
+        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "product_tree_id": "7deaa1b3f7e67857",
+        "harness_tree_id": "0c707fbe626c2f67",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-codex.json",
-          "receipt_sha256": "0ea030b4b6d24d5982039fbee233acdca89c3f2239fb6bfc477babd19645602b",
+          "receipt_sha256": "c652140885693d022794f0b0d23b3fede5e77313f8246a567331f65fdc215e52",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "codex-mcp-client",
@@ -520,111 +520,256 @@
           }
         },
         "note": "4/4 checks",
-        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
+        "executable_sha256": "4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301",
         "client_version": "codex-cli 0.164.0"
       }
     },
     "gemini-cli": {
       "C1": {
         "result": "PROVIDER_BLOCKED",
-        "blocker": "Gemini CLI 0.34.0 refuses to start with the owner's stored Google login: IneligibleTierError: \"This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products\" (captured 2026-11-24 on the qualification machine; no request reached Mind Place).",
-        "fallback": "Antigravity CLI (separate row). Gemini CLI on an eligible (for example Workspace or paid) account is covered by owner card 'any local CLI that failed in the agent run'.",
-        "note": "Not a Mind Place defect: the vendor client did not start a session."
+        "blocker": "Gemini CLI 0.34.0 refuses to run a session with the owner's stored Google login (IneligibleTierError in @google/gemini-cli-core/dist/src/code_assist/setup.js _doSetupUser: \"This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products\"). Observed 2026-11-24 at exact commit dd50987b82c4: the CLI connected for initialize + tools/list (2025-11-25) and exited 1 at setup before any LLM turn or tools/call.",
+        "fallback": "Antigravity CLI (separate row, PASS C1-C9 via scripts/mcp-stdio-bridge.mjs). Gemini CLI on an eligible (for example Workspace or paid) account is covered by owner card 'any local CLI that failed in the agent run'.",
+        "note": "Not a Mind Place defect: the vendor account tier blocked LLM execution."
       },
       "C2": {
         "result": "PROVIDER_BLOCKED",
-        "blocker": "Gemini CLI 0.34.0 refuses to start with the owner's stored Google login: IneligibleTierError: \"This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products\" (captured 2026-11-24 on the qualification machine; no request reached Mind Place).",
-        "fallback": "Antigravity CLI (separate row). Gemini CLI on an eligible (for example Workspace or paid) account is covered by owner card 'any local CLI that failed in the agent run'.",
-        "note": "Not a Mind Place defect: the vendor client did not start a session."
+        "blocker": "Gemini CLI 0.34.0 refuses to run a session with the owner's stored Google login (IneligibleTierError in @google/gemini-cli-core/dist/src/code_assist/setup.js _doSetupUser: \"This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products\"). Observed 2026-11-24 at exact commit dd50987b82c4: the CLI connected for initialize + tools/list (2025-11-25) and exited 1 at setup before any LLM turn or tools/call.",
+        "fallback": "Antigravity CLI (separate row, PASS C1-C9 via scripts/mcp-stdio-bridge.mjs). Gemini CLI on an eligible (for example Workspace or paid) account is covered by owner card 'any local CLI that failed in the agent run'.",
+        "note": "Not a Mind Place defect: the vendor account tier blocked LLM execution."
       },
       "C3": {
         "result": "PROVIDER_BLOCKED",
-        "blocker": "Gemini CLI 0.34.0 refuses to start with the owner's stored Google login: IneligibleTierError: \"This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products\" (captured 2026-11-24 on the qualification machine; no request reached Mind Place).",
-        "fallback": "Antigravity CLI (separate row). Gemini CLI on an eligible (for example Workspace or paid) account is covered by owner card 'any local CLI that failed in the agent run'.",
-        "note": "Not a Mind Place defect: the vendor client did not start a session."
+        "blocker": "Gemini CLI 0.34.0 refuses to run a session with the owner's stored Google login (IneligibleTierError in @google/gemini-cli-core/dist/src/code_assist/setup.js _doSetupUser: \"This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products\"). Observed 2026-11-24 at exact commit dd50987b82c4: the CLI connected for initialize + tools/list (2025-11-25) and exited 1 at setup before any LLM turn or tools/call.",
+        "fallback": "Antigravity CLI (separate row, PASS C1-C9 via scripts/mcp-stdio-bridge.mjs). Gemini CLI on an eligible (for example Workspace or paid) account is covered by owner card 'any local CLI that failed in the agent run'.",
+        "note": "Not a Mind Place defect: the vendor account tier blocked LLM execution."
       },
       "C4": {
         "result": "PROVIDER_BLOCKED",
-        "blocker": "Gemini CLI 0.34.0 refuses to start with the owner's stored Google login: IneligibleTierError: \"This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products\" (captured 2026-11-24 on the qualification machine; no request reached Mind Place).",
-        "fallback": "Antigravity CLI (separate row). Gemini CLI on an eligible (for example Workspace or paid) account is covered by owner card 'any local CLI that failed in the agent run'.",
-        "note": "Not a Mind Place defect: the vendor client did not start a session."
+        "blocker": "Gemini CLI 0.34.0 refuses to run a session with the owner's stored Google login (IneligibleTierError in @google/gemini-cli-core/dist/src/code_assist/setup.js _doSetupUser: \"This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products\"). Observed 2026-11-24 at exact commit dd50987b82c4: the CLI connected for initialize + tools/list (2025-11-25) and exited 1 at setup before any LLM turn or tools/call.",
+        "fallback": "Antigravity CLI (separate row, PASS C1-C9 via scripts/mcp-stdio-bridge.mjs). Gemini CLI on an eligible (for example Workspace or paid) account is covered by owner card 'any local CLI that failed in the agent run'.",
+        "note": "Not a Mind Place defect: the vendor account tier blocked LLM execution."
       },
       "C5": {
         "result": "PROVIDER_BLOCKED",
-        "blocker": "Gemini CLI 0.34.0 refuses to start with the owner's stored Google login: IneligibleTierError: \"This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products\" (captured 2026-11-24 on the qualification machine; no request reached Mind Place).",
-        "fallback": "Antigravity CLI (separate row). Gemini CLI on an eligible (for example Workspace or paid) account is covered by owner card 'any local CLI that failed in the agent run'.",
-        "note": "Not a Mind Place defect: the vendor client did not start a session."
+        "blocker": "Gemini CLI 0.34.0 refuses to run a session with the owner's stored Google login (IneligibleTierError in @google/gemini-cli-core/dist/src/code_assist/setup.js _doSetupUser: \"This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products\"). Observed 2026-11-24 at exact commit dd50987b82c4: the CLI connected for initialize + tools/list (2025-11-25) and exited 1 at setup before any LLM turn or tools/call.",
+        "fallback": "Antigravity CLI (separate row, PASS C1-C9 via scripts/mcp-stdio-bridge.mjs). Gemini CLI on an eligible (for example Workspace or paid) account is covered by owner card 'any local CLI that failed in the agent run'.",
+        "note": "Not a Mind Place defect: the vendor account tier blocked LLM execution."
       },
       "C6": {
         "result": "PROVIDER_BLOCKED",
-        "blocker": "Gemini CLI 0.34.0 refuses to start with the owner's stored Google login: IneligibleTierError: \"This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products\" (captured 2026-11-24 on the qualification machine; no request reached Mind Place).",
-        "fallback": "Antigravity CLI (separate row). Gemini CLI on an eligible (for example Workspace or paid) account is covered by owner card 'any local CLI that failed in the agent run'.",
-        "note": "Not a Mind Place defect: the vendor client did not start a session."
+        "blocker": "Gemini CLI 0.34.0 refuses to run a session with the owner's stored Google login (IneligibleTierError in @google/gemini-cli-core/dist/src/code_assist/setup.js _doSetupUser: \"This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products\"). Observed 2026-11-24 at exact commit dd50987b82c4: the CLI connected for initialize + tools/list (2025-11-25) and exited 1 at setup before any LLM turn or tools/call.",
+        "fallback": "Antigravity CLI (separate row, PASS C1-C9 via scripts/mcp-stdio-bridge.mjs). Gemini CLI on an eligible (for example Workspace or paid) account is covered by owner card 'any local CLI that failed in the agent run'.",
+        "note": "Not a Mind Place defect: the vendor account tier blocked LLM execution."
       },
       "C7": {
         "result": "PROVIDER_BLOCKED",
-        "blocker": "Gemini CLI 0.34.0 refuses to start with the owner's stored Google login: IneligibleTierError: \"This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products\" (captured 2026-11-24 on the qualification machine; no request reached Mind Place).",
-        "fallback": "Antigravity CLI (separate row). Gemini CLI on an eligible (for example Workspace or paid) account is covered by owner card 'any local CLI that failed in the agent run'.",
-        "note": "Not a Mind Place defect: the vendor client did not start a session."
+        "blocker": "Gemini CLI 0.34.0 refuses to run a session with the owner's stored Google login (IneligibleTierError in @google/gemini-cli-core/dist/src/code_assist/setup.js _doSetupUser: \"This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products\"). Observed 2026-11-24 at exact commit dd50987b82c4: the CLI connected for initialize + tools/list (2025-11-25) and exited 1 at setup before any LLM turn or tools/call.",
+        "fallback": "Antigravity CLI (separate row, PASS C1-C9 via scripts/mcp-stdio-bridge.mjs). Gemini CLI on an eligible (for example Workspace or paid) account is covered by owner card 'any local CLI that failed in the agent run'.",
+        "note": "Not a Mind Place defect: the vendor account tier blocked LLM execution."
       },
       "C8": {
         "result": "PROVIDER_BLOCKED",
-        "blocker": "Gemini CLI 0.34.0 refuses to start with the owner's stored Google login: IneligibleTierError: \"This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products\" (captured 2026-11-24 on the qualification machine; no request reached Mind Place).",
-        "fallback": "Antigravity CLI (separate row). Gemini CLI on an eligible (for example Workspace or paid) account is covered by owner card 'any local CLI that failed in the agent run'.",
-        "note": "Not a Mind Place defect: the vendor client did not start a session."
+        "blocker": "Gemini CLI 0.34.0 refuses to run a session with the owner's stored Google login (IneligibleTierError in @google/gemini-cli-core/dist/src/code_assist/setup.js _doSetupUser: \"This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products\"). Observed 2026-11-24 at exact commit dd50987b82c4: the CLI connected for initialize + tools/list (2025-11-25) and exited 1 at setup before any LLM turn or tools/call.",
+        "fallback": "Antigravity CLI (separate row, PASS C1-C9 via scripts/mcp-stdio-bridge.mjs). Gemini CLI on an eligible (for example Workspace or paid) account is covered by owner card 'any local CLI that failed in the agent run'.",
+        "note": "Not a Mind Place defect: the vendor account tier blocked LLM execution."
       },
       "C9": {
         "result": "PROVIDER_BLOCKED",
-        "blocker": "Gemini CLI 0.34.0 refuses to start with the owner's stored Google login: IneligibleTierError: \"This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products\" (captured 2026-11-24 on the qualification machine; no request reached Mind Place).",
-        "fallback": "Antigravity CLI (separate row). Gemini CLI on an eligible (for example Workspace or paid) account is covered by owner card 'any local CLI that failed in the agent run'.",
-        "note": "Not a Mind Place defect: the vendor client did not start a session."
+        "blocker": "Gemini CLI 0.34.0 refuses to run a session with the owner's stored Google login (IneligibleTierError in @google/gemini-cli-core/dist/src/code_assist/setup.js _doSetupUser: \"This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products\"). Observed 2026-11-24 at exact commit dd50987b82c4: the CLI connected for initialize + tools/list (2025-11-25) and exited 1 at setup before any LLM turn or tools/call.",
+        "fallback": "Antigravity CLI (separate row, PASS C1-C9 via scripts/mcp-stdio-bridge.mjs). Gemini CLI on an eligible (for example Workspace or paid) account is covered by owner card 'any local CLI that failed in the agent run'.",
+        "note": "Not a Mind Place defect: the vendor account tier blocked LLM execution."
       }
     },
     "antigravity": {
       "C1": {
-        "result": "NOT_RUN",
-        "reason": "Antigravity CLI 1.5.10 reached the listener and sent initialize, which Mind Place correctly refused with 401: its MCP configuration does not expand environment variables in headers, so the literal placeholder was sent. Delivering the key would require putting it literally on a command line or in its shared user config (~/.gemini/config), which this harness deliberately does not do. Headless runs also stay in request-review permission mode ('--mode auto' is not available for this account), so tool calls would wait for approval. See receipt blocked-antigravity.json.",
-        "owner_card": "OWNER-TEST-CARDS.md#card-antigravity-cli"
+        "result": "PASS",
+        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "product_tree_id": "7deaa1b3f7e67857",
+        "harness_tree_id": "0c707fbe626c2f67",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-antigravity.json",
+          "receipt_sha256": "45fe507e28b783597e83627c95cdfd84b88dba47b804d23d2f47766a40ca35b9",
+          "transport": "stdio-bridge -> streamable-http-loopback",
+          "observed_client": {
+            "name": "antigravity-client",
+            "version": "v1.0.0",
+            "protocolVersion": "2025-11-25",
+            "source": "initialize.clientInfo"
+          }
+        },
+        "note": "3/3 checks",
+        "executable_sha256": "4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301",
+        "client_version": "1.5.15"
       },
       "C2": {
-        "result": "NOT_RUN",
-        "reason": "Antigravity CLI 1.5.10 reached the listener and sent initialize, which Mind Place correctly refused with 401: its MCP configuration does not expand environment variables in headers, so the literal placeholder was sent. Delivering the key would require putting it literally on a command line or in its shared user config (~/.gemini/config), which this harness deliberately does not do. Headless runs also stay in request-review permission mode ('--mode auto' is not available for this account), so tool calls would wait for approval. See receipt blocked-antigravity.json.",
-        "owner_card": "OWNER-TEST-CARDS.md#card-antigravity-cli"
+        "result": "PASS",
+        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "product_tree_id": "7deaa1b3f7e67857",
+        "harness_tree_id": "0c707fbe626c2f67",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-antigravity.json",
+          "receipt_sha256": "45fe507e28b783597e83627c95cdfd84b88dba47b804d23d2f47766a40ca35b9",
+          "transport": "stdio-bridge -> streamable-http-loopback",
+          "observed_client": {
+            "name": "antigravity-client",
+            "version": "v1.0.0",
+            "protocolVersion": "2025-11-25",
+            "source": "initialize.clientInfo"
+          }
+        },
+        "note": "2/2 checks",
+        "executable_sha256": "4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301",
+        "client_version": "1.5.15"
       },
       "C3": {
-        "result": "NOT_RUN",
-        "reason": "Antigravity CLI 1.5.10 reached the listener and sent initialize, which Mind Place correctly refused with 401: its MCP configuration does not expand environment variables in headers, so the literal placeholder was sent. Delivering the key would require putting it literally on a command line or in its shared user config (~/.gemini/config), which this harness deliberately does not do. Headless runs also stay in request-review permission mode ('--mode auto' is not available for this account), so tool calls would wait for approval. See receipt blocked-antigravity.json.",
-        "owner_card": "OWNER-TEST-CARDS.md#card-antigravity-cli"
+        "result": "PASS",
+        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "product_tree_id": "7deaa1b3f7e67857",
+        "harness_tree_id": "0c707fbe626c2f67",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-antigravity.json",
+          "receipt_sha256": "45fe507e28b783597e83627c95cdfd84b88dba47b804d23d2f47766a40ca35b9",
+          "transport": "stdio-bridge -> streamable-http-loopback",
+          "observed_client": {
+            "name": "antigravity-client",
+            "version": "v1.0.0",
+            "protocolVersion": "2025-11-25",
+            "source": "initialize.clientInfo"
+          }
+        },
+        "note": "4/4 checks",
+        "executable_sha256": "4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301",
+        "client_version": "1.5.15"
       },
       "C4": {
-        "result": "NOT_RUN",
-        "reason": "Antigravity CLI 1.5.10 reached the listener and sent initialize, which Mind Place correctly refused with 401: its MCP configuration does not expand environment variables in headers, so the literal placeholder was sent. Delivering the key would require putting it literally on a command line or in its shared user config (~/.gemini/config), which this harness deliberately does not do. Headless runs also stay in request-review permission mode ('--mode auto' is not available for this account), so tool calls would wait for approval. See receipt blocked-antigravity.json.",
-        "owner_card": "OWNER-TEST-CARDS.md#card-antigravity-cli"
+        "result": "PASS",
+        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "product_tree_id": "7deaa1b3f7e67857",
+        "harness_tree_id": "0c707fbe626c2f67",
+        "scope": "Medium multi-byte two-revision chat: latest revision 20102 bytes read in 7 pages of at most 3000 bytes, earlier revision also read. The long chat over 256 KB was NOT read by this real client (NOT_RUN for real clients; covered by the synthetic reference only).",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-antigravity.json",
+          "receipt_sha256": "45fe507e28b783597e83627c95cdfd84b88dba47b804d23d2f47766a40ca35b9",
+          "transport": "stdio-bridge -> streamable-http-loopback",
+          "observed_client": {
+            "name": "antigravity-client",
+            "version": "v1.0.0",
+            "protocolVersion": "2025-11-25",
+            "source": "initialize.clientInfo"
+          }
+        },
+        "note": "2/2 checks",
+        "executable_sha256": "4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301",
+        "client_version": "1.5.15"
       },
       "C5": {
-        "result": "NOT_RUN",
-        "reason": "Antigravity CLI 1.5.10 reached the listener and sent initialize, which Mind Place correctly refused with 401: its MCP configuration does not expand environment variables in headers, so the literal placeholder was sent. Delivering the key would require putting it literally on a command line or in its shared user config (~/.gemini/config), which this harness deliberately does not do. Headless runs also stay in request-review permission mode ('--mode auto' is not available for this account), so tool calls would wait for approval. See receipt blocked-antigravity.json.",
-        "owner_card": "OWNER-TEST-CARDS.md#card-antigravity-cli"
+        "result": "PASS",
+        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "product_tree_id": "7deaa1b3f7e67857",
+        "harness_tree_id": "0c707fbe626c2f67",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-antigravity.json",
+          "receipt_sha256": "45fe507e28b783597e83627c95cdfd84b88dba47b804d23d2f47766a40ca35b9",
+          "transport": "stdio-bridge -> streamable-http-loopback",
+          "observed_client": {
+            "name": "antigravity-client",
+            "version": "v1.0.0",
+            "protocolVersion": "2025-11-25",
+            "source": "initialize.clientInfo"
+          }
+        },
+        "note": "4/4 checks",
+        "executable_sha256": "4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301",
+        "client_version": "1.5.15"
       },
       "C6": {
-        "result": "NOT_RUN",
-        "reason": "Antigravity CLI 1.5.10 reached the listener and sent initialize, which Mind Place correctly refused with 401: its MCP configuration does not expand environment variables in headers, so the literal placeholder was sent. Delivering the key would require putting it literally on a command line or in its shared user config (~/.gemini/config), which this harness deliberately does not do. Headless runs also stay in request-review permission mode ('--mode auto' is not available for this account), so tool calls would wait for approval. See receipt blocked-antigravity.json.",
-        "owner_card": "OWNER-TEST-CARDS.md#card-antigravity-cli"
+        "result": "PASS",
+        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "product_tree_id": "7deaa1b3f7e67857",
+        "harness_tree_id": "0c707fbe626c2f67",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-antigravity.json",
+          "receipt_sha256": "45fe507e28b783597e83627c95cdfd84b88dba47b804d23d2f47766a40ca35b9",
+          "transport": "stdio-bridge -> streamable-http-loopback",
+          "observed_client": {
+            "name": "antigravity-client",
+            "version": "v1.0.0",
+            "protocolVersion": "2025-11-25",
+            "source": "initialize.clientInfo"
+          }
+        },
+        "note": "5/5 checks",
+        "executable_sha256": "4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301",
+        "client_version": "1.5.15"
       },
       "C7": {
-        "result": "NOT_RUN",
-        "reason": "Antigravity CLI 1.5.10 reached the listener and sent initialize, which Mind Place correctly refused with 401: its MCP configuration does not expand environment variables in headers, so the literal placeholder was sent. Delivering the key would require putting it literally on a command line or in its shared user config (~/.gemini/config), which this harness deliberately does not do. Headless runs also stay in request-review permission mode ('--mode auto' is not available for this account), so tool calls would wait for approval. See receipt blocked-antigravity.json.",
-        "owner_card": "OWNER-TEST-CARDS.md#card-antigravity-cli"
+        "result": "PASS",
+        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "product_tree_id": "7deaa1b3f7e67857",
+        "harness_tree_id": "0c707fbe626c2f67",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-antigravity.json",
+          "receipt_sha256": "45fe507e28b783597e83627c95cdfd84b88dba47b804d23d2f47766a40ca35b9",
+          "transport": "stdio-bridge -> streamable-http-loopback",
+          "observed_client": {
+            "name": "antigravity-client",
+            "version": "v1.0.0",
+            "protocolVersion": "2025-11-25",
+            "source": "initialize.clientInfo"
+          }
+        },
+        "note": "5/5 checks",
+        "executable_sha256": "4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301",
+        "client_version": "1.5.15"
       },
       "C8": {
-        "result": "NOT_RUN",
-        "reason": "Antigravity CLI 1.5.10 reached the listener and sent initialize, which Mind Place correctly refused with 401: its MCP configuration does not expand environment variables in headers, so the literal placeholder was sent. Delivering the key would require putting it literally on a command line or in its shared user config (~/.gemini/config), which this harness deliberately does not do. Headless runs also stay in request-review permission mode ('--mode auto' is not available for this account), so tool calls would wait for approval. See receipt blocked-antigravity.json.",
-        "owner_card": "OWNER-TEST-CARDS.md#card-antigravity-cli"
+        "result": "PASS",
+        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "product_tree_id": "7deaa1b3f7e67857",
+        "harness_tree_id": "0c707fbe626c2f67",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-antigravity.json",
+          "receipt_sha256": "45fe507e28b783597e83627c95cdfd84b88dba47b804d23d2f47766a40ca35b9",
+          "transport": "stdio-bridge -> streamable-http-loopback",
+          "observed_client": {
+            "name": "antigravity-client",
+            "version": "v1.0.0",
+            "protocolVersion": "2025-11-25",
+            "source": "initialize.clientInfo"
+          }
+        },
+        "note": "2/2 checks",
+        "executable_sha256": "4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301",
+        "client_version": "1.5.15"
       },
       "C9": {
-        "result": "NOT_RUN",
-        "reason": "Antigravity CLI 1.5.10 reached the listener and sent initialize, which Mind Place correctly refused with 401: its MCP configuration does not expand environment variables in headers, so the literal placeholder was sent. Delivering the key would require putting it literally on a command line or in its shared user config (~/.gemini/config), which this harness deliberately does not do. Headless runs also stay in request-review permission mode ('--mode auto' is not available for this account), so tool calls would wait for approval. See receipt blocked-antigravity.json.",
-        "owner_card": "OWNER-TEST-CARDS.md#card-antigravity-cli"
+        "result": "PASS",
+        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "product_tree_id": "7deaa1b3f7e67857",
+        "harness_tree_id": "0c707fbe626c2f67",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-antigravity.json",
+          "receipt_sha256": "45fe507e28b783597e83627c95cdfd84b88dba47b804d23d2f47766a40ca35b9",
+          "transport": "stdio-bridge -> streamable-http-loopback",
+          "observed_client": {
+            "name": "antigravity-client",
+            "version": "v1.0.0",
+            "protocolVersion": "2025-11-25",
+            "source": "initialize.clientInfo"
+          }
+        },
+        "note": "4/4 checks",
+        "executable_sha256": "4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301",
+        "client_version": "1.5.15"
       }
     },
     "claude-app": {

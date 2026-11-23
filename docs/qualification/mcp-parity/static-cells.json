@@ -2,9 +2,9 @@
   "gemini-cli": {
     "_all": {
       "result": "PROVIDER_BLOCKED",
-      "blocker": "Gemini CLI 0.34.0 refuses to start with the owner's stored Google login: IneligibleTierError: \"This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products\" (captured 2026-11-24 on the qualification machine; no request reached Mind Place).",
-      "fallback": "Antigravity CLI (separate row). Gemini CLI on an eligible (for example Workspace or paid) account is covered by owner card 'any local CLI that failed in the agent run'.",
-      "note": "Not a Mind Place defect: the vendor client did not start a session."
+      "blocker": "Gemini CLI 0.34.0 refuses to run a session with the owner's stored Google login (IneligibleTierError in @google/gemini-cli-core/dist/src/code_assist/setup.js _doSetupUser: \"This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products\"). Observed 2026-11-24 at exact commit dd50987b82c4: the CLI connected for initialize + tools/list (2025-11-25) and exited 1 at setup before any LLM turn or tools/call.",
+      "fallback": "Antigravity CLI (separate row, PASS C1-C9 via scripts/mcp-stdio-bridge.mjs). Gemini CLI on an eligible (for example Workspace or paid) account is covered by owner card 'any local CLI that failed in the agent run'.",
+      "note": "Not a Mind Place defect: the vendor account tier blocked LLM execution."
     }
   },
   "claude-app": {
@@ -26,13 +26,6 @@
       "result": "NOT_RUN",
       "reason": "Hosted Gemini needs the owner's account (Connect to an MCP server or Developer Mode) and an HTTPS endpoint reachable by Gemini. The Gemini app custom-app feature is reported to require an eligible personal account; if the owner's account is not eligible the result is PROVIDER_BLOCKED, to be recorded on the card.",
       "owner_card": "OWNER-TEST-CARDS.md#card-gemini-hosted-app"
-    }
-  },
-  "antigravity": {
-    "_all": {
-      "result": "NOT_RUN",
-      "reason": "Antigravity CLI 1.5.10 reached the listener and sent initialize, which Mind Place correctly refused with 401: its MCP configuration does not expand environment variables in headers, so the literal placeholder was sent. Delivering the key would require putting it literally on a command line or in its shared user config (~/.gemini/config), which this harness deliberately does not do. Headless runs also stay in request-review permission mode ('--mode auto' is not available for this account), so tool calls would wait for approval. See receipt blocked-antigravity.json.",
-      "owner_card": "OWNER-TEST-CARDS.md#card-antigravity-cli"
     }
   }
 }

@@ -1,0 +1,803 @@
+{
+  "kind": "REAL_CLIENT run: the actual provider client behind a recording proxy against the packaged app (disposable synthetic corpus). Verdicts come from the wire log, not the model transcript.",
+  "source": {
+    "sha": "dd50987b82c494c125711156535282f856a54bf3",
+    "dirty": false,
+    "trees": {
+      "crates": "0fde859bda4eeddb5d24f573af21c28947c4215e",
+      "src_tauri": "43380c0c461fd1b07bfb6cab5bba010c3c35e73e",
+      "cargo_lock": "d205240176426ffeec45956f651c92729e5bf1f0",
+      "src": "3eb1dc4ac7bc1768ca24fcf52621f4315a631106"
+    },
+    "harness": {
+      "conformance": "469d0167d75322d22364634730200fe90d0c2fe3",
+      "lib": "6810a45c3b08a128f2083a5542ba43d5a7b49bc5"
+    }
+  },
+  "executable_sha256": "4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301",
+  "dirty_tree": false,
+  "clientId": "antigravity",
+  "label": "Antigravity",
+  "installed": {
+    "exe": "C:\\Users\\kaisa\\AppData\\Local\\agy\\bin\\agy.exe",
+    "version": "1.5.15"
+  },
+  "observed_client": {
+    "name": "antigravity-client",
+    "version": "v1.0.0",
+    "protocolVersion": "2025-11-25",
+    "source": "initialize.clientInfo"
+  },
+  "permission_proof": {
+    "canonical_full_digest": "c8339224e6fb",
+    "identity_digest": "c8339224e6fb",
+    "valid_granted_200": true,
+    "r0": {
+      "mode": "complete_args_equal",
+      "client_full_digest": "c8339224e6fb",
+      "replayed_while_granted_200": true
+    },
+    "r3": {
+      "mode": "complete_args_equal",
+      "client_full_digest": "c8339224e6fb"
+    }
+  },
+  "c4_scope": "Medium multi-byte two-revision chat: latest revision 20102 bytes read in 7 pages of at most 3000 bytes, earlier revision also read. The long chat over 256 KB was NOT read by this real client (NOT_RUN for real clients; covered by the synthetic reference only).",
+  "transcript": [
+    {
+      "label": "R0 default deny",
+      "exit": 0,
+      "serverStatus": null,
+      "discoveredTools": null,
+      "exchanges": 6
+    },
+    {
+      "label": "R1 scoped search",
+      "exit": 0,
+      "serverStatus": null,
+      "discoveredTools": null,
+      "exchanges": 7
+    },
+    {
+      "label": "R2 paged exact read",
+      "exit": 0,
+      "serverStatus": null,
+      "discoveredTools": null,
+      "exchanges": 16
+    },
+    {
+      "label": "R3 after chat revoke",
+      "exit": 0,
+      "serverStatus": null,
+      "discoveredTools": null,
+      "exchanges": 6
+    },
+    {
+      "label": "R3b client works before revoke",
+      "exit": 0,
+      "serverStatus": null,
+      "discoveredTools": null,
+      "exchanges": 5
+    },
+    {
+      "label": "R3b client after client revoke",
+      "exit": 0,
+      "serverStatus": null,
+      "discoveredTools": null,
+      "exchanges": 2
+    },
+    {
+      "label": "R4 after Lock",
+      "exit": 0,
+      "serverStatus": null,
+      "discoveredTools": null,
+      "exchanges": 1
+    },
+    {
+      "label": "R5 after reconnect",
+      "exit": 0,
+      "serverStatus": null,
+      "discoveredTools": null,
+      "exchanges": 6
+    }
+  ],
+  "claims": {
+    "C1": {
+      "id": "C1",
+      "result": "PASS",
+      "checks": [
+        {
+          "name": "the client announced its own name and version on the wire",
+          "ok": true,
+          "detail": "{\"name\":\"antigravity-client\",\"version\":\"v1.0.0\",\"protocolVersion\":\"2025-11-25\",\"source\":\"initialize.clientInfo\"}"
+        },
+        {
+          "name": "the server accepted the client handshake",
+          "ok": true,
+          "detail": "initialize 200"
+        },
+        {
+          "name": "a protocol revision was negotiated",
+          "ok": true,
+          "detail": "2025-11-25"
+        }
+      ]
+    },
+    "C2": {
+      "id": "C2",
+      "result": "PASS",
+      "checks": [
+        {
+          "name": "the client requested tools/list and received the three read-only tools",
+          "ok": true,
+          "detail": "memory_search,memory_fetch,context_build"
+        },
+        {
+          "name": "the client went on to call a discovered tool (it accepted the tool schemas)",
+          "ok": true,
+          "detail": "3 search call(s)"
+        }
+      ]
+    },
+    "C3": {
+      "id": "C3",
+      "result": "PASS",
+      "checks": [
+        {
+          "name": "the real client found its granted chat",
+          "ok": true,
+          "detail": "1 hits"
+        },
+        {
+          "name": "the real client got nothing for the never-granted canary chat",
+          "ok": true,
+          "detail": "0 hits"
+        },
+        {
+          "name": "the real client got nothing for the other collection",
+          "ok": true,
+          "detail": "0 hits"
+        },
+        {
+          "name": "the real client never received an ungranted conversation id in any response",
+          "ok": true,
+          "detail": ""
+        }
+      ]
+    },
+    "C4": {
+      "id": "C4",
+      "result": "PASS",
+      "checks": [
+        {
+          "name": "the real client read the latest revision exactly (7 pages, 20102 bytes)",
+          "ok": true,
+          "detail": "7 pages"
+        },
+        {
+          "name": "the client followed the server cursors and sent nothing else (no fabricated cursor)",
+          "ok": true,
+          "detail": "every accepted call used the previous next_cursor"
+        }
+      ]
+    },
+    "C5": {
+      "id": "C5",
+      "result": "PASS",
+      "checks": [
+        {
+          "name": "the latest revision came back with stable identity and provenance",
+          "ok": true,
+          "detail": "{\"p\":\"chatgpt\",\"s\":true}"
+        },
+        {
+          "name": "the real client read the earlier revision exactly (5 pages, 14371 bytes)",
+          "ok": true,
+          "detail": "5 pages"
+        },
+        {
+          "name": "the earlier revision came back with stable identity and provenance",
+          "ok": true,
+          "detail": "{\"p\":\"chatgpt\",\"s\":true}"
+        },
+        {
+          "name": "both revisions of the same chat were read through one source id",
+          "ok": true,
+          "detail": ""
+        }
+      ]
+    },
+    "C6": {
+      "id": "C6",
+      "result": "PASS",
+      "checks": [
+        {
+          "name": "the real client searched before any grant and got nothing",
+          "ok": true,
+          "detail": "200:0"
+        },
+        {
+          "name": "before any grant the harness, with the proven-valid canonical fetch arguments, is denied exactly like an unknown id",
+          "ok": true,
+          "detail": "canonical_full c8339224e6fb: 400:{\"code\":-32602,\"message\":\"Invalid params\"} vs 400:{\"code\":-32602,\"message\":\"Invalid params\"}"
+        },
+        {
+          "name": "the real client fetched with valid arguments before any grant and was denied like an unknown id",
+          "ok": true,
+          "detail": "complete_args_equal (client_full c8339224e6fb vs canonical_full c8339224e6fb, identity c8339224e6fb): 400:{\"code\":-32602,\"message\":\"Invalid params\"}"
+        },
+        {
+          "name": "the same arguments are valid once granted: HTTP 200 with the revision content (so the denial was permission, not malformed input)",
+          "ok": true,
+          "detail": "complete_args_equal (canonical_full c8339224e6fb, client_full c8339224e6fb): 200:null"
+        },
+        {
+          "name": "after the grant the canary and second collections stay invisible to the real client",
+          "ok": true,
+          "detail": ""
+        }
+      ]
+    },
+    "C7": {
+      "id": "C7",
+      "result": "PASS",
+      "checks": [
+        {
+          "name": "the very next search by the real client returns nothing after the chat was revoked",
+          "ok": true,
+          "detail": "0"
+        },
+        {
+          "name": "after the revoke the canonical arguments that were accepted (HTTP 200) while granted are denied exactly like an unknown id",
+          "ok": true,
+          "detail": "canonical_full c8339224e6fb: 400:{\"code\":-32602,\"message\":\"Invalid params\"} vs 400:{\"code\":-32602,\"message\":\"Invalid params\"}"
+        },
+        {
+          "name": "the very next fetch by the real client, with valid arguments, is denied like an unknown id",
+          "ok": true,
+          "detail": "complete_args_equal (client_full c8339224e6fb vs canonical_full c8339224e6fb, identity c8339224e6fb): 400:{\"code\":-32602,\"message\":\"Invalid params\"}"
+        },
+        {
+          "name": "a second real-client credential worked before it was revoked",
+          "ok": true,
+          "detail": "1 hits"
+        },
+        {
+          "name": "after the whole client was revoked the real client was refused and read nothing",
+          "ok": true,
+          "detail": "1 refusals, results=false"
+        }
+      ]
+    },
+    "C8": {
+      "id": "C8",
+      "result": "PASS",
+      "checks": [
+        {
+          "name": "after Lock the real client received no tool result",
+          "ok": true,
+          "detail": "1 exchanges"
+        },
+        {
+          "name": "after Lock the real client tried to connect and the listener was unreachable or refused every request",
+          "ok": true,
+          "detail": "unreachable"
+        }
+      ]
+    },
+    "C9": {
+      "id": "C9",
+      "result": "PASS",
+      "checks": [
+        {
+          "name": "with the same key and configuration the real client reconnected and reads its grant",
+          "ok": true,
+          "detail": "1 hits"
+        },
+        {
+          "name": "after reconnecting it still cannot read the canary chat (no escalation)",
+          "ok": true,
+          "detail": "0"
+        },
+        {
+          "name": "the grant set after reconnect is exactly the one before Lock",
+          "ok": true,
+          "detail": "1 grant(s)"
+        },
+        {
+          "name": "the revoked client stayed revoked",
+          "ok": true,
+          "detail": "401"
+        }
+      ]
+    }
+  },
+  "exchange_summary": [
+    {
+      "at": "2026-11-23T23:24:24.050Z",
+      "http": "POST",
+      "rpc": "server/discover",
+      "tool": null,
+      "status": 400,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params"
+      },
+      "bytes": 75
+    },
+    {
+      "at": "2026-11-23T23:24:24.078Z",
+      "http": "POST",
+      "rpc": "initialize",
+      "tool": null,
+      "status": 200,
+      "bytes": 166
+    },
+    {
+      "at": "2026-11-23T23:24:24.096Z",
+      "http": "POST",
+      "rpc": "notifications/initialized",
+      "tool": null,
+      "status": 202,
+      "bytes": 0
+    },
+    {
+      "at": "2026-11-23T23:24:24.111Z",
+      "http": "POST",
+      "rpc": "tools/list",
+      "tool": null,
+      "status": 200,
+      "bytes": 4724
+    },
+    {
+      "at": "2026-11-23T23:24:34.486Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_search",
+      "status": 200,
+      "hits": 0,
+      "truncated": false,
+      "bytes": 198
+    },
+    {
+      "at": "2026-11-23T23:24:44.136Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_fetch",
+      "status": 400,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params"
+      },
+      "bytes": 75,
+      "snapshot": "4b23d9625423"
+    },
+    {
+      "at": "2026-11-23T23:24:53.361Z",
+      "http": "POST",
+      "rpc": "server/discover",
+      "tool": null,
+      "status": 400,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params"
+      },
+      "bytes": 75
+    },
+    {
+      "at": "2026-11-23T23:24:53.376Z",
+      "http": "POST",
+      "rpc": "initialize",
+      "tool": null,
+      "status": 200,
+      "bytes": 166
+    },
+    {
+      "at": "2026-11-23T23:24:53.391Z",
+      "http": "POST",
+      "rpc": "notifications/initialized",
+      "tool": null,
+      "status": 202,
+      "bytes": 0
+    },
+    {
+      "at": "2026-11-23T23:24:53.406Z",
+      "http": "POST",
+      "rpc": "tools/list",
+      "tool": null,
+      "status": 200,
+      "bytes": 4724
+    },
+    {
+      "at": "2026-11-23T23:25:00.439Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_search",
+      "status": 200,
+      "hits": 1,
+      "truncated": false,
+      "bytes": 2150
+    },
+    {
+      "at": "2026-11-23T23:25:01.699Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_search",
+      "status": 200,
+      "hits": 0,
+      "truncated": false,
+      "bytes": 198
+    },
+    {
+      "at": "2026-11-23T23:25:02.763Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_search",
+      "status": 200,
+      "hits": 0,
+      "truncated": false,
+      "bytes": 198
+    },
+    {
+      "at": "2026-11-23T23:25:14.555Z",
+      "http": "POST",
+      "rpc": "server/discover",
+      "tool": null,
+      "status": 400,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params"
+      },
+      "bytes": 75
+    },
+    {
+      "at": "2026-11-23T23:25:14.598Z",
+      "http": "POST",
+      "rpc": "initialize",
+      "tool": null,
+      "status": 200,
+      "bytes": 166
+    },
+    {
+      "at": "2026-11-23T23:25:14.611Z",
+      "http": "POST",
+      "rpc": "notifications/initialized",
+      "tool": null,
+      "status": 202,
+      "bytes": 0
+    },
+    {
+      "at": "2026-11-23T23:25:14.624Z",
+      "http": "POST",
+      "rpc": "tools/list",
+      "tool": null,
+      "status": 200,
+      "bytes": 4724
+    },
+    {
+      "at": "2026-11-23T23:25:24.476Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_fetch",
+      "status": 200,
+      "segments": 3,
+      "truncated": true,
+      "bytes": 8672,
+      "snapshot": "4b23d9625423"
+    },
+    {
+      "at": "2026-11-23T23:25:31.032Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_fetch",
+      "status": 200,
+      "segments": 3,
+      "truncated": true,
+      "bytes": 8676,
+      "snapshot": "4b23d9625423"
+    },
+    {
+      "at": "2026-11-23T23:25:37.035Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_fetch",
+      "status": 200,
+      "segments": 3,
+      "truncated": true,
+      "bytes": 8676,
+      "snapshot": "4b23d9625423"
+    },
+    {
+      "at": "2026-11-23T23:25:45.706Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_fetch",
+      "status": 200,
+      "segments": 3,
+      "truncated": true,
+      "bytes": 8678,
+      "snapshot": "4b23d9625423"
+    },
+    {
+      "at": "2026-11-23T23:25:52.108Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_fetch",
+      "status": 200,
+      "segments": 3,
+      "truncated": true,
+      "bytes": 8684,
+      "snapshot": "4b23d9625423"
+    },
+    {
+      "at": "2026-11-23T23:25:57.474Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_fetch",
+      "status": 200,
+      "segments": 3,
+      "truncated": true,
+      "bytes": 8690,
+      "snapshot": "4b23d9625423"
+    },
+    {
+      "at": "2026-11-23T23:26:05.437Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_fetch",
+      "status": 200,
+      "segments": 2,
+      "truncated": false,
+      "bytes": 6475,
+      "snapshot": "4b23d9625423"
+    },
+    {
+      "at": "2026-11-23T23:26:11.828Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_fetch",
+      "status": 200,
+      "segments": 3,
+      "truncated": true,
+      "bytes": 8675,
+      "snapshot": "50a731683b07"
+    },
+    {
+      "at": "2026-11-23T23:26:17.112Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_fetch",
+      "status": 200,
+      "segments": 3,
+      "truncated": true,
+      "bytes": 8679,
+      "snapshot": "50a731683b07"
+    },
+    {
+      "at": "2026-11-23T23:26:21.723Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_fetch",
+      "status": 200,
+      "segments": 3,
+      "truncated": true,
+      "bytes": 8679,
+      "snapshot": "50a731683b07"
+    },
+    {
+      "at": "2026-11-23T23:26:28.424Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_fetch",
+      "status": 200,
+      "segments": 3,
+      "truncated": true,
+      "bytes": 8681,
+      "snapshot": "50a731683b07"
+    },
+    {
+      "at": "2026-11-23T23:26:33.476Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_fetch",
+      "status": 200,
+      "segments": 2,
+      "truncated": false,
+      "bytes": 7009,
+      "snapshot": "50a731683b07"
+    },
+    {
+      "at": "2026-11-23T23:26:46.397Z",
+      "http": "POST",
+      "rpc": "server/discover",
+      "tool": null,
+      "status": 400,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params"
+      },
+      "bytes": 75
+    },
+    {
+      "at": "2026-11-23T23:26:46.411Z",
+      "http": "POST",
+      "rpc": "initialize",
+      "tool": null,
+      "status": 200,
+      "bytes": 166
+    },
+    {
+      "at": "2026-11-23T23:26:46.427Z",
+      "http": "POST",
+      "rpc": "notifications/initialized",
+      "tool": null,
+      "status": 202,
+      "bytes": 0
+    },
+    {
+      "at": "2026-11-23T23:26:46.450Z",
+      "http": "POST",
+      "rpc": "tools/list",
+      "tool": null,
+      "status": 200,
+      "bytes": 4724
+    },
+    {
+      "at": "2026-11-23T23:26:56.286Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_search",
+      "status": 200,
+      "hits": 0,
+      "truncated": false,
+      "bytes": 198
+    },
+    {
+      "at": "2026-11-23T23:27:05.403Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_fetch",
+      "status": 400,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params"
+      },
+      "bytes": 75,
+      "snapshot": "4b23d9625423"
+    },
+    {
+      "at": "2026-11-23T23:27:14.753Z",
+      "http": "POST",
+      "rpc": "server/discover",
+      "tool": null,
+      "status": 400,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params"
+      },
+      "bytes": 75
+    },
+    {
+      "at": "2026-11-23T23:27:14.770Z",
+      "http": "POST",
+      "rpc": "initialize",
+      "tool": null,
+      "status": 200,
+      "bytes": 166
+    },
+    {
+      "at": "2026-11-23T23:27:14.791Z",
+      "http": "POST",
+      "rpc": "notifications/initialized",
+      "tool": null,
+      "status": 202,
+      "bytes": 0
+    },
+    {
+      "at": "2026-11-23T23:27:14.809Z",
+      "http": "POST",
+      "rpc": "tools/list",
+      "tool": null,
+      "status": 200,
+      "bytes": 4724
+    },
+    {
+      "at": "2026-11-23T23:27:20.821Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_search",
+      "status": 200,
+      "hits": 1,
+      "truncated": false,
+      "bytes": 2150
+    },
+    {
+      "at": "2026-11-23T23:27:28.396Z",
+      "http": "POST",
+      "rpc": "server/discover",
+      "tool": null,
+      "status": 400,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params"
+      },
+      "bytes": 75
+    },
+    {
+      "at": "2026-11-23T23:27:28.414Z",
+      "http": "POST",
+      "rpc": "initialize",
+      "tool": null,
+      "status": 401,
+      "error": {
+        "code": -32001,
+        "message": "Unauthorized"
+      },
+      "bytes": 73
+    },
+    {
+      "at": "2026-11-23T23:27:48.937Z",
+      "http": "POST",
+      "rpc": "server/discover",
+      "status": 502,
+      "upstreamError": true
+    },
+    {
+      "at": "2026-11-23T23:33:29.559Z",
+      "http": "POST",
+      "rpc": "server/discover",
+      "tool": null,
+      "status": 400,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params"
+      },
+      "bytes": 75
+    },
+    {
+      "at": "2026-11-23T23:33:29.580Z",
+      "http": "POST",
+      "rpc": "initialize",
+      "tool": null,
+      "status": 200,
+      "bytes": 166
+    },
+    {
+      "at": "2026-11-23T23:33:29.597Z",
+      "http": "POST",
+      "rpc": "notifications/initialized",
+      "tool": null,
+      "status": 202,
+      "bytes": 0
+    },
+    {
+      "at": "2026-11-23T23:33:29.613Z",
+      "http": "POST",
+      "rpc": "tools/list",
+      "tool": null,
+      "status": 200,
+      "bytes": 4724
+    },
+    {
+      "at": "2026-11-23T23:33:41.331Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_search",
+      "status": 200,
+      "hits": 1,
+      "truncated": false,
+      "bytes": 2150
+    },
+    {
+      "at": "2026-11-23T23:33:43.074Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_search",
+      "status": 200,
+      "hits": 0,
+      "truncated": false,
+      "bytes": 198
+    }
+  ],
+  "sourceKey": "C:\\Users\\kaisa\\.gemini\\antigravity\\worktrees\\mind-place\\mcp_release1_remediation\\release\\win32-x64\\mind-place.exe"
+}
