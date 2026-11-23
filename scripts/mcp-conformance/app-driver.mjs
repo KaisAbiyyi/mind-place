@@ -26,8 +26,17 @@ export async function portIsBusy(port) {
 /**
  * @param {{exe: string, runtimeDir: string, dataDir: string}} options
  */
+/** An OS-assigned free port: fixed ranges can fall inside Windows' reserved (Hyper-V/WSL) exclusions and never listen. */
+async function freePort() {
+  return new Promise((resolve, reject) => {
+    const probe = http.createServer();
+    probe.listen(0, '127.0.0.1', () => { const { port } = probe.address(); probe.close(() => resolve(port)); });
+    probe.on('error', reject);
+  });
+}
+
 export async function launchApp({ exe, runtimeDir, dataDir }) {
-  const cdpPort = 49000 + crypto.randomInt(1000);
+  const cdpPort = await freePort();
   const app = spawn(exe, [], {
     cwd: path.dirname(exe),
     windowsHide: false,
@@ -41,7 +50,7 @@ export async function launchApp({ exe, runtimeDir, dataDir }) {
   });
   const endpoint = `http://127.0.0.1:${cdpPort}`;
   let ok = false;
-  for (let i = 0; i < 150 && !ok; i += 1) {
+  for (let i = 0; i < 400 && !ok; i += 1) {
     if (app.exitCode !== null) throw new Error(`App exited early: ${app.exitCode}`);
     try { ok = (await fetch(`${endpoint}/json/version`, { signal: AbortSignal.timeout(600) })).ok; } catch { await sleep(200); }
   }

@@ -14,7 +14,8 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 export const TOKEN_ENV = 'MP_CONFORMANCE_TOKEN';
-const SERVER_NAME = 'mindplace';
+// Distinct from any connector the account may already have (for example a hosted "mind_place" app).
+const SERVER_NAME = 'mpconformance';
 
 function which(command) {
   const result = spawnSync('where.exe', [command], { encoding: 'utf8', windowsHide: true });
@@ -23,14 +24,29 @@ function which(command) {
   return lines.find((l) => /\.(exe|cmd)$/i.test(l)) ?? lines[0] ?? null;
 }
 
-function version(command, args = ['--version'], timeout = 60000) {
-  const run = spawnSync(command, args, { encoding: 'utf8', windowsHide: true, timeout, shell: /\.cmd$/i.test(command) });
-  return run.status === 0 ? String(run.stdout).trim().split(/\r?\n/).pop() : null;
+/**
+ * npm installs CLIs as .cmd shims. Running them through a shell breaks on paths with spaces and
+ * mangles quoting, so resolve the Node entry script the shim points at and run it directly.
+ */
+function launcher(command) {
+  if (!/\.cmd$/i.test(command)) return { command, prefix: [] };
+  const text = fs.readFileSync(command, 'utf8');
+  const entryMatch = text.match(/"%dp0%\\([^"]+\.js)"/i);
+  if (!entryMatch) throw new Error(`Cannot resolve the Node entry behind ${path.basename(command)}`);
+  const flagMatch = text.match(/"%_prog%"\s+((?:--[\w=.-]+\s+)*)"%dp0%/i);
+  const flags = flagMatch ? flagMatch[1].trim().split(/\s+/).filter(Boolean) : [];
+  return { command: process.execPath, prefix: [...flags, path.join(path.dirname(command), entryMatch[1])] };
+}
+
+function version(command, args = ['--version'], timeout = 90000) {
+  const l = launcher(command);
+  const result = spawnSync(l.command, [...l.prefix, ...args], { encoding: 'utf8', windowsHide: true, timeout });
+  return result.status === 0 ? String(result.stdout).trim().split(/\r?\n/).pop() : null;
 }
 
 function run(command, args, { input, env, cwd, timeoutMs }) {
-  const shell = /\.cmd$/i.test(command);
-  return spawnSync(command, args, {
+  const l = launcher(command);
+  return spawnSync(l.command, [...l.prefix, ...args], {
     input,
     cwd,
     env,
@@ -38,7 +54,6 @@ function run(command, args, { input, env, cwd, timeoutMs }) {
     windowsHide: true,
     timeout: timeoutMs,
     maxBuffer: 64 * 1024 * 1024,
-    shell,
   });
 }
 
@@ -97,23 +112,33 @@ export const DRIVERS = {
       const found = this.detect();
       if (!found) throw new Error('Codex is not installed');
       // Config via -c overrides only: nothing is written to the user's ~/.codex.
+      // The user's other MCP servers are switched off for this run (names only are read from the config).
+      const others = codexConfiguredServers().filter((name) => name !== SERVER_NAME).map((name) => `mcp_servers.${name}.enabled=false`);
       const overrides = [
         `mcp_servers.${SERVER_NAME}.url=${JSON.stringify(o.url)}`,
         `mcp_servers.${SERVER_NAME}.bearer_token_env_var=${JSON.stringify(TOKEN_ENV)}`,
         'approval_policy="never"',
+        // Account-level hosted connectors (codex_apps) must not be reachable from a conformance run.
+        'features.apps=false',
+        ...others,
       ].flatMap((kv) => ['-c', kv]);
-      const result = run(found.exe, ['exec', '--json', '--skip-git-repo-check', '-s', 'read-only', ...overrides, '-'], {
+      // The account's default model may not be available to Codex with a ChatGPT login; pick one that is.
+      const model = process.env.MP_CODEX_MODEL ?? 'gpt-6-luna';
+      const result = run(found.exe, ['exec', '--json', '--skip-git-repo-check', '-s', 'read-only', '-m', model, ...overrides, '-'], {
         input: o.prompt, cwd: o.workDir, timeoutMs: o.timeoutMs ?? 300000,
         env: { ...process.env, [TOKEN_ENV]: o.token },
       });
+      if (process.env.MP_DEBUG_DIR) fs.writeFileSync(path.join(process.env.MP_DEBUG_DIR, 'codex-stderr.log'), String(result.stderr).replace(new RegExp(String(o.token), 'g'), '[redacted]'));
       const events = jsonLines(result.stdout);
       return {
         exit: result.status,
         clientVersion: found.version,
         connected: null,
         events: events.length,
+        summary: events.map((e) => [e.type, e.item?.type, e.item?.server, e.item?.tool, e.item?.status].filter(Boolean).join('/')),
         finalText: String(events.filter((e) => e.item?.type === 'agent_message').map((e) => e.item.text).at(-1) ?? '').slice(0, 400),
         stderr: String(result.stderr).slice(-400),
+        stdoutTail: String(result.stdout).slice(-900),
       };
     },
   },
@@ -147,6 +172,7 @@ export const DRIVERS = {
         events: events.length,
         finalText: String(events.filter((e) => e.type === 'message' && e.role === 'assistant').map((e) => e.content).join('')).slice(-400),
         stderr: String(result.stderr).slice(-400),
+        stdoutTail: String(result.stdout).slice(-900),
       };
     },
   },
@@ -162,26 +188,40 @@ export const DRIVERS = {
     run(o) {
       const found = this.detect();
       if (!found) throw new Error('Antigravity is not installed');
-      const settings = path.join(o.workDir, 'agy-settings.json');
-      fs.writeFileSync(settings, JSON.stringify({
-        mcpServers: { [SERVER_NAME]: { type: 'http', url: o.url, headers: { Authorization: `Bearer \${${TOKEN_ENV}}` } } },
-      }));
-      const result = run(found.exe, ['--print', '--settings', settings, '--output-format', 'stream-json', '--mode', 'auto'], {
-        input: o.prompt, cwd: o.workDir, timeoutMs: o.timeoutMs ?? 300000,
-        env: { ...process.env, [TOKEN_ENV]: o.token },
-      });
-      const events = jsonLines(result.stdout);
-      return {
-        exit: result.status,
-        clientVersion: found.version,
-        connected: null,
-        events: events.length,
-        finalText: String(result.stdout).slice(-300),
-        stderr: String(result.stderr).slice(-400),
-      };
+      const env = { ...process.env, [TOKEN_ENV]: o.token };
+      // Antigravity keeps MCP servers in its user configuration. The entry is added for this run only and
+      // removed in finally. The header carries the NAME of an environment variable, not the key; whether
+      // Antigravity expands it is part of what this run establishes.
+      const placeholder = 'Authorization: Bearer ${' + TOKEN_ENV + '}';
+      const add = run(found.exe, ['mcp', 'add', '--type', 'http', '--header', placeholder, SERVER_NAME, o.url], { env, cwd: o.workDir, timeoutMs: 60000 });
+      try {
+        const result = run(found.exe, ['--output-format', 'stream-json', '--mode', 'auto', `--print=${o.prompt}`], {
+          cwd: o.workDir, timeoutMs: o.timeoutMs ?? 300000, env,
+        });
+        const events = jsonLines(result.stdout);
+        return {
+          exit: result.status,
+          clientVersion: found.version,
+          connected: null,
+          addExit: add.status,
+          events: events.length,
+          finalText: String(result.stdout).slice(-300),
+          stderr: String(result.stderr).slice(-400),
+          stdoutTail: String(result.stdout).slice(-900),
+        };
+      } finally {
+        run(found.exe, ['mcp', 'remove', SERVER_NAME], { env, cwd: o.workDir, timeoutMs: 60000 });
+      }
     },
   },
 };
+
+function codexConfiguredServers() {
+  try {
+    const text = fs.readFileSync(path.join(os.homedir(), '.codex', 'config.toml'), 'utf8');
+    return [...text.matchAll(/^\[mcp_servers\.([A-Za-z0-9_-]+)\]\s*$/gm)].map((m) => m[1]);
+  } catch { return []; }
+}
 
 export function makeWorkDir(label) {
   return fs.mkdtempSync(path.join(os.tmpdir(), `mp-conf-${label}-`));

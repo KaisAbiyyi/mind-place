@@ -19,6 +19,7 @@ import { launchApp, portIsBusy } from './app-driver.mjs';
 import { seedCorpus } from './corpus.mjs';
 import { runSyntheticSuite } from './suite.mjs';
 import { createWire } from './wire.mjs';
+import { runRealClient } from './real.mjs';
 
 export const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const git = (...args) => spawnSync('git', args, { cwd: repoRoot, encoding: 'utf8' }).stdout.trim();
@@ -109,9 +110,35 @@ async function syntheticPhase() {
   process.exitCode = failure || result?.harnessFailure || Object.values(summary).some((r) => r !== 'PASS') ? 1 : 0;
 }
 
+async function realPhase(clientId) {
+  const source = sourceIdentity();
+  const outDir = path.join(repoRoot, 'outputs', 'mcp-conformance', source.sha.slice(0, 12));
+  const log = (m) => console.error(`[real:${clientId}] ${m}`);
+  const result = await runRealClient(clientId, { startSession, log });
+  const { secrets = [], ...rest } = result;
+  if (rest.blocked) {
+    console.log(JSON.stringify({ clientId, blocked: rest.blocked }, null, 2));
+    process.exitCode = 3;
+    return;
+  }
+  const body = {
+    kind: 'REAL_CLIENT run: the actual provider client behind a recording proxy against the packaged app (disposable synthetic corpus). Verdicts come from the wire log, not the model transcript.',
+    source,
+    executable_sha256: sha256File(productPaths().exe),
+    dirty_tree: source.dirty,
+    ...rest,
+  };
+  const receipt = writeReceipt(outDir, `real-${clientId}.json`, body, secrets);
+  const summary = Object.fromEntries(Object.entries(rest.claims).map(([k, v]) => [k, v.result]));
+  console.log(JSON.stringify({ receipt: receipt.file, sha256: receipt.sha256, observed_client: rest.observed_client, summary }, null, 2));
+  for (const claim of Object.values(rest.claims)) for (const check of claim.checks.filter((c) => !c.ok)) console.log(`FAIL ${claim.id} ${check.name} :: ${check.detail}`);
+  process.exitCode = Object.values(summary).every((r) => r === 'PASS') ? 0 : 1;
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [phase] = process.argv.slice(2);
   if (phase === 'synthetic') await syntheticPhase();
+  else if (phase === 'real') await realPhase(process.argv[3]);
   else {
     console.error('Usage: run.mjs synthetic | real <client> | matrix');
     process.exitCode = 2;

@@ -25,6 +25,8 @@ export async function startRecordingProxy(options = {}) {
   const secrets = options.secrets ?? [];
   /** @type {Array<Record<string, any>>} */
   const exchanges = [];
+  /** Every request as it arrived (headers minus credentials), even if the upstream never answers. */
+  const received = [];
   const sockets = new Set();
   let mode = 'forward'; // forward | drop (simulate a broken connection)
 
@@ -38,6 +40,8 @@ export async function startRecordingProxy(options = {}) {
     });
     req.on('end', () => {
       const body = Buffer.concat(chunks);
+      const { authorization: _a, ...safeHeaders } = req.headers;
+      received.push({ at: new Date().toISOString(), http: req.method, path: req.url, headers: safeHeaders, bodyBytes: body.length });
       if (mode === 'drop') { req.socket.destroy(); return; }
       let rpc = null;
       try { rpc = body.length ? JSON.parse(body.toString('utf8')) : null; } catch { /* not JSON */ }
@@ -87,6 +91,7 @@ export async function startRecordingProxy(options = {}) {
     port,
     url: `http://127.0.0.1:${port}/mcp`,
     exchanges,
+    received,
     /** Snapshot index, used to scope assertions to one client turn. */
     mark: () => exchanges.length,
     since: (mark) => exchanges.slice(mark),
