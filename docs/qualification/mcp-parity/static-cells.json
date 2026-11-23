@@ -27,5 +27,12 @@
       "reason": "Hosted Gemini needs the owner's account (Connect to an MCP server or Developer Mode) and an HTTPS endpoint reachable by Gemini. The Gemini app custom-app feature is reported to require an eligible personal account; if the owner's account is not eligible the result is PROVIDER_BLOCKED, to be recorded on the card.",
       "owner_card": "OWNER-TEST-CARDS.md#card-gemini-hosted-app"
     }
+  },
+  "antigravity": {
+    "_all": {
+      "result": "NOT_RUN",
+      "reason": "Antigravity CLI 1.5.10 reached the listener and sent initialize, which Mind Place correctly refused with 401: its MCP configuration does not expand environment variables in headers, so the literal placeholder was sent. Delivering the key would require putting it literally on a command line or in its shared user config (~/.gemini/config), which this harness deliberately does not do. Headless runs also stay in request-review permission mode ('--mode auto' is not available for this account), so tool calls would wait for approval. See receipt blocked-antigravity.json.",
+      "owner_card": "OWNER-TEST-CARDS.md#card-antigravity-cli"
+    }
   }
 }

@@ -25,11 +25,18 @@ function chainFor(exs, snapshotId) {
   return calls(exs, 'memory_fetch').filter((e) => e.params?.arguments?.snapshot_id === snapshotId);
 }
 
+/** Key order is not meaning: compare cursors structurally. */
+function canonical(value) {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+  if (value && typeof value === 'object') return `{${Object.keys(value).sort().map((k) => `${JSON.stringify(k)}:${canonical(value[k])}`).join(',')}}`;
+  return JSON.stringify(value ?? null);
+}
+
 function chainHonest(chain) {
   for (let i = 0; i < chain.length; i += 1) {
     const sent = chain[i].params?.arguments?.cursor ?? null;
     const expected = i === 0 ? null : chain[i - 1].result?.structuredContent?.next_cursor ?? null;
-    if (JSON.stringify(sent) !== JSON.stringify(expected)) return `call ${i + 1} sent a cursor that is not the server's previous next_cursor`;
+    if (canonical(sent) !== canonical(expected)) return `call ${i + 1} sent a cursor that is not the server's previous next_cursor`;
   }
   return null;
 }
@@ -77,9 +84,10 @@ export async function runRealClient(clientId, { startSession, log = () => {} }) 
     const r0 = await exercise('R0 default deny', K.credential,
       `${ONLY}Step 1: call memory_search with queries ["sentinel-medium-3"]. Step 2: call memory_fetch with ${ids(rev2)}, granularity "revision". Reply with one line: the hit count and whether the fetch succeeded. Do not retry.`);
     identity = observedClientIdentity(proxy.exchanges);
-    if (r0.exs.length === 0) {
+    const handshaken = r0.exs.some((e) => e.status === 200);
+    if (r0.exs.length === 0 || !handshaken) {
       // The client never reached the server: nothing can be concluded about Mind Place, so do not report FAIL cells.
-      notConnected = { exit: r0.out.exit, serverStatus: r0.out.serverStatus ?? null, stderr: String(r0.out.stderr ?? '').slice(-300), stdoutTail: String(r0.out.stdoutTail ?? '').slice(-300), received: proxy.received.length };
+      notConnected = { reason: r0.exs.length === 0 ? 'no request reached the listener' : `every request was refused (${[...new Set(r0.exs.map((e) => e.status))].join(',')}); the client did not deliver a valid credential`, requestsSeen: r0.exs.length, exit: r0.out.exit, serverStatus: r0.out.serverStatus ?? null, stderr: String(r0.out.stderr ?? '').slice(-300), stdoutTail: String(r0.out.stdoutTail ?? '').slice(-300), received: proxy.received.length };
       throw new Error('CLIENT_DID_NOT_CONNECT');
     }
     {
@@ -220,7 +228,7 @@ export async function runRealClient(clientId, { startSession, log = () => {} }) 
     await app.close();
   }
   identity = identity ?? observedClientIdentity(proxy.exchanges);
-  if (notConnected) return { clientId, label: driver.label, installed: found, blocked: { kind: 'CLIENT_DID_NOT_CONNECT', detail: 'The real client was run with a task that needs the MCP server, and made no request to it.', ...notConnected }, secrets };
+  if (notConnected) return { clientId, label: driver.label, installed: found, blocked: { kind: 'CLIENT_COULD_NOT_USE_THE_SERVER', detail: 'The real client was run with a task that needs the MCP server but never completed a handshake. Nothing can be concluded about Mind Place from this run.', ...notConnected }, secrets };
   return {
     clientId,
     label: driver.label,

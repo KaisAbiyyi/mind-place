@@ -45,6 +45,17 @@ Needs: an account that can add a custom connector, and a connector URL reachable
 
 Needs: a Gemini account that offers "Connect to an MCP server" or Developer Mode (`gemini.google.com/devmode`), and the same HTTPS reachability as the Claude card. Use Developer Mode to confirm tool schemas are accepted (this server's input schemas use `oneOf`, type arrays, `exclusiveMinimum` and `format`; strict schema subsets may reject them, and that is a finding to record, not hide). Record **PROVIDER_BLOCKED** with the vendor message if your account is not eligible.
 
+## Card: Antigravity CLI
+
+Antigravity's MCP configuration stores the Authorization header literally (no environment-variable expansion), so the agent run could not deliver the key without writing it somewhere persistent. You can, with a **disposable** key from the disposable app (never your real archive's key):
+
+1. In the disposable app create access named "Antigravity test" and allow only "Conformance medium conversation".
+2. In your own PowerShell, with the key held in a variable you do not echo, add the server for this test only (replace the URL port if you front it with the recording proxy), for example `agy mcp add --type http --header "Authorization: Bearer <key>" mpconformance http://127.0.0.1:43731/mcp`.
+3. Run the P0 to P6 prompts in an interactive `agy` session, approving the Mind Place tool calls when asked.
+4. Afterwards remove it: `agy mcp remove mpconformance`, then revoke the access in the app. Close the PowerShell window so the command history is not kept.
+
+Record results in `owner-result-template.json`. (This card exists because the key is on a command line here; use a disposable key only.)
+
 ## Card: any local CLI that failed in the agent run
 
 If a row in `PARITY-MATRIX.md` shows PROVIDER_BLOCKED or NOT_RUN for a local CLI, run `node scripts/mcp-conformance/run.mjs real <client-id>` from a normal terminal on a machine where that client is signed in with an eligible account (`claude-code`, `codex`, `gemini-cli`, `antigravity`). It writes a receipt under `outputs/mcp-conformance/<sha>/`, then `node scripts/mcp-conformance/run.mjs matrix` merges it.
