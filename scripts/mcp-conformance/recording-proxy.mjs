@@ -18,6 +18,13 @@ import { scrubText } from '../lib/e2e-secret-guard.mjs';
 const MAX_BODY = 1024 * 1024;
 
 /**
+ * The only request header names the proxy keeps. Full RPC params and results stay in this process's memory
+ * (the harness needs them to verify content byte for byte) and are never written to a receipt; receipts carry
+ * only counts, statuses, tool names, hashes and short ids (see real.mjs `exchange_summary`).
+ */
+export const RECORDED_HEADERS = ['content-type', 'accept', 'content-length', 'mcp-protocol-version', 'mcp-session-id', 'user-agent', 'host'];
+
+/**
  * @param {{targetPort?: number, secrets?: string[]}} [options]
  */
 export async function startRecordingProxy(options = {}) {
@@ -40,8 +47,13 @@ export async function startRecordingProxy(options = {}) {
     });
     req.on('end', () => {
       const body = Buffer.concat(chunks);
-      const { authorization: _a, ...safeHeaders } = req.headers;
-      received.push({ at: new Date().toISOString(), http: req.method, path: req.url, headers: safeHeaders, bodyBytes: body.length });
+      // Allowlist, not blocklist: only header names the conformance checks need are kept. Cookies, alternate
+      // auth headers (x-api-key, proxy-authorization, ...) and anything unknown are dropped, and so is any
+      // query string (a credential could ride in it).
+      const safeHeaders = {};
+      for (const name of RECORDED_HEADERS) if (req.headers[name] !== undefined) safeHeaders[name] = scrubText(String(req.headers[name]), secrets).slice(0, 160);
+      const safePath = String(req.url ?? '').split('?')[0];
+      received.push({ at: new Date().toISOString(), http: req.method, path: safePath, hadQuery: String(req.url ?? '').includes('?'), headers: safeHeaders, bodyBytes: body.length });
       if (mode === 'drop') { req.socket.destroy(); return; }
       let rpc = null;
       try { rpc = body.length ? JSON.parse(body.toString('utf8')) : null; } catch { /* not JSON */ }
@@ -56,7 +68,7 @@ export async function startRecordingProxy(options = {}) {
           exchanges.push({
             at: new Date().toISOString(),
             http: req.method,
-            path: req.url,
+            path: safePath,
             protocolHeader: req.headers['mcp-protocol-version'] ?? null,
             userAgent: scrubText(req.headers['user-agent'] ?? '', secrets).slice(0, 160) || null,
             hadAuthorization: Boolean(req.headers.authorization),

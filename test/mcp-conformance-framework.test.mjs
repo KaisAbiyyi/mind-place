@@ -58,7 +58,7 @@ test('a matrix must be complete, on one SHA, and renders every client', () => {
   const matrix = { sha: SHA, generated_at: '2026-11-24T00:00:00Z', cells };
   assert.deepEqual(validateMatrix(matrix), []);
   const md = renderMatrixMarkdown(matrix);
-  for (const client of CLIENTS) assert.match(md, new RegExp(client.label.replace(/[()]/g, '\\$&')));
+  for (const client of CLIENTS) assert.ok(md.includes(client.label), `rendered matrix lists ${client.id}`);
   assert.match(md, /NOT_RUN/);
   delete matrix.cells.codex.C4;
   assert.ok(validateMatrix(matrix).some((p) => /codex\/C4: cell missing/.test(p)));
@@ -165,4 +165,90 @@ test('client identity falls back to modern _meta clientInfo, then the User-Agent
   const ua = [{ userAgent: 'codex_cli_rs/0.164.0 (Windows)', protocolHeader: '2026-07-28' }];
   assert.deepEqual(observedClientIdentity(ua), { name: 'codex_cli_rs', version: '0.164.0', protocolVersion: '2026-07-28', source: 'user-agent' });
   assert.equal(observedClientIdentity([{ rpcMethod: 'tools/list' }]), null);
+});
+
+import fs from 'node:fs';
+import { geminiProjectSettings } from '../scripts/mcp-conformance/clients.mjs';
+import { argsDigest, identityArgs } from '../scripts/mcp-conformance/real.mjs';
+import { isChatGptConversationUrl } from '../scripts/mcp-conformance/suite.mjs';
+
+test('Gemini CLI is never configured with provider-side per-server trust', () => {
+  const settings = geminiProjectSettings('http://127.0.0.1:1/mcp');
+  const servers = Object.values(settings.mcpServers);
+  assert.ok(servers.length > 0);
+  for (const server of servers) assert.equal(server.trust, false, 'trust must be explicitly false');
+  // The key is referenced by environment variable name only.
+  assert.doesNotMatch(JSON.stringify(settings), /mpc_v1_[0-9a-f]{64}/);
+  // Static guard: no driver may turn a trust or auto-approve switch on.
+  const source = fs.readFileSync(new URL('../scripts/mcp-conformance/clients.mjs', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /trust\s*:\s*true/);
+  assert.doesNotMatch(source, /--yolo|dangerously|bypassPermissions|danger-full-access/);
+});
+
+test('a provenance URL is accepted only for the exact chatgpt.com host and a conversation path', () => {
+  assert.equal(isChatGptConversationUrl('https://chatgpt.com/c/abc-123'), true);
+  for (const bad of ['https://evilchatgpt.com/c/abc', 'https://chatgpt.com.evil.test/c/abc', 'https://evil.test/?u=chatgpt.com/c/abc', 'http://chatgpt.com/c/abc', 'https://chatgpt.com/c/', 'https://chatgpt.com/other', 'not a url', '', null, undefined]) {
+    assert.equal(isChatGptConversationUrl(bad), false, String(bad));
+  }
+});
+
+test('the denial proof compares argument identity by digest, ignoring key order, cursor and budget', () => {
+  const valid = { source_id: 'src:a', archive_id: 'ar:b', snapshot_id: 'sn:c', granularity: 'revision' };
+  const same = { granularity: 'revision', snapshot_id: 'sn:c', archive_id: 'ar:b', source_id: 'src:a', cursor: { byte_offset: 3, message_index: 0 }, budget: { max_bytes: 3000 } };
+  assert.equal(argsDigest(identityArgs(same)), argsDigest(valid));
+  for (const wrong of [{ ...valid, snapshot_id: 'sn:other' }, { ...valid, granularity: 'message' }, { ...valid, source_id: undefined }]) {
+    assert.notEqual(argsDigest(identityArgs(wrong)), argsDigest(valid));
+  }
+  assert.match(argsDigest(valid), /^[0-9a-f]{12}$/);
+});
+
+test('the matrix is one frozen version: every executed cell must run at the matrix commit and harness', () => {
+  const OTHER = 'c'.repeat(40);
+  const build = (over = {}) => {
+    const cells = {};
+    for (const client of CLIENTS) {
+      cells[client.id] = {};
+      for (const claim of CLAIMS) {
+        if (client.synthetic) cells[client.id][claim.id] = { result: 'PASS', sha: SHA, harness_tree_id: 'h1', evidence: { kind: 'SYNTHETIC_HTTP', receipt: 'r.json', receipt_sha256: HASH } };
+        else cells[client.id][claim.id] = { result: 'NOT_RUN', reason: 'not exercised', owner_card: 'OWNER-TEST-CARDS.md' };
+      }
+    }
+    return { sha: SHA, harness_tree_id: 'h1', cells, ...over };
+  };
+  assert.deepEqual(validateMatrix(build()), []);
+  const staleCommit = build();
+  staleCommit.cells.codex.C1 = real({ sha: OTHER, harness_tree_id: 'h1' });
+  assert.ok(validateMatrix(staleCommit).some((p) => /codex\/C1: cell ran at ccccccccc but the matrix is for aaaaaaaaa/.test(p)));
+  const otherHarness = build();
+  otherHarness.cells.codex.C1 = real({ harness_tree_id: 'h2' });
+  assert.ok(validateMatrix(otherHarness).some((p) => /different conformance harness/.test(p)));
+  const noScope = build();
+  noScope.cells.codex.C4 = real({ harness_tree_id: 'h1' });
+  assert.ok(validateMatrix(noScope).some((p) => /C4 cell must state its measured scope/.test(p)));
+  noScope.cells.codex.C4 = real({ harness_tree_id: 'h1', scope: 'medium chat only; long chat NOT_RUN' });
+  assert.ok(!validateMatrix(noScope).some((p) => /measured scope/.test(p)));
+});
+
+test('recording proxy keeps only allowlisted headers and no query string', async () => {
+  const upstream = await fakeUpstream();
+  const proxy = await startRecordingProxy({ targetPort: upstream.port, secrets: [TOKEN] });
+  try {
+    const body = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} });
+    await new Promise((resolve, reject) => {
+      const req = http.request({ host: '127.0.0.1', port: proxy.port, path: `/mcp?access_token=${TOKEN}`, method: 'POST', headers: {
+        'content-type': 'application/json', authorization: `Bearer ${TOKEN}`, cookie: 'session=SECRETCOOKIE', 'x-api-key': 'SECRETAPIKEY', 'proxy-authorization': 'Basic SECRETPROXY', 'x-custom-token': 'SECRETCUSTOM', 'user-agent': 'unit/1.0',
+      } }, (res) => { res.resume(); res.on('end', resolve); });
+      req.on('error', reject);
+      req.end(body);
+    });
+    const text = JSON.stringify({ received: proxy.received, exchanges: proxy.exchanges });
+    assert.doesNotMatch(text, /SECRETCOOKIE|SECRETAPIKEY|SECRETPROXY|SECRETCUSTOM|access_token|mpc_v1_|Bearer/);
+    assert.equal(proxy.received[0].path, '/mcp');
+    assert.equal(proxy.received[0].hadQuery, true);
+    assert.deepEqual(Object.keys(proxy.received[0].headers).sort(), ['content-length', 'content-type', 'host', 'user-agent']);
+    assert.equal(proxy.exchanges[0].path, '/mcp');
+  } finally {
+    await proxy.close();
+    await upstream.close();
+  }
 });

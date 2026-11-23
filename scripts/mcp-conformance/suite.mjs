@@ -60,6 +60,16 @@ export function verifyRevision(pages, expectedMessages, expected) {
 }
 
 /** Schema keywords some strict clients reject. Informational: the real-client rows decide. */
+/** True only for an https URL whose host is exactly chatgpt.com and whose path is a conversation path. */
+export function isChatGptConversationUrl(value) {
+  try {
+    const url = new URL(String(value ?? ''));
+    return url.protocol === 'https:' && url.hostname === 'chatgpt.com' && url.pathname.startsWith('/c/') && url.pathname.length > 3;
+  } catch {
+    return false;
+  }
+}
+
 export function schemaFeatures(tools) {
   const found = new Set();
   const walk = (node) => {
@@ -231,7 +241,7 @@ export async function runSyntheticSuite(ctx) {
       c.check(`historical revision ${i + 1} (${rev.message_count} messages) is still exact after later revisions`, verdict.ok, verdict.reason ?? '');
       const first = pages[0]?.json?.result?.structuredContent;
       sources.add(first?.source_id);
-      c.check(`revision ${i + 1} carries stable identity and provenance`, first?.snapshot_id === rev.snapshot_id && first?.provider === 'chatgpt' && /^\d{4}-\d\d-\d\dT/.test(first?.captured_at ?? '') && first?.title === corpus.long.title && /chatgpt\.com\/c\//.test(first?.source_url ?? ''), JSON.stringify({ s: first?.snapshot_id === rev.snapshot_id, p: first?.provider, t: first?.captured_at }));
+      c.check(`revision ${i + 1} carries stable identity and provenance`, first?.snapshot_id === rev.snapshot_id && first?.provider === 'chatgpt' && /^\d{4}-\d\d-\d\dT/.test(first?.captured_at ?? '') && first?.title === corpus.long.title && isChatGptConversationUrl(first?.source_url), JSON.stringify({ s: first?.snapshot_id === rev.snapshot_id, p: first?.provider, t: first?.captured_at }));
       const seg = first?.segments?.[0];
       c.check(`revision ${i + 1} segments carry message id, index, role and byte range`, Boolean(seg?.message_id) && Number.isInteger(seg?.message_index) && Boolean(seg?.role) && Number.isInteger(seg?.byte_end), JSON.stringify(seg ? { id: seg.message_id, i: seg.message_index, r: seg.role } : null));
     }

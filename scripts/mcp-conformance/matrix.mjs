@@ -14,7 +14,7 @@ export const CLAIMS = [
   { id: 'C1', title: 'Handshake and initialization', detail: 'Real initialize (or discovery) accepted; protocol negotiated; client identity observed on the wire' },
   { id: 'C2', title: 'Tool discovery', detail: 'tools/list returns exactly the three read-only tools; client accepts their schemas' },
   { id: 'C3', title: 'Authenticated, scoped search', detail: 'memory_search returns hits from granted chats only' },
-  { id: 'C4', title: 'Exact full-content fetch', detail: 'Long conversation read byte-exact across cursor pages; no silent truncation' },
+  { id: 'C4', title: 'Exact full-content fetch', detail: 'A conversation read byte-exact across cursor pages; no silent truncation. Measured scope differs by row: the synthetic reference reads a long (over 256 KB, multi-revision, multi-byte) chat; a real client reads the medium multi-byte two-revision chat in small pages (a long-chat result stream does not fit a CLI model\'s context). Real-client long-chat read is NOT_RUN and is stated in each cell\'s scope.' },
   { id: 'C5', title: 'Revisions, identity, provenance', detail: 'Historical revisions fetchable; stable source/snapshot ids, provider and timestamps preserved' },
   { id: 'C6', title: 'Default deny and isolation', detail: 'Nothing readable before a grant; ungranted fetch looks like an unknown id; other clients cannot read this client\'s chats' },
   { id: 'C7', title: 'Immediate revocation', detail: 'Chat grant and whole-client revocation take effect on the next request' },
@@ -57,6 +57,7 @@ export function validateCell(clientId, claimId, cell) {
       const observed = cell.evidence?.observed_client;
       if (!observed?.name || !observed?.version) problems.push(`${where}: real-client evidence needs the client name and version observed on the wire`);
       if (!cell.evidence?.transport) problems.push(`${where}: needs the transport`);
+      if (claimId === 'C4' && !String(cell.scope ?? '').trim()) problems.push(`${where}: a real-client C4 cell must state its measured scope (what content size and revisions were actually read)`);
     }
   }
   if (cell.result === 'PROVIDER_BLOCKED') {
@@ -78,6 +79,13 @@ export function validateMatrix(matrix) {
       const cell = matrix?.cells?.[client.id]?.[claim.id];
       if (!cell) { problems.push(`${client.id}/${claim.id}: cell missing (every cell must be explicit)`); continue; }
       problems.push(...validateCell(client.id, claim.id, cell));
+      // One frozen version: every executed cell ran at the matrix commit, with the same conformance harness and product.
+      if ((cell.result === 'PASS' || cell.result === 'FAIL') && matrix.sha && cell.sha && cell.sha !== matrix.sha) {
+        problems.push(`${client.id}/${claim.id}: cell ran at ${cell.sha.slice(0, 9)} but the matrix is for ${matrix.sha.slice(0, 9)} (rerun every cell at one frozen commit)`);
+      }
+      if ((cell.result === 'PASS' || cell.result === 'FAIL') && matrix.harness_tree_id && cell.harness_tree_id !== matrix.harness_tree_id) {
+        problems.push(`${client.id}/${claim.id}: cell was run with a different conformance harness than the matrix`);
+      }
       if (cell.product_tree_id && matrix.product_tree_id && cell.product_tree_id !== matrix.product_tree_id) {
         problems.push(`${client.id}/${claim.id}: cell was run on a different product (tree ${String(cell.product_tree_id).slice(0, 8)}) than the matrix (${String(matrix.product_tree_id).slice(0, 8)})`);
       }
@@ -97,7 +105,7 @@ export function renderMatrixMarkdown(matrix) {
   lines.push('');
   lines.push(`Source SHA: \`${matrix.sha}\` · generated ${matrix.generated_at}`);
   lines.push('');
-  lines.push(`Product under test: mind-place.exe sha256 \`${matrix.executable_sha256}\`, product source tree id \`${matrix.product_tree_id}\`. Each PASS or FAIL cell cites the commit it ran at; the harness may advance between runs, the product (executable and product trees) may not.`);
+  lines.push(`Product under test: mind-place.exe sha256 \`${matrix.executable_sha256}\`, product source tree id \`${matrix.product_tree_id}\`, conformance harness tree id \`${matrix.harness_tree_id ?? 'n/a'}\`. Every PASS or FAIL cell ran at exactly this commit with exactly this harness and product (enforced by the validator). The commit that records this matrix adds only the documentation and receipts under \`docs/qualification/mcp-parity/\`.`);
   lines.push('');
   lines.push('Legend: PASS = a REAL provider client did it on this exact SHA (client name and version observed on the wire). The synthetic row is a server reference, never provider proof. NOT_RUN and PROVIDER_BLOCKED are explicit, not hidden.');
   lines.push('');
@@ -120,6 +128,7 @@ export function renderMatrixMarkdown(matrix) {
       if (cell.evidence?.observed_client) bits.push(`client ${cell.evidence.observed_client.name} ${cell.evidence.observed_client.version}`);
       if (cell.evidence?.transport) bits.push(`transport ${cell.evidence.transport}`);
       if (cell.evidence?.receipt) bits.push(`receipt ${cell.evidence.receipt}`);
+      if (cell.scope) bits.push(`scope: ${cell.scope}`);
       if (cell.note) bits.push(cell.note);
       if (cell.reason) bits.push(`reason: ${cell.reason}`);
       if (cell.blocker) bits.push(`blocker: ${cell.blocker}; fallback: ${cell.fallback}`);

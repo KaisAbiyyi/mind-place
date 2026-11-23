@@ -56,6 +56,10 @@ Antigravity's MCP configuration stores the Authorization header literally (no en
 
 Record results in `owner-result-template.json`. (This card exists because the key is on a command line here; use a disposable key only.)
 
+## Card: Gemini CLI (eligible account)
+
+The harness writes project settings with `trust: false` for the server (no provider-side per-server trust). In a headless run Gemini CLI may therefore wait for tool-call approval: approve only the three read-only Mind Place tools (`memory_search`, `memory_fetch`, `context_build`) when asked, or use the CLI's own allowed-tools option for those three names. Never enable trust for the server or a blanket auto-approve mode: that would let the provider, not the owner's grants, decide what is read. Then run `node scripts/mcp-conformance/run.mjs real gemini-cli`.
+
 ## Card: any local CLI that failed in the agent run
 
 If a row in `PARITY-MATRIX.md` shows PROVIDER_BLOCKED or NOT_RUN for a local CLI, run `node scripts/mcp-conformance/run.mjs real <client-id>` from a normal terminal on a machine where that client is signed in with an eligible account (`claude-code`, `codex`, `gemini-cli`, `antigravity`). It writes a receipt under `outputs/mcp-conformance/<sha>/`, then `node scripts/mcp-conformance/run.mjs matrix` merges it.

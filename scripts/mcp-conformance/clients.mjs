@@ -17,6 +17,18 @@ export const TOKEN_ENV = 'MP_CONFORMANCE_TOKEN';
 // Distinct from any connector the account may already have (for example a hosted "mind_place" app).
 const SERVER_NAME = 'mpconformance';
 
+/**
+ * Gemini CLI project settings for one run. `trust` is explicitly false: provider-side per-server trust
+ * (skipping the client's own tool-call confirmation) must never stand in for the owner's consent. What a
+ * client may read is decided only by Mind Place's per-chat grants. The key is referenced by environment
+ * variable name, never written.
+ */
+export function geminiProjectSettings(url) {
+  return {
+    mcpServers: { [SERVER_NAME]: { httpUrl: url, headers: { Authorization: `Bearer \${${TOKEN_ENV}}` }, timeout: 60000, trust: false } },
+  };
+}
+
 function which(command) {
   const result = spawnSync('where.exe', [command], { encoding: 'utf8', windowsHide: true });
   if (result.status !== 0) return null;
@@ -170,9 +182,7 @@ export const DRIVERS = {
       // references an environment variable that the CLI expands itself.
       const dir = path.join(o.workDir, '.gemini');
       fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({
-        mcpServers: { [SERVER_NAME]: { httpUrl: o.url, headers: { Authorization: `Bearer \${${TOKEN_ENV}}` }, timeout: 60000, trust: true } },
-      }));
+      fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify(geminiProjectSettings(o.url)));
       const result = await run(found.exe, ['-p', o.prompt, '--output-format', 'stream-json', '--allowed-mcp-server-names', SERVER_NAME], {
         cwd: o.workDir, timeoutMs: o.timeoutMs ?? 300000,
         env: { ...process.env, [TOKEN_ENV]: o.token },

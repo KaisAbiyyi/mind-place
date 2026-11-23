@@ -33,6 +33,8 @@ export function sourceIdentity() {
     dirty,
     // The binary is built from Rust sources and the frontend. Binding both lets a reader see exactly what the executable embodies.
     trees: { crates: git('rev-parse', 'HEAD:crates'), src_tauri: git('rev-parse', 'HEAD:src-tauri'), cargo_lock: git('rev-parse', 'HEAD:Cargo.lock'), src: git('rev-parse', 'HEAD:src') },
+    // The conformance harness that produced the evidence. Recorded separately from the product so both are verifiable.
+    harness: { conformance: git('rev-parse', 'HEAD:scripts/mcp-conformance'), lib: git('rev-parse', 'HEAD:scripts/lib') },
   };
 }
 
@@ -98,6 +100,7 @@ async function syntheticPhase() {
     page_errors: app.pageErrors,
     corpus_summary: Object.fromEntries(Object.entries(corpus).map(([k, v]) => [k, v.revisions.map((r) => ({ messages: r.message_count, raw_sha256: r.raw_sha256 }))])),
     schema_features: result?.schemaFeatures ?? [],
+    c4_scope: 'Long chat (over 256 KB, 3 revisions, multi-byte, astral-plane and right-to-left text): latest revision at 64 KB and 9 KB pages in two protocol eras and every earlier revision; medium chat in 4 KB pages. A server reference, not a provider client.',
     harness_failure: result?.harnessFailure ?? null,
     failure,
     claims: result?.claims ?? null,
@@ -142,7 +145,8 @@ async function matrixPhase() {
       if (!/^[0-9a-f]{40}$/.test(receipt.source?.sha ?? '')) problems.push(`${client.id}: receipt has no exact SHA`);
       if (treeId(receipt.source?.trees) !== treeId(source.trees)) problems.push(`${client.id}: receipt was produced from a different product tree than HEAD (the executable must match the sources)`);
       if (receipt.dirty_tree) problems.push(`${client.id}: receipt was produced from a dirty tree`);
-      const text = fs.readFileSync(src);
+      if (receipt.source?.sha !== source.sha) problems.push(`${client.id}: receipt ran at ${String(receipt.source?.sha).slice(0, 9)}, not at ${source.sha.slice(0, 9)}: rerun every client at one frozen commit`);
+      if (treeId(receipt.source?.harness) !== treeId(source.harness)) problems.push(`${client.id}: receipt was produced by a different conformance harness than HEAD`);      const text = fs.readFileSync(src);
       fs.writeFileSync(path.join(receiptsDir, fileFor(client)), text);
       rel = `receipts/${fileFor(client)}`;
       hash = crypto.createHash('sha256').update(text).digest('hex');
@@ -155,6 +159,8 @@ async function matrixPhase() {
           result: fromReceipt.result,
           sha: receipt.source.sha,
           product_tree_id: treeId(receipt.source.trees),
+          harness_tree_id: treeId(receipt.source.harness),
+          ...(claim.id === 'C4' && receipt.c4_scope ? { scope: receipt.c4_scope } : {}),
           evidence: client.synthetic
             ? { kind: 'SYNTHETIC_HTTP', receipt: rel, receipt_sha256: hash, transport: client.transport }
             : { kind: 'REAL_CLIENT', receipt: rel, receipt_sha256: hash, transport: client.transport, observed_client: receipt.observed_client ?? undefined },
@@ -170,7 +176,7 @@ async function matrixPhase() {
       }
     }
   }
-  const matrix = { sha: source.sha, product_tree_id: treeId(source.trees), generated_at: new Date().toISOString(), executable_sha256: JSON.parse(fs.readFileSync(path.join(outDir, 'synthetic.json'), 'utf8')).executable_sha256, rust_trees: source.trees, cells };
+  const matrix = { sha: source.sha, product_tree_id: treeId(source.trees), harness_tree_id: treeId(source.harness), generated_at: new Date().toISOString(), executable_sha256: JSON.parse(fs.readFileSync(path.join(outDir, 'synthetic.json'), 'utf8')).executable_sha256, rust_trees: source.trees, cells };
   problems.push(...validateMatrix(matrix));
   fs.writeFileSync(path.join(docsDir, 'matrix.json'), JSON.stringify(matrix, null, 2) + '\n');
   fs.writeFileSync(path.join(docsDir, 'PARITY-MATRIX.md'), renderMatrixMarkdown(matrix));

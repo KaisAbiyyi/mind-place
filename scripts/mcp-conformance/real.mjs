@@ -6,6 +6,7 @@
  * Verdicts come from the proxy log, never from what the model said: the client announced its own
  * name and version, which tools/call requests it really sent, and what the server really answered.
  */
+import crypto from 'node:crypto';
 import { Claim, verifyRevision } from './suite.mjs';
 import { DRIVERS, makeWorkDir } from './clients.mjs';
 import { observedClientIdentity, startRecordingProxy } from './recording-proxy.mjs';
@@ -38,6 +39,12 @@ function canonical(value) {
   return JSON.stringify(value ?? null);
 }
 
+/** Short digest of canonical arguments: lets a receipt compare argument shapes without carrying any id. */
+export const argsDigest = (value) => crypto.createHash('sha256').update(canonical(value)).digest('hex').slice(0, 12);
+
+/** The arguments that decide which revision is read; paging and budget do not. */
+export const identityArgs = (args) => ({ source_id: args?.source_id ?? null, archive_id: args?.archive_id ?? null, snapshot_id: args?.snapshot_id ?? null, granularity: args?.granularity ?? null });
+
 function chainHonest(chain) {
   for (let i = 0; i < chain.length; i += 1) {
     const sent = chain[i].params?.arguments?.cursor ?? null;
@@ -62,6 +69,7 @@ export async function runRealClient(clientId, { startSession, log = () => {} }) 
   let identity = null;
   let progress = 'setup';
   let notConnected = null;
+  let c4Verdict = null;
   try {
     const K = await app.issueReader('Real client');
     const K2 = await app.issueReader('Real client (client-revoke test)');
@@ -83,6 +91,14 @@ export async function runRealClient(clientId, { startSession, log = () => {} }) 
     };
     const unknownFetch = async (rev) => outcomeOf(await wire.call(K.credential, 'memory_fetch', { source_id: `src:v1:${'0'.repeat(64)}`, archive_id: rev.archive_id, snapshot_id: rev.snapshot_id, granularity: 'revision' }, MODERN));
     const outcomeOf = (r) => `${r.status}:${JSON.stringify(r.json?.error ?? null)}`;
+    // A denial only means something if the very same arguments are valid when access is granted. The harness
+    // proves that with the exact arguments below (granted: HTTP 200 with content; denied: the unknown-id outcome),
+    // and each real-client fetch is then compared with them by digest, so a malformed client call (which also
+    // answers 400/-32602) can never be mistaken for a permission denial. Receipts carry digests, never ids.
+    const validArgs = { source_id: sid[med.title], archive_id: rev2.archive_id, snapshot_id: rev2.snapshot_id, granularity: 'revision' };
+    const validDigest = argsDigest(validArgs);
+    const usesValidArgs = (e) => argsDigest(identityArgs(e.params?.arguments)) === validDigest;
+    const probe = async () => wire.call(K.credential, 'memory_fetch', validArgs, MODERN);
 
     // R0 default deny: nothing is granted yet.
     progress = 'R0';
@@ -96,16 +112,20 @@ export async function runRealClient(clientId, { startSession, log = () => {} }) 
       notConnected = { reason: r0.exs.length === 0 ? 'no request reached the listener' : `every request was refused (${[...new Set(r0.exs.map((e) => e.status))].join(',')}); the client did not deliver a valid credential`, requestsSeen: r0.exs.length, exit: r0.out.exit, serverStatus: r0.out.serverStatus ?? null, stderr: String(r0.out.stderr ?? '').slice(-300), stdoutTail: String(r0.out.stdoutTail ?? '').slice(-300), received: proxy.received.length };
       throw new Error('CLIENT_DID_NOT_CONNECT');
     }
+    const deniedBeforeGrant = outcomeOf(await probe());
     {
       const c = claims.C6;
       const search = calls(r0.exs, 'memory_search')[0];
-      const fetch = calls(r0.exs, 'memory_fetch')[0];
+      const fetch = calls(r0.exs, 'memory_fetch').find(usesValidArgs);
       c.check('the real client searched before any grant and got nothing', Boolean(search) && ok(search) && hitsOf(search).length === 0, search ? `${search.status}:${hitsOf(search).length}` : 'client sent no search');
-      c.check('the real client fetched with exact ids before any grant and was denied like an unknown id', Boolean(fetch) && errKey(fetch) === unknownOutcome, fetch ? `${errKey(fetch)} vs ${unknownOutcome}` : 'client sent no fetch');
+      c.check('before any grant the harness, with the proven-valid fetch arguments, is denied exactly like an unknown id', deniedBeforeGrant === unknownOutcome, `${deniedBeforeGrant} vs ${unknownOutcome}`);
+      c.check('the real client fetched with those same valid arguments before any grant and was denied like an unknown id', Boolean(fetch) && errKey(fetch) === unknownOutcome, fetch ? `args digest ${validDigest}: ${errKey(fetch)}` : `client sent no fetch with the proven-valid arguments (digest ${validDigest})`);
     }
 
     // Owner grants the medium chat to K.
     await app.grantSources(K.clientId, [sid[med.title]]);
+    const grantedProbe = await probe();
+    claims.C6.check('the same arguments are valid once granted: HTTP 200 with the revision content (so the denial was permission, not malformed input)', grantedProbe.status === 200 && !grantedProbe.json?.error && grantedProbe.json?.result?.structuredContent?.snapshot_id === rev2.snapshot_id && (grantedProbe.json?.result?.structuredContent?.segments?.length ?? 0) > 0, `args digest ${validDigest}: ${outcomeOf(grantedProbe)}`);
 
     // R1 handshake, discovery, scoped search.
     progress = 'R1';
@@ -156,6 +176,7 @@ export async function runRealClient(clientId, { startSession, log = () => {} }) 
       const chain = chainFor(r2.exs, rev.snapshot_id);
       const verdict = verifyRevision(chain.map(asReply), rev.messages, rev);
       const dishonest = chainHonest(chain);
+      if (label === 'latest') c4Verdict = verdict;
       const target = label === 'latest' ? claims.C4 : claims.C5;
       target.check(`the real client read the ${label} revision exactly (${verdict.pages ?? chain.length} pages, ${verdict.bytes ?? 0} bytes)`, verdict.ok && !dishonest && (label === 'earlier' || verdict.pages >= 5), verdict.reason ?? dishonest ?? `${verdict.pages} pages`);
       const rejected = rejectedFetches(r2.exs, rev.snapshot_id);
@@ -173,9 +194,11 @@ export async function runRealClient(clientId, { startSession, log = () => {} }) 
     {
       const c = claims.C7;
       const s = calls(r3.exs, 'memory_search')[0];
-      const f = calls(r3.exs, 'memory_fetch')[0];
+      const f = calls(r3.exs, 'memory_fetch').find(usesValidArgs);
+      const deniedAfterRevoke = outcomeOf(await probe());
       c.check('the very next search by the real client returns nothing after the chat was revoked', Boolean(s) && ok(s) && hitsOf(s).length === 0, s ? `${hitsOf(s).length}` : 'no search');
-      c.check('the very next fetch by the real client is denied like an unknown id', Boolean(f) && errKey(f) === unknownOutcome, f ? errKey(f) : 'no fetch');
+      c.check('after the revoke the same arguments that were accepted (HTTP 200) while granted are denied exactly like an unknown id', deniedAfterRevoke === unknownOutcome, `${deniedAfterRevoke} vs ${unknownOutcome}`);
+      c.check('the very next fetch by the real client, with those same valid arguments, is denied like an unknown id', Boolean(f) && errKey(f) === unknownOutcome, f ? `args digest ${validDigest}: ${errKey(f)}` : `client sent no fetch with the proven-valid arguments (digest ${validDigest})`);
     }
     // Whole-client revoke, with a second credential.
     progress = 'R3b';
@@ -241,6 +264,8 @@ export async function runRealClient(clientId, { startSession, log = () => {} }) 
     label: driver.label,
     installed: found,
     observed_client: identity,
+    // What this real client actually read for C4. The long (over 256 KB) chat is verified by the synthetic row only.
+    c4_scope: `Medium multi-byte two-revision chat: latest revision ${c4Verdict?.bytes ?? 'n/a'} bytes read in ${c4Verdict?.pages ?? 'n/a'} pages of at most 3000 bytes, earlier revision also read. The long chat over 256 KB was NOT read by this real client (NOT_RUN for real clients; covered by the synthetic reference only).`,
     transcript,
     claims: Object.fromEntries(Object.entries(claims).map(([k, v]) => [k, v.toJSON()])),
     exchange_summary: proxy.exchanges.map((e) => ({
