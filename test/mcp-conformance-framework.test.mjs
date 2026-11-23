@@ -92,7 +92,7 @@ test('recording proxy captures the real client identity and exchanges, rewrites 
     const init = await wire.post(TOKEN, 'initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'claude-code', version: '9.9.9' } }, { era: '2025-06-18' });
     assert.equal(init.status, 200);
     assert.equal(upstream.seen[0].host, `127.0.0.1:${upstream.port}`, 'Host is rewritten to the listener loopback host');
-    assert.deepEqual(observedClientIdentity(proxy.exchanges), { name: 'claude-code', version: '9.9.9', protocolVersion: '2025-06-18' });
+    assert.deepEqual(observedClientIdentity(proxy.exchanges), { name: 'claude-code', version: '9.9.9', protocolVersion: '2025-06-18', source: 'initialize.clientInfo' });
     const denied = await wire.post('wrong-token-0000000000', 'tools/list', {}, { era: '2025-06-18' });
     assert.equal(denied.status, 401);
     assert.equal(proxy.exchanges.at(-1).status, 401);
@@ -156,4 +156,12 @@ test('verifyRevision rejects gaps, silent truncation, wrong text and wrong count
 test('schemaFeatures reports the keywords strict clients may reject', () => {
   const features = schemaFeatures([{ inputSchema: { type: 'object', properties: { a: { oneOf: [{ type: 'string', minLength: 1 }, { type: ['string', 'null'] }] }, b: { type: 'number', exclusiveMinimum: 0 } }, additionalProperties: false } }]);
   assert.deepEqual(features, ['additionalProperties', 'exclusiveMinimum', 'minLength', 'oneOf', 'type-array']);
+});
+
+test('client identity falls back to modern _meta clientInfo, then the User-Agent, and says which', () => {
+  const meta = [{ params: { _meta: { 'io.modelcontextprotocol/clientInfo': { name: 'codex', version: '0.164.0' }, 'io.modelcontextprotocol/protocolVersion': '2026-07-28' } } }];
+  assert.deepEqual(observedClientIdentity(meta), { name: 'codex', version: '0.164.0', protocolVersion: '2026-07-28', source: '_meta.clientInfo' });
+  const ua = [{ userAgent: 'codex_cli_rs/0.164.0 (Windows)', protocolHeader: '2026-07-28' }];
+  assert.deepEqual(observedClientIdentity(ua), { name: 'codex_cli_rs', version: '0.164.0', protocolVersion: '2026-07-28', source: 'user-agent' });
+  assert.equal(observedClientIdentity([{ rpcMethod: 'tools/list' }]), null);
 });
