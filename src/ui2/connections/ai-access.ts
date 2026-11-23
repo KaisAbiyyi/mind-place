@@ -62,6 +62,7 @@ export function createAiAccessSection(deps: AiAccessDeps): ConnectionsSection {
   let nameValue = "";
   let issued: IssuedKey | null = null;
   let copied = false;
+  let copyFailed = false;
   let clients: ClientRow[] = [];
   let hasMore = false;
   let listState: "loading" | "ready" | "error" = "loading";
@@ -153,23 +154,37 @@ export function createAiAccessSection(deps: AiAccessDeps): ConnectionsSection {
     box.append(createUi2Banner(doc, { tone: "ok", title: i18n.t("conn.keyT"), message: i18n.t("conn.keyV") }));
     const code = renderUi2TechnicalCode(doc, key.credential);
     code.setAttribute("aria-label", i18n.t("conn.keyLabel"));
+    const clipboard = deps.clipboard;
     const copy = createUi2Button(doc, {
       label: i18n.t(copied ? "action.copied" : "action.copy"),
       variant: "secondary",
       size: "sm",
+      // No clipboard writer: the button cannot succeed, so it is disabled and
+      // the hint below says the key has to be copied by hand.
+      disabled: !clipboard,
       onClick: () => {
+        if (!clipboard) return;
         void (async () => {
+          copied = false;
+          copyFailed = false;
           try {
-            await deps.clipboard?.writeText(key.credential);
+            await clipboard.writeText(key.credential);
             copied = true;
           } catch {
-            message = i18n.t("action.retry");
+            copyFailed = true;
           }
-          render();
+          if (live()) render();
         })();
       },
     });
     box.append(code, copy);
+    if (!clipboard || copyFailed) {
+      const hint = doc.createElement("p");
+      hint.className = "ui2-field-hint";
+      hint.setAttribute("role", "status");
+      hint.textContent = i18n.t("conn.copyManual");
+      box.append(hint);
+    }
     return box;
   }
 
@@ -318,6 +333,7 @@ export function createAiAccessSection(deps: AiAccessDeps): ConnectionsSection {
       if (!alive) return;
       issued = { client_id: result.client_id, credential: result.credential };
       copied = false;
+      copyFailed = false;
       nameValue = "";
       creating = false;
       await loadClients(true);
@@ -371,6 +387,8 @@ export function createAiAccessSection(deps: AiAccessDeps): ConnectionsSection {
       openDialog = undefined;
       // Clear the one-time key and the typed name; nothing here is persisted.
       issued = null;
+      copied = false;
+      copyFailed = false;
       nameValue = "";
       counts.clear();
       clients = [];

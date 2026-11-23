@@ -351,6 +351,7 @@ export const ID_CATALOG: Record<Ui2TranslationKey, string> = {
   "conn.keyT": "Salin kuncimu sekarang",
   "conn.keyV": "Hanya ditampilkan sekali dan dihapus saat kamu meninggalkan halaman ini atau mengunci.",
   "conn.keyLabel": "Kunci akses",
+  "conn.copyManual": "Tidak bisa menyalin otomatis. Pilih kunci di atas lalu salin sendiri.",
   "conn.apps": "Aplikasi dengan akses",
   "conn.noApps": "Belum ada aplikasi dengan akses.",
   "conn.readOnly": "Hanya baca",

@@ -349,6 +349,7 @@ export const EN_CATALOG = {
   "conn.keyT": "Copy your key now",
   "conn.keyV": "It is shown only once and is cleared when you leave this page or lock.",
   "conn.keyLabel": "Access key",
+  "conn.copyManual": "Could not copy automatically. Select the key above and copy it yourself.",
   "conn.apps": "Apps with access",
   "conn.noApps": "No apps have access yet.",
   "conn.readOnly": "Read only",

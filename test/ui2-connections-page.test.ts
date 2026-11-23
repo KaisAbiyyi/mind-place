@@ -17,7 +17,7 @@ interface Client {
   policy_revision: number;
 }
 
-function rig(options: { running?: boolean; failShare?: boolean; failIssue?: boolean; failRegister?: boolean; registered?: string[]; tunnelError?: string } = {}) {
+function rig(options: { running?: boolean; failShare?: boolean; failIssue?: boolean; failRegister?: boolean; registered?: string[]; tunnelError?: string; clipboard?: "ok" | "missing" | "reject" } = {}) {
   const dom = new JSDOM('<!doctype html><body><div id="root"></div></body>', { pretendToBeVisual: true });
   const doc = dom.window.document;
   Object.assign(globalThis, { document: doc, window: dom.window });
@@ -84,7 +84,16 @@ function rig(options: { running?: boolean; failShare?: boolean; failIssue?: bool
     doc,
     i18n,
     invoke,
-    clipboard: { writeText: async (value: string) => void written.push(value) },
+    ...(options.clipboard === "missing"
+      ? {}
+      : {
+          clipboard: {
+            writeText: async (value: string) => {
+              if (options.clipboard === "reject") throw new Error("NotAllowedError");
+              written.push(value);
+            },
+          },
+        }),
   });
   doc.getElementById("root")!.append(page.element);
   const settle = async () => {
@@ -150,6 +159,42 @@ test("create access shows the key once, copies it, survives a language switch, a
   r.page.destroy();
   assert.equal((r.doc.body.textContent ?? "").includes(KEY), false, "destroy clears the key from the page");
   assert.equal(r.page.element.childElementCount, 0);
+});
+
+test("copy never reports success when the clipboard is missing", async () => {
+  const r = rig({ clipboard: "missing" });
+  await r.settle();
+  r.button("Create access")!.click();
+  await r.settle();
+  const copy = r.button("Copy")!;
+  assert.ok(copy, "the Copy button is still present");
+  assert.equal(copy.disabled, true, "cannot be clicked when nothing can be copied");
+  copy.click();
+  await r.settle();
+  assert.equal(r.button("Copied"), undefined, "no false success");
+  assert.match(r.page.element.textContent ?? "", /copy it yourself/);
+  assert.ok((r.page.element.textContent ?? "").includes(KEY), "the key stays visible for manual copy");
+});
+
+test("copy never reports success when the clipboard rejects, and a later success still works", async () => {
+  const r = rig({ clipboard: "reject" });
+  await r.settle();
+  r.button("Create access")!.click();
+  await r.settle();
+  r.button("Copy")!.click();
+  await r.settle();
+  assert.equal(r.button("Copied"), undefined, "no false success");
+  assert.ok(r.button("Copy"), "button stays available for another try");
+  assert.match(r.page.element.textContent ?? "", /Could not copy automatically/);
+  assert.deepEqual(r.written, []);
+  const ok = rig();
+  await ok.settle();
+  ok.button("Create access")!.click();
+  await ok.settle();
+  ok.button("Copy")!.click();
+  await ok.settle();
+  assert.ok(ok.button("Copied"));
+  assert.doesNotMatch(ok.page.element.textContent ?? "", /copy it yourself/);
 });
 
 test("a failed create shows an error and never shows a key", async () => {

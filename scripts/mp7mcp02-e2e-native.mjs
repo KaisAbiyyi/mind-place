@@ -3,8 +3,12 @@
  * Connections page, the real local MCP listener, and an HTTP MCP client.
  * Disposable archive and WebView2 profile; synthetic conversations written
  * through the real native-messaging host. No owner data, no real secrets: the
- * unlock secret and the access key live only in this process and are never
- * logged or written to the receipt.
+ * unlock secret and the access key live only in this process. They are never
+ * logged, written to the receipt or captured in a screenshot: every screenshot
+ * goes through scripts/lib/e2e-secret-guard.mjs, which hides every element that
+ * shows a secret and refuses to capture (fail-closed) when it cannot, every
+ * string that leaves the process is scrubbed, and the output directory is
+ * scanned before the run ends. The one-time key page is deliberately NOT captured.
  *
  * Run after `npm run dist:win`:  node scripts/mp7mcp02-e2e-native.mjs
  * Needs the MCP port (43731) free, so close any running Mind Place first.
@@ -17,18 +21,21 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
+import { findSecretsOnDisk, guardedScreenshot, purgeUnsafeEvidence, scrubText } from './lib/e2e-secret-guard.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const out = path.join(root, 'outputs', 'mp7mcp02-e2e');
 const executable = path.join(root, 'release', 'win32-x64', 'mind-place.exe');
 const host = path.join(root, 'release', 'win32-x64', 'mind-place-capture-host.exe');
 const checks = [];
+/** Live secrets of this run (unlock secret, access key). Scrubbed from every output. */
+const secrets = [];
 const pageErrors = [];
 let app;
 let browser;
 let page;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const record = (gate, result, detail) => checks.push({ gate, result, detail });
+const record = (gate, result, detail) => checks.push({ gate, result, detail: scrubText(detail, secrets) });
 async function gate(name, check) {
   try {
     record(name, 'PASS', (await check()) ?? 'Verified');
@@ -85,8 +92,9 @@ async function connect(port) {
   page.on('pageerror', (error) => pageErrors.push(String(error.message).slice(0, 250)));
 }
 
+/** Fail-closed capture: secrets are hidden first; if that cannot be proven, no file is written. */
 async function shot(name) {
-  await page.screenshot({ path: path.join(out, name), fullPage: true });
+  await guardedScreenshot(page, out, name, { secrets });
 }
 
 try {
@@ -126,6 +134,7 @@ try {
 
   // First run: create a disposable unlock secret that never leaves this process.
   const secret = crypto.randomBytes(24).toString('hex');
+  secrets.push(secret);
   await page.locator('#security-secret').waitFor({ timeout: 40000 });
   await page.locator('#security-secret').fill(secret);
   await page.locator('#security-secret-confirm').fill(secret);
@@ -154,9 +163,11 @@ try {
   await page.getByRole('button', { name: 'Create access' }).click();
   await page.locator('.ui2-tech-code').waitFor();
   const token = (await page.locator('.ui2-tech-code').first().innerText()).trim();
-  assert.match(token, /^mpc_v1_[0-9a-f]{64}$/);
-  await shot('02-key-shown-once.png');
-  record('create-access-shows-key-once', 'PASS', 'Key displayed once in the UI (value not recorded)');
+  secrets.push(token);
+  // Never put the value in an assertion message: a failed match would print it.
+  assert.ok(/^mpc_v1_[0-9a-f]{64}$/.test(token), 'Issued key does not have the expected shape');
+  // No screenshot while the key is on screen: this run never captures the key page.
+  record('create-access-shows-key-once', 'PASS', 'Key displayed once in the UI (value not recorded, page not captured)');
   await page.getByText('My AI app').first().waitFor();
 
   // Default deny, proven through the real HTTP listener.
@@ -314,17 +325,26 @@ try {
   record('page-errors', pageErrors.length === 0 ? 'PASS' : 'FAIL', pageErrors.length === 0 ? 'No uncaught page errors' : pageErrors.join(' | '));
 } catch (error) {
   record('harness', 'FAIL', String(error.message ?? error).slice(0, 500));
-  try { if (page) await shot('failure.png'); } catch { /* ignore */ }
+  // Failure capture uses the same guard; if the guard refuses, there is simply no image.
+  try { if (page) await shot('failure.png'); } catch { /* guard refused or page gone */ }
 } finally {
   await browser?.close().catch(() => {});
   if (app?.exitCode === null) app.kill();
+  // Last line of defence: nothing secret-bearing or unguarded may remain in the output directory.
+  const unsafe = findSecretsOnDisk(out, secrets);
+  if (unsafe.length) {
+    purgeUnsafeEvidence(out, secrets);
+    record('no-secrets-on-disk', 'FAIL', `Removed unsafe evidence: ${unsafe.join('; ')}`);
+  } else {
+    record('no-secrets-on-disk', 'PASS', 'Output directory holds no secret and no unguarded image');
+  }
   const receipt = {
     kind: 'packaged app + real WebView2 UI2 Connections page + real local MCP listener + HTTP MCP client (disposable synthetic data)',
     executable_sha256: crypto.createHash('sha256').update(fs.readFileSync(executable)).digest('hex'),
     checks,
     verdict: checks.every((c) => c.result === 'PASS') ? 'PASS' : 'FAIL',
   };
-  fs.writeFileSync(path.join(out, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n');
-  console.log(JSON.stringify({ verdict: receipt.verdict, checks: checks.map((c) => `${c.result} ${c.gate}${c.result === 'FAIL' ? ' :: ' + c.detail : ''}`) }, null, 2));
+  fs.writeFileSync(path.join(out, 'receipt.json'), scrubText(JSON.stringify(receipt, null, 2), secrets) + '\n');
+  console.log(scrubText(JSON.stringify({ verdict: receipt.verdict, checks: checks.map((c) => `${c.result} ${c.gate}${c.result === 'FAIL' ? ' :: ' + c.detail : ''}`) }, null, 2), secrets));
   process.exitCode = receipt.verdict === 'PASS' ? 0 : 1;
 }
