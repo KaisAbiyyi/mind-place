@@ -11,7 +11,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 
 export const TOKEN_ENV = 'MP_CONFORMANCE_TOKEN';
 // Distinct from any connector the account may already have (for example a hosted "mind_place" app).
@@ -44,16 +44,29 @@ function version(command, args = ['--version'], timeout = 90000) {
   return result.status === 0 ? String(result.stdout).trim().split(/\r?\n/).pop() : null;
 }
 
+/**
+ * Runs a client ASYNCHRONOUSLY. This matters: the recording proxy and the app driver live in this same
+ * process, so a blocking spawn would freeze the event loop and the client could never reach the proxy.
+ */
 function run(command, args, { input, env, cwd, timeoutMs }) {
   const l = launcher(command);
-  return spawnSync(l.command, [...l.prefix, ...args], {
-    input,
-    cwd,
-    env,
-    encoding: 'utf8',
-    windowsHide: true,
-    timeout: timeoutMs,
-    maxBuffer: 64 * 1024 * 1024,
+  return new Promise((resolve) => {
+    const child = spawn(l.command, [...l.prefix, ...args], { cwd, env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    const out = [];
+    const err = [];
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true });
+    }, timeoutMs ?? 300000);
+    child.stdout.on('data', (c) => out.push(c));
+    child.stderr.on('data', (c) => err.push(c));
+    child.on('error', (error) => { err.push(Buffer.from(String(error.message))); });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      resolve({ status: timedOut ? null : code, timedOut, stdout: Buffer.concat(out).toString('utf8'), stderr: Buffer.concat(err).toString('utf8') });
+    });
+    if (input) child.stdin.end(input); else child.stdin.end();
   });
 }
 
@@ -72,7 +85,7 @@ export const DRIVERS = {
       return exe ? { exe, version: version(exe) } : null;
     },
     /** @param {RunOptions} o */
-    run(o) {
+    async run(o) {
       const found = this.detect();
       if (!found) throw new Error('Claude Code is not installed');
       const config = path.join(o.workDir, 'claude-mcp.json');
@@ -80,7 +93,7 @@ export const DRIVERS = {
         mcpServers: { [SERVER_NAME]: { type: 'http', url: o.url, headers: { Authorization: `Bearer \${${TOKEN_ENV}}` } } },
       }));
       const tools = ['memory_search', 'memory_fetch', 'context_build'].map((t) => `mcp__${SERVER_NAME}__${t}`);
-      const result = run(found.exe, ['-p', '--mcp-config', config, '--strict-mcp-config', '--allowedTools', ...tools,
+      const result = await run(found.exe, ['-p', '--mcp-config', config, '--strict-mcp-config', '--allowedTools', ...tools,
         '--model', 'haiku', '--max-turns', '60', '--output-format', 'stream-json', '--verbose'], {
         input: o.prompt, cwd: o.workDir, timeoutMs: o.timeoutMs ?? 300000,
         env: { ...process.env, [TOKEN_ENV]: o.token },
@@ -108,7 +121,7 @@ export const DRIVERS = {
       const exe = which('codex');
       return exe ? { exe, version: version(exe) } : null;
     },
-    run(o) {
+    async run(o) {
       const found = this.detect();
       if (!found) throw new Error('Codex is not installed');
       // Config via -c overrides only: nothing is written to the user's ~/.codex.
@@ -124,7 +137,7 @@ export const DRIVERS = {
       ].flatMap((kv) => ['-c', kv]);
       // The account's default model may not be available to Codex with a ChatGPT login; pick one that is.
       const model = process.env.MP_CODEX_MODEL ?? 'gpt-6-luna';
-      const result = run(found.exe, ['exec', '--json', '--skip-git-repo-check', '-s', 'read-only', '-m', model, ...overrides, '-'], {
+      const result = await run(found.exe, ['exec', '--json', '--skip-git-repo-check', '-s', 'read-only', '-m', model, ...overrides, '-'], {
         input: o.prompt, cwd: o.workDir, timeoutMs: o.timeoutMs ?? 300000,
         env: { ...process.env, [TOKEN_ENV]: o.token },
       });
@@ -150,7 +163,7 @@ export const DRIVERS = {
       const exe = which('gemini');
       return exe ? { exe, version: version(exe) } : null;
     },
-    run(o) {
+    async run(o) {
       const found = this.detect();
       if (!found) throw new Error('Gemini CLI is not installed');
       // Project-scope settings inside a disposable working directory. The header value
@@ -160,7 +173,7 @@ export const DRIVERS = {
       fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({
         mcpServers: { [SERVER_NAME]: { httpUrl: o.url, headers: { Authorization: `Bearer \${${TOKEN_ENV}}` }, timeout: 60000, trust: true } },
       }));
-      const result = run(found.exe, ['-p', o.prompt, '--output-format', 'stream-json', '--allowed-mcp-server-names', SERVER_NAME], {
+      const result = await run(found.exe, ['-p', o.prompt, '--output-format', 'stream-json', '--allowed-mcp-server-names', SERVER_NAME], {
         cwd: o.workDir, timeoutMs: o.timeoutMs ?? 300000,
         env: { ...process.env, [TOKEN_ENV]: o.token },
       });
@@ -185,7 +198,7 @@ export const DRIVERS = {
       if (!fs.existsSync(exe)) return null;
       return { exe, version: version(exe) };
     },
-    run(o) {
+    async run(o) {
       const found = this.detect();
       if (!found) throw new Error('Antigravity is not installed');
       const env = { ...process.env, [TOKEN_ENV]: o.token };
@@ -193,9 +206,9 @@ export const DRIVERS = {
       // removed in finally. The header carries the NAME of an environment variable, not the key; whether
       // Antigravity expands it is part of what this run establishes.
       const placeholder = 'Authorization: Bearer ${' + TOKEN_ENV + '}';
-      const add = run(found.exe, ['mcp', 'add', '--type', 'http', '--header', placeholder, SERVER_NAME, o.url], { env, cwd: o.workDir, timeoutMs: 60000 });
+      const add = await run(found.exe, ['mcp', 'add', '--type', 'http', '--header', placeholder, SERVER_NAME, o.url], { env, cwd: o.workDir, timeoutMs: 60000 });
       try {
-        const result = run(found.exe, ['--output-format', 'stream-json', '--mode', 'auto', `--print=${o.prompt}`], {
+        const result = await run(found.exe, ['--output-format', 'stream-json', '--mode', 'auto', `--print=${o.prompt}`], {
           cwd: o.workDir, timeoutMs: o.timeoutMs ?? 300000, env,
         });
         const events = jsonLines(result.stdout);
@@ -210,7 +223,7 @@ export const DRIVERS = {
           stdoutTail: String(result.stdout).slice(-900),
         };
       } finally {
-        run(found.exe, ['mcp', 'remove', SERVER_NAME], { env, cwd: o.workDir, timeoutMs: 60000 });
+        await run(found.exe, ['mcp', 'remove', SERVER_NAME], { env, cwd: o.workDir, timeoutMs: 60000 });
       }
     },
   },

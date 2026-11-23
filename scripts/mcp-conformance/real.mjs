@@ -58,10 +58,10 @@ export async function runRealClient(clientId, { startSession, log = () => {} }) 
     const [rev1, rev2] = med.revisions;
     const ids = (rev) => `source_id "${sid[med.title]}", archive_id "${rev.archive_id}", snapshot_id "${rev.snapshot_id}"`;
 
-    const exercise = (label, token, prompt, timeoutMs = 420000) => {
+    const exercise = async (label, token, prompt, timeoutMs = 420000) => {
       const mark = proxy.mark();
       const workDir = makeWorkDir(clientId);
-      const out = driver.run({ url: proxy.url, token, prompt, workDir, timeoutMs });
+      const out = await driver.run({ url: proxy.url, token, prompt, workDir, timeoutMs });
       const exs = proxy.since(mark);
       transcript.push({ label, exit: out.exit, serverStatus: out.serverStatus ?? null, discoveredTools: out.discoveredTools ?? null, exchanges: exs.length });
       log(`${label}: exit ${out.exit}, ${exs.length} exchanges`);
@@ -73,7 +73,7 @@ export async function runRealClient(clientId, { startSession, log = () => {} }) 
     // R0 default deny: nothing is granted yet.
     progress = 'R0';
     const unknownOutcome = await unknownFetch(rev2);
-    const r0 = exercise('R0 default deny', K.credential,
+    const r0 = await exercise('R0 default deny', K.credential,
       `${ONLY}Step 1: call memory_search with queries ["sentinel-medium-3"]. Step 2: call memory_fetch with ${ids(rev2)}, granularity "revision". Reply with one line: the hit count and whether the fetch succeeded. Do not retry.`);
     identity = observedClientIdentity(proxy.exchanges);
     {
@@ -89,7 +89,7 @@ export async function runRealClient(clientId, { startSession, log = () => {} }) 
 
     // R1 handshake, discovery, scoped search.
     progress = 'R1';
-    const r1 = exercise('R1 scoped search', K.credential,
+    const r1 = await exercise('R1 scoped search', K.credential,
       `${ONLY}Call memory_search three times, once each with queries ["sentinel-medium-3"], ["sentinel-canary-2"], ["sentinel-second-2"]. Reply with the three hit counts only.`);
     identity = observedClientIdentity(proxy.exchanges) ?? identity;
     {
@@ -129,7 +129,7 @@ export async function runRealClient(clientId, { startSession, log = () => {} }) 
 
     // R2 exact full-content read, both revisions, small pages so the client really pages.
     progress = 'R2';
-    const r2 = exercise('R2 paged exact read', K.credential,
+    const r2 = await exercise('R2 paged exact read', K.credential,
       `${ONLY}Read two revisions of one conversation completely with memory_fetch, never printing the text. Revision A: ${ids(rev2)}. Revision B: ${ids(rev1)}. Always use granularity "revision" and budget {"max_bytes": 3000}. After every call, if next_cursor is not null, call memory_fetch again with the same arguments plus cursor set to EXACTLY the next_cursor value just returned; stop when next_cursor is null. Do revision A first, then revision B. Reply with the number of calls made for each.`,
       900000);
     for (const [label, rev] of [['latest', rev2], ['earlier', rev1]]) {
@@ -147,7 +147,7 @@ export async function runRealClient(clientId, { startSession, log = () => {} }) 
     // R3 immediate revocation of the chat grant.
     progress = 'R3';
     await app.revokeSources(K.clientId, [sid[med.title]]);
-    const r3 = exercise('R3 after chat revoke', K.credential,
+    const r3 = await exercise('R3 after chat revoke', K.credential,
       `${ONLY}Step 1: call memory_search with queries ["sentinel-medium-3"]. Step 2: call memory_fetch with ${ids(rev2)}, granularity "revision". Reply with the hit count and whether the fetch succeeded. Do not retry.`);
     {
       const c = claims.C7;
@@ -159,9 +159,9 @@ export async function runRealClient(clientId, { startSession, log = () => {} }) 
     // Whole-client revoke, with a second credential.
     progress = 'R3b';
     await app.grantSources(K2.clientId, [sid[med.title]]);
-    const r3a = exercise('R3b client works before revoke', K2.credential, `${ONLY}Call memory_search with queries ["sentinel-medium-3"] and reply with the hit count only.`);
+    const r3a = await exercise('R3b client works before revoke', K2.credential, `${ONLY}Call memory_search with queries ["sentinel-medium-3"] and reply with the hit count only.`);
     await app.revokeClient(K2.clientId);
-    const r3b = exercise('R3b client after client revoke', K2.credential, `${ONLY}Call memory_search with queries ["sentinel-medium-3"] and reply with the hit count only.`);
+    const r3b = await exercise('R3b client after client revoke', K2.credential, `${ONLY}Call memory_search with queries ["sentinel-medium-3"] and reply with the hit count only.`);
     {
       const c = claims.C7;
       const before = calls(r3a.exs, 'memory_search')[0];
@@ -176,7 +176,7 @@ export async function runRealClient(clientId, { startSession, log = () => {} }) 
     await app.grantSources(K.clientId, [sid[med.title]]);
     await app.lock();
     await new Promise((resolve) => setTimeout(resolve, 1500));
-    const r4 = exercise('R4 after Lock', K.credential, `${ONLY}Call memory_search with queries ["sentinel-medium-3"] and reply with the hit count only. If the server is unreachable, say so.`);
+    const r4 = await exercise('R4 after Lock', K.credential, `${ONLY}Call memory_search with queries ["sentinel-medium-3"] and reply with the hit count only. If the server is unreachable, say so.`);
     {
       const c = claims.C8;
       const disclosed = r4.exs.some((e) => ok(e) && (e.rpcMethod === 'tools/call'));
@@ -190,7 +190,7 @@ export async function runRealClient(clientId, { startSession, log = () => {} }) 
     await app.unlock(unlockSecret);
     await app.startSharing();
     const grantedAfter = await app.grantedSources(K.clientId);
-    const r5 = exercise('R5 after reconnect', K.credential,
+    const r5 = await exercise('R5 after reconnect', K.credential,
       `${ONLY}Call memory_search twice, once with queries ["sentinel-medium-3"] and once with ["sentinel-canary-2"]. Reply with the two hit counts only.`);
     {
       const c = claims.C9;
