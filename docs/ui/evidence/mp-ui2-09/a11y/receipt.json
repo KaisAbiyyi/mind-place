@@ -1,0 +1,122 @@
+{
+  "kind": "automated keyboard-only pass in Chromium against the real UI2 shell with a mocked native layer",
+  "not_covered": [
+    "a screen reader (NVDA, Narrator or JAWS) reading the page and dialogs",
+    "the packaged app in real WebView2 (focus rings, IME, high-DPI, Windows high contrast)",
+    "the owner's own keyboard-only walk-through (owner gate)"
+  ],
+  "checks": [
+    {
+      "id": "K1",
+      "title": "Tab reaches the sharing switch, Create access, Choose chats, Revoke, Register and the Advanced disclosure",
+      "result": "PASS",
+      "detail": "stops=23; missing="
+    },
+    {
+      "id": "K1b",
+      "title": "Every tab stop has an accessible name",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "K9",
+      "title": "Every tab stop shows a visible focus indicator",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "K1c",
+      "title": "No uncaught page errors during the tab walk",
+      "result": "PASS",
+      "detail": ""
+    },
+    {
+      "id": "K2b",
+      "title": "Focus stays on the sharing switch after it is toggled from the keyboard",
+      "result": "PASS",
+      "detail": "{\"lost\":false,\"tag\":\"BUTTON\",\"role\":\"switch\",\"label\":\"Share memory with AI apps\",\"w\":40,\"h\":22,\"focusVisible\":true,\"ring\":true}"
+    },
+    {
+      "id": "K2",
+      "title": "Space toggles the sharing switch both ways, state exposed via aria-checked",
+      "result": "PASS",
+      "detail": "on=true off=false"
+    },
+    {
+      "id": "K3",
+      "title": "Create access and Copy work with Enter; the one-time key has an accessible name",
+      "result": "PASS",
+      "detail": "name=Access key; copiedWrites=1"
+    },
+    {
+      "id": "K3c",
+      "title": "Without a clipboard, Copy is disabled, a hint explains manual copy, and nothing says Copied",
+      "result": "PASS",
+      "detail": "disabled=true hint=1 copied=0"
+    },
+    {
+      "id": "K4",
+      "title": "Choose chats: focus moves into the dialog, Tab/Shift+Tab stay inside, Escape closes it, focus returns to the opener",
+      "result": "PASS",
+      "detail": "entered=true trapped=true closed=true focusAfter=Choose chats"
+    },
+    {
+      "id": "K5",
+      "title": "Inline revoke opens from the keyboard, Cancel closes it without revoking, and focus is never dropped to the page body",
+      "result": "PASS",
+      "detail": "afterOpen=Cancel next=Revoke access cancelClosed=true afterCancel=Revoke access"
+    },
+    {
+      "id": "K5b",
+      "title": "Confirming revoke from the keyboard moves the app to Revoked apps and focus is not lost",
+      "result": "PASS",
+      "detail": "focusAfter=Apps with access"
+    },
+    {
+      "id": "K6",
+      "title": "The Advanced disclosure opens and closes with Enter and Space, and the hosted consent is a labelled switch",
+      "result": "PASS",
+      "detail": "afterEnter=true afterSpace=false reopened=true checkboxes=2"
+    },
+    {
+      "id": "K7",
+      "title": "EN to ID by keyboard swaps the page copy without losing focus",
+      "result": "PASS",
+      "detail": "focus=ID"
+    },
+    {
+      "id": "K8",
+      "title": "At 390px width there is no horizontal scrolling",
+      "result": "PASS",
+      "detail": "overflowPx=0"
+    },
+    {
+      "id": "K8b",
+      "title": "Controls smaller than 24x24 CSS px (WCAG 2.2 target-size minimum; the spacing exception was not evaluated)",
+      "result": "NOTE",
+      "detail": "[{\"el\":\"Share memory with AI apps\",\"w\":40,\"h\":22},{\"el\":\"Advanced: connect hosted ChatG\",\"w\":274,\"h\":19.5},{\"el\":\"I understand ChatGPT may read \",\"w\":40,\"h\":22}]"
+    },
+    {
+      "id": "K11",
+      "title": "Typing the app name keeps focus and the typed text",
+      "result": "PASS",
+      "detail": "value=Keyboard app focus=Name of the app"
+    },
+    {
+      "id": "K12",
+      "title": "After Create access from the keyboard, focus is not dropped to the page body",
+      "result": "PASS",
+      "detail": "focus=Create access"
+    },
+    {
+      "id": "K10",
+      "title": "Lock is reachable and activates with Enter",
+      "result": "PASS",
+      "detail": "lockCalls=1"
+    }
+  ],
+  "verdict": "PASS",
+  "notes_for_owner": [
+    "K8b: Controls smaller than 24x24 CSS px (WCAG 2.2 target-size minimum; the spacing exception was not evaluated)"
+  ]
+}

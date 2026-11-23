@@ -197,6 +197,30 @@ test("copy never reports success when the clipboard rejects, and a later success
   assert.doesNotMatch(ok.page.element.textContent ?? "", /copy it yourself/);
 });
 
+test("keyboard focus stays put when the card re-renders (switch, create, revoke)", async () => {
+  const r = rig();
+  await r.settle();
+  const active = () => (r.doc.activeElement as HTMLElement | null)?.getAttribute("aria-label") ?? r.doc.activeElement?.textContent?.trim() ?? "BODY";
+  const sw = () => r.page.element.querySelector<HTMLButtonElement>("[role=switch]")!;
+  sw().focus();
+  sw().click();
+  await r.settle();
+  assert.equal(active(), "Share memory with AI apps", "the sharing switch keeps focus after it is toggled");
+  const create = r.button("Create access")!;
+  create.focus();
+  create.click();
+  await r.settle();
+  assert.notEqual(r.doc.activeElement, r.doc.body, "focus is not dropped after Create access");
+  assert.equal(active(), "Create access");
+  const confirmOpen = [...r.page.element.querySelectorAll<HTMLButtonElement>(".ui2-conn-app button")].find((b) => b.textContent === "Revoke access")!;
+  confirmOpen.click();
+  const confirm = [...r.page.element.querySelectorAll<HTMLButtonElement>(".ui2-inline-confirm-box button")].find((b) => b.textContent === "Revoke access")!;
+  confirm.focus();
+  confirm.click();
+  await r.settle();
+  assert.notEqual(r.doc.activeElement, r.doc.body, "focus lands on the list heading when the revoked app's controls disappear");
+});
+
 test("a failed create shows an error and never shows a key", async () => {
   const r = rig({ failIssue: true });
   await r.settle();

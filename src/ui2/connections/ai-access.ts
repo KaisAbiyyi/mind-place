@@ -71,8 +71,76 @@ export function createAiAccessSection(deps: AiAccessDeps): ConnectionsSection {
 
   const live = () => alive && root.isConnected !== false;
 
+  // Keyboard focus survives re-renders. The card is rebuilt on every state change,
+  // which would otherwise drop focus to the page body after each key press.
+  let pendingFocus: string | null = null;
+  const mark = <T extends HTMLElement>(element: T, key: string): T => {
+    element.dataset.connFocus = key;
+    return element;
+  };
+  // Opaque per-app focus keys: client ids never appear in the page.
+  const appKeys = new Map<string, string>();
+  const appKey = (clientId: string): string => {
+    let key = appKeys.get(clientId);
+    if (!key) {
+      key = `a${appKeys.size + 1}`;
+      appKeys.set(clientId, key);
+    }
+    return key;
+  };
+  const keyed = (key: string) =>
+    [...root.querySelectorAll<HTMLElement>("[data-conn-focus]")].find((element) => element.dataset.connFocus === key);
+  const focusable = (holder: HTMLElement): HTMLElement | null => {
+    const target = holder.matches("button, input, [tabindex]")
+      ? holder
+      : holder.querySelector<HTMLElement>("button:not([hidden]):not(:disabled), input:not(:disabled)");
+    return target && !(target as HTMLButtonElement).disabled && !target.hidden ? target : null;
+  };
+  /** Where focus is now: a keyed control of this card, a node of the persistent hosted section, or nothing. */
+  function captureFocus(): { key: string | null; hosted: HTMLElement | null; range: [number | null, number | null] } {
+    const active = doc.activeElement as HTMLElement | null;
+    if (!active || active === doc.body) return { key: pendingFocus, hosted: null, range: [null, null] };
+    if (!root.contains(active)) {
+      pendingFocus = null;
+      return { key: null, hosted: null, range: [null, null] };
+    }
+    pendingFocus = null;
+    if (deps.hosted?.element.contains(active)) {
+      const input = active as HTMLInputElement;
+      return { key: null, hosted: active, range: [input.selectionStart ?? null, input.selectionEnd ?? null] };
+    }
+    return { key: active.closest<HTMLElement>("[data-conn-focus]")?.dataset.connFocus ?? null, hosted: null, range: [null, null] };
+  }
+  function restoreFocus(saved: ReturnType<typeof captureFocus>): void {
+    if (saved.hosted && saved.hosted.isConnected) {
+      saved.hosted.focus();
+      const input = saved.hosted as HTMLInputElement;
+      if (saved.range[0] !== null && saved.range[1] !== null) {
+        try { input.setSelectionRange(saved.range[0], saved.range[1]); } catch { /* not a text field */ }
+      }
+      return;
+    }
+    if (!saved.key) return;
+    const holder = keyed(saved.key);
+    const target = holder ? focusable(holder) : null;
+    if (target) {
+      target.focus();
+      pendingFocus = null;
+      return;
+    }
+    // The control is temporarily disabled: try again after the next render.
+    if (holder) {
+      pendingFocus = saved.key;
+      return;
+    }
+    // The control is gone (for example a revoked app): land on the list heading.
+    pendingFocus = null;
+    keyed("apps")?.focus();
+  }
+
   function render(): void {
     if (!alive) return;
+    const saved = captureFocus();
     const card = createUi2Card(doc);
     const body = card.body;
 
@@ -87,6 +155,7 @@ export function createAiAccessSection(deps: AiAccessDeps): ConnectionsSection {
       disabled: running === null || sharingBusy,
       onChange: (next) => void changeSharing(next),
     });
+    mark(sharing, "share");
     const sharingCard = createUi2SettingsCard(doc, {
       title: i18n.t("conn.aiH"),
       rows: [
@@ -115,6 +184,7 @@ export function createAiAccessSection(deps: AiAccessDeps): ConnectionsSection {
       disabled: creating,
       onClick: () => void createAccess(),
     });
+    mark(create, "create");
     form.append(field.element, create);
     body.append(form);
 
@@ -124,6 +194,8 @@ export function createAiAccessSection(deps: AiAccessDeps): ConnectionsSection {
     const label = doc.createElement("p");
     label.className = "ui2-field-label";
     label.textContent = i18n.t("conn.apps");
+    label.tabIndex = -1;
+    mark(label, "apps");
     body.append(label);
     body.append(renderApps());
 
@@ -146,6 +218,7 @@ export function createAiAccessSection(deps: AiAccessDeps): ConnectionsSection {
 
     if (deps.hosted) body.append(deps.hosted.element);
     root.replaceChildren(sharingCard, card.element);
+    restoreFocus(saved);
   }
 
   function renderKey(key: IssuedKey): HTMLElement {
@@ -177,6 +250,7 @@ export function createAiAccessSection(deps: AiAccessDeps): ConnectionsSection {
         })();
       },
     });
+    mark(copy, "copy");
     box.append(code, copy);
     if (!clipboard || copyFailed) {
       const hint = doc.createElement("p");
@@ -218,19 +292,25 @@ export function createAiAccessSection(deps: AiAccessDeps): ConnectionsSection {
           const actions = doc.createElement("div");
           actions.className = "ui2-row-flex";
           actions.append(
-            createUi2Button(doc, {
-              label: i18n.t("conn.chooseChats"),
-              variant: "secondary",
-              size: "sm",
-              onClick: (event) => openChoose(client, event.currentTarget as HTMLElement),
-            }),
-            createUi2InlineConfirm(doc, {
-              triggerLabel: i18n.t("action.revoke"),
-              question: i18n.t("conn.revokeQuestion", { app: client.display_name }),
-              confirmLabel: i18n.t("action.revoke"),
-              cancelLabel: i18n.t("action.cancel"),
-              onConfirm: () => void revoke(client),
-            }).element,
+            mark(
+              createUi2Button(doc, {
+                label: i18n.t("conn.chooseChats"),
+                variant: "secondary",
+                size: "sm",
+                onClick: (event) => openChoose(client, event.currentTarget as HTMLElement),
+              }),
+              `choose:${appKey(client.id)}`,
+            ),
+            mark(
+              createUi2InlineConfirm(doc, {
+                triggerLabel: i18n.t("action.revoke"),
+                question: i18n.t("conn.revokeQuestion", { app: client.display_name }),
+                confirmLabel: i18n.t("action.revoke"),
+                cancelLabel: i18n.t("action.cancel"),
+                onConfirm: () => void revoke(client),
+              }).element,
+              `revoke:${appKey(client.id)}`,
+            ),
           );
           const count = counts.get(client.id);
           const tag =
@@ -390,6 +470,7 @@ export function createAiAccessSection(deps: AiAccessDeps): ConnectionsSection {
       copied = false;
       copyFailed = false;
       nameValue = "";
+      appKeys.clear();
       counts.clear();
       clients = [];
       root.replaceChildren();
