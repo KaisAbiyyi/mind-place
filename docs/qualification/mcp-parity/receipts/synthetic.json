@@ -1,13 +1,17 @@
 {
   "kind": "SYNTHETIC_HTTP reference run against the packaged app (disposable synthetic corpus). Not proof of any provider client.",
   "source": {
-    "sha": "1bb339c693462970cfbd319475110ac86bf98d5b",
+    "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
     "dirty": false,
     "trees": {
       "crates": "b3101cee0080dba2ab7267ad5dbcf1e3efe59993",
       "src_tauri": "43380c0c461fd1b07bfb6cab5bba010c3c35e73e",
       "cargo_lock": "d205240176426ffeec45956f651c92729e5bf1f0",
       "src": "3eb1dc4ac7bc1768ca24fcf52621f4315a631106"
+    },
+    "harness": {
+      "conformance": "60d3ea14fdaeccfd234bea6bd981c4f9db031001",
+      "lib": "6810a45c3b08a128f2083a5542ba43d5a7b49bc5"
     }
   },
   "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
@@ -17,37 +21,37 @@
     "long": [
       {
         "messages": 240,
-        "raw_sha256": "d9d30114d9094eefba14b6d297088992fc6df5218c2424c60bb9f96da04f9a81"
+        "raw_sha256": "117b3ac7407b2266bc79eea9752996fedfca4861ac7bca596e086d833b5073e0"
       },
       {
         "messages": 260,
-        "raw_sha256": "9fa8ffb66641269159d80a059e3a6ee23721c085ba0e664d69967c923dd469bd"
+        "raw_sha256": "6d293842a39584fceb9369f6ced4cc8a83756b4f077e55f9e25b180d5039b064"
       },
       {
         "messages": 260,
-        "raw_sha256": "40b74971e24867165150baf7025bd58b389da6453609427296843e2210902080"
+        "raw_sha256": "b392ea1a54dd0d9214acc18e7be5efce94cf0f2ecb4b476da5408afc9a617c5f"
       }
     ],
     "medium": [
       {
         "messages": 30,
-        "raw_sha256": "e5a48686cf367648365cb76b93ed1f7cf047863c10ac2a7050db8820d004e95f"
+        "raw_sha256": "982e0aab236bbb86e8c6520693a5322599f3b1c0a1c671787ea3450da42ef764"
       },
       {
         "messages": 34,
-        "raw_sha256": "3f3e437787e7cc08b1522e09f052fc5783dc5a1101a4296f6bb29c28b53c67d9"
+        "raw_sha256": "913e1922453d4ae22440234ca820baa34091e4c74910635bb6d6f0d6986547e8"
       }
     ],
     "second": [
       {
         "messages": 6,
-        "raw_sha256": "6c8fe53990ec1cd94d9a1f842bd5e9eec8e5c1d98b693b49683aa0cafb4f31ec"
+        "raw_sha256": "c0fe6cd1b050bedb2bbd27e6e47713976e65c3d8b3f2f0593f122502f87be31e"
       }
     ],
     "other": [
       {
         "messages": 6,
-        "raw_sha256": "149638cf55afd9d9359a3699faf3923e0e396509ce51ec3eb2b6379917a431cb"
+        "raw_sha256": "73360128cfa84d4fea44d5b90efc7516cc84fe2d49de0efcfc061fca6c8f4391"
       }
     ]
   },
@@ -60,6 +64,7 @@
     "oneOf",
     "type-array"
   ],
+  "c4_scope": "Long chat (over 256 KB, 3 revisions, multi-byte, astral-plane and right-to-left text): latest revision at 64 KB and 9 KB pages in two protocol eras and every earlier revision; medium chat in 4 KB pages. A server reference, not a provider client.",
   "harness_failure": null,
   "failure": null,
   "claims": {
@@ -339,7 +344,7 @@
         {
           "name": "revision 1 carries stable identity and provenance",
           "ok": true,
-          "detail": "{\"s\":true,\"p\":\"chatgpt\",\"t\":\"2026-11-23T19:46:21.636Z\"}"
+          "detail": "{\"s\":true,\"p\":\"chatgpt\",\"t\":\"2026-11-23T21:57:49.867Z\"}"
         },
         {
           "name": "revision 1 segments carry message id, index, role and byte range",
@@ -354,7 +359,7 @@
         {
           "name": "revision 2 carries stable identity and provenance",
           "ok": true,
-          "detail": "{\"s\":true,\"p\":\"chatgpt\",\"t\":\"2026-11-23T19:46:22.091Z\"}"
+          "detail": "{\"s\":true,\"p\":\"chatgpt\",\"t\":\"2026-11-23T21:57:50.605Z\"}"
         },
         {
           "name": "revision 2 segments carry message id, index, role and byte range",
@@ -369,7 +374,7 @@
         {
           "name": "revision 3 carries stable identity and provenance",
           "ok": true,
-          "detail": "{\"s\":true,\"p\":\"chatgpt\",\"t\":\"2026-11-23T19:46:22.488Z\"}"
+          "detail": "{\"s\":true,\"p\":\"chatgpt\",\"t\":\"2026-11-23T21:57:51.055Z\"}"
         },
         {
           "name": "revision 3 segments carry message id, index, role and byte range",

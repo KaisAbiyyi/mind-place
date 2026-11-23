@@ -1,8 +1,8 @@
 # Release 1 read-only MCP Parity Matrix
 
-Source SHA: `59050f6998d24c1c6c3907463748f76b9ab91a85` · generated 2026-11-23T19:58:55.280Z
+Source SHA: `24387a9316bc161a4fc72b27d13d85fafd44a1cc` · generated 2026-11-23T22:09:13.727Z
 
-Product under test: mind-place.exe sha256 `d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c`, product source tree id `4344d1e7c28540ae`. Each PASS or FAIL cell cites the commit it ran at; the harness may advance between runs, the product (executable and product trees) may not.
+Product under test: mind-place.exe sha256 `d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c`, product source tree id `4344d1e7c28540ae`, conformance harness tree id `456481fd0dc6c9ea`. Every PASS or FAIL cell ran at exactly this commit with exactly this harness and product (enforced by the validator). The commit that records this matrix adds only the documentation and receipts under `docs/qualification/mcp-parity/`.
 
 Legend: PASS = a REAL provider client did it on this exact SHA (client name and version observed on the wire). The synthetic row is a server reference, never provider proof. NOT_RUN and PROVIDER_BLOCKED are explicit, not hidden.
 
@@ -21,7 +21,7 @@ Legend: PASS = a REAL provider client did it on this exact SHA (client name and 
 - **C1 Handshake and initialization**: Real initialize (or discovery) accepted; protocol negotiated; client identity observed on the wire
 - **C2 Tool discovery**: tools/list returns exactly the three read-only tools; client accepts their schemas
 - **C3 Authenticated, scoped search**: memory_search returns hits from granted chats only
-- **C4 Exact full-content fetch**: Long conversation read byte-exact across cursor pages; no silent truncation
+- **C4 Exact full-content fetch**: A conversation read byte-exact across cursor pages; no silent truncation. Measured scope differs by row: the synthetic reference reads a long (over 256 KB, multi-revision, multi-byte) chat; a real client reads the medium multi-byte two-revision chat in small pages (a long-chat result stream does not fit a CLI model's context). Real-client long-chat read is NOT_RUN and is stated in each cell's scope.
 - **C5 Revisions, identity, provenance**: Historical revisions fetchable; stable source/snapshot ids, provider and timestamps preserved
 - **C6 Default deny and isolation**: Nothing readable before a grant; ungranted fetch looks like an unknown id; other clients cannot read this client's chats
 - **C7 Immediate revocation**: Chat grant and whole-client revocation take effect on the next request
@@ -32,7 +32,7 @@ Legend: PASS = a REAL provider client did it on this exact SHA (client name and 
 - Synthetic HTTP reference (not a provider) / C1 — PASS: transport streamable-http-loopback; receipt receipts/synthetic.json; 13/13 checks
 - Synthetic HTTP reference (not a provider) / C2 — PASS: transport streamable-http-loopback; receipt receipts/synthetic.json; 15/15 checks
 - Synthetic HTTP reference (not a provider) / C3 — PASS: transport streamable-http-loopback; receipt receipts/synthetic.json; 12/12 checks
-- Synthetic HTTP reference (not a provider) / C4 — PASS: transport streamable-http-loopback; receipt receipts/synthetic.json; 8/8 checks
+- Synthetic HTTP reference (not a provider) / C4 — PASS: transport streamable-http-loopback; receipt receipts/synthetic.json; scope: Long chat (over 256 KB, 3 revisions, multi-byte, astral-plane and right-to-left text): latest revision at 64 KB and 9 KB pages in two protocol eras and every earlier revision; medium chat in 4 KB pages. A server reference, not a provider client.; 8/8 checks
 - Synthetic HTTP reference (not a provider) / C5 — PASS: transport streamable-http-loopback; receipt receipts/synthetic.json; 15/15 checks
 - Synthetic HTTP reference (not a provider) / C6 — PASS: transport streamable-http-loopback; receipt receipts/synthetic.json; 23/23 checks
 - Synthetic HTTP reference (not a provider) / C7 — PASS: transport streamable-http-loopback; receipt receipts/synthetic.json; 6/6 checks
@@ -41,19 +41,19 @@ Legend: PASS = a REAL provider client did it on this exact SHA (client name and 
 - Claude Code / C1 — PASS: client claude-code 2.1.322; transport streamable-http-loopback; receipt receipts/real-claude-code.json; 3/3 checks
 - Claude Code / C2 — PASS: client claude-code 2.1.322; transport streamable-http-loopback; receipt receipts/real-claude-code.json; 3/3 checks
 - Claude Code / C3 — PASS: client claude-code 2.1.322; transport streamable-http-loopback; receipt receipts/real-claude-code.json; 4/4 checks
-- Claude Code / C4 — PASS: client claude-code 2.1.322; transport streamable-http-loopback; receipt receipts/real-claude-code.json; 2/2 checks
+- Claude Code / C4 — PASS: client claude-code 2.1.322; transport streamable-http-loopback; receipt receipts/real-claude-code.json; scope: Medium multi-byte two-revision chat: latest revision 20102 bytes read in 7 pages of at most 3000 bytes, earlier revision also read. The long chat over 256 KB was NOT read by this real client (NOT_RUN for real clients; covered by the synthetic reference only).; 2/2 checks
 - Claude Code / C5 — PASS: client claude-code 2.1.322; transport streamable-http-loopback; receipt receipts/real-claude-code.json; 4/4 checks
-- Claude Code / C6 — PASS: client claude-code 2.1.322; transport streamable-http-loopback; receipt receipts/real-claude-code.json; 3/3 checks
-- Claude Code / C7 — PASS: client claude-code 2.1.322; transport streamable-http-loopback; receipt receipts/real-claude-code.json; 4/4 checks
+- Claude Code / C6 — PASS: client claude-code 2.1.322; transport streamable-http-loopback; receipt receipts/real-claude-code.json; 5/5 checks
+- Claude Code / C7 — PASS: client claude-code 2.1.322; transport streamable-http-loopback; receipt receipts/real-claude-code.json; 5/5 checks
 - Claude Code / C8 — PASS: client claude-code 2.1.322; transport streamable-http-loopback; receipt receipts/real-claude-code.json; 2/2 checks
 - Claude Code / C9 — PASS: client claude-code 2.1.322; transport streamable-http-loopback; receipt receipts/real-claude-code.json; 4/4 checks
 - Codex / C1 — PASS: client codex-mcp-client 0.164.0; transport streamable-http-loopback; receipt receipts/real-codex.json; 3/3 checks
 - Codex / C2 — PASS: client codex-mcp-client 0.164.0; transport streamable-http-loopback; receipt receipts/real-codex.json; 2/2 checks
 - Codex / C3 — PASS: client codex-mcp-client 0.164.0; transport streamable-http-loopback; receipt receipts/real-codex.json; 4/4 checks
-- Codex / C4 — PASS: client codex-mcp-client 0.164.0; transport streamable-http-loopback; receipt receipts/real-codex.json; 2/2 checks
+- Codex / C4 — PASS: client codex-mcp-client 0.164.0; transport streamable-http-loopback; receipt receipts/real-codex.json; scope: Medium multi-byte two-revision chat: latest revision 20102 bytes read in 7 pages of at most 3000 bytes, earlier revision also read. The long chat over 256 KB was NOT read by this real client (NOT_RUN for real clients; covered by the synthetic reference only).; 2/2 checks
 - Codex / C5 — PASS: client codex-mcp-client 0.164.0; transport streamable-http-loopback; receipt receipts/real-codex.json; 4/4 checks
-- Codex / C6 — PASS: client codex-mcp-client 0.164.0; transport streamable-http-loopback; receipt receipts/real-codex.json; 3/3 checks
-- Codex / C7 — PASS: client codex-mcp-client 0.164.0; transport streamable-http-loopback; receipt receipts/real-codex.json; 4/4 checks
+- Codex / C6 — PASS: client codex-mcp-client 0.164.0; transport streamable-http-loopback; receipt receipts/real-codex.json; 5/5 checks
+- Codex / C7 — PASS: client codex-mcp-client 0.164.0; transport streamable-http-loopback; receipt receipts/real-codex.json; 5/5 checks
 - Codex / C8 — PASS: client codex-mcp-client 0.164.0; transport streamable-http-loopback; receipt receipts/real-codex.json; 2/2 checks
 - Codex / C9 — PASS: client codex-mcp-client 0.164.0; transport streamable-http-loopback; receipt receipts/real-codex.json; 4/4 checks
 - Gemini CLI / C1 — PROVIDER_BLOCKED: Not a Mind Place defect: the vendor client did not start a session.; blocker: Gemini CLI 0.34.0 refuses to start with the owner's stored Google login: IneligibleTierError: "This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products" (captured 2026-11-24 on the qualification machine; no request reached Mind Place).; fallback: Antigravity CLI (separate row). Gemini CLI on an eligible (for example Workspace or paid) account is covered by owner card 'any local CLI that failed in the agent run'.

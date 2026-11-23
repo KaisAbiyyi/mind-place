@@ -1,7 +1,8 @@
 {
-  "sha": "59050f6998d24c1c6c3907463748f76b9ab91a85",
+  "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
   "product_tree_id": "4344d1e7c28540ae",
-  "generated_at": "2026-11-23T19:58:55.280Z",
+  "harness_tree_id": "456481fd0dc6c9ea",
+  "generated_at": "2026-11-23T22:09:13.727Z",
   "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
   "rust_trees": {
     "crates": "b3101cee0080dba2ab7267ad5dbcf1e3efe59993",
@@ -13,12 +14,13 @@
     "synthetic-http": {
       "C1": {
         "result": "PASS",
-        "sha": "1bb339c693462970cfbd319475110ac86bf98d5b",
+        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
         "product_tree_id": "4344d1e7c28540ae",
+        "harness_tree_id": "456481fd0dc6c9ea",
         "evidence": {
           "kind": "SYNTHETIC_HTTP",
           "receipt": "receipts/synthetic.json",
-          "receipt_sha256": "4c9110083d2adaef32c25e960438268b2efc6eae897e3104bc9ed8ca22bd2147",
+          "receipt_sha256": "0a39d8e0ede1d99e9821efdc77ca0539b4245185d0443ae102577ad757274d81",
           "transport": "streamable-http-loopback"
         },
         "note": "13/13 checks",
@@ -26,12 +28,13 @@
       },
       "C2": {
         "result": "PASS",
-        "sha": "1bb339c693462970cfbd319475110ac86bf98d5b",
+        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
         "product_tree_id": "4344d1e7c28540ae",
+        "harness_tree_id": "456481fd0dc6c9ea",
         "evidence": {
           "kind": "SYNTHETIC_HTTP",
           "receipt": "receipts/synthetic.json",
-          "receipt_sha256": "4c9110083d2adaef32c25e960438268b2efc6eae897e3104bc9ed8ca22bd2147",
+          "receipt_sha256": "0a39d8e0ede1d99e9821efdc77ca0539b4245185d0443ae102577ad757274d81",
           "transport": "streamable-http-loopback"
         },
         "note": "15/15 checks",
@@ -39,12 +42,13 @@
       },
       "C3": {
         "result": "PASS",
-        "sha": "1bb339c693462970cfbd319475110ac86bf98d5b",
+        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
         "product_tree_id": "4344d1e7c28540ae",
+        "harness_tree_id": "456481fd0dc6c9ea",
         "evidence": {
           "kind": "SYNTHETIC_HTTP",
           "receipt": "receipts/synthetic.json",
-          "receipt_sha256": "4c9110083d2adaef32c25e960438268b2efc6eae897e3104bc9ed8ca22bd2147",
+          "receipt_sha256": "0a39d8e0ede1d99e9821efdc77ca0539b4245185d0443ae102577ad757274d81",
           "transport": "streamable-http-loopback"
         },
         "note": "12/12 checks",
@@ -52,12 +56,14 @@
       },
       "C4": {
         "result": "PASS",
-        "sha": "1bb339c693462970cfbd319475110ac86bf98d5b",
+        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
         "product_tree_id": "4344d1e7c28540ae",
+        "harness_tree_id": "456481fd0dc6c9ea",
+        "scope": "Long chat (over 256 KB, 3 revisions, multi-byte, astral-plane and right-to-left text): latest revision at 64 KB and 9 KB pages in two protocol eras and every earlier revision; medium chat in 4 KB pages. A server reference, not a provider client.",
         "evidence": {
           "kind": "SYNTHETIC_HTTP",
           "receipt": "receipts/synthetic.json",
-          "receipt_sha256": "4c9110083d2adaef32c25e960438268b2efc6eae897e3104bc9ed8ca22bd2147",
+          "receipt_sha256": "0a39d8e0ede1d99e9821efdc77ca0539b4245185d0443ae102577ad757274d81",
           "transport": "streamable-http-loopback"
         },
         "note": "8/8 checks",
@@ -65,12 +71,13 @@
       },
       "C5": {
         "result": "PASS",
-        "sha": "1bb339c693462970cfbd319475110ac86bf98d5b",
+        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
         "product_tree_id": "4344d1e7c28540ae",
+        "harness_tree_id": "456481fd0dc6c9ea",
         "evidence": {
           "kind": "SYNTHETIC_HTTP",
           "receipt": "receipts/synthetic.json",
-          "receipt_sha256": "4c9110083d2adaef32c25e960438268b2efc6eae897e3104bc9ed8ca22bd2147",
+          "receipt_sha256": "0a39d8e0ede1d99e9821efdc77ca0539b4245185d0443ae102577ad757274d81",
           "transport": "streamable-http-loopback"
         },
         "note": "15/15 checks",
@@ -78,12 +85,13 @@
       },
       "C6": {
         "result": "PASS",
-        "sha": "1bb339c693462970cfbd319475110ac86bf98d5b",
+        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
         "product_tree_id": "4344d1e7c28540ae",
+        "harness_tree_id": "456481fd0dc6c9ea",
         "evidence": {
           "kind": "SYNTHETIC_HTTP",
           "receipt": "receipts/synthetic.json",
-          "receipt_sha256": "4c9110083d2adaef32c25e960438268b2efc6eae897e3104bc9ed8ca22bd2147",
+          "receipt_sha256": "0a39d8e0ede1d99e9821efdc77ca0539b4245185d0443ae102577ad757274d81",
           "transport": "streamable-http-loopback"
         },
         "note": "23/23 checks",
@@ -91,12 +99,13 @@
       },
       "C7": {
         "result": "PASS",
-        "sha": "1bb339c693462970cfbd319475110ac86bf98d5b",
+        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
         "product_tree_id": "4344d1e7c28540ae",
+        "harness_tree_id": "456481fd0dc6c9ea",
         "evidence": {
           "kind": "SYNTHETIC_HTTP",
           "receipt": "receipts/synthetic.json",
-          "receipt_sha256": "4c9110083d2adaef32c25e960438268b2efc6eae897e3104bc9ed8ca22bd2147",
+          "receipt_sha256": "0a39d8e0ede1d99e9821efdc77ca0539b4245185d0443ae102577ad757274d81",
           "transport": "streamable-http-loopback"
         },
         "note": "6/6 checks",
@@ -104,12 +113,13 @@
       },
       "C8": {
         "result": "PASS",
-        "sha": "1bb339c693462970cfbd319475110ac86bf98d5b",
+        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
         "product_tree_id": "4344d1e7c28540ae",
+        "harness_tree_id": "456481fd0dc6c9ea",
         "evidence": {
           "kind": "SYNTHETIC_HTTP",
           "receipt": "receipts/synthetic.json",
-          "receipt_sha256": "4c9110083d2adaef32c25e960438268b2efc6eae897e3104bc9ed8ca22bd2147",
+          "receipt_sha256": "0a39d8e0ede1d99e9821efdc77ca0539b4245185d0443ae102577ad757274d81",
           "transport": "streamable-http-loopback"
         },
         "note": "4/4 checks",
@@ -117,12 +127,13 @@
       },
       "C9": {
         "result": "PASS",
-        "sha": "1bb339c693462970cfbd319475110ac86bf98d5b",
+        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
         "product_tree_id": "4344d1e7c28540ae",
+        "harness_tree_id": "456481fd0dc6c9ea",
         "evidence": {
           "kind": "SYNTHETIC_HTTP",
           "receipt": "receipts/synthetic.json",
-          "receipt_sha256": "4c9110083d2adaef32c25e960438268b2efc6eae897e3104bc9ed8ca22bd2147",
+          "receipt_sha256": "0a39d8e0ede1d99e9821efdc77ca0539b4245185d0443ae102577ad757274d81",
           "transport": "streamable-http-loopback"
         },
         "note": "8/8 checks",
@@ -132,12 +143,13 @@
     "claude-code": {
       "C1": {
         "result": "PASS",
-        "sha": "59050f6998d24c1c6c3907463748f76b9ab91a85",
+        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
         "product_tree_id": "4344d1e7c28540ae",
+        "harness_tree_id": "456481fd0dc6c9ea",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-claude-code.json",
-          "receipt_sha256": "e16cc9649007cc65b48c4ae2dede08ae3af13c2a0821e5b452c3a18d04e2229d",
+          "receipt_sha256": "90de4f750af4c0f7c6b6f627942a135f9b02597524a4dd9adc2dc6ce03ae6958",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "claude-code",
@@ -152,12 +164,13 @@
       },
       "C2": {
         "result": "PASS",
-        "sha": "59050f6998d24c1c6c3907463748f76b9ab91a85",
+        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
         "product_tree_id": "4344d1e7c28540ae",
+        "harness_tree_id": "456481fd0dc6c9ea",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-claude-code.json",
-          "receipt_sha256": "e16cc9649007cc65b48c4ae2dede08ae3af13c2a0821e5b452c3a18d04e2229d",
+          "receipt_sha256": "90de4f750af4c0f7c6b6f627942a135f9b02597524a4dd9adc2dc6ce03ae6958",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "claude-code",
@@ -172,12 +185,13 @@
       },
       "C3": {
         "result": "PASS",
-        "sha": "59050f6998d24c1c6c3907463748f76b9ab91a85",
+        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
         "product_tree_id": "4344d1e7c28540ae",
+        "harness_tree_id": "456481fd0dc6c9ea",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-claude-code.json",
-          "receipt_sha256": "e16cc9649007cc65b48c4ae2dede08ae3af13c2a0821e5b452c3a18d04e2229d",
+          "receipt_sha256": "90de4f750af4c0f7c6b6f627942a135f9b02597524a4dd9adc2dc6ce03ae6958",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "claude-code",
@@ -192,12 +206,14 @@
       },
       "C4": {
         "result": "PASS",
-        "sha": "59050f6998d24c1c6c3907463748f76b9ab91a85",
+        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
         "product_tree_id": "4344d1e7c28540ae",
+        "harness_tree_id": "456481fd0dc6c9ea",
+        "scope": "Medium multi-byte two-revision chat: latest revision 20102 bytes read in 7 pages of at most 3000 bytes, earlier revision also read. The long chat over 256 KB was NOT read by this real client (NOT_RUN for real clients; covered by the synthetic reference only).",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-claude-code.json",
-          "receipt_sha256": "e16cc9649007cc65b48c4ae2dede08ae3af13c2a0821e5b452c3a18d04e2229d",
+          "receipt_sha256": "90de4f750af4c0f7c6b6f627942a135f9b02597524a4dd9adc2dc6ce03ae6958",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "claude-code",
@@ -212,12 +228,13 @@
       },
       "C5": {
         "result": "PASS",
-        "sha": "59050f6998d24c1c6c3907463748f76b9ab91a85",
+        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
         "product_tree_id": "4344d1e7c28540ae",
+        "harness_tree_id": "456481fd0dc6c9ea",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-claude-code.json",
-          "receipt_sha256": "e16cc9649007cc65b48c4ae2dede08ae3af13c2a0821e5b452c3a18d04e2229d",
+          "receipt_sha256": "90de4f750af4c0f7c6b6f627942a135f9b02597524a4dd9adc2dc6ce03ae6958",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "claude-code",
@@ -232,12 +249,13 @@
       },
       "C6": {
         "result": "PASS",
-        "sha": "59050f6998d24c1c6c3907463748f76b9ab91a85",
+        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
         "product_tree_id": "4344d1e7c28540ae",
+        "harness_tree_id": "456481fd0dc6c9ea",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-claude-code.json",
-          "receipt_sha256": "e16cc9649007cc65b48c4ae2dede08ae3af13c2a0821e5b452c3a18d04e2229d",
+          "receipt_sha256": "90de4f750af4c0f7c6b6f627942a135f9b02597524a4dd9adc2dc6ce03ae6958",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "claude-code",
@@ -246,18 +264,19 @@
             "source": "_meta.clientInfo"
           }
         },
-        "note": "3/3 checks",
+        "note": "5/5 checks",
         "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
         "client_version": "2.1.322 (Claude Code)"
       },
       "C7": {
         "result": "PASS",
-        "sha": "59050f6998d24c1c6c3907463748f76b9ab91a85",
+        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
         "product_tree_id": "4344d1e7c28540ae",
+        "harness_tree_id": "456481fd0dc6c9ea",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-claude-code.json",
-          "receipt_sha256": "e16cc9649007cc65b48c4ae2dede08ae3af13c2a0821e5b452c3a18d04e2229d",
+          "receipt_sha256": "90de4f750af4c0f7c6b6f627942a135f9b02597524a4dd9adc2dc6ce03ae6958",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "claude-code",
@@ -266,18 +285,19 @@
             "source": "_meta.clientInfo"
           }
         },
-        "note": "4/4 checks",
+        "note": "5/5 checks",
         "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
         "client_version": "2.1.322 (Claude Code)"
       },
       "C8": {
         "result": "PASS",
-        "sha": "59050f6998d24c1c6c3907463748f76b9ab91a85",
+        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
         "product_tree_id": "4344d1e7c28540ae",
+        "harness_tree_id": "456481fd0dc6c9ea",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-claude-code.json",
-          "receipt_sha256": "e16cc9649007cc65b48c4ae2dede08ae3af13c2a0821e5b452c3a18d04e2229d",
+          "receipt_sha256": "90de4f750af4c0f7c6b6f627942a135f9b02597524a4dd9adc2dc6ce03ae6958",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "claude-code",
@@ -292,12 +312,13 @@
       },
       "C9": {
         "result": "PASS",
-        "sha": "59050f6998d24c1c6c3907463748f76b9ab91a85",
+        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
         "product_tree_id": "4344d1e7c28540ae",
+        "harness_tree_id": "456481fd0dc6c9ea",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-claude-code.json",
-          "receipt_sha256": "e16cc9649007cc65b48c4ae2dede08ae3af13c2a0821e5b452c3a18d04e2229d",
+          "receipt_sha256": "90de4f750af4c0f7c6b6f627942a135f9b02597524a4dd9adc2dc6ce03ae6958",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "claude-code",
@@ -314,12 +335,13 @@
     "codex": {
       "C1": {
         "result": "PASS",
-        "sha": "1bb339c693462970cfbd319475110ac86bf98d5b",
+        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
         "product_tree_id": "4344d1e7c28540ae",
+        "harness_tree_id": "456481fd0dc6c9ea",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-codex.json",
-          "receipt_sha256": "b7cd4b84eb92788d506d034d7b0770e80e0020bdb615e037f32b9408e4931854",
+          "receipt_sha256": "0ea030b4b6d24d5982039fbee233acdca89c3f2239fb6bfc477babd19645602b",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "codex-mcp-client",
@@ -334,12 +356,13 @@
       },
       "C2": {
         "result": "PASS",
-        "sha": "1bb339c693462970cfbd319475110ac86bf98d5b",
+        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
         "product_tree_id": "4344d1e7c28540ae",
+        "harness_tree_id": "456481fd0dc6c9ea",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-codex.json",
-          "receipt_sha256": "b7cd4b84eb92788d506d034d7b0770e80e0020bdb615e037f32b9408e4931854",
+          "receipt_sha256": "0ea030b4b6d24d5982039fbee233acdca89c3f2239fb6bfc477babd19645602b",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "codex-mcp-client",
@@ -354,12 +377,13 @@
       },
       "C3": {
         "result": "PASS",
-        "sha": "1bb339c693462970cfbd319475110ac86bf98d5b",
+        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
         "product_tree_id": "4344d1e7c28540ae",
+        "harness_tree_id": "456481fd0dc6c9ea",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-codex.json",
-          "receipt_sha256": "b7cd4b84eb92788d506d034d7b0770e80e0020bdb615e037f32b9408e4931854",
+          "receipt_sha256": "0ea030b4b6d24d5982039fbee233acdca89c3f2239fb6bfc477babd19645602b",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "codex-mcp-client",
@@ -374,12 +398,14 @@
       },
       "C4": {
         "result": "PASS",
-        "sha": "1bb339c693462970cfbd319475110ac86bf98d5b",
+        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
         "product_tree_id": "4344d1e7c28540ae",
+        "harness_tree_id": "456481fd0dc6c9ea",
+        "scope": "Medium multi-byte two-revision chat: latest revision 20102 bytes read in 7 pages of at most 3000 bytes, earlier revision also read. The long chat over 256 KB was NOT read by this real client (NOT_RUN for real clients; covered by the synthetic reference only).",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-codex.json",
-          "receipt_sha256": "b7cd4b84eb92788d506d034d7b0770e80e0020bdb615e037f32b9408e4931854",
+          "receipt_sha256": "0ea030b4b6d24d5982039fbee233acdca89c3f2239fb6bfc477babd19645602b",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "codex-mcp-client",
@@ -394,12 +420,13 @@
       },
       "C5": {
         "result": "PASS",
-        "sha": "1bb339c693462970cfbd319475110ac86bf98d5b",
+        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
         "product_tree_id": "4344d1e7c28540ae",
+        "harness_tree_id": "456481fd0dc6c9ea",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-codex.json",
-          "receipt_sha256": "b7cd4b84eb92788d506d034d7b0770e80e0020bdb615e037f32b9408e4931854",
+          "receipt_sha256": "0ea030b4b6d24d5982039fbee233acdca89c3f2239fb6bfc477babd19645602b",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "codex-mcp-client",
@@ -414,12 +441,13 @@
       },
       "C6": {
         "result": "PASS",
-        "sha": "1bb339c693462970cfbd319475110ac86bf98d5b",
+        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
         "product_tree_id": "4344d1e7c28540ae",
+        "harness_tree_id": "456481fd0dc6c9ea",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-codex.json",
-          "receipt_sha256": "b7cd4b84eb92788d506d034d7b0770e80e0020bdb615e037f32b9408e4931854",
+          "receipt_sha256": "0ea030b4b6d24d5982039fbee233acdca89c3f2239fb6bfc477babd19645602b",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "codex-mcp-client",
@@ -428,18 +456,19 @@
             "source": "_meta.clientInfo"
           }
         },
-        "note": "3/3 checks",
+        "note": "5/5 checks",
         "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
         "client_version": "codex-cli 0.164.0"
       },
       "C7": {
         "result": "PASS",
-        "sha": "1bb339c693462970cfbd319475110ac86bf98d5b",
+        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
         "product_tree_id": "4344d1e7c28540ae",
+        "harness_tree_id": "456481fd0dc6c9ea",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-codex.json",
-          "receipt_sha256": "b7cd4b84eb92788d506d034d7b0770e80e0020bdb615e037f32b9408e4931854",
+          "receipt_sha256": "0ea030b4b6d24d5982039fbee233acdca89c3f2239fb6bfc477babd19645602b",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "codex-mcp-client",
@@ -448,18 +477,19 @@
             "source": "_meta.clientInfo"
           }
         },
-        "note": "4/4 checks",
+        "note": "5/5 checks",
         "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
         "client_version": "codex-cli 0.164.0"
       },
       "C8": {
         "result": "PASS",
-        "sha": "1bb339c693462970cfbd319475110ac86bf98d5b",
+        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
         "product_tree_id": "4344d1e7c28540ae",
+        "harness_tree_id": "456481fd0dc6c9ea",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-codex.json",
-          "receipt_sha256": "b7cd4b84eb92788d506d034d7b0770e80e0020bdb615e037f32b9408e4931854",
+          "receipt_sha256": "0ea030b4b6d24d5982039fbee233acdca89c3f2239fb6bfc477babd19645602b",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "codex-mcp-client",
@@ -474,12 +504,13 @@
       },
       "C9": {
         "result": "PASS",
-        "sha": "1bb339c693462970cfbd319475110ac86bf98d5b",
+        "sha": "24387a9316bc161a4fc72b27d13d85fafd44a1cc",
         "product_tree_id": "4344d1e7c28540ae",
+        "harness_tree_id": "456481fd0dc6c9ea",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-codex.json",
-          "receipt_sha256": "b7cd4b84eb92788d506d034d7b0770e80e0020bdb615e037f32b9408e4931854",
+          "receipt_sha256": "0ea030b4b6d24d5982039fbee233acdca89c3f2239fb6bfc477babd19645602b",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "codex-mcp-client",
