@@ -5,17 +5,56 @@
  * client did comes from the proxy log, not from the client's own words.
  *
  * Credentials: the bearer key reaches a client only through an environment
- * variable that the client's own config expands, never a command line, URL or
- * file written by this harness (Antigravity is handled separately, see below).
+ * variable that the client's own config (or our loopback stdio bridge) reads,
+ * never a command line, URL, or persistent user config file.
  */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { safePreview, writeDebugArtifact } from './hygiene.mjs';
 
 export const TOKEN_ENV = 'MP_CONFORMANCE_TOKEN';
 // Distinct from any connector the account may already have (for example a hosted "mind_place" app).
 const SERVER_NAME = 'mpconformance';
+const BRIDGE_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'mcp-stdio-bridge.mjs');
+
+/**
+ * Antigravity workspace MCP config using the loopback stdio bridge so the bearer
+ * key is read from TOKEN_ENV and never written to shared config or CLI flags.
+ */
+export function antigravityWorkspaceConfig(url, bridgePath = BRIDGE_PATH) {
+  return {
+    mcpServers: {
+      [SERVER_NAME]: {
+        command: process.execPath,
+        args: [bridgePath, '--url', url, '--token-env', TOKEN_ENV],
+        tools: {
+          memory_search: { eager: true },
+          memory_fetch: { eager: true },
+          context_build: { eager: true },
+        },
+      },
+    },
+  };
+}
+
+/**
+ * Antigravity session-only permission allowlist restricted strictly to the three
+ * read-only Mind Place tools (never wildcard MCP access and never auto-approve all tools).
+ */
+export function antigravitySessionSettings() {
+  return {
+    permissions: {
+      allow: [
+        `mcp(${SERVER_NAME}/memory_search)`,
+        `mcp(${SERVER_NAME}/memory_fetch)`,
+        `mcp(${SERVER_NAME}/context_build)`,
+      ],
+    },
+  };
+}
 
 /**
  * Gemini CLI project settings for one run. `trust` is explicitly false: provider-side per-server trust
@@ -29,11 +68,17 @@ export function geminiProjectSettings(url) {
   };
 }
 
-function which(command) {
+function which(command, fallbacks = []) {
   const result = spawnSync('where.exe', [command], { encoding: 'utf8', windowsHide: true });
-  if (result.status !== 0) return null;
-  const lines = result.stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-  return lines.find((l) => /\.(exe|cmd)$/i.test(l)) ?? lines[0] ?? null;
+  if (result.status === 0) {
+    const lines = result.stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    const found = lines.find((l) => /\.(exe|cmd)$/i.test(l)) ?? lines[0];
+    if (found) return found;
+  }
+  for (const candidate of fallbacks) {
+    if (candidate && fs.existsSync(candidate)) return candidate;
+  }
+  return null;
 }
 
 /**
@@ -86,20 +131,23 @@ function jsonLines(text) {
   return String(text).split(/\r?\n/).filter(Boolean).map((line) => { try { return JSON.parse(line); } catch { return null; } }).filter(Boolean);
 }
 
-/** @typedef {{url: string, token: string, prompt: string, timeoutMs?: number, workDir: string}} RunOptions */
+/** @typedef {{url: string, token: string, prompt: string, timeoutMs?: number, workDir: string, secrets?: string[]}} RunOptions */
 
 export const DRIVERS = {
   'claude-code': {
     label: 'Claude Code',
     transport: 'streamable-http-loopback',
     detect() {
-      const exe = which('claude');
+      const exe = which('claude', [
+        path.join(os.homedir(), '.local', 'bin', 'claude.exe'),
+      ]);
       return exe ? { exe, version: version(exe) } : null;
     },
     /** @param {RunOptions} o */
     async run(o) {
       const found = this.detect();
       if (!found) throw new Error('Claude Code is not installed');
+      const allSecrets = [o.token, ...(o.secrets ?? [])];
       const config = path.join(o.workDir, 'claude-mcp.json');
       fs.writeFileSync(config, JSON.stringify({
         mcpServers: { [SERVER_NAME]: { type: 'http', url: o.url, headers: { Authorization: `Bearer \${${TOKEN_ENV}}` } } },
@@ -120,8 +168,8 @@ export const DRIVERS = {
         connected: server?.status === 'connected',
         serverStatus: server?.status ?? 'absent',
         discoveredTools: discovered,
-        finalText: String(events.find((e) => e.type === 'result')?.result ?? '').slice(0, 400),
-        stderr: String(result.stderr).slice(0, 300),
+        finalText: safePreview(events.find((e) => e.type === 'result')?.result ?? '', allSecrets, 400),
+        stderr: safePreview(result.stderr, allSecrets, 300, true),
       };
     },
   },
@@ -136,6 +184,7 @@ export const DRIVERS = {
     async run(o) {
       const found = this.detect();
       if (!found) throw new Error('Codex is not installed');
+      const allSecrets = [o.token, ...(o.secrets ?? [])];
       // Config via -c overrides only: nothing is written to the user's ~/.codex.
       // The user's other MCP servers are switched off for this run (names only are read from the config).
       const others = codexConfiguredServers().filter((name) => name !== SERVER_NAME).map((name) => `mcp_servers.${name}.enabled=false`);
@@ -153,7 +202,9 @@ export const DRIVERS = {
         input: o.prompt, cwd: o.workDir, timeoutMs: o.timeoutMs ?? 300000,
         env: { ...process.env, [TOKEN_ENV]: o.token },
       });
-      if (process.env.MP_DEBUG_DIR) fs.writeFileSync(path.join(process.env.MP_DEBUG_DIR, 'codex-stderr.log'), String(result.stderr).replace(new RegExp(String(o.token), 'g'), '[redacted]'));
+      if (process.env.MP_DEBUG_DIR) {
+        writeDebugArtifact(process.env.MP_DEBUG_DIR, 'codex-stderr.log', result.stderr, allSecrets);
+      }
       const events = jsonLines(result.stdout);
       return {
         exit: result.status,
@@ -161,9 +212,9 @@ export const DRIVERS = {
         connected: null,
         events: events.length,
         summary: events.map((e) => [e.type, e.item?.type, e.item?.server, e.item?.tool, e.item?.status].filter(Boolean).join('/')),
-        finalText: String(events.filter((e) => e.item?.type === 'agent_message').map((e) => e.item.text).at(-1) ?? '').slice(0, 400),
-        stderr: String(result.stderr).slice(-400),
-        stdoutTail: String(result.stdout).slice(-900),
+        finalText: safePreview(events.filter((e) => e.item?.type === 'agent_message').map((e) => e.item.text).at(-1) ?? '', allSecrets, 400),
+        stderr: safePreview(result.stderr, allSecrets, 400, true),
+        stdoutTail: safePreview(result.stdout, allSecrets, 900, true),
       };
     },
   },
@@ -172,12 +223,15 @@ export const DRIVERS = {
     label: 'Gemini CLI',
     transport: 'streamable-http-loopback',
     detect() {
-      const exe = which('gemini');
+      const exe = which('gemini', [
+        process.env.APPDATA ? path.join(process.env.APPDATA, 'npm', 'gemini.cmd') : null,
+      ]);
       return exe ? { exe, version: version(exe) } : null;
     },
     async run(o) {
       const found = this.detect();
       if (!found) throw new Error('Gemini CLI is not installed');
+      const allSecrets = [o.token, ...(o.secrets ?? [])];
       // Project-scope settings inside a disposable working directory. The header value
       // references an environment variable that the CLI expands itself.
       const dir = path.join(o.workDir, '.gemini');
@@ -193,16 +247,16 @@ export const DRIVERS = {
         clientVersion: found.version,
         connected: null,
         events: events.length,
-        finalText: String(events.filter((e) => e.type === 'message' && e.role === 'assistant').map((e) => e.content).join('')).slice(-400),
-        stderr: String(result.stderr).slice(-400),
-        stdoutTail: String(result.stdout).slice(-900),
+        finalText: safePreview(events.filter((e) => e.type === 'message' && e.role === 'assistant').map((e) => e.content).join(''), allSecrets, 400, true),
+        stderr: safePreview(result.stderr, allSecrets, 400, true),
+        stdoutTail: safePreview(result.stdout, allSecrets, 900, true),
       };
     },
   },
 
   antigravity: {
     label: 'Antigravity',
-    transport: 'streamable-http-loopback',
+    transport: 'stdio-bridge -> streamable-http-loopback',
     detect() {
       const exe = which('agy') ?? path.join(os.homedir(), 'AppData', 'Local', 'agy', 'bin', 'agy.exe');
       if (!fs.existsSync(exe)) return null;
@@ -211,30 +265,29 @@ export const DRIVERS = {
     async run(o) {
       const found = this.detect();
       if (!found) throw new Error('Antigravity is not installed');
+      const allSecrets = [o.token, ...(o.secrets ?? [])];
       const env = { ...process.env, [TOKEN_ENV]: o.token };
-      // Antigravity keeps MCP servers in its user configuration. The entry is added for this run only and
-      // removed in finally. The header carries the NAME of an environment variable, not the key; whether
-      // Antigravity expands it is part of what this run establishes.
-      const placeholder = 'Authorization: Bearer ${' + TOKEN_ENV + '}';
-      const add = await run(found.exe, ['mcp', 'add', '--type', 'http', '--header', placeholder, SERVER_NAME, o.url], { env, cwd: o.workDir, timeoutMs: 60000 });
-      try {
-        const result = await run(found.exe, ['--output-format', 'stream-json', '--mode', 'auto', `--print=${o.prompt}`], {
-          cwd: o.workDir, timeoutMs: o.timeoutMs ?? 300000, env,
-        });
-        const events = jsonLines(result.stdout);
-        return {
-          exit: result.status,
-          clientVersion: found.version,
-          connected: null,
-          addExit: add.status,
-          events: events.length,
-          finalText: String(result.stdout).slice(-300),
-          stderr: String(result.stderr).slice(-400),
-          stdoutTail: String(result.stdout).slice(-900),
-        };
-      } finally {
-        await run(found.exe, ['mcp', 'remove', SERVER_NAME], { env, cwd: o.workDir, timeoutMs: 60000 });
-      }
+      // Workspace-only .agents/mcp_config.json pointing to the loopback stdio bridge (no global config writes,
+      // no CLI credential flags). Session-only --settings allowlists only the 3 read-only Mind Place tools.
+      const agentsDir = path.join(o.workDir, '.agents');
+      fs.mkdirSync(agentsDir, { recursive: true });
+      fs.writeFileSync(path.join(agentsDir, 'mcp_config.json'), JSON.stringify(antigravityWorkspaceConfig(o.url), null, 2));
+      const settingsPath = path.join(o.workDir, 'agy-settings.json');
+      fs.writeFileSync(settingsPath, JSON.stringify(antigravitySessionSettings(), null, 2));
+      const result = await run(found.exe, ['--settings', settingsPath, '--output-format', 'stream-json', '--print', o.prompt], {
+        cwd: o.workDir, timeoutMs: o.timeoutMs ?? 300000, env,
+      });
+      const events = jsonLines(result.stdout);
+      const finalEvent = [...events].reverse().find((e) => e.event === 'result')?.result;
+      return {
+        exit: result.status,
+        clientVersion: found.version,
+        connected: null,
+        events: events.length,
+        finalText: safePreview(finalEvent?.response ?? result.stdout, allSecrets, 400, true),
+        stderr: safePreview(result.stderr, allSecrets, 400, true),
+        stdoutTail: safePreview(result.stdout, allSecrets, 900, true),
+      };
     },
   },
 };

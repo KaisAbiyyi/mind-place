@@ -168,9 +168,13 @@ test('client identity falls back to modern _meta clientInfo, then the User-Agent
 });
 
 import fs from 'node:fs';
-import { geminiProjectSettings } from '../scripts/mcp-conformance/clients.mjs';
-import { argsDigest, identityArgs } from '../scripts/mcp-conformance/real.mjs';
+import os from 'node:os';
+import path from 'node:path';
+import { antigravitySessionSettings, antigravityWorkspaceConfig, geminiProjectSettings } from '../scripts/mcp-conformance/clients.mjs';
+import { formatSafeJson, formatSafeLine, safeUrlPath, sanitizeBlocked, scrubDiagnostic, writeDebugArtifact } from '../scripts/mcp-conformance/hygiene.mjs';
+import { argsDigest, classifyFetchArgsMatch, fullArgsDigest, identityArgs } from '../scripts/mcp-conformance/real.mjs';
 import { isChatGptConversationUrl } from '../scripts/mcp-conformance/suite.mjs';
+import { createBridgeSession, parseBridgeArgs, validateLoopbackUrl } from '../scripts/mcp-stdio-bridge.mjs';
 
 test('Gemini CLI is never configured with provider-side per-server trust', () => {
   const settings = geminiProjectSettings('http://127.0.0.1:1/mcp');
@@ -251,4 +255,151 @@ test('recording proxy keeps only allowlisted headers and no query string', async
     await proxy.close();
     await upstream.close();
   }
+});
+
+test('negative secret canary: upstream error, blocked diagnostics, failed check lines, and debug logs never leak secrets', async () => {
+  const CANARY_TOKEN = `mpc_v1_${'cafe1234'.repeat(8)}`;
+  const CANARY_UNLOCK = 'unlock-canary-9988776655';
+  const CANARY_OPENAI = 'sk-canaryproj1234567890abcdef';
+  const secrets = [CANARY_TOKEN, CANARY_UNLOCK, CANARY_OPENAI];
+
+  // Dead local port to force upstream.on('error') -> 502 branch in recording-proxy.
+  const dead = http.createServer();
+  await new Promise((resolve) => dead.listen(0, '127.0.0.1', resolve));
+  const deadPort = dead.address().port;
+  await new Promise((resolve) => dead.close(resolve));
+
+  const proxy = await startRecordingProxy({ targetPort: deadPort, secrets });
+  try {
+    const status = await new Promise((resolve, reject) => {
+      const req = http.request({
+        host: '127.0.0.1',
+        port: proxy.port,
+        path: `/mcp?access_token=${CANARY_TOKEN}&unlock=${CANARY_UNLOCK}`,
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${CANARY_TOKEN}`,
+          cookie: `sid=${CANARY_UNLOCK}`,
+          'x-api-key': CANARY_OPENAI,
+          'user-agent': `canary-ua/${CANARY_UNLOCK}`,
+        },
+      }, (res) => { res.resume(); res.on('end', () => resolve(res.statusCode)); });
+      req.on('error', reject);
+      req.end(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }));
+    });
+    assert.equal(status, 502);
+    assert.equal(proxy.exchanges.length, 1);
+    assert.equal(proxy.exchanges[0].upstreamError, true);
+    assert.equal(proxy.exchanges[0].path, '/mcp');
+    assert.equal(proxy.exchanges[0].hadQuery, true);
+    const dumped = JSON.stringify({ received: proxy.received, exchanges: proxy.exchanges });
+    assert.doesNotMatch(dumped, /cafe1234|unlock-canary|sk-canaryproj|access_token|mpc_v1_|Bearer/);
+  } finally {
+    await proxy.close();
+  }
+
+  // Blocked diagnostic, failed check console formatting, and debug artifact scrubbing.
+  const dirtyBlocked = sanitizeBlocked({
+    kind: 'CLIENT_COULD_NOT_USE_THE_SERVER',
+    detail: `failed with ${CANARY_OPENAI}`,
+    reason: `Authorization: Bearer ${CANARY_TOKEN} at /mcp?token=${CANARY_UNLOCK}`,
+    requestsSeen: 2,
+    exit: 1,
+    serverStatus: 'refused',
+    received: 2,
+    stderr: `stderr tail ${CANARY_TOKEN} ${CANARY_UNLOCK}`,
+    stdoutTail: `stdout tail ${CANARY_OPENAI} Bearer ${CANARY_TOKEN}`,
+    extraForbiddenField: 'should-be-dropped',
+  }, secrets);
+  assert.equal('extraForbiddenField' in dirtyBlocked, false);
+  const printedBlocked = formatSafeJson({ clientId: 'test', blocked: dirtyBlocked }, secrets);
+  const failedLine = formatSafeLine(`FAIL C6 check :: detail ${CANARY_TOKEN} ${CANARY_UNLOCK} ${CANARY_OPENAI}`, secrets);
+  assert.doesNotMatch(printedBlocked, /cafe1234|unlock-canary|sk-canaryproj|mpc_v1_|Bearer/);
+  assert.doesNotMatch(failedLine, /cafe1234|unlock-canary|sk-canaryproj|mpc_v1_|Bearer/);
+  assert.equal(safeUrlPath(`/mcp?token=${CANARY_TOKEN}`, secrets).path, '/mcp');
+  assert.equal(scrubDiagnostic(`https://x.test/?key=${CANARY_UNLOCK}`, secrets).includes(CANARY_UNLOCK), false);
+
+  const debugDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mp-hygiene-'));
+  try {
+    const file = writeDebugArtifact(debugDir, 'codex-stderr.log', `line1 ${CANARY_TOKEN}\nline2 ${CANARY_UNLOCK}\n`, secrets);
+    const onDisk = fs.readFileSync(file, 'utf8');
+    assert.doesNotMatch(onDisk, /cafe1234|unlock-canary|mpc_v1_/);
+  } finally {
+    fs.rmSync(debugDir, { recursive: true, force: true });
+  }
+});
+
+test('permission evidence distinguishes complete canonical request equality from revision identity match', () => {
+  const valid = { source_id: 'src:a', archive_id: 'ar:b', snapshot_id: 'sn:c', granularity: 'revision' };
+  const exact = classifyFetchArgsMatch({ granularity: 'revision', snapshot_id: 'sn:c', archive_id: 'ar:b', source_id: 'src:a' }, valid);
+  assert.equal(exact.mode, 'complete_args_equal');
+  assert.equal(exact.completeArgsMatch, true);
+  assert.equal(exact.identityMatches, true);
+  assert.equal(exact.clientFullDigest, fullArgsDigest(valid));
+
+  const extraFields = classifyFetchArgsMatch({ ...valid, budget: { max_bytes: 3000 }, cursor: null }, valid);
+  assert.equal(extraFields.mode, 'identity_only_match');
+  assert.equal(extraFields.completeArgsMatch, false);
+  assert.equal(extraFields.identityMatches, true);
+  assert.notEqual(extraFields.clientFullDigest, extraFields.canonicalFullDigest);
+
+  const wrong = classifyFetchArgsMatch({ ...valid, snapshot_id: 'sn:other' }, valid);
+  assert.equal(wrong.mode, 'mismatch');
+  assert.equal(wrong.completeArgsMatch, false);
+  assert.equal(wrong.identityMatches, false);
+});
+
+test('stdio bridge rejects non-loopback URLs, queries, and inline credentials, and forwards safely with env token', async () => {
+  assert.throws(() => parseBridgeArgs(['--url', 'https://evil.example/mcp']), /http:\/\/ loopback/);
+  assert.throws(() => parseBridgeArgs(['--url', 'http://192.168.1.5:43731/mcp']), /non-loopback/);
+  assert.throws(() => parseBridgeArgs(['--url', 'http://127.0.0.1:43731/mcp?token=abc']), /query string/);
+  assert.throws(() => parseBridgeArgs(['--token', TOKEN]), /inline credential flag/);
+  assert.throws(() => parseBridgeArgs(['--header', `Authorization: Bearer ${TOKEN}`]), /inline credential flag/);
+  assert.equal(validateLoopbackUrl('http://127.0.0.1:43731/mcp').hostname, '127.0.0.1');
+
+  const upstream = await fakeUpstream();
+  const proxy = await startRecordingProxy({ targetPort: upstream.port, secrets: [TOKEN] });
+  const outs = [];
+  const errs = [];
+  try {
+    const session = createBridgeSession({
+      targetUrl: new URL(proxy.url),
+      token: TOKEN,
+      writeOut: (line) => outs.push(JSON.parse(line)),
+      writeErr: (msg) => errs.push(msg),
+    });
+    await session.handleLine(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'antigravity', version: '1.5.15' } } }));
+    assert.equal(outs.length, 1);
+    assert.equal(outs[0].result.protocolVersion, '2025-11-25');
+    assert.equal(upstream.seen[0].authorization, `Bearer ${TOKEN}`);
+    assert.doesNotMatch(JSON.stringify({ outs, errs }), /mpc_v1_|Bearer/);
+  } finally {
+    await proxy.close();
+    await upstream.close();
+  }
+});
+
+test('Antigravity driver and owner test cards never place bearer tokens on CLI or grant wildcard mcp(*)', () => {
+  const cfg = antigravityWorkspaceConfig('http://127.0.0.1:1/mcp');
+  const server = cfg.mcpServers.mpconformance;
+  assert.ok(server.args.some((a) => a.endsWith('mcp-stdio-bridge.mjs')));
+  assert.ok(server.args.includes('--token-env'));
+  assert.doesNotMatch(JSON.stringify(cfg), /mpc_v1_|Bearer|--header/);
+
+  const settings = antigravitySessionSettings();
+  assert.deepEqual(settings.permissions.allow, [
+    'mcp(mpconformance/memory_search)',
+    'mcp(mpconformance/memory_fetch)',
+    'mcp(mpconformance/context_build)',
+  ]);
+
+  const clientsSource = fs.readFileSync(new URL('../scripts/mcp-conformance/clients.mjs', import.meta.url), 'utf8');
+  assert.doesNotMatch(clientsSource, /mcp\s+add|--header|mcp\(\*\)|--dangerously-skip-permissions/);
+
+  const cards = fs.readFileSync(new URL('../docs/qualification/mcp-parity/OWNER-TEST-CARDS.md', import.meta.url), 'utf8');
+  assert.doesNotMatch(cards, /agy mcp add|--header\s+"Authorization|Close the PowerShell window/i);
+  assert.match(cards, /P0.*BEFORE any grant/i);
+  assert.match(cards, /Key 2/);
+  assert.match(cards, /P6b/);
 });

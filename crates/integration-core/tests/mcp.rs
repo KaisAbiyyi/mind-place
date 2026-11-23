@@ -672,6 +672,124 @@ async fn real_http_deny_rebinding_origin_and_locked_epoch() {
     assert!(denied.starts_with("HTTP/1.1 401"), "{denied}");
     assert!(!denied.contains("memory_search"));
 
+    // Concurrent TCP requests from two distinct credentials with disjoint grants.
+    let id2 = "22222222-3333-4444-8555-666666666666";
+    f.archive
+        .save(Capture {
+            schema_version: 1,
+            provider: "chatgpt".into(),
+            conversation_id: id2.into(),
+            source_url: format!("https://chatgpt.com/c/{id2}"),
+            title: "Disjoint".into(),
+            conversation_created_at: None,
+            conversation_updated_at: None,
+            captured_at: "2026-10-18T12:00:00Z".into(),
+            capture_method: "manual-dom".into(),
+            completeness: "partial".into(),
+            warnings: vec![],
+            messages: vec![Message {
+                id: "m2".into(),
+                role: "user".into(),
+                text: "cobalt horizon signal".into(),
+                format: "plain".into(),
+                authored_at: None,
+                model: None,
+                attachments: vec![],
+            }],
+        })
+        .unwrap();
+    f.index.sync(&f.archive, &f.state).unwrap();
+    let probe2 = f
+        .core()
+        .execute_batch(
+            &mind_place_integration::ToolBatch {
+                calls: vec![mind_place_integration::ToolCall {
+                    name: mind_place_integration::ToolName::MemorySearch,
+                    arguments: json!({"queries": ["cobalt horizon"]}),
+                }],
+            },
+            || Ok(()),
+        )
+        .unwrap();
+    let source2 = probe2.results[0].result["hits"][0]["source_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let client_b = ClientAuthority::new(&f.state, &f.security)
+        .issue("Disjoint client B", &[ClientCapability::Read])
+        .unwrap();
+    ClientAuthority::new(&f.state, &f.security)
+        .grant_read_sources(&client_b.client.id, std::slice::from_ref(&source2))
+        .unwrap();
+    let token_b = client_b.credential().to_string();
+    let mut disjoint_tasks = Vec::new();
+    for i in 0..8 {
+        let (tok, q) = if i % 2 == 0 {
+            (
+                f.token.clone(),
+                if i % 4 == 0 {
+                    "amber eclipse"
+                } else {
+                    "cobalt horizon"
+                },
+            )
+        } else {
+            (
+                token_b.clone(),
+                if i % 4 == 1 {
+                    "cobalt horizon"
+                } else {
+                    "amber eclipse"
+                },
+            )
+        };
+        disjoint_tasks.push((
+            i,
+            tokio::spawn(simulated_forward(
+                tok,
+                "tools/call",
+                json!({"_meta":meta(),"name":"memory_search","arguments":{"queries":[q]}}),
+                "",
+            )),
+        ));
+    }
+    for (i, task) in disjoint_tasks {
+        let reply = task.await.unwrap();
+        assert!(reply.starts_with("HTTP/1.1 200"), "task {i}: {reply}");
+        let hits = response_json(&reply)["result"]["structuredContent"]["hits"]
+            .as_array()
+            .unwrap()
+            .clone();
+        if i % 4 == 0 {
+            assert_eq!(hits.len(), 1);
+            assert_eq!(hits[0]["source_id"], f.source);
+            assert!(!reply.contains("cobalt horizon"));
+        } else if i % 4 == 1 {
+            assert_eq!(hits.len(), 1);
+            assert_eq!(hits[0]["source_id"], source2);
+            assert!(!reply.contains("amber eclipse"));
+        } else {
+            assert!(hits.is_empty(), "cross-client query leaked hits: {reply}");
+        }
+    }
+    // Connection-cap burst (> MAX_CONNECTIONS = 8) must remain bounded and recover cleanly.
+    let burst: Vec<_> = (0..12)
+        .map(|_| {
+            let tok = f.token.clone();
+            tokio::task::spawn_blocking(move || {
+                tcp_request_result(raw(&tok, "127.0.0.1:43731", ""))
+            })
+        })
+        .collect();
+    for res in burst {
+        if let Ok(reply) = res.await.unwrap() {
+            assert!(reply.starts_with("HTTP/1.1 200") || reply.starts_with("HTTP/1.1 503"));
+        }
+    }
+    let after_burst =
+        simulated_forward(f.token.clone(), "tools/list", json!({"_meta":meta()}), "").await;
+    assert!(after_burst.starts_with("HTTP/1.1 200"), "{after_burst}");
+
     f.security.lock();
     let token = f.token.clone();
     let denied =

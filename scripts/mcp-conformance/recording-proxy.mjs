@@ -13,7 +13,7 @@
  * records or logs the Authorization header or any bearer value.
  */
 import http from 'node:http';
-import { scrubText } from '../lib/e2e-secret-guard.mjs';
+import { safePreview, safeUrlPath, scrubDiagnostic } from './hygiene.mjs';
 
 const MAX_BODY = 1024 * 1024;
 
@@ -51,9 +51,9 @@ export async function startRecordingProxy(options = {}) {
       // auth headers (x-api-key, proxy-authorization, ...) and anything unknown are dropped, and so is any
       // query string (a credential could ride in it).
       const safeHeaders = {};
-      for (const name of RECORDED_HEADERS) if (req.headers[name] !== undefined) safeHeaders[name] = scrubText(String(req.headers[name]), secrets).slice(0, 160);
-      const safePath = String(req.url ?? '').split('?')[0];
-      received.push({ at: new Date().toISOString(), http: req.method, path: safePath, hadQuery: String(req.url ?? '').includes('?'), headers: safeHeaders, bodyBytes: body.length });
+      for (const name of RECORDED_HEADERS) if (req.headers[name] !== undefined) safeHeaders[name] = safePreview(req.headers[name], secrets, 160);
+      const safeTarget = safeUrlPath(req.url, secrets);
+      received.push({ at: new Date().toISOString(), http: req.method, path: safeTarget.path, hadQuery: safeTarget.hadQuery, headers: safeHeaders, bodyBytes: body.length });
       if (mode === 'drop') { req.socket.destroy(); return; }
       let rpc = null;
       try { rpc = body.length ? JSON.parse(body.toString('utf8')) : null; } catch { /* not JSON */ }
@@ -68,9 +68,10 @@ export async function startRecordingProxy(options = {}) {
           exchanges.push({
             at: new Date().toISOString(),
             http: req.method,
-            path: safePath,
+            path: safeTarget.path,
+            hadQuery: safeTarget.hadQuery,
             protocolHeader: req.headers['mcp-protocol-version'] ?? null,
-            userAgent: scrubText(req.headers['user-agent'] ?? '', secrets).slice(0, 160) || null,
+            userAgent: safePreview(req.headers['user-agent'] ?? '', secrets, 160) || null,
             hadAuthorization: Boolean(req.headers.authorization),
             rpcMethod: rpc?.method ?? null,
             toolName: rpc?.method === 'tools/call' ? (rpc.params?.name ?? null) : null,
@@ -80,7 +81,7 @@ export async function startRecordingProxy(options = {}) {
               : null,
             status: reply.statusCode ?? 0,
             result: json?.result ?? null,
-            error: json?.error ?? null,
+            error: json?.error ? { code: json.error.code, message: scrubDiagnostic(json.error.message ?? '', secrets) } : null,
             responseBytes: out.length,
           });
           const forwardHeaders = { ...reply.headers };
@@ -89,7 +90,7 @@ export async function startRecordingProxy(options = {}) {
         });
       });
       upstream.on('error', () => {
-        exchanges.push({ at: new Date().toISOString(), http: req.method, path: req.url, rpcMethod: rpc?.method ?? null, status: 502, upstreamError: true });
+        exchanges.push({ at: new Date().toISOString(), http: req.method, path: safeTarget.path, hadQuery: safeTarget.hadQuery, rpcMethod: rpc?.method ?? null, status: 502, upstreamError: true });
         res.writeHead(502); res.end();
       });
       upstream.end(body);

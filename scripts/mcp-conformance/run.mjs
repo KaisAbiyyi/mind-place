@@ -17,9 +17,11 @@ import { fileURLToPath } from 'node:url';
 import { findSecretsOnDisk, scrubText } from '../lib/e2e-secret-guard.mjs';
 import { launchApp, portIsBusy } from './app-driver.mjs';
 import { seedCorpus } from './corpus.mjs';
+import { formatSafeJson, formatSafeLine, safePreview, sanitizeBlocked } from './hygiene.mjs';
 import { runSyntheticSuite } from './suite.mjs';
 import { createWire } from './wire.mjs';
 import { runRealClient } from './real.mjs';
+import { startRecordingProxy } from './recording-proxy.mjs';
 import { CLAIMS, CLIENTS, renderMatrixMarkdown, validateMatrix } from './matrix.mjs';
 
 export const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -62,8 +64,18 @@ export async function startSession({ label, corpusOptions, log = () => {} }) {
   const secrets = [];
   const unlockSecret = await app.firstRunUnlock();
   secrets.push(unlockSecret);
+  // Ensure the post-unlock vault->index FTS5 sync completes before any MCP query or fetch runs.
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    try {
+      await app.invoke('refresh_archive_index', {});
+      break;
+    } catch (error) {
+      if (!/MP_STATE_BUSY|locked/i.test(String(error?.message ?? error)) || attempt === 119) throw error;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+  }
   await app.startSharing();
-  log('app unlocked, sharing on');
+  log('app unlocked, indexed, sharing on');
   return { app, corpus, unlockSecret, secrets, runtime, exe };
 }
 
@@ -80,15 +92,17 @@ export function writeReceipt(dir, name, body, secrets) {
 async function syntheticPhase() {
   const source = sourceIdentity();
   const outDir = path.join(repoRoot, 'outputs', 'mcp-conformance', source.sha.slice(0, 12));
-  const log = (m) => console.error(`[synthetic] ${m}`);
+  let activeSecrets = [];
+  const log = (m) => console.error(formatSafeLine(`[synthetic] ${m}`, activeSecrets));
   const session = await startSession({ label: 'syn', log });
   const { app, corpus, unlockSecret, secrets } = session;
+  activeSecrets = secrets;
   let result;
   let failure = null;
   try {
     result = await runSyntheticSuite({ wire: createWire(), app, corpus, unlockSecret, secrets, log });
   } catch (error) {
-    failure = String(error?.message ?? error);
+    failure = formatSafeLine(String(error?.message ?? error), secrets);
   } finally {
     await app.close();
   }
@@ -97,19 +111,19 @@ async function syntheticPhase() {
     source,
     executable_sha256: sha256File(session.exe),
     dirty_tree: source.dirty,
-    page_errors: app.pageErrors,
+    page_errors: app.pageErrors.map((e) => safePreview(e, secrets, 250)),
     corpus_summary: Object.fromEntries(Object.entries(corpus).map(([k, v]) => [k, v.revisions.map((r) => ({ messages: r.message_count, raw_sha256: r.raw_sha256 }))])),
     schema_features: result?.schemaFeatures ?? [],
     c4_scope: 'Long chat (over 256 KB, 3 revisions, multi-byte, astral-plane and right-to-left text): latest revision at 64 KB and 9 KB pages in two protocol eras and every earlier revision; medium chat in 4 KB pages. A server reference, not a provider client.',
-    harness_failure: result?.harnessFailure ?? null,
+    harness_failure: result?.harnessFailure ? formatSafeLine(result.harnessFailure, secrets) : null,
     failure,
     claims: result?.claims ?? null,
   };
   const receipt = writeReceipt(outDir, 'synthetic.json', body, secrets);
   const summary = Object.fromEntries(Object.entries(result?.claims ?? {}).map(([k, v]) => [k, v.result]));
-  console.log(JSON.stringify({ receipt: receipt.file, sha256: receipt.sha256, summary, failure }, null, 2));
+  console.log(formatSafeJson({ receipt: receipt.file, sha256: receipt.sha256, summary, failure }, secrets));
   for (const claim of Object.values(result?.claims ?? {})) {
-    for (const check of claim.checks.filter((c) => !c.ok)) console.log(`FAIL ${claim.id} ${check.name} :: ${check.detail}`);
+    for (const check of claim.checks.filter((c) => !c.ok)) console.log(formatSafeLine(`FAIL ${claim.id} ${check.name} :: ${check.detail}`, secrets));
   }
   process.exitCode = failure || result?.harnessFailure || Object.values(summary).some((r) => r !== 'PASS') ? 1 : 0;
 }
@@ -182,22 +196,56 @@ async function matrixPhase() {
   fs.writeFileSync(path.join(docsDir, 'PARITY-MATRIX.md'), renderMatrixMarkdown(matrix));
   const leaks = findSecretsOnDisk(docsDir, []);
   problems.push(...leaks);
-  console.log(JSON.stringify({ sha: source.sha, problems }, null, 2));
+  console.log(formatSafeJson({ sha: source.sha, problems }, []));
   process.exitCode = problems.length ? 1 : 0;
 }
 
 /**
  * Owner test card helper: a disposable, unlocked Mind Place with the synthetic conformance corpus, left open
  * for the owner to connect a client that cannot be driven from here (hosted ChatGPT, Gemini app, Claude app).
- * The owner creates the access key and picks chats in the real Connections screen. Nothing private is loaded.
+ * Pass `--proxy` to expose a local recording proxy in front of 127.0.0.1:43731 and emit a scrubbed wire receipt.
+ * The owner creates the access keys and picks chats in the real Connections screen. Nothing private is loaded.
  */
-async function servePhase() {
-  const log = (m) => console.error(`[serve] ${m}`);
+async function servePhase(useProxy = false) {
+  const source = sourceIdentity();
+  const outDir = path.join(repoRoot, 'outputs', 'mcp-conformance', source.sha.slice(0, 12));
+  let activeSecrets = [];
+  const log = (m) => console.error(formatSafeLine(`[serve] ${m}`, activeSecrets));
   const session = await startSession({ label: 'serve', corpusOptions: { longMessages: 6, longBytes: 500, mediumMessages: 10, mediumBytes: 1400 }, log });
+  activeSecrets = session.secrets;
+  const proxy = useProxy ? await startRecordingProxy({ targetPort: 43731, secrets: session.secrets }) : null;
   console.log('Disposable Mind Place is running with a synthetic corpus (4 chats). It is unlocked and sharing is on.');
-  console.log('In the app: open Connections, create access for your client, then Choose chats and allow ONLY "Conformance medium conversation".');
-  console.log('Follow docs/qualification/mcp-parity/OWNER-TEST-CARDS.md. Press Ctrl-C here when done (this closes the app and discards the archive).');
-  const stop = async () => { await session.app.close(); process.exit(0); };
+  if (proxy) console.log(`Recording proxy listening at ${proxy.url} (forwards to http://127.0.0.1:43731/mcp; writes scrubbed wire receipt on exit).`);
+  console.log('In the app: open Connections -> create Key 1 ("<client>-main") with ZERO chats granted first for P0 (default deny).');
+  console.log('Only AFTER P0 passes, Choose chats -> allow ONLY "Conformance medium conversation". Use a SEPARATE Key 2 for P4 whole-client revoke.');
+  console.log('Follow docs/qualification/mcp-parity/OWNER-TEST-CARDS.md. Press Ctrl-C here when done (writes scrubbed session receipt and discards the archive).');
+  let stopping = false;
+  const stop = async () => {
+    if (stopping) return;
+    stopping = true;
+    const receiptBody = {
+      kind: 'OWNER_SERVE_SESSION_RECEIPT',
+      source,
+      executable_sha256: sha256File(session.exe),
+      dirty_tree: source.dirty,
+      proxy_used: Boolean(proxy),
+      observed_client: proxy ? (await import('./recording-proxy.mjs')).observedClientIdentity(proxy.exchanges) : null,
+      exchange_summary: proxy ? proxy.exchanges.map((e) => ({
+        at: e.at, http: e.http, rpc: e.rpcMethod, tool: e.toolName, status: e.status, upstreamError: e.upstreamError ?? undefined,
+        hits: e.result?.structuredContent?.hits ? e.result.structuredContent.hits.length : undefined,
+        segments: e.result?.structuredContent?.segments ? e.result.structuredContent.segments.length : undefined,
+        error: e.error ? { code: e.error.code, message: safePreview(e.error.message, session.secrets, 160) } : undefined,
+        bytes: e.responseBytes,
+      })) : [],
+      contains_no_keys_or_private_ids: true,
+    };
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const saved = writeReceipt(outDir, `owner-serve-${stamp}.json`, receiptBody, session.secrets);
+    console.log(formatSafeJson({ owner_serve_receipt: saved.file, sha256: saved.sha256 }, session.secrets));
+    if (proxy) await proxy.close();
+    await session.app.close();
+    process.exit(0);
+  };
   process.on('SIGINT', stop);
   await new Promise(() => {});
 }
@@ -205,12 +253,22 @@ async function servePhase() {
 async function realPhase(clientId) {
   const source = sourceIdentity();
   const outDir = path.join(repoRoot, 'outputs', 'mcp-conformance', source.sha.slice(0, 12));
-  const log = (m) => console.error(`[real:${clientId}] ${m}`);
-  const result = await runRealClient(clientId, { startSession, log });
+  const activeSecrets = [];
+  const log = (m) => console.error(formatSafeLine(`[real:${clientId}] ${m}`, activeSecrets));
+  const result = await runRealClient(clientId, {
+    startSession: async (opts) => {
+      const s = await startSession(opts);
+      activeSecrets.push(...s.secrets);
+      return s;
+    },
+    log,
+  });
   const { secrets = [], ...rest } = result;
+  activeSecrets.push(...secrets);
   if (rest.blocked) {
-    const blockedReceipt = writeReceipt(outDir, `blocked-${clientId}.json`, { source, clientId, installed: rest.installed, blocked: rest.blocked }, secrets);
-    console.log(JSON.stringify({ clientId, blocked: rest.blocked, receipt: blockedReceipt.file }, null, 2));
+    const safeBlocked = sanitizeBlocked(rest.blocked, activeSecrets);
+    const blockedReceipt = writeReceipt(outDir, `blocked-${clientId}.json`, { source, clientId, installed: rest.installed, blocked: safeBlocked }, activeSecrets);
+    console.log(formatSafeJson({ clientId, blocked: safeBlocked, receipt: blockedReceipt.file }, activeSecrets));
     process.exitCode = 3;
     return;
   }
@@ -221,10 +279,12 @@ async function realPhase(clientId) {
     dirty_tree: source.dirty,
     ...rest,
   };
-  const receipt = writeReceipt(outDir, `real-${clientId}.json`, body, secrets);
+  const receipt = writeReceipt(outDir, `real-${clientId}.json`, body, activeSecrets);
   const summary = Object.fromEntries(Object.entries(rest.claims).map(([k, v]) => [k, v.result]));
-  console.log(JSON.stringify({ receipt: receipt.file, sha256: receipt.sha256, observed_client: rest.observed_client, summary }, null, 2));
-  for (const claim of Object.values(rest.claims)) for (const check of claim.checks.filter((c) => !c.ok)) console.log(`FAIL ${claim.id} ${check.name} :: ${check.detail}`);
+  console.log(formatSafeJson({ receipt: receipt.file, sha256: receipt.sha256, observed_client: rest.observed_client, summary }, activeSecrets));
+  for (const claim of Object.values(rest.claims)) {
+    for (const check of claim.checks.filter((c) => !c.ok)) console.log(formatSafeLine(`FAIL ${claim.id} ${check.name} :: ${check.detail}`, activeSecrets));
+  }
   process.exitCode = Object.values(summary).every((r) => r === 'PASS') ? 0 : 1;
 }
 
@@ -233,9 +293,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   if (phase === 'synthetic') await syntheticPhase();
   else if (phase === 'real') await realPhase(process.argv[3]);
   else if (phase === 'matrix') await matrixPhase();
-  else if (phase === 'serve') await servePhase();
+  else if (phase === 'serve') await servePhase(process.argv.includes('--proxy'));
   else {
-    console.error('Usage: run.mjs synthetic | real <client> | matrix');
+    console.error('Usage: run.mjs synthetic | real <client> | matrix | serve [--proxy]');
     process.exitCode = 2;
   }
 }

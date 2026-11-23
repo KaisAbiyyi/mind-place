@@ -1,20 +1,25 @@
 {
-  "client": "ChatGPT | Claude app | Gemini app | other",
+  "client": "ChatGPT | Claude app | Gemini app | Antigravity | other",
   "client_version": "from the client's About screen",
   "surface": "hosted app | desktop app | web | CLI",
-  "transport": "secure tunnel | custom connector HTTPS | loopback",
+  "transport": "secure tunnel | custom connector HTTPS | stdio-bridge -> loopback | loopback",
+  "credential_tier": "hosted | local",
   "date": "YYYY-MM-DD",
   "mind_place_sha": "40-hex commit of the release under test",
   "executable_sha256": "64-hex of mind-place.exe",
+  "evidence_level": "wire_verified | manual_partial",
+  "observable_wire_receipt": "relative path to scrubbed owner-serve-*.json or sanitized server audit receipt",
+  "observable_wire_receipt_sha256": "64-hex sha256 of the scrubbed receipt file",
   "results": {
-    "P0": { "result": "PASS | FAIL | NOT_RUN | PROVIDER_BLOCKED", "note": "" },
-    "P1": { "result": "", "note": "" },
-    "P2": { "result": "", "note": "calls for latest revision: N" },
-    "P3": { "result": "", "note": "" },
-    "P4": { "result": "", "note": "" },
-    "P5": { "result": "", "note": "" },
-    "P6": { "result": "", "note": "" }
+    "P0_default_deny_before_grant_key1": { "result": "PASS | FAIL | NOT_RUN | PROVIDER_BLOCKED", "note": "must run BEFORE granting any chat to Key 1" },
+    "P1_scoped_search_key1": { "result": "", "note": "only Conformance medium conversation granted" },
+    "P2_paged_exact_fetch_key1": { "result": "", "note": "calls for latest revision: N; earlier revision also read" },
+    "P3_chat_revoke_key1": { "result": "", "note": "" },
+    "P4_whole_client_revoke_key2": { "result": "", "note": "distinct Key 2 granted, verified working, then revoked" },
+    "P5_lock_key1": { "result": "", "note": "Key 1 re-granted while Key 2 remains revoked; Lock pressed" },
+    "P6a_reconnect_key1": { "result": "", "note": "Unlock + Start sharing; Key 1 reads only its grant" },
+    "P6b_revoked_key2_still_denied": { "result": "", "note": "Key 2 remains 401/403 after Lock/Unlock/reconnect" }
   },
-  "provider_blocked_evidence": "vendor message or screenshot description if applicable",
+  "provider_blocked_evidence": "vendor message or redacted description if applicable",
   "contains_no_keys_or_private_ids": true
 }

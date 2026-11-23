@@ -28,7 +28,7 @@ export const CLIENTS = [
   { id: 'claude-code', label: 'Claude Code', surface: 'local CLI', transport: 'streamable-http-loopback' },
   { id: 'codex', label: 'Codex', surface: 'local CLI', transport: 'streamable-http-loopback' },
   { id: 'gemini-cli', label: 'Gemini CLI', surface: 'local CLI', transport: 'streamable-http-loopback' },
-  { id: 'antigravity', label: 'Antigravity', surface: 'local CLI', transport: 'streamable-http-loopback' },
+  { id: 'antigravity', label: 'Antigravity', surface: 'local CLI', transport: 'stdio-bridge -> streamable-http-loopback' },
   { id: 'claude-app', label: 'Claude (desktop / web app)', surface: 'hosted or desktop app', transport: 'custom connector (HTTPS)' },
   { id: 'chatgpt', label: 'ChatGPT', surface: 'hosted', transport: 'secure tunnel (HTTPS)' },
   { id: 'gemini-app', label: 'Gemini (hosted app)', surface: 'hosted', transport: 'custom connector (HTTPS)' },
