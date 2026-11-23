@@ -57,8 +57,17 @@ export async function launchApp({ exe, runtimeDir, dataDir }) {
   const pageErrors = [];
   page.on('pageerror', (error) => pageErrors.push(String(error.message).slice(0, 250)));
 
-  const invoke = (command, args = {}) =>
-    page.evaluate(([c, a]) => window.__TAURI_INTERNALS__.invoke(c, a), [command, args]);
+  /** Owner command. Right after unlock the state migration may still be running; that is a retryable condition. */
+  const invoke = async (command, args = {}) => {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await page.evaluate(([c, a]) => window.__TAURI_INTERNALS__.invoke(c, a), [command, args]);
+      } catch (error) {
+        if (attempt < 120 && /MP_STATE_BUSY/.test(String(error?.message ?? error))) { await sleep(500); continue; }
+        throw error;
+      }
+    }
+  };
 
   const driver = {
     app,
