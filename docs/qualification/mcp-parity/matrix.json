@@ -1,0 +1,741 @@
+{
+  "sha": "59050f6998d24c1c6c3907463748f76b9ab91a85",
+  "product_tree_id": "4344d1e7c28540ae",
+  "generated_at": "2026-11-23T19:58:55.280Z",
+  "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
+  "rust_trees": {
+    "crates": "b3101cee0080dba2ab7267ad5dbcf1e3efe59993",
+    "src_tauri": "43380c0c461fd1b07bfb6cab5bba010c3c35e73e",
+    "cargo_lock": "d205240176426ffeec45956f651c92729e5bf1f0",
+    "src": "3eb1dc4ac7bc1768ca24fcf52621f4315a631106"
+  },
+  "cells": {
+    "synthetic-http": {
+      "C1": {
+        "result": "PASS",
+        "sha": "1bb339c693462970cfbd319475110ac86bf98d5b",
+        "product_tree_id": "4344d1e7c28540ae",
+        "evidence": {
+          "kind": "SYNTHETIC_HTTP",
+          "receipt": "receipts/synthetic.json",
+          "receipt_sha256": "4c9110083d2adaef32c25e960438268b2efc6eae897e3104bc9ed8ca22bd2147",
+          "transport": "streamable-http-loopback"
+        },
+        "note": "13/13 checks",
+        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c"
+      },
+      "C2": {
+        "result": "PASS",
+        "sha": "1bb339c693462970cfbd319475110ac86bf98d5b",
+        "product_tree_id": "4344d1e7c28540ae",
+        "evidence": {
+          "kind": "SYNTHETIC_HTTP",
+          "receipt": "receipts/synthetic.json",
+          "receipt_sha256": "4c9110083d2adaef32c25e960438268b2efc6eae897e3104bc9ed8ca22bd2147",
+          "transport": "streamable-http-loopback"
+        },
+        "note": "15/15 checks",
+        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c"
+      },
+      "C3": {
+        "result": "PASS",
+        "sha": "1bb339c693462970cfbd319475110ac86bf98d5b",
+        "product_tree_id": "4344d1e7c28540ae",
+        "evidence": {
+          "kind": "SYNTHETIC_HTTP",
+          "receipt": "receipts/synthetic.json",
+          "receipt_sha256": "4c9110083d2adaef32c25e960438268b2efc6eae897e3104bc9ed8ca22bd2147",
+          "transport": "streamable-http-loopback"
+        },
+        "note": "12/12 checks",
+        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c"
+      },
+      "C4": {
+        "result": "PASS",
+        "sha": "1bb339c693462970cfbd319475110ac86bf98d5b",
+        "product_tree_id": "4344d1e7c28540ae",
+        "evidence": {
+          "kind": "SYNTHETIC_HTTP",
+          "receipt": "receipts/synthetic.json",
+          "receipt_sha256": "4c9110083d2adaef32c25e960438268b2efc6eae897e3104bc9ed8ca22bd2147",
+          "transport": "streamable-http-loopback"
+        },
+        "note": "8/8 checks",
+        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c"
+      },
+      "C5": {
+        "result": "PASS",
+        "sha": "1bb339c693462970cfbd319475110ac86bf98d5b",
+        "product_tree_id": "4344d1e7c28540ae",
+        "evidence": {
+          "kind": "SYNTHETIC_HTTP",
+          "receipt": "receipts/synthetic.json",
+          "receipt_sha256": "4c9110083d2adaef32c25e960438268b2efc6eae897e3104bc9ed8ca22bd2147",
+          "transport": "streamable-http-loopback"
+        },
+        "note": "15/15 checks",
+        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c"
+      },
+      "C6": {
+        "result": "PASS",
+        "sha": "1bb339c693462970cfbd319475110ac86bf98d5b",
+        "product_tree_id": "4344d1e7c28540ae",
+        "evidence": {
+          "kind": "SYNTHETIC_HTTP",
+          "receipt": "receipts/synthetic.json",
+          "receipt_sha256": "4c9110083d2adaef32c25e960438268b2efc6eae897e3104bc9ed8ca22bd2147",
+          "transport": "streamable-http-loopback"
+        },
+        "note": "23/23 checks",
+        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c"
+      },
+      "C7": {
+        "result": "PASS",
+        "sha": "1bb339c693462970cfbd319475110ac86bf98d5b",
+        "product_tree_id": "4344d1e7c28540ae",
+        "evidence": {
+          "kind": "SYNTHETIC_HTTP",
+          "receipt": "receipts/synthetic.json",
+          "receipt_sha256": "4c9110083d2adaef32c25e960438268b2efc6eae897e3104bc9ed8ca22bd2147",
+          "transport": "streamable-http-loopback"
+        },
+        "note": "6/6 checks",
+        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c"
+      },
+      "C8": {
+        "result": "PASS",
+        "sha": "1bb339c693462970cfbd319475110ac86bf98d5b",
+        "product_tree_id": "4344d1e7c28540ae",
+        "evidence": {
+          "kind": "SYNTHETIC_HTTP",
+          "receipt": "receipts/synthetic.json",
+          "receipt_sha256": "4c9110083d2adaef32c25e960438268b2efc6eae897e3104bc9ed8ca22bd2147",
+          "transport": "streamable-http-loopback"
+        },
+        "note": "4/4 checks",
+        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c"
+      },
+      "C9": {
+        "result": "PASS",
+        "sha": "1bb339c693462970cfbd319475110ac86bf98d5b",
+        "product_tree_id": "4344d1e7c28540ae",
+        "evidence": {
+          "kind": "SYNTHETIC_HTTP",
+          "receipt": "receipts/synthetic.json",
+          "receipt_sha256": "4c9110083d2adaef32c25e960438268b2efc6eae897e3104bc9ed8ca22bd2147",
+          "transport": "streamable-http-loopback"
+        },
+        "note": "8/8 checks",
+        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c"
+      }
+    },
+    "claude-code": {
+      "C1": {
+        "result": "PASS",
+        "sha": "59050f6998d24c1c6c3907463748f76b9ab91a85",
+        "product_tree_id": "4344d1e7c28540ae",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-claude-code.json",
+          "receipt_sha256": "e16cc9649007cc65b48c4ae2dede08ae3af13c2a0821e5b452c3a18d04e2229d",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "claude-code",
+            "version": "2.1.322",
+            "protocolVersion": "2026-07-28",
+            "source": "_meta.clientInfo"
+          }
+        },
+        "note": "3/3 checks",
+        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
+        "client_version": "2.1.322 (Claude Code)"
+      },
+      "C2": {
+        "result": "PASS",
+        "sha": "59050f6998d24c1c6c3907463748f76b9ab91a85",
+        "product_tree_id": "4344d1e7c28540ae",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-claude-code.json",
+          "receipt_sha256": "e16cc9649007cc65b48c4ae2dede08ae3af13c2a0821e5b452c3a18d04e2229d",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "claude-code",
+            "version": "2.1.322",
+            "protocolVersion": "2026-07-28",
+            "source": "_meta.clientInfo"
+          }
+        },
+        "note": "3/3 checks",
+        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
+        "client_version": "2.1.322 (Claude Code)"
+      },
+      "C3": {
+        "result": "PASS",
+        "sha": "59050f6998d24c1c6c3907463748f76b9ab91a85",
+        "product_tree_id": "4344d1e7c28540ae",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-claude-code.json",
+          "receipt_sha256": "e16cc9649007cc65b48c4ae2dede08ae3af13c2a0821e5b452c3a18d04e2229d",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "claude-code",
+            "version": "2.1.322",
+            "protocolVersion": "2026-07-28",
+            "source": "_meta.clientInfo"
+          }
+        },
+        "note": "4/4 checks",
+        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
+        "client_version": "2.1.322 (Claude Code)"
+      },
+      "C4": {
+        "result": "PASS",
+        "sha": "59050f6998d24c1c6c3907463748f76b9ab91a85",
+        "product_tree_id": "4344d1e7c28540ae",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-claude-code.json",
+          "receipt_sha256": "e16cc9649007cc65b48c4ae2dede08ae3af13c2a0821e5b452c3a18d04e2229d",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "claude-code",
+            "version": "2.1.322",
+            "protocolVersion": "2026-07-28",
+            "source": "_meta.clientInfo"
+          }
+        },
+        "note": "2/2 checks",
+        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
+        "client_version": "2.1.322 (Claude Code)"
+      },
+      "C5": {
+        "result": "PASS",
+        "sha": "59050f6998d24c1c6c3907463748f76b9ab91a85",
+        "product_tree_id": "4344d1e7c28540ae",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-claude-code.json",
+          "receipt_sha256": "e16cc9649007cc65b48c4ae2dede08ae3af13c2a0821e5b452c3a18d04e2229d",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "claude-code",
+            "version": "2.1.322",
+            "protocolVersion": "2026-07-28",
+            "source": "_meta.clientInfo"
+          }
+        },
+        "note": "4/4 checks",
+        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
+        "client_version": "2.1.322 (Claude Code)"
+      },
+      "C6": {
+        "result": "PASS",
+        "sha": "59050f6998d24c1c6c3907463748f76b9ab91a85",
+        "product_tree_id": "4344d1e7c28540ae",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-claude-code.json",
+          "receipt_sha256": "e16cc9649007cc65b48c4ae2dede08ae3af13c2a0821e5b452c3a18d04e2229d",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "claude-code",
+            "version": "2.1.322",
+            "protocolVersion": "2026-07-28",
+            "source": "_meta.clientInfo"
+          }
+        },
+        "note": "3/3 checks",
+        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
+        "client_version": "2.1.322 (Claude Code)"
+      },
+      "C7": {
+        "result": "PASS",
+        "sha": "59050f6998d24c1c6c3907463748f76b9ab91a85",
+        "product_tree_id": "4344d1e7c28540ae",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-claude-code.json",
+          "receipt_sha256": "e16cc9649007cc65b48c4ae2dede08ae3af13c2a0821e5b452c3a18d04e2229d",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "claude-code",
+            "version": "2.1.322",
+            "protocolVersion": "2026-07-28",
+            "source": "_meta.clientInfo"
+          }
+        },
+        "note": "4/4 checks",
+        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
+        "client_version": "2.1.322 (Claude Code)"
+      },
+      "C8": {
+        "result": "PASS",
+        "sha": "59050f6998d24c1c6c3907463748f76b9ab91a85",
+        "product_tree_id": "4344d1e7c28540ae",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-claude-code.json",
+          "receipt_sha256": "e16cc9649007cc65b48c4ae2dede08ae3af13c2a0821e5b452c3a18d04e2229d",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "claude-code",
+            "version": "2.1.322",
+            "protocolVersion": "2026-07-28",
+            "source": "_meta.clientInfo"
+          }
+        },
+        "note": "2/2 checks",
+        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
+        "client_version": "2.1.322 (Claude Code)"
+      },
+      "C9": {
+        "result": "PASS",
+        "sha": "59050f6998d24c1c6c3907463748f76b9ab91a85",
+        "product_tree_id": "4344d1e7c28540ae",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-claude-code.json",
+          "receipt_sha256": "e16cc9649007cc65b48c4ae2dede08ae3af13c2a0821e5b452c3a18d04e2229d",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "claude-code",
+            "version": "2.1.322",
+            "protocolVersion": "2026-07-28",
+            "source": "_meta.clientInfo"
+          }
+        },
+        "note": "4/4 checks",
+        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
+        "client_version": "2.1.322 (Claude Code)"
+      }
+    },
+    "codex": {
+      "C1": {
+        "result": "PASS",
+        "sha": "1bb339c693462970cfbd319475110ac86bf98d5b",
+        "product_tree_id": "4344d1e7c28540ae",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-codex.json",
+          "receipt_sha256": "b7cd4b84eb92788d506d034d7b0770e80e0020bdb615e037f32b9408e4931854",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "codex-mcp-client",
+            "version": "0.164.0",
+            "protocolVersion": "2026-07-28",
+            "source": "_meta.clientInfo"
+          }
+        },
+        "note": "3/3 checks",
+        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
+        "client_version": "codex-cli 0.164.0"
+      },
+      "C2": {
+        "result": "PASS",
+        "sha": "1bb339c693462970cfbd319475110ac86bf98d5b",
+        "product_tree_id": "4344d1e7c28540ae",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-codex.json",
+          "receipt_sha256": "b7cd4b84eb92788d506d034d7b0770e80e0020bdb615e037f32b9408e4931854",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "codex-mcp-client",
+            "version": "0.164.0",
+            "protocolVersion": "2026-07-28",
+            "source": "_meta.clientInfo"
+          }
+        },
+        "note": "2/2 checks",
+        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
+        "client_version": "codex-cli 0.164.0"
+      },
+      "C3": {
+        "result": "PASS",
+        "sha": "1bb339c693462970cfbd319475110ac86bf98d5b",
+        "product_tree_id": "4344d1e7c28540ae",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-codex.json",
+          "receipt_sha256": "b7cd4b84eb92788d506d034d7b0770e80e0020bdb615e037f32b9408e4931854",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "codex-mcp-client",
+            "version": "0.164.0",
+            "protocolVersion": "2026-07-28",
+            "source": "_meta.clientInfo"
+          }
+        },
+        "note": "4/4 checks",
+        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
+        "client_version": "codex-cli 0.164.0"
+      },
+      "C4": {
+        "result": "PASS",
+        "sha": "1bb339c693462970cfbd319475110ac86bf98d5b",
+        "product_tree_id": "4344d1e7c28540ae",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-codex.json",
+          "receipt_sha256": "b7cd4b84eb92788d506d034d7b0770e80e0020bdb615e037f32b9408e4931854",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "codex-mcp-client",
+            "version": "0.164.0",
+            "protocolVersion": "2026-07-28",
+            "source": "_meta.clientInfo"
+          }
+        },
+        "note": "2/2 checks",
+        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
+        "client_version": "codex-cli 0.164.0"
+      },
+      "C5": {
+        "result": "PASS",
+        "sha": "1bb339c693462970cfbd319475110ac86bf98d5b",
+        "product_tree_id": "4344d1e7c28540ae",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-codex.json",
+          "receipt_sha256": "b7cd4b84eb92788d506d034d7b0770e80e0020bdb615e037f32b9408e4931854",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "codex-mcp-client",
+            "version": "0.164.0",
+            "protocolVersion": "2026-07-28",
+            "source": "_meta.clientInfo"
+          }
+        },
+        "note": "4/4 checks",
+        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
+        "client_version": "codex-cli 0.164.0"
+      },
+      "C6": {
+        "result": "PASS",
+        "sha": "1bb339c693462970cfbd319475110ac86bf98d5b",
+        "product_tree_id": "4344d1e7c28540ae",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-codex.json",
+          "receipt_sha256": "b7cd4b84eb92788d506d034d7b0770e80e0020bdb615e037f32b9408e4931854",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "codex-mcp-client",
+            "version": "0.164.0",
+            "protocolVersion": "2026-07-28",
+            "source": "_meta.clientInfo"
+          }
+        },
+        "note": "3/3 checks",
+        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
+        "client_version": "codex-cli 0.164.0"
+      },
+      "C7": {
+        "result": "PASS",
+        "sha": "1bb339c693462970cfbd319475110ac86bf98d5b",
+        "product_tree_id": "4344d1e7c28540ae",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-codex.json",
+          "receipt_sha256": "b7cd4b84eb92788d506d034d7b0770e80e0020bdb615e037f32b9408e4931854",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "codex-mcp-client",
+            "version": "0.164.0",
+            "protocolVersion": "2026-07-28",
+            "source": "_meta.clientInfo"
+          }
+        },
+        "note": "4/4 checks",
+        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
+        "client_version": "codex-cli 0.164.0"
+      },
+      "C8": {
+        "result": "PASS",
+        "sha": "1bb339c693462970cfbd319475110ac86bf98d5b",
+        "product_tree_id": "4344d1e7c28540ae",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-codex.json",
+          "receipt_sha256": "b7cd4b84eb92788d506d034d7b0770e80e0020bdb615e037f32b9408e4931854",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "codex-mcp-client",
+            "version": "0.164.0",
+            "protocolVersion": "2026-07-28",
+            "source": "_meta.clientInfo"
+          }
+        },
+        "note": "2/2 checks",
+        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
+        "client_version": "codex-cli 0.164.0"
+      },
+      "C9": {
+        "result": "PASS",
+        "sha": "1bb339c693462970cfbd319475110ac86bf98d5b",
+        "product_tree_id": "4344d1e7c28540ae",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-codex.json",
+          "receipt_sha256": "b7cd4b84eb92788d506d034d7b0770e80e0020bdb615e037f32b9408e4931854",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "codex-mcp-client",
+            "version": "0.164.0",
+            "protocolVersion": "2026-07-28",
+            "source": "_meta.clientInfo"
+          }
+        },
+        "note": "4/4 checks",
+        "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
+        "client_version": "codex-cli 0.164.0"
+      }
+    },
+    "gemini-cli": {
+      "C1": {
+        "result": "PROVIDER_BLOCKED",
+        "blocker": "Gemini CLI 0.34.0 refuses to start with the owner's stored Google login: IneligibleTierError: \"This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products\" (captured 2026-11-24 on the qualification machine; no request reached Mind Place).",
+        "fallback": "Antigravity CLI (separate row). Gemini CLI on an eligible (for example Workspace or paid) account is covered by owner card 'any local CLI that failed in the agent run'.",
+        "note": "Not a Mind Place defect: the vendor client did not start a session."
+      },
+      "C2": {
+        "result": "PROVIDER_BLOCKED",
+        "blocker": "Gemini CLI 0.34.0 refuses to start with the owner's stored Google login: IneligibleTierError: \"This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products\" (captured 2026-11-24 on the qualification machine; no request reached Mind Place).",
+        "fallback": "Antigravity CLI (separate row). Gemini CLI on an eligible (for example Workspace or paid) account is covered by owner card 'any local CLI that failed in the agent run'.",
+        "note": "Not a Mind Place defect: the vendor client did not start a session."
+      },
+      "C3": {
+        "result": "PROVIDER_BLOCKED",
+        "blocker": "Gemini CLI 0.34.0 refuses to start with the owner's stored Google login: IneligibleTierError: \"This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products\" (captured 2026-11-24 on the qualification machine; no request reached Mind Place).",
+        "fallback": "Antigravity CLI (separate row). Gemini CLI on an eligible (for example Workspace or paid) account is covered by owner card 'any local CLI that failed in the agent run'.",
+        "note": "Not a Mind Place defect: the vendor client did not start a session."
+      },
+      "C4": {
+        "result": "PROVIDER_BLOCKED",
+        "blocker": "Gemini CLI 0.34.0 refuses to start with the owner's stored Google login: IneligibleTierError: \"This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products\" (captured 2026-11-24 on the qualification machine; no request reached Mind Place).",
+        "fallback": "Antigravity CLI (separate row). Gemini CLI on an eligible (for example Workspace or paid) account is covered by owner card 'any local CLI that failed in the agent run'.",
+        "note": "Not a Mind Place defect: the vendor client did not start a session."
+      },
+      "C5": {
+        "result": "PROVIDER_BLOCKED",
+        "blocker": "Gemini CLI 0.34.0 refuses to start with the owner's stored Google login: IneligibleTierError: \"This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products\" (captured 2026-11-24 on the qualification machine; no request reached Mind Place).",
+        "fallback": "Antigravity CLI (separate row). Gemini CLI on an eligible (for example Workspace or paid) account is covered by owner card 'any local CLI that failed in the agent run'.",
+        "note": "Not a Mind Place defect: the vendor client did not start a session."
+      },
+      "C6": {
+        "result": "PROVIDER_BLOCKED",
+        "blocker": "Gemini CLI 0.34.0 refuses to start with the owner's stored Google login: IneligibleTierError: \"This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products\" (captured 2026-11-24 on the qualification machine; no request reached Mind Place).",
+        "fallback": "Antigravity CLI (separate row). Gemini CLI on an eligible (for example Workspace or paid) account is covered by owner card 'any local CLI that failed in the agent run'.",
+        "note": "Not a Mind Place defect: the vendor client did not start a session."
+      },
+      "C7": {
+        "result": "PROVIDER_BLOCKED",
+        "blocker": "Gemini CLI 0.34.0 refuses to start with the owner's stored Google login: IneligibleTierError: \"This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products\" (captured 2026-11-24 on the qualification machine; no request reached Mind Place).",
+        "fallback": "Antigravity CLI (separate row). Gemini CLI on an eligible (for example Workspace or paid) account is covered by owner card 'any local CLI that failed in the agent run'.",
+        "note": "Not a Mind Place defect: the vendor client did not start a session."
+      },
+      "C8": {
+        "result": "PROVIDER_BLOCKED",
+        "blocker": "Gemini CLI 0.34.0 refuses to start with the owner's stored Google login: IneligibleTierError: \"This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products\" (captured 2026-11-24 on the qualification machine; no request reached Mind Place).",
+        "fallback": "Antigravity CLI (separate row). Gemini CLI on an eligible (for example Workspace or paid) account is covered by owner card 'any local CLI that failed in the agent run'.",
+        "note": "Not a Mind Place defect: the vendor client did not start a session."
+      },
+      "C9": {
+        "result": "PROVIDER_BLOCKED",
+        "blocker": "Gemini CLI 0.34.0 refuses to start with the owner's stored Google login: IneligibleTierError: \"This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products\" (captured 2026-11-24 on the qualification machine; no request reached Mind Place).",
+        "fallback": "Antigravity CLI (separate row). Gemini CLI on an eligible (for example Workspace or paid) account is covered by owner card 'any local CLI that failed in the agent run'.",
+        "note": "Not a Mind Place defect: the vendor client did not start a session."
+      }
+    },
+    "antigravity": {
+      "C1": {
+        "result": "NOT_RUN",
+        "reason": "Antigravity CLI 1.5.10 reached the listener and sent initialize, which Mind Place correctly refused with 401: its MCP configuration does not expand environment variables in headers, so the literal placeholder was sent. Delivering the key would require putting it literally on a command line or in its shared user config (~/.gemini/config), which this harness deliberately does not do. Headless runs also stay in request-review permission mode ('--mode auto' is not available for this account), so tool calls would wait for approval. See receipt blocked-antigravity.json.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-antigravity-cli"
+      },
+      "C2": {
+        "result": "NOT_RUN",
+        "reason": "Antigravity CLI 1.5.10 reached the listener and sent initialize, which Mind Place correctly refused with 401: its MCP configuration does not expand environment variables in headers, so the literal placeholder was sent. Delivering the key would require putting it literally on a command line or in its shared user config (~/.gemini/config), which this harness deliberately does not do. Headless runs also stay in request-review permission mode ('--mode auto' is not available for this account), so tool calls would wait for approval. See receipt blocked-antigravity.json.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-antigravity-cli"
+      },
+      "C3": {
+        "result": "NOT_RUN",
+        "reason": "Antigravity CLI 1.5.10 reached the listener and sent initialize, which Mind Place correctly refused with 401: its MCP configuration does not expand environment variables in headers, so the literal placeholder was sent. Delivering the key would require putting it literally on a command line or in its shared user config (~/.gemini/config), which this harness deliberately does not do. Headless runs also stay in request-review permission mode ('--mode auto' is not available for this account), so tool calls would wait for approval. See receipt blocked-antigravity.json.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-antigravity-cli"
+      },
+      "C4": {
+        "result": "NOT_RUN",
+        "reason": "Antigravity CLI 1.5.10 reached the listener and sent initialize, which Mind Place correctly refused with 401: its MCP configuration does not expand environment variables in headers, so the literal placeholder was sent. Delivering the key would require putting it literally on a command line or in its shared user config (~/.gemini/config), which this harness deliberately does not do. Headless runs also stay in request-review permission mode ('--mode auto' is not available for this account), so tool calls would wait for approval. See receipt blocked-antigravity.json.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-antigravity-cli"
+      },
+      "C5": {
+        "result": "NOT_RUN",
+        "reason": "Antigravity CLI 1.5.10 reached the listener and sent initialize, which Mind Place correctly refused with 401: its MCP configuration does not expand environment variables in headers, so the literal placeholder was sent. Delivering the key would require putting it literally on a command line or in its shared user config (~/.gemini/config), which this harness deliberately does not do. Headless runs also stay in request-review permission mode ('--mode auto' is not available for this account), so tool calls would wait for approval. See receipt blocked-antigravity.json.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-antigravity-cli"
+      },
+      "C6": {
+        "result": "NOT_RUN",
+        "reason": "Antigravity CLI 1.5.10 reached the listener and sent initialize, which Mind Place correctly refused with 401: its MCP configuration does not expand environment variables in headers, so the literal placeholder was sent. Delivering the key would require putting it literally on a command line or in its shared user config (~/.gemini/config), which this harness deliberately does not do. Headless runs also stay in request-review permission mode ('--mode auto' is not available for this account), so tool calls would wait for approval. See receipt blocked-antigravity.json.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-antigravity-cli"
+      },
+      "C7": {
+        "result": "NOT_RUN",
+        "reason": "Antigravity CLI 1.5.10 reached the listener and sent initialize, which Mind Place correctly refused with 401: its MCP configuration does not expand environment variables in headers, so the literal placeholder was sent. Delivering the key would require putting it literally on a command line or in its shared user config (~/.gemini/config), which this harness deliberately does not do. Headless runs also stay in request-review permission mode ('--mode auto' is not available for this account), so tool calls would wait for approval. See receipt blocked-antigravity.json.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-antigravity-cli"
+      },
+      "C8": {
+        "result": "NOT_RUN",
+        "reason": "Antigravity CLI 1.5.10 reached the listener and sent initialize, which Mind Place correctly refused with 401: its MCP configuration does not expand environment variables in headers, so the literal placeholder was sent. Delivering the key would require putting it literally on a command line or in its shared user config (~/.gemini/config), which this harness deliberately does not do. Headless runs also stay in request-review permission mode ('--mode auto' is not available for this account), so tool calls would wait for approval. See receipt blocked-antigravity.json.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-antigravity-cli"
+      },
+      "C9": {
+        "result": "NOT_RUN",
+        "reason": "Antigravity CLI 1.5.10 reached the listener and sent initialize, which Mind Place correctly refused with 401: its MCP configuration does not expand environment variables in headers, so the literal placeholder was sent. Delivering the key would require putting it literally on a command line or in its shared user config (~/.gemini/config), which this harness deliberately does not do. Headless runs also stay in request-review permission mode ('--mode auto' is not available for this account), so tool calls would wait for approval. See receipt blocked-antigravity.json.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-antigravity-cli"
+      }
+    },
+    "claude-app": {
+      "C1": {
+        "result": "NOT_RUN",
+        "reason": "Claude web and desktop custom connectors need an HTTPS MCP URL reachable by Claude. Release 1 ships no general public gateway (only the OpenAI-only secure tunnel). An agent cannot sign in to the owner's Claude account or publish an endpoint.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-claude-app-desktop-or-web-custom-connector"
+      },
+      "C2": {
+        "result": "NOT_RUN",
+        "reason": "Claude web and desktop custom connectors need an HTTPS MCP URL reachable by Claude. Release 1 ships no general public gateway (only the OpenAI-only secure tunnel). An agent cannot sign in to the owner's Claude account or publish an endpoint.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-claude-app-desktop-or-web-custom-connector"
+      },
+      "C3": {
+        "result": "NOT_RUN",
+        "reason": "Claude web and desktop custom connectors need an HTTPS MCP URL reachable by Claude. Release 1 ships no general public gateway (only the OpenAI-only secure tunnel). An agent cannot sign in to the owner's Claude account or publish an endpoint.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-claude-app-desktop-or-web-custom-connector"
+      },
+      "C4": {
+        "result": "NOT_RUN",
+        "reason": "Claude web and desktop custom connectors need an HTTPS MCP URL reachable by Claude. Release 1 ships no general public gateway (only the OpenAI-only secure tunnel). An agent cannot sign in to the owner's Claude account or publish an endpoint.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-claude-app-desktop-or-web-custom-connector"
+      },
+      "C5": {
+        "result": "NOT_RUN",
+        "reason": "Claude web and desktop custom connectors need an HTTPS MCP URL reachable by Claude. Release 1 ships no general public gateway (only the OpenAI-only secure tunnel). An agent cannot sign in to the owner's Claude account or publish an endpoint.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-claude-app-desktop-or-web-custom-connector"
+      },
+      "C6": {
+        "result": "NOT_RUN",
+        "reason": "Claude web and desktop custom connectors need an HTTPS MCP URL reachable by Claude. Release 1 ships no general public gateway (only the OpenAI-only secure tunnel). An agent cannot sign in to the owner's Claude account or publish an endpoint.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-claude-app-desktop-or-web-custom-connector"
+      },
+      "C7": {
+        "result": "NOT_RUN",
+        "reason": "Claude web and desktop custom connectors need an HTTPS MCP URL reachable by Claude. Release 1 ships no general public gateway (only the OpenAI-only secure tunnel). An agent cannot sign in to the owner's Claude account or publish an endpoint.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-claude-app-desktop-or-web-custom-connector"
+      },
+      "C8": {
+        "result": "NOT_RUN",
+        "reason": "Claude web and desktop custom connectors need an HTTPS MCP URL reachable by Claude. Release 1 ships no general public gateway (only the OpenAI-only secure tunnel). An agent cannot sign in to the owner's Claude account or publish an endpoint.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-claude-app-desktop-or-web-custom-connector"
+      },
+      "C9": {
+        "result": "NOT_RUN",
+        "reason": "Claude web and desktop custom connectors need an HTTPS MCP URL reachable by Claude. Release 1 ships no general public gateway (only the OpenAI-only secure tunnel). An agent cannot sign in to the owner's Claude account or publish an endpoint.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-claude-app-desktop-or-web-custom-connector"
+      }
+    },
+    "chatgpt": {
+      "C1": {
+        "result": "NOT_RUN",
+        "reason": "Hosted ChatGPT needs the owner's OpenAI tunnel ID and runtime API key and ChatGPT developer mode. Those credentials must not be handled by an agent. An earlier real-ChatGPT run of search, fetch and context_build over the tunnel (MP-7MCP-04 baseline) was on an older build and is not claimed for this SHA.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-chatgpt-hosted-secure-mcp-tunnel"
+      },
+      "C2": {
+        "result": "NOT_RUN",
+        "reason": "Hosted ChatGPT needs the owner's OpenAI tunnel ID and runtime API key and ChatGPT developer mode. Those credentials must not be handled by an agent. An earlier real-ChatGPT run of search, fetch and context_build over the tunnel (MP-7MCP-04 baseline) was on an older build and is not claimed for this SHA.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-chatgpt-hosted-secure-mcp-tunnel"
+      },
+      "C3": {
+        "result": "NOT_RUN",
+        "reason": "Hosted ChatGPT needs the owner's OpenAI tunnel ID and runtime API key and ChatGPT developer mode. Those credentials must not be handled by an agent. An earlier real-ChatGPT run of search, fetch and context_build over the tunnel (MP-7MCP-04 baseline) was on an older build and is not claimed for this SHA.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-chatgpt-hosted-secure-mcp-tunnel"
+      },
+      "C4": {
+        "result": "NOT_RUN",
+        "reason": "Hosted ChatGPT needs the owner's OpenAI tunnel ID and runtime API key and ChatGPT developer mode. Those credentials must not be handled by an agent. An earlier real-ChatGPT run of search, fetch and context_build over the tunnel (MP-7MCP-04 baseline) was on an older build and is not claimed for this SHA.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-chatgpt-hosted-secure-mcp-tunnel"
+      },
+      "C5": {
+        "result": "NOT_RUN",
+        "reason": "Hosted ChatGPT needs the owner's OpenAI tunnel ID and runtime API key and ChatGPT developer mode. Those credentials must not be handled by an agent. An earlier real-ChatGPT run of search, fetch and context_build over the tunnel (MP-7MCP-04 baseline) was on an older build and is not claimed for this SHA.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-chatgpt-hosted-secure-mcp-tunnel"
+      },
+      "C6": {
+        "result": "NOT_RUN",
+        "reason": "Hosted ChatGPT needs the owner's OpenAI tunnel ID and runtime API key and ChatGPT developer mode. Those credentials must not be handled by an agent. An earlier real-ChatGPT run of search, fetch and context_build over the tunnel (MP-7MCP-04 baseline) was on an older build and is not claimed for this SHA.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-chatgpt-hosted-secure-mcp-tunnel"
+      },
+      "C7": {
+        "result": "NOT_RUN",
+        "reason": "Hosted ChatGPT needs the owner's OpenAI tunnel ID and runtime API key and ChatGPT developer mode. Those credentials must not be handled by an agent. An earlier real-ChatGPT run of search, fetch and context_build over the tunnel (MP-7MCP-04 baseline) was on an older build and is not claimed for this SHA.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-chatgpt-hosted-secure-mcp-tunnel"
+      },
+      "C8": {
+        "result": "NOT_RUN",
+        "reason": "Hosted ChatGPT needs the owner's OpenAI tunnel ID and runtime API key and ChatGPT developer mode. Those credentials must not be handled by an agent. An earlier real-ChatGPT run of search, fetch and context_build over the tunnel (MP-7MCP-04 baseline) was on an older build and is not claimed for this SHA.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-chatgpt-hosted-secure-mcp-tunnel"
+      },
+      "C9": {
+        "result": "NOT_RUN",
+        "reason": "Hosted ChatGPT needs the owner's OpenAI tunnel ID and runtime API key and ChatGPT developer mode. Those credentials must not be handled by an agent. An earlier real-ChatGPT run of search, fetch and context_build over the tunnel (MP-7MCP-04 baseline) was on an older build and is not claimed for this SHA.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-chatgpt-hosted-secure-mcp-tunnel"
+      }
+    },
+    "gemini-app": {
+      "C1": {
+        "result": "NOT_RUN",
+        "reason": "Hosted Gemini needs the owner's account (Connect to an MCP server or Developer Mode) and an HTTPS endpoint reachable by Gemini. The Gemini app custom-app feature is reported to require an eligible personal account; if the owner's account is not eligible the result is PROVIDER_BLOCKED, to be recorded on the card.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-gemini-hosted-app"
+      },
+      "C2": {
+        "result": "NOT_RUN",
+        "reason": "Hosted Gemini needs the owner's account (Connect to an MCP server or Developer Mode) and an HTTPS endpoint reachable by Gemini. The Gemini app custom-app feature is reported to require an eligible personal account; if the owner's account is not eligible the result is PROVIDER_BLOCKED, to be recorded on the card.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-gemini-hosted-app"
+      },
+      "C3": {
+        "result": "NOT_RUN",
+        "reason": "Hosted Gemini needs the owner's account (Connect to an MCP server or Developer Mode) and an HTTPS endpoint reachable by Gemini. The Gemini app custom-app feature is reported to require an eligible personal account; if the owner's account is not eligible the result is PROVIDER_BLOCKED, to be recorded on the card.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-gemini-hosted-app"
+      },
+      "C4": {
+        "result": "NOT_RUN",
+        "reason": "Hosted Gemini needs the owner's account (Connect to an MCP server or Developer Mode) and an HTTPS endpoint reachable by Gemini. The Gemini app custom-app feature is reported to require an eligible personal account; if the owner's account is not eligible the result is PROVIDER_BLOCKED, to be recorded on the card.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-gemini-hosted-app"
+      },
+      "C5": {
+        "result": "NOT_RUN",
+        "reason": "Hosted Gemini needs the owner's account (Connect to an MCP server or Developer Mode) and an HTTPS endpoint reachable by Gemini. The Gemini app custom-app feature is reported to require an eligible personal account; if the owner's account is not eligible the result is PROVIDER_BLOCKED, to be recorded on the card.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-gemini-hosted-app"
+      },
+      "C6": {
+        "result": "NOT_RUN",
+        "reason": "Hosted Gemini needs the owner's account (Connect to an MCP server or Developer Mode) and an HTTPS endpoint reachable by Gemini. The Gemini app custom-app feature is reported to require an eligible personal account; if the owner's account is not eligible the result is PROVIDER_BLOCKED, to be recorded on the card.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-gemini-hosted-app"
+      },
+      "C7": {
+        "result": "NOT_RUN",
+        "reason": "Hosted Gemini needs the owner's account (Connect to an MCP server or Developer Mode) and an HTTPS endpoint reachable by Gemini. The Gemini app custom-app feature is reported to require an eligible personal account; if the owner's account is not eligible the result is PROVIDER_BLOCKED, to be recorded on the card.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-gemini-hosted-app"
+      },
+      "C8": {
+        "result": "NOT_RUN",
+        "reason": "Hosted Gemini needs the owner's account (Connect to an MCP server or Developer Mode) and an HTTPS endpoint reachable by Gemini. The Gemini app custom-app feature is reported to require an eligible personal account; if the owner's account is not eligible the result is PROVIDER_BLOCKED, to be recorded on the card.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-gemini-hosted-app"
+      },
+      "C9": {
+        "result": "NOT_RUN",
+        "reason": "Hosted Gemini needs the owner's account (Connect to an MCP server or Developer Mode) and an HTTPS endpoint reachable by Gemini. The Gemini app custom-app feature is reported to require an eligible personal account; if the owner's account is not eligible the result is PROVIDER_BLOCKED, to be recorded on the card.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-gemini-hosted-app"
+      }
+    }
+  }
+}

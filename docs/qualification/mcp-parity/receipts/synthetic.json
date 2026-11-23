@@ -1,0 +1,641 @@
+{
+  "kind": "SYNTHETIC_HTTP reference run against the packaged app (disposable synthetic corpus). Not proof of any provider client.",
+  "source": {
+    "sha": "1bb339c693462970cfbd319475110ac86bf98d5b",
+    "dirty": false,
+    "trees": {
+      "crates": "b3101cee0080dba2ab7267ad5dbcf1e3efe59993",
+      "src_tauri": "43380c0c461fd1b07bfb6cab5bba010c3c35e73e",
+      "cargo_lock": "d205240176426ffeec45956f651c92729e5bf1f0",
+      "src": "3eb1dc4ac7bc1768ca24fcf52621f4315a631106"
+    }
+  },
+  "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
+  "dirty_tree": false,
+  "page_errors": [],
+  "corpus_summary": {
+    "long": [
+      {
+        "messages": 240,
+        "raw_sha256": "d9d30114d9094eefba14b6d297088992fc6df5218c2424c60bb9f96da04f9a81"
+      },
+      {
+        "messages": 260,
+        "raw_sha256": "9fa8ffb66641269159d80a059e3a6ee23721c085ba0e664d69967c923dd469bd"
+      },
+      {
+        "messages": 260,
+        "raw_sha256": "40b74971e24867165150baf7025bd58b389da6453609427296843e2210902080"
+      }
+    ],
+    "medium": [
+      {
+        "messages": 30,
+        "raw_sha256": "e5a48686cf367648365cb76b93ed1f7cf047863c10ac2a7050db8820d004e95f"
+      },
+      {
+        "messages": 34,
+        "raw_sha256": "3f3e437787e7cc08b1522e09f052fc5783dc5a1101a4296f6bb29c28b53c67d9"
+      }
+    ],
+    "second": [
+      {
+        "messages": 6,
+        "raw_sha256": "6c8fe53990ec1cd94d9a1f842bd5e9eec8e5c1d98b693b49683aa0cafb4f31ec"
+      }
+    ],
+    "other": [
+      {
+        "messages": 6,
+        "raw_sha256": "149638cf55afd9d9359a3699faf3923e0e396509ce51ec3eb2b6379917a431cb"
+      }
+    ]
+  },
+  "schema_features": [
+    "additionalProperties",
+    "exclusiveMinimum",
+    "format",
+    "maxLength",
+    "minLength",
+    "oneOf",
+    "type-array"
+  ],
+  "harness_failure": null,
+  "failure": null,
+  "claims": {
+    "C1": {
+      "id": "C1",
+      "result": "PASS",
+      "checks": [
+        {
+          "name": "initialize 2025-11-25 negotiates that revision",
+          "ok": true,
+          "detail": "200:null"
+        },
+        {
+          "name": "initialized notification 2025-11-25 is accepted",
+          "ok": true,
+          "detail": "202"
+        },
+        {
+          "name": "serverInfo names the product (2025-11-25)",
+          "ok": true,
+          "detail": "{\"name\":\"mind-place\",\"version\":\"0.2.5\"}"
+        },
+        {
+          "name": "initialize 2025-06-18 negotiates that revision",
+          "ok": true,
+          "detail": "200:null"
+        },
+        {
+          "name": "initialized notification 2025-06-18 is accepted",
+          "ok": true,
+          "detail": "202"
+        },
+        {
+          "name": "serverInfo names the product (2025-06-18)",
+          "ok": true,
+          "detail": "{\"name\":\"mind-place\",\"version\":\"0.2.5\"}"
+        },
+        {
+          "name": "initialize 2025-03-26 negotiates that revision",
+          "ok": true,
+          "detail": "200:null"
+        },
+        {
+          "name": "initialized notification 2025-03-26 is accepted",
+          "ok": true,
+          "detail": "202"
+        },
+        {
+          "name": "serverInfo names the product (2025-03-26)",
+          "ok": true,
+          "detail": "{\"name\":\"mind-place\",\"version\":\"0.2.5\"}"
+        },
+        {
+          "name": "modern discovery lists its revision",
+          "ok": true,
+          "detail": "200:null"
+        },
+        {
+          "name": "initialize without a credential is refused",
+          "ok": true,
+          "detail": "401:null"
+        },
+        {
+          "name": "initialize with an unknown key is refused",
+          "ok": true,
+          "detail": "401:{\"code\":-32001,\"message\":\"Unauthorized\"}"
+        },
+        {
+          "name": "an unsupported protocol revision is refused",
+          "ok": true,
+          "detail": "400:{\"code\":-32022,\"message\":\"Unsupported protocol version\"}"
+        }
+      ]
+    },
+    "C2": {
+      "id": "C2",
+      "result": "PASS",
+      "checks": [
+        {
+          "name": "tools/list (2026-07-28) returns exactly the three read tools",
+          "ok": true,
+          "detail": "memory_search,memory_fetch,context_build"
+        },
+        {
+          "name": "every tool is annotated read-only and non-destructive (2026-07-28)",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "name": "tools/list (2025-11-25) returns exactly the three read tools",
+          "ok": true,
+          "detail": "memory_search,memory_fetch,context_build"
+        },
+        {
+          "name": "every tool is annotated read-only and non-destructive (2025-11-25)",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "name": "tools/list (2025-06-18) returns exactly the three read tools",
+          "ok": true,
+          "detail": "memory_search,memory_fetch,context_build"
+        },
+        {
+          "name": "every tool is annotated read-only and non-destructive (2025-06-18)",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "name": "tools/list (2025-03-26) returns exactly the three read tools",
+          "ok": true,
+          "detail": "memory_search,memory_fetch,context_build"
+        },
+        {
+          "name": "every tool is annotated read-only and non-destructive (2025-03-26)",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "name": "unknown or write tool \"memory_write\" is not callable",
+          "ok": true,
+          "detail": "404:{\"code\":-32602,\"message\":\"Unknown tool\"}"
+        },
+        {
+          "name": "unknown or write tool \"memory_delete\" is not callable",
+          "ok": true,
+          "detail": "404:{\"code\":-32602,\"message\":\"Unknown tool\"}"
+        },
+        {
+          "name": "unknown or write tool \"memory_update\" is not callable",
+          "ok": true,
+          "detail": "404:{\"code\":-32602,\"message\":\"Unknown tool\"}"
+        },
+        {
+          "name": "unknown or write tool \"archive_write\" is not callable",
+          "ok": true,
+          "detail": "404:{\"code\":-32602,\"message\":\"Unknown tool\"}"
+        },
+        {
+          "name": "unknown or write tool \"issue_key\" is not callable",
+          "ok": true,
+          "detail": "404:{\"code\":-32602,\"message\":\"Unknown tool\"}"
+        },
+        {
+          "name": "unknown or write tool \"shell\" is not callable",
+          "ok": true,
+          "detail": "404:{\"code\":-32602,\"message\":\"Unknown tool\"}"
+        },
+        {
+          "name": "schema keywords strict clients may reject are recorded (informational)",
+          "ok": true,
+          "detail": "additionalProperties,exclusiveMinimum,format,maxLength,minLength,oneOf,type-array"
+        }
+      ]
+    },
+    "C3": {
+      "id": "C3",
+      "result": "PASS",
+      "checks": [
+        {
+          "name": "A finds its granted long chat",
+          "ok": true,
+          "detail": "200:1"
+        },
+        {
+          "name": "A finds its granted medium chat",
+          "ok": true,
+          "detail": "1"
+        },
+        {
+          "name": "A never sees ungranted content (sentinel-second-2)",
+          "ok": true,
+          "detail": "0"
+        },
+        {
+          "name": "A never sees ungranted content (sentinel-canary-2)",
+          "ok": true,
+          "detail": "0"
+        },
+        {
+          "name": "a broad query returns only granted chats",
+          "ok": true,
+          "detail": "bbb2,aaa1"
+        },
+        {
+          "name": "a filter naming an ungranted source does not widen access",
+          "ok": true,
+          "detail": "0"
+        },
+        {
+          "name": "B finds only its own chat",
+          "ok": true,
+          "detail": "1"
+        },
+        {
+          "name": "cross-client isolation: B cannot find A's chat",
+          "ok": true,
+          "detail": "0"
+        },
+        {
+          "name": "six parallel searches from one client are all served (2026-07-28)",
+          "ok": true,
+          "detail": "200,200,200,200,200,200"
+        },
+        {
+          "name": "six parallel searches from one client are all served (2025-06-18)",
+          "ok": true,
+          "detail": "200,200,200,200,200,200"
+        },
+        {
+          "name": "context_build does not assemble ungranted evidence",
+          "ok": true,
+          "detail": "200:null"
+        },
+        {
+          "name": "context_build works on granted evidence",
+          "ok": true,
+          "detail": "200:null"
+        }
+      ]
+    },
+    "C4": {
+      "id": "C4",
+      "result": "PASS",
+      "checks": [
+        {
+          "name": "long chat latest revision is byte-exact across 36 pages (2026-07-28, 65536 B pages)",
+          "ok": true,
+          "detail": "36 pages, 578022 bytes"
+        },
+        {
+          "name": "long chat latest revision is byte-exact across 65 pages (2026-07-28, 9000 B pages)",
+          "ok": true,
+          "detail": "65 pages, 578022 bytes"
+        },
+        {
+          "name": "long chat latest revision is byte-exact across 36 pages (2025-06-18, 65536 B pages)",
+          "ok": true,
+          "detail": "36 pages, 578022 bytes"
+        },
+        {
+          "name": "long chat latest revision is byte-exact across 65 pages (2025-06-18, 9000 B pages)",
+          "ok": true,
+          "detail": "65 pages, 578022 bytes"
+        },
+        {
+          "name": "page size and protocol era do not change the content (same digest)",
+          "ok": true,
+          "detail": "{\"2026-07-28:65536\":\"2990653325367fd8683b95f9855a35efb81e8b7f9f06c342f255cade14875f06\",\"2026-07-28:9000\":\"2990653325367fd8683b95f9855a35efb81e8b7f9f06c342f255cade14875f06\",\"2025-06-18:65536\":\"29906533"
+        },
+        {
+          "name": "medium chat is exact over 12 small pages",
+          "ok": true,
+          "detail": "12"
+        },
+        {
+          "name": "the long chat really is larger than one default page",
+          "ok": true,
+          "detail": "260 messages"
+        },
+        {
+          "name": "the corpus contains multi-byte and astral-plane text",
+          "ok": true,
+          "detail": ""
+        }
+      ]
+    },
+    "C5": {
+      "id": "C5",
+      "result": "PASS",
+      "checks": [
+        {
+          "name": "historical revision 1 (240 messages) is still exact after later revisions",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "name": "revision 1 carries stable identity and provenance",
+          "ok": true,
+          "detail": "{\"s\":true,\"p\":\"chatgpt\",\"t\":\"2026-11-23T19:46:21.636Z\"}"
+        },
+        {
+          "name": "revision 1 segments carry message id, index, role and byte range",
+          "ok": true,
+          "detail": "{\"id\":\"m-1\",\"i\":0,\"r\":\"user\"}"
+        },
+        {
+          "name": "historical revision 2 (260 messages) is still exact after later revisions",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "name": "revision 2 carries stable identity and provenance",
+          "ok": true,
+          "detail": "{\"s\":true,\"p\":\"chatgpt\",\"t\":\"2026-11-23T19:46:22.091Z\"}"
+        },
+        {
+          "name": "revision 2 segments carry message id, index, role and byte range",
+          "ok": true,
+          "detail": "{\"id\":\"m-1\",\"i\":0,\"r\":\"user\"}"
+        },
+        {
+          "name": "historical revision 3 (260 messages) is still exact after later revisions",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "name": "revision 3 carries stable identity and provenance",
+          "ok": true,
+          "detail": "{\"s\":true,\"p\":\"chatgpt\",\"t\":\"2026-11-23T19:46:22.488Z\"}"
+        },
+        {
+          "name": "revision 3 segments carry message id, index, role and byte range",
+          "ok": true,
+          "detail": "{\"id\":\"m-1\",\"i\":0,\"r\":\"user\"}"
+        },
+        {
+          "name": "the source id is stable across all revisions",
+          "ok": true,
+          "detail": "src:v1:bef42132760616abab873df604d9b1e0f59e0c3d425685212c17ec94d474297f"
+        },
+        {
+          "name": "revision 3 differs from revision 2 only where the edit was made (history is immutable)",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "name": "search with history sees more than one revision of the same chat",
+          "ok": true,
+          "detail": "3 snapshot(s)"
+        },
+        {
+          "name": "a search hit carries source, archive, snapshot and message ids, provider and timestamp",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "name": "a search hit carries source, archive, snapshot and message ids, provider and timestamp",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "name": "a search hit carries source, archive, snapshot and message ids, provider and timestamp",
+          "ok": true,
+          "detail": ""
+        }
+      ]
+    },
+    "C6": {
+      "id": "C6",
+      "result": "PASS",
+      "checks": [
+        {
+          "name": "default deny: client A finds nothing for sentinel-long-5 before a grant",
+          "ok": true,
+          "detail": "200:0"
+        },
+        {
+          "name": "default deny: client A finds nothing for sentinel-medium-3 before a grant",
+          "ok": true,
+          "detail": "200:0"
+        },
+        {
+          "name": "default deny: client A finds nothing for sentinel-second-2 before a grant",
+          "ok": true,
+          "detail": "200:0"
+        },
+        {
+          "name": "default deny: client A finds nothing for sentinel-canary-2 before a grant",
+          "ok": true,
+          "detail": "200:0"
+        },
+        {
+          "name": "default deny: client B finds nothing for sentinel-long-5 before a grant",
+          "ok": true,
+          "detail": "200:0"
+        },
+        {
+          "name": "default deny: client B finds nothing for sentinel-medium-3 before a grant",
+          "ok": true,
+          "detail": "200:0"
+        },
+        {
+          "name": "default deny: client B finds nothing for sentinel-second-2 before a grant",
+          "ok": true,
+          "detail": "200:0"
+        },
+        {
+          "name": "default deny: client B finds nothing for sentinel-canary-2 before a grant",
+          "ok": true,
+          "detail": "200:0"
+        },
+        {
+          "name": "default deny: client C finds nothing for sentinel-long-5 before a grant",
+          "ok": true,
+          "detail": "200:0"
+        },
+        {
+          "name": "default deny: client C finds nothing for sentinel-medium-3 before a grant",
+          "ok": true,
+          "detail": "200:0"
+        },
+        {
+          "name": "default deny: client C finds nothing for sentinel-second-2 before a grant",
+          "ok": true,
+          "detail": "200:0"
+        },
+        {
+          "name": "default deny: client C finds nothing for sentinel-canary-2 before a grant",
+          "ok": true,
+          "detail": "200:0"
+        },
+        {
+          "name": "ungranted fetch of \"long\" is indistinguishable from an unknown id",
+          "ok": true,
+          "detail": "400:{\"code\":-32602,\"message\":\"Invalid params\"} vs 400:{\"code\":-32602,\"message\":\"Invalid params\"}"
+        },
+        {
+          "name": "ungranted fetch of \"medium\" is indistinguishable from an unknown id",
+          "ok": true,
+          "detail": "400:{\"code\":-32602,\"message\":\"Invalid params\"} vs 400:{\"code\":-32602,\"message\":\"Invalid params\"}"
+        },
+        {
+          "name": "ungranted fetch of \"second\" is indistinguishable from an unknown id",
+          "ok": true,
+          "detail": "400:{\"code\":-32602,\"message\":\"Invalid params\"} vs 400:{\"code\":-32602,\"message\":\"Invalid params\"}"
+        },
+        {
+          "name": "ungranted fetch of \"other\" is indistinguishable from an unknown id",
+          "ok": true,
+          "detail": "400:{\"code\":-32602,\"message\":\"Invalid params\"} vs 400:{\"code\":-32602,\"message\":\"Invalid params\"}"
+        },
+        {
+          "name": "A: granted-set fetch of ungranted \"second\" looks like an unknown id",
+          "ok": true,
+          "detail": "400:{\"code\":-32602,\"message\":\"Invalid params\"} vs 400:{\"code\":-32602,\"message\":\"Invalid params\"}"
+        },
+        {
+          "name": "A: granted-set fetch of ungranted \"other\" looks like an unknown id",
+          "ok": true,
+          "detail": "400:{\"code\":-32602,\"message\":\"Invalid params\"} vs 400:{\"code\":-32602,\"message\":\"Invalid params\"}"
+        },
+        {
+          "name": "B cannot read \"long\" even with exact ids",
+          "ok": true,
+          "detail": "400:{\"code\":-32602,\"message\":\"Invalid params\"}"
+        },
+        {
+          "name": "B cannot read \"medium\" even with exact ids",
+          "ok": true,
+          "detail": "400:{\"code\":-32602,\"message\":\"Invalid params\"}"
+        },
+        {
+          "name": "B cannot read \"other\" even with exact ids",
+          "ok": true,
+          "detail": "400:{\"code\":-32602,\"message\":\"Invalid params\"}"
+        },
+        {
+          "name": "C (never granted) cannot read anything",
+          "ok": true,
+          "detail": "400:{\"code\":-32602,\"message\":\"Invalid params\"}"
+        },
+        {
+          "name": "B's own chat is readable (the denials are about scope, not a broken client)",
+          "ok": true,
+          "detail": "200:null"
+        }
+      ]
+    },
+    "C7": {
+      "id": "C7",
+      "result": "PASS",
+      "checks": [
+        {
+          "name": "revoking one chat takes effect on the very next fetch",
+          "ok": true,
+          "detail": "400:{\"code\":-32602,\"message\":\"Invalid params\"}"
+        },
+        {
+          "name": "revoking one chat takes effect on the very next search",
+          "ok": true,
+          "detail": "0"
+        },
+        {
+          "name": "other grants of the same client are unaffected",
+          "ok": true,
+          "detail": "1"
+        },
+        {
+          "name": "revoking a client denies its key on the next request",
+          "ok": true,
+          "detail": "401:{\"code\":-32001,\"message\":\"Unauthorized\"}"
+        },
+        {
+          "name": "a revoked client reads nothing",
+          "ok": true,
+          "detail": "401"
+        },
+        {
+          "name": "revoking B does not disturb A (no cross-client effect)",
+          "ok": true,
+          "detail": "1"
+        }
+      ]
+    },
+    "C8": {
+      "id": "C8",
+      "result": "PASS",
+      "checks": [
+        {
+          "name": "before Lock, A reads its chat",
+          "ok": true,
+          "detail": "1"
+        },
+        {
+          "name": "after Lock the listener refuses or is closed",
+          "ok": true,
+          "detail": "closed"
+        },
+        {
+          "name": "after Lock nothing is disclosed",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "name": "after Lock even tool discovery is unavailable",
+          "ok": true,
+          "detail": "closed"
+        }
+      ]
+    },
+    "C9": {
+      "id": "C9",
+      "result": "PASS",
+      "checks": [
+        {
+          "name": "after unlock and restart the same key works again for its grant",
+          "ok": true,
+          "detail": "200:1"
+        },
+        {
+          "name": "the grant set is exactly what it was before Lock (no escalation)",
+          "ok": true,
+          "detail": "1 -> 1"
+        },
+        {
+          "name": "still no access to ungranted content after reconnect (sentinel-medium-3)",
+          "ok": true,
+          "detail": "0"
+        },
+        {
+          "name": "still no access to ungranted content after reconnect (sentinel-second-2)",
+          "ok": true,
+          "detail": "0"
+        },
+        {
+          "name": "still no access to ungranted content after reconnect (sentinel-canary-2)",
+          "ok": true,
+          "detail": "0"
+        },
+        {
+          "name": "a revoked client stays revoked after Lock and unlock",
+          "ok": true,
+          "detail": "401:{\"code\":-32001,\"message\":\"Unauthorized\"}"
+        },
+        {
+          "name": "a never-granted key still reads nothing after reconnect",
+          "ok": true,
+          "detail": "0"
+        },
+        {
+          "name": "a new handshake succeeds after reconnect",
+          "ok": true,
+          "detail": "200:null"
+        }
+      ]
+    }
+  }
+}

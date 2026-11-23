@@ -1,0 +1,684 @@
+{
+  "kind": "REAL_CLIENT run: the actual provider client behind a recording proxy against the packaged app (disposable synthetic corpus). Verdicts come from the wire log, not the model transcript.",
+  "source": {
+    "sha": "1bb339c693462970cfbd319475110ac86bf98d5b",
+    "dirty": false,
+    "trees": {
+      "crates": "b3101cee0080dba2ab7267ad5dbcf1e3efe59993",
+      "src_tauri": "43380c0c461fd1b07bfb6cab5bba010c3c35e73e",
+      "cargo_lock": "d205240176426ffeec45956f651c92729e5bf1f0",
+      "src": "3eb1dc4ac7bc1768ca24fcf52621f4315a631106"
+    }
+  },
+  "executable_sha256": "d657b268402fa08d8ee930b786d114545e92f24ea686a3bd61278f5da5cb939c",
+  "dirty_tree": false,
+  "clientId": "codex",
+  "label": "Codex",
+  "installed": {
+    "exe": "C:\\Program Files\\nodejs\\codex.cmd",
+    "version": "codex-cli 0.164.0"
+  },
+  "observed_client": {
+    "name": "codex-mcp-client",
+    "version": "0.164.0",
+    "protocolVersion": "2026-07-28",
+    "source": "_meta.clientInfo"
+  },
+  "transcript": [
+    {
+      "label": "R0 default deny",
+      "exit": 0,
+      "serverStatus": null,
+      "discoveredTools": null,
+      "exchanges": 4
+    },
+    {
+      "label": "R1 scoped search",
+      "exit": 0,
+      "serverStatus": null,
+      "discoveredTools": null,
+      "exchanges": 5
+    },
+    {
+      "label": "R2 paged exact read",
+      "exit": 0,
+      "serverStatus": null,
+      "discoveredTools": null,
+      "exchanges": 14
+    },
+    {
+      "label": "R3 after chat revoke",
+      "exit": 0,
+      "serverStatus": null,
+      "discoveredTools": null,
+      "exchanges": 4
+    },
+    {
+      "label": "R3b client works before revoke",
+      "exit": 0,
+      "serverStatus": null,
+      "discoveredTools": null,
+      "exchanges": 3
+    },
+    {
+      "label": "R3b client after client revoke",
+      "exit": 0,
+      "serverStatus": null,
+      "discoveredTools": null,
+      "exchanges": 2
+    },
+    {
+      "label": "R4 after Lock",
+      "exit": 0,
+      "serverStatus": null,
+      "discoveredTools": null,
+      "exchanges": 6
+    },
+    {
+      "label": "R5 after reconnect",
+      "exit": 0,
+      "serverStatus": null,
+      "discoveredTools": null,
+      "exchanges": 4
+    }
+  ],
+  "claims": {
+    "C1": {
+      "id": "C1",
+      "result": "PASS",
+      "checks": [
+        {
+          "name": "the client announced its own name and version on the wire",
+          "ok": true,
+          "detail": "{\"name\":\"codex-mcp-client\",\"version\":\"0.164.0\",\"protocolVersion\":\"2026-07-28\",\"source\":\"_meta.clientInfo\"}"
+        },
+        {
+          "name": "the server accepted the client handshake",
+          "ok": true,
+          "detail": "discover 200"
+        },
+        {
+          "name": "a protocol revision was negotiated",
+          "ok": true,
+          "detail": "null"
+        }
+      ]
+    },
+    "C2": {
+      "id": "C2",
+      "result": "PASS",
+      "checks": [
+        {
+          "name": "the client requested tools/list and received the three read-only tools",
+          "ok": true,
+          "detail": "memory_search,memory_fetch,context_build"
+        },
+        {
+          "name": "the client went on to call a discovered tool (it accepted the tool schemas)",
+          "ok": true,
+          "detail": "3 search call(s)"
+        }
+      ]
+    },
+    "C3": {
+      "id": "C3",
+      "result": "PASS",
+      "checks": [
+        {
+          "name": "the real client found its granted chat",
+          "ok": true,
+          "detail": "1 hits"
+        },
+        {
+          "name": "the real client got nothing for the never-granted canary chat",
+          "ok": true,
+          "detail": "0 hits"
+        },
+        {
+          "name": "the real client got nothing for the other collection",
+          "ok": true,
+          "detail": "0 hits"
+        },
+        {
+          "name": "the real client never received an ungranted conversation id in any response",
+          "ok": true,
+          "detail": ""
+        }
+      ]
+    },
+    "C4": {
+      "id": "C4",
+      "result": "PASS",
+      "checks": [
+        {
+          "name": "the real client read the latest revision exactly (7 pages, 20102 bytes)",
+          "ok": true,
+          "detail": "7 pages"
+        },
+        {
+          "name": "the client followed the server cursors and sent nothing else (no fabricated cursor)",
+          "ok": true,
+          "detail": ""
+        }
+      ]
+    },
+    "C5": {
+      "id": "C5",
+      "result": "PASS",
+      "checks": [
+        {
+          "name": "the latest revision came back with stable identity and provenance",
+          "ok": true,
+          "detail": "{\"p\":\"chatgpt\",\"s\":true}"
+        },
+        {
+          "name": "the real client read the earlier revision exactly (5 pages, 14371 bytes)",
+          "ok": true,
+          "detail": "5 pages"
+        },
+        {
+          "name": "the earlier revision came back with stable identity and provenance",
+          "ok": true,
+          "detail": "{\"p\":\"chatgpt\",\"s\":true}"
+        },
+        {
+          "name": "both revisions of the same chat were read through one source id",
+          "ok": true,
+          "detail": ""
+        }
+      ]
+    },
+    "C6": {
+      "id": "C6",
+      "result": "PASS",
+      "checks": [
+        {
+          "name": "the real client searched before any grant and got nothing",
+          "ok": true,
+          "detail": "200:0"
+        },
+        {
+          "name": "the real client fetched with exact ids before any grant and was denied like an unknown id",
+          "ok": true,
+          "detail": "400:{\"code\":-32602,\"message\":\"Invalid params\"} vs 400:{\"code\":-32602,\"message\":\"Invalid params\"}"
+        },
+        {
+          "name": "after the grant the canary and second collections stay invisible to the real client",
+          "ok": true,
+          "detail": ""
+        }
+      ]
+    },
+    "C7": {
+      "id": "C7",
+      "result": "PASS",
+      "checks": [
+        {
+          "name": "the very next search by the real client returns nothing after the chat was revoked",
+          "ok": true,
+          "detail": "0"
+        },
+        {
+          "name": "the very next fetch by the real client is denied like an unknown id",
+          "ok": true,
+          "detail": "400:{\"code\":-32602,\"message\":\"Invalid params\"}"
+        },
+        {
+          "name": "a second real-client credential worked before it was revoked",
+          "ok": true,
+          "detail": "1 hits"
+        },
+        {
+          "name": "after the whole client was revoked the real client was refused and read nothing",
+          "ok": true,
+          "detail": "2 refusals, results=false"
+        }
+      ]
+    },
+    "C8": {
+      "id": "C8",
+      "result": "PASS",
+      "checks": [
+        {
+          "name": "after Lock the real client received no tool result",
+          "ok": true,
+          "detail": "6 exchanges"
+        },
+        {
+          "name": "after Lock the real client tried to connect and the listener was unreachable or refused every request",
+          "ok": true,
+          "detail": "unreachable,unreachable,unreachable,unreachable,unreachable,unreachable"
+        }
+      ]
+    },
+    "C9": {
+      "id": "C9",
+      "result": "PASS",
+      "checks": [
+        {
+          "name": "with the same key and configuration the real client reconnected and reads its grant",
+          "ok": true,
+          "detail": "1 hits"
+        },
+        {
+          "name": "after reconnecting it still cannot read the canary chat (no escalation)",
+          "ok": true,
+          "detail": "0"
+        },
+        {
+          "name": "the grant set after reconnect is exactly the one before Lock",
+          "ok": true,
+          "detail": "1 grant(s)"
+        },
+        {
+          "name": "the revoked client stayed revoked",
+          "ok": true,
+          "detail": "401"
+        }
+      ]
+    }
+  },
+  "exchange_summary": [
+    {
+      "at": "2026-11-23T19:48:53.576Z",
+      "http": "POST",
+      "rpc": "server/discover",
+      "tool": null,
+      "status": 200,
+      "bytes": 261
+    },
+    {
+      "at": "2026-11-23T19:48:53.591Z",
+      "http": "POST",
+      "rpc": "tools/list",
+      "tool": null,
+      "status": 200,
+      "bytes": 4868
+    },
+    {
+      "at": "2026-11-23T19:49:22.792Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_search",
+      "status": 200,
+      "hits": 0,
+      "truncated": false,
+      "bytes": 309
+    },
+    {
+      "at": "2026-11-23T19:49:23.474Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_fetch",
+      "status": 400,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params"
+      },
+      "bytes": 75,
+      "snapshot": "4b23d9625423"
+    },
+    {
+      "at": "2026-11-23T19:49:29.133Z",
+      "http": "POST",
+      "rpc": "server/discover",
+      "tool": null,
+      "status": 200,
+      "bytes": 261
+    },
+    {
+      "at": "2026-11-23T19:49:29.147Z",
+      "http": "POST",
+      "rpc": "tools/list",
+      "tool": null,
+      "status": 200,
+      "bytes": 4868
+    },
+    {
+      "at": "2026-11-23T19:49:51.992Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_search",
+      "status": 200,
+      "hits": 1,
+      "truncated": false,
+      "bytes": 2261
+    },
+    {
+      "at": "2026-11-23T19:49:52.024Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_search",
+      "status": 200,
+      "hits": 0,
+      "truncated": false,
+      "bytes": 309
+    },
+    {
+      "at": "2026-11-23T19:49:52.061Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_search",
+      "status": 200,
+      "hits": 0,
+      "truncated": false,
+      "bytes": 309
+    },
+    {
+      "at": "2026-11-23T19:49:59.812Z",
+      "http": "POST",
+      "rpc": "server/discover",
+      "tool": null,
+      "status": 200,
+      "bytes": 261
+    },
+    {
+      "at": "2026-11-23T19:49:59.825Z",
+      "http": "POST",
+      "rpc": "tools/list",
+      "tool": null,
+      "status": 200,
+      "bytes": 4868
+    },
+    {
+      "at": "2026-11-23T19:50:23.745Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_fetch",
+      "status": 200,
+      "segments": 3,
+      "truncated": true,
+      "bytes": 8783,
+      "snapshot": "4b23d9625423"
+    },
+    {
+      "at": "2026-11-23T19:50:24.476Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_fetch",
+      "status": 200,
+      "segments": 3,
+      "truncated": true,
+      "bytes": 8787,
+      "snapshot": "4b23d9625423"
+    },
+    {
+      "at": "2026-11-23T19:50:25.202Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_fetch",
+      "status": 200,
+      "segments": 3,
+      "truncated": true,
+      "bytes": 8787,
+      "snapshot": "4b23d9625423"
+    },
+    {
+      "at": "2026-11-23T19:50:25.916Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_fetch",
+      "status": 200,
+      "segments": 3,
+      "truncated": true,
+      "bytes": 8789,
+      "snapshot": "4b23d9625423"
+    },
+    {
+      "at": "2026-11-23T19:50:26.627Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_fetch",
+      "status": 200,
+      "segments": 3,
+      "truncated": true,
+      "bytes": 8795,
+      "snapshot": "4b23d9625423"
+    },
+    {
+      "at": "2026-11-23T19:50:27.363Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_fetch",
+      "status": 200,
+      "segments": 3,
+      "truncated": true,
+      "bytes": 8801,
+      "snapshot": "4b23d9625423"
+    },
+    {
+      "at": "2026-11-23T19:50:28.085Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_fetch",
+      "status": 200,
+      "segments": 2,
+      "truncated": false,
+      "bytes": 6585,
+      "snapshot": "4b23d9625423"
+    },
+    {
+      "at": "2026-11-23T19:50:36.659Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_fetch",
+      "status": 200,
+      "segments": 3,
+      "truncated": true,
+      "bytes": 8785,
+      "snapshot": "50a731683b07"
+    },
+    {
+      "at": "2026-11-23T19:50:37.382Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_fetch",
+      "status": 200,
+      "segments": 3,
+      "truncated": true,
+      "bytes": 8790,
+      "snapshot": "50a731683b07"
+    },
+    {
+      "at": "2026-11-23T19:50:38.087Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_fetch",
+      "status": 200,
+      "segments": 3,
+      "truncated": true,
+      "bytes": 8790,
+      "snapshot": "50a731683b07"
+    },
+    {
+      "at": "2026-11-23T19:50:38.812Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_fetch",
+      "status": 200,
+      "segments": 3,
+      "truncated": true,
+      "bytes": 8792,
+      "snapshot": "50a731683b07"
+    },
+    {
+      "at": "2026-11-23T19:50:39.477Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_fetch",
+      "status": 200,
+      "segments": 2,
+      "truncated": false,
+      "bytes": 7120,
+      "snapshot": "50a731683b07"
+    },
+    {
+      "at": "2026-11-23T19:50:46.037Z",
+      "http": "POST",
+      "rpc": "server/discover",
+      "tool": null,
+      "status": 200,
+      "bytes": 261
+    },
+    {
+      "at": "2026-11-23T19:50:46.050Z",
+      "http": "POST",
+      "rpc": "tools/list",
+      "tool": null,
+      "status": 200,
+      "bytes": 4868
+    },
+    {
+      "at": "2026-11-23T19:50:56.801Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_search",
+      "status": 200,
+      "hits": 0,
+      "truncated": false,
+      "bytes": 309
+    },
+    {
+      "at": "2026-11-23T19:51:01.511Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_fetch",
+      "status": 400,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params"
+      },
+      "bytes": 75,
+      "snapshot": "4b23d9625423"
+    },
+    {
+      "at": "2026-11-23T19:51:08.545Z",
+      "http": "POST",
+      "rpc": "server/discover",
+      "tool": null,
+      "status": 200,
+      "bytes": 261
+    },
+    {
+      "at": "2026-11-23T19:51:08.559Z",
+      "http": "POST",
+      "rpc": "tools/list",
+      "tool": null,
+      "status": 200,
+      "bytes": 4868
+    },
+    {
+      "at": "2026-11-23T19:51:16.287Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_search",
+      "status": 200,
+      "hits": 1,
+      "truncated": false,
+      "bytes": 2261
+    },
+    {
+      "at": "2026-11-23T19:51:22.387Z",
+      "http": "POST",
+      "rpc": "server/discover",
+      "tool": null,
+      "status": 401,
+      "error": {
+        "code": -32001,
+        "message": "Unauthorized"
+      },
+      "bytes": 73
+    },
+    {
+      "at": "2026-11-23T19:51:23.859Z",
+      "http": "POST",
+      "rpc": "server/discover",
+      "tool": null,
+      "status": 401,
+      "error": {
+        "code": -32001,
+        "message": "Unauthorized"
+      },
+      "bytes": 73
+    },
+    {
+      "at": "2026-11-23T19:52:09.903Z",
+      "http": "POST",
+      "rpc": "server/discover",
+      "status": 502,
+      "upstreamError": true
+    },
+    {
+      "at": "2026-11-23T19:52:10.164Z",
+      "http": "POST",
+      "rpc": "server/discover",
+      "status": 502,
+      "upstreamError": true
+    },
+    {
+      "at": "2026-11-23T19:52:11.171Z",
+      "http": "POST",
+      "rpc": "server/discover",
+      "status": 502,
+      "upstreamError": true
+    },
+    {
+      "at": "2026-11-23T19:52:11.361Z",
+      "http": "POST",
+      "rpc": "server/discover",
+      "status": 502,
+      "upstreamError": true
+    },
+    {
+      "at": "2026-11-23T19:52:11.623Z",
+      "http": "POST",
+      "rpc": "server/discover",
+      "status": 502,
+      "upstreamError": true
+    },
+    {
+      "at": "2026-11-23T19:52:12.629Z",
+      "http": "POST",
+      "rpc": "server/discover",
+      "status": 502,
+      "upstreamError": true
+    },
+    {
+      "at": "2026-11-23T19:52:38.614Z",
+      "http": "POST",
+      "rpc": "server/discover",
+      "tool": null,
+      "status": 200,
+      "bytes": 261
+    },
+    {
+      "at": "2026-11-23T19:52:38.629Z",
+      "http": "POST",
+      "rpc": "tools/list",
+      "tool": null,
+      "status": 200,
+      "bytes": 4868
+    },
+    {
+      "at": "2026-11-23T19:52:59.642Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_search",
+      "status": 200,
+      "hits": 1,
+      "truncated": false,
+      "bytes": 2261
+    },
+    {
+      "at": "2026-11-23T19:53:00.358Z",
+      "http": "POST",
+      "rpc": "tools/call",
+      "tool": "memory_search",
+      "status": 200,
+      "hits": 0,
+      "truncated": false,
+      "bytes": 309
+    }
+  ],
+  "sourceKey": "D:\\projects\\mind-place\\.claude\\worktrees\\mind-place-mcp-release-64c842\\release\\win32-x64\\mind-place.exe"
+}
