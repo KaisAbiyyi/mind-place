@@ -184,6 +184,11 @@ export async function runSyntheticSuite(ctx) {
     c.check('B finds only its own chat', bOwn.hits.length > 0 && bOwn.hits.every((h) => h.conversation_id.endsWith('ccccccccccc3')), `${bOwn.hits.length}`);
     const bCross = await wire.search(B.credential, ['sentinel-long-5']);
     c.check("cross-client isolation: B cannot find A's chat", bCross.hits.length === 0, `${bCross.hits.length}`);
+    // Real clients issue parallel tool calls (Codex does). They must be served, not refused with 503.
+    for (const era of [MODERN, '2025-06-18']) {
+      const burst = await Promise.all(Array.from({ length: 6 }, () => wire.search(A.credential, ['sentinel-long-5'], {}, era)));
+      c.check(`six parallel searches from one client are all served (${era})`, burst.every((r) => r.status === 200 && r.hits.length > 0), burst.map((r) => r.status).join(','));
+    }
     const ctxA = await wire.call(A.credential, 'context_build', { queries: ['sentinel-canary-2'] }, MODERN);
     c.check('context_build does not assemble ungranted evidence', ctxA.status === 200 && !JSON.stringify(ctxA.json).includes('sentinel-canary'), outcome(ctxA));
     const ctxOwn = await wire.call(A.credential, 'context_build', { queries: ['sentinel-long-5'] }, MODERN);
