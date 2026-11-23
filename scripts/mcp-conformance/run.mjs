@@ -197,7 +197,8 @@ async function realPhase(clientId) {
   const result = await runRealClient(clientId, { startSession, log });
   const { secrets = [], ...rest } = result;
   if (rest.blocked) {
-    console.log(JSON.stringify({ clientId, blocked: rest.blocked }, null, 2));
+    const blockedReceipt = writeReceipt(outDir, `blocked-${clientId}.json`, { source, clientId, installed: rest.installed, blocked: rest.blocked }, secrets);
+    console.log(JSON.stringify({ clientId, blocked: rest.blocked, receipt: blockedReceipt.file }, null, 2));
     process.exitCode = 3;
     return;
   }

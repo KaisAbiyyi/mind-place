@@ -48,6 +48,7 @@ export async function runRealClient(clientId, { startSession, log = () => {} }) 
   const transcript = [];
   let identity = null;
   let progress = 'setup';
+  let notConnected = null;
   try {
     const K = await app.issueReader('Real client');
     const K2 = await app.issueReader('Real client (client-revoke test)');
@@ -76,6 +77,11 @@ export async function runRealClient(clientId, { startSession, log = () => {} }) 
     const r0 = await exercise('R0 default deny', K.credential,
       `${ONLY}Step 1: call memory_search with queries ["sentinel-medium-3"]. Step 2: call memory_fetch with ${ids(rev2)}, granularity "revision". Reply with one line: the hit count and whether the fetch succeeded. Do not retry.`);
     identity = observedClientIdentity(proxy.exchanges);
+    if (r0.exs.length === 0) {
+      // The client never reached the server: nothing can be concluded about Mind Place, so do not report FAIL cells.
+      notConnected = { exit: r0.out.exit, serverStatus: r0.out.serverStatus ?? null, stderr: String(r0.out.stderr ?? '').slice(-300), stdoutTail: String(r0.out.stdoutTail ?? '').slice(-300), received: proxy.received.length };
+      throw new Error('CLIENT_DID_NOT_CONNECT');
+    }
     {
       const c = claims.C6;
       const search = calls(r0.exs, 'memory_search')[0];
@@ -204,14 +210,17 @@ export async function runRealClient(clientId, { startSession, log = () => {} }) 
     }
     progress = 'done';
   } catch (error) {
+    if (notConnected) { /* reported below as blocked */ } else {
     const reason = `harness stopped during ${progress}: ${String(error?.message ?? error).split(/\r?\n/)[0]}`;
     for (const claim of Object.values(claims)) if (claim.checks.length === 0) claim.check('claim could not run', false, reason);
     transcript.push({ label: 'harness', failure: reason });
+    }
   } finally {
     await proxy.close();
     await app.close();
   }
   identity = identity ?? observedClientIdentity(proxy.exchanges);
+  if (notConnected) return { clientId, label: driver.label, installed: found, blocked: { kind: 'CLIENT_DID_NOT_CONNECT', detail: 'The real client was run with a task that needs the MCP server, and made no request to it.', ...notConnected }, secrets };
   return {
     clientId,
     label: driver.label,
