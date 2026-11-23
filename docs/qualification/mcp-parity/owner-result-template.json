@@ -1,0 +1,20 @@
+{
+  "client": "ChatGPT | Claude app | Gemini app | other",
+  "client_version": "from the client's About screen",
+  "surface": "hosted app | desktop app | web | CLI",
+  "transport": "secure tunnel | custom connector HTTPS | loopback",
+  "date": "YYYY-MM-DD",
+  "mind_place_sha": "40-hex commit of the release under test",
+  "executable_sha256": "64-hex of mind-place.exe",
+  "results": {
+    "P0": { "result": "PASS | FAIL | NOT_RUN | PROVIDER_BLOCKED", "note": "" },
+    "P1": { "result": "", "note": "" },
+    "P2": { "result": "", "note": "calls for latest revision: N" },
+    "P3": { "result": "", "note": "" },
+    "P4": { "result": "", "note": "" },
+    "P5": { "result": "", "note": "" },
+    "P6": { "result": "", "note": "" }
+  },
+  "provider_blocked_evidence": "vendor message or screenshot description if applicable",
+  "contains_no_keys_or_private_ids": true
+}

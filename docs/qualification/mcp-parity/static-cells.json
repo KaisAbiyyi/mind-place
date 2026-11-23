@@ -1,0 +1,31 @@
+{
+  "gemini-cli": {
+    "_all": {
+      "result": "PROVIDER_BLOCKED",
+      "blocker": "Gemini CLI 0.34.0 refuses to start with the owner's stored Google login: IneligibleTierError: \"This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products\" (captured 2026-11-24 on the qualification machine; no request reached Mind Place).",
+      "fallback": "Antigravity CLI (separate row). Gemini CLI on an eligible (for example Workspace or paid) account is covered by owner card 'any local CLI that failed in the agent run'.",
+      "note": "Not a Mind Place defect: the vendor client did not start a session."
+    }
+  },
+  "claude-app": {
+    "_all": {
+      "result": "NOT_RUN",
+      "reason": "Claude web and desktop custom connectors need an HTTPS MCP URL reachable by Claude. Release 1 ships no general public gateway (only the OpenAI-only secure tunnel). An agent cannot sign in to the owner's Claude account or publish an endpoint.",
+      "owner_card": "OWNER-TEST-CARDS.md#card-claude-app-desktop-or-web-custom-connector"
+    }
+  },
+  "chatgpt": {
+    "_all": {
+      "result": "NOT_RUN",
+      "reason": "Hosted ChatGPT needs the owner's OpenAI tunnel ID and runtime API key and ChatGPT developer mode. Those credentials must not be handled by an agent. An earlier real-ChatGPT run of search, fetch and context_build over the tunnel (MP-7MCP-04 baseline) was on an older build and is not claimed for this SHA.",
+      "owner_card": "OWNER-TEST-CARDS.md#card-chatgpt-hosted-secure-mcp-tunnel"
+    }
+  },
+  "gemini-app": {
+    "_all": {
+      "result": "NOT_RUN",
+      "reason": "Hosted Gemini needs the owner's account (Connect to an MCP server or Developer Mode) and an HTTPS endpoint reachable by Gemini. The Gemini app custom-app feature is reported to require an eligible personal account; if the owner's account is not eligible the result is PROVIDER_BLOCKED, to be recorded on the card.",
+      "owner_card": "OWNER-TEST-CARDS.md#card-gemini-hosted-app"
+    }
+  }
+}

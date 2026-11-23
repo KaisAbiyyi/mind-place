@@ -20,6 +20,7 @@ import { seedCorpus } from './corpus.mjs';
 import { runSyntheticSuite } from './suite.mjs';
 import { createWire } from './wire.mjs';
 import { runRealClient } from './real.mjs';
+import { CLAIMS, CLIENTS, renderMatrixMarkdown, validateMatrix } from './matrix.mjs';
 
 export const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const git = (...args) => spawnSync('git', args, { cwd: repoRoot, encoding: 'utf8' }).stdout.trim();
@@ -110,6 +111,85 @@ async function syntheticPhase() {
   process.exitCode = failure || result?.harnessFailure || Object.values(summary).some((r) => r !== 'PASS') ? 1 : 0;
 }
 
+/**
+ * Merge the receipts of ONE exact SHA into the Parity Matrix. Cells without a receipt must be explicit
+ * (NOT_RUN or PROVIDER_BLOCKED) in static-cells.json; nothing is ever inferred or defaulted to PASS.
+ */
+async function matrixPhase() {
+  const source = sourceIdentity();
+  const outDir = path.join(repoRoot, 'outputs', 'mcp-conformance', source.sha.slice(0, 12));
+  const docsDir = path.join(repoRoot, 'docs', 'qualification', 'mcp-parity');
+  const receiptsDir = path.join(docsDir, 'receipts');
+  fs.mkdirSync(receiptsDir, { recursive: true });
+  const statics = JSON.parse(fs.readFileSync(path.join(docsDir, 'static-cells.json'), 'utf8'));
+  const problems = [];
+  if (source.dirty) problems.push('working tree has uncommitted changes: evidence must come from an exact committed SHA');
+  const cells = {};
+  for (const client of CLIENTS) cells[client.id] = {};
+  const fileFor = (client) => (client.synthetic ? 'synthetic.json' : `real-${client.id}.json`);
+  for (const client of CLIENTS) {
+    const src = path.join(outDir, fileFor(client));
+    const have = fs.existsSync(src);
+    let receipt = null;
+    let rel = null;
+    let hash = null;
+    if (have) {
+      receipt = JSON.parse(fs.readFileSync(src, 'utf8'));
+      if (receipt.source?.sha !== source.sha) problems.push(`${client.id}: receipt is for ${String(receipt.source?.sha).slice(0, 8)}, not ${source.sha.slice(0, 8)}`);
+      if (receipt.dirty_tree) problems.push(`${client.id}: receipt was produced from a dirty tree`);
+      const text = fs.readFileSync(src);
+      fs.writeFileSync(path.join(receiptsDir, fileFor(client)), text);
+      rel = `receipts/${fileFor(client)}`;
+      hash = crypto.createHash('sha256').update(text).digest('hex');
+    }
+    for (const claim of CLAIMS) {
+      const fromReceipt = receipt?.claims?.[claim.id];
+      const fixed = statics[client.id]?.[claim.id] ?? statics[client.id]?._all;
+      if (fromReceipt && fromReceipt.checks?.length) {
+        cells[client.id][claim.id] = {
+          result: fromReceipt.result,
+          sha: source.sha,
+          evidence: client.synthetic
+            ? { kind: 'SYNTHETIC_HTTP', receipt: rel, receipt_sha256: hash, transport: client.transport }
+            : { kind: 'REAL_CLIENT', receipt: rel, receipt_sha256: hash, transport: client.transport, observed_client: receipt.observed_client ?? undefined },
+          note: `${fromReceipt.checks.filter((c) => c.ok).length}/${fromReceipt.checks.length} checks${fromReceipt.result === 'FAIL' ? '; failing: ' + fromReceipt.checks.filter((c) => !c.ok).map((c) => c.name).join(' | ').slice(0, 260) : ''}`,
+          executable_sha256: receipt.executable_sha256,
+          client_version: receipt.installed?.version ?? undefined,
+        };
+        if (!client.synthetic && cells[client.id][claim.id].evidence.observed_client === undefined) cells[client.id][claim.id].evidence.observed_client = { name: '', version: '' };
+      } else if (fixed) {
+        cells[client.id][claim.id] = { ...fixed };
+      } else {
+        problems.push(`${client.id}/${claim.id}: no receipt and no explicit static cell`);
+      }
+    }
+  }
+  const matrix = { sha: source.sha, generated_at: new Date().toISOString(), executable_sha256: JSON.parse(fs.readFileSync(path.join(outDir, 'synthetic.json'), 'utf8')).executable_sha256, rust_trees: source.trees, cells };
+  problems.push(...validateMatrix(matrix));
+  fs.writeFileSync(path.join(docsDir, 'matrix.json'), JSON.stringify(matrix, null, 2) + '\n');
+  fs.writeFileSync(path.join(docsDir, 'PARITY-MATRIX.md'), renderMatrixMarkdown(matrix));
+  const leaks = findSecretsOnDisk(docsDir, []);
+  problems.push(...leaks);
+  console.log(JSON.stringify({ sha: source.sha, problems }, null, 2));
+  process.exitCode = problems.length ? 1 : 0;
+}
+
+/**
+ * Owner test card helper: a disposable, unlocked Mind Place with the synthetic conformance corpus, left open
+ * for the owner to connect a client that cannot be driven from here (hosted ChatGPT, Gemini app, Claude app).
+ * The owner creates the access key and picks chats in the real Connections screen. Nothing private is loaded.
+ */
+async function servePhase() {
+  const log = (m) => console.error(`[serve] ${m}`);
+  const session = await startSession({ label: 'serve', corpusOptions: { longMessages: 6, longBytes: 500, mediumMessages: 10, mediumBytes: 1400 }, log });
+  console.log('Disposable Mind Place is running with a synthetic corpus (4 chats). It is unlocked and sharing is on.');
+  console.log('In the app: open Connections, create access for your client, then Choose chats and allow ONLY "Conformance medium conversation".');
+  console.log('Follow docs/qualification/mcp-parity/OWNER-TEST-CARDS.md. Press Ctrl-C here when done (this closes the app and discards the archive).');
+  const stop = async () => { await session.app.close(); process.exit(0); };
+  process.on('SIGINT', stop);
+  await new Promise(() => {});
+}
+
 async function realPhase(clientId) {
   const source = sourceIdentity();
   const outDir = path.join(repoRoot, 'outputs', 'mcp-conformance', source.sha.slice(0, 12));
@@ -139,6 +219,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const [phase] = process.argv.slice(2);
   if (phase === 'synthetic') await syntheticPhase();
   else if (phase === 'real') await realPhase(process.argv[3]);
+  else if (phase === 'matrix') await matrixPhase();
+  else if (phase === 'serve') await servePhase();
   else {
     console.error('Usage: run.mjs synthetic | real <client> | matrix');
     process.exitCode = 2;

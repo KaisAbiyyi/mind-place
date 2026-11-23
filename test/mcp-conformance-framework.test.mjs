@@ -119,3 +119,41 @@ test('recording proxy can simulate a dropped connection for reconnect checks', a
     await upstream.close();
   }
 });
+
+import { schemaFeatures, verifyRevision } from '../scripts/mcp-conformance/suite.mjs';
+
+const seg = (i, text, start, end, total) => ({ message_id: `m-${i + 1}`, message_index: i, role: 'user', text, byte_start: start, byte_end: end, message_total_bytes: total });
+const page = (segments, next) => ({ status: 200, json: { result: { structuredContent: { snapshot_id: 's1', segments, truncated: Boolean(next), next_cursor: next ?? null } } } });
+const bytes = (t) => Buffer.byteLength(t);
+
+test('verifyRevision accepts an exact multi-page, multi-byte reassembly', () => {
+  const m0 = 'héllo 🙂 wörld';
+  const m1 = 'second';
+  const half = Buffer.from(m0).subarray(0, 8).toString('utf8');
+  assert.ok(half.length > 0);
+  const pages = [
+    page([seg(0, 'héllo ', 0, bytes('héllo '), bytes(m0))], { message_index: 0, byte_offset: bytes('héllo ') }),
+    page([seg(0, '🙂 wörld', bytes('héllo '), bytes(m0), bytes(m0)), seg(1, m1, 0, bytes(m1), bytes(m1))]),
+  ];
+  const verdict = verifyRevision(pages, [m0, m1], { snapshot_id: 's1' });
+  assert.equal(verdict.ok, true, verdict.reason);
+  assert.equal(verdict.pages, 2);
+});
+
+test('verifyRevision rejects gaps, silent truncation, wrong text and wrong counts', () => {
+  const good = [page([seg(0, 'abc', 0, 3, 3)])];
+  assert.equal(verifyRevision(good, ['abc'], { snapshot_id: 's1' }).ok, true);
+  assert.match(verifyRevision(good, ['abd'], { snapshot_id: 's1' }).reason, /differs/);
+  assert.match(verifyRevision(good, ['abc', 'x'], { snapshot_id: 's1' }).reason, /count/);
+  assert.match(verifyRevision([page([seg(0, 'abc', 0, 3, 6)])], ['abc'], { snapshot_id: 's1' }).reason, /incomplete/);
+  assert.match(verifyRevision([page([seg(0, 'abc', 0, 3, 3)], { message_index: 1, byte_offset: 0 })], ['abc'], { snapshot_id: 's1' }).reason, /silent truncation|truncated/);
+  const gap = [page([seg(0, 'ab', 0, 2, 4)], { message_index: 0, byte_offset: 2 }), page([seg(0, 'd', 3, 4, 4)])];
+  assert.match(verifyRevision(gap, ['abd'], { snapshot_id: 's1' }).reason, /gap or overlap/);
+  assert.match(verifyRevision([{ status: 500, json: null }], ['abc'], {}).reason, /status 500/);
+  assert.match(verifyRevision(good, ['abc'], { snapshot_id: 'other' }).reason, /snapshot differs/);
+});
+
+test('schemaFeatures reports the keywords strict clients may reject', () => {
+  const features = schemaFeatures([{ inputSchema: { type: 'object', properties: { a: { oneOf: [{ type: 'string', minLength: 1 }, { type: ['string', 'null'] }] }, b: { type: 'number', exclusiveMinimum: 0 } }, additionalProperties: false } }]);
+  assert.deepEqual(features, ['additionalProperties', 'exclusiveMinimum', 'minLength', 'oneOf', 'type-array']);
+});
