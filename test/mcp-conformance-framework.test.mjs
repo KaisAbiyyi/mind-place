@@ -62,8 +62,9 @@ test('a matrix must be complete, on one SHA, and renders every client', () => {
   assert.match(md, /NOT_RUN/);
   delete matrix.cells.codex.C4;
   assert.ok(validateMatrix(matrix).some((p) => /codex\/C4: cell missing/.test(p)));
-  matrix.cells.codex.C4 = { result: 'PASS', sha: 'c'.repeat(40), evidence: real().evidence };
-  assert.ok(validateMatrix(matrix).some((p) => /differs from the matrix SHA/.test(p)));
+  matrix.product_tree_id = 'tree-a';
+  matrix.cells.codex.C4 = { result: 'PASS', sha: 'c'.repeat(40), product_tree_id: 'tree-b', evidence: real().evidence };
+  assert.ok(validateMatrix(matrix).some((p) => /different product/.test(p)));
 });
 
 /** Fake MCP listener that insists on its own Host and records what it received. */

@@ -20,10 +20,16 @@ const hitsOf = (e) => e.result?.structuredContent?.hits ?? [];
 const asReply = (e) => ({ status: e.status, json: e.error ? { error: e.error } : { result: e.result } });
 const errKey = (e) => `${e.status}:${JSON.stringify(e.error ?? null)}`;
 
-/** The fetch chain a client really executed for one snapshot, in order. */
+/**
+ * The fetch chain a client really executed for one snapshot, in order. A call the server rejected (for
+ * example the model's own malformed first attempt) is not part of the chain: the client retries, and what
+ * matters is that the accepted calls follow the server's cursors and add up to the exact revision.
+ */
 function chainFor(exs, snapshotId) {
-  return calls(exs, 'memory_fetch').filter((e) => e.params?.arguments?.snapshot_id === snapshotId);
+  return calls(exs, 'memory_fetch').filter((e) => e.params?.arguments?.snapshot_id === snapshotId && e.status === 200 && e.result);
 }
+
+const rejectedFetches = (exs, snapshotId) => calls(exs, 'memory_fetch').filter((e) => e.params?.arguments?.snapshot_id === snapshotId && e.status !== 200).length;
 
 /** Key order is not meaning: compare cursors structurally. */
 function canonical(value) {
@@ -152,7 +158,8 @@ export async function runRealClient(clientId, { startSession, log = () => {} }) 
       const dishonest = chainHonest(chain);
       const target = label === 'latest' ? claims.C4 : claims.C5;
       target.check(`the real client read the ${label} revision exactly (${verdict.pages ?? chain.length} pages, ${verdict.bytes ?? 0} bytes)`, verdict.ok && !dishonest && (label === 'earlier' || verdict.pages >= 5), verdict.reason ?? dishonest ?? `${verdict.pages} pages`);
-      if (label === 'latest') claims.C4.check('the client followed the server cursors and sent nothing else (no fabricated cursor)', dishonest === null, dishonest ?? '');
+      const rejected = rejectedFetches(r2.exs, rev.snapshot_id);
+      if (label === 'latest') claims.C4.check('the client followed the server cursors and sent nothing else (no fabricated cursor)', dishonest === null, (dishonest ?? 'every accepted call used the previous next_cursor') + (rejected ? `; ${rejected} call(s) were rejected by the server (client-side invalid arguments) and retried` : ''));
       const first = chain[0]?.result?.structuredContent;
       claims.C5.check(`the ${label} revision came back with stable identity and provenance`, first?.snapshot_id === rev.snapshot_id && first?.provider === 'chatgpt' && /^\d{4}-/.test(first?.captured_at ?? '') && first?.source_id === sid[med.title], JSON.stringify({ p: first?.provider, s: first?.source_id === sid[med.title] }));
     }

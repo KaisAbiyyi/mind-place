@@ -115,6 +115,8 @@ async function syntheticPhase() {
  * Merge the receipts of ONE exact SHA into the Parity Matrix. Cells without a receipt must be explicit
  * (NOT_RUN or PROVIDER_BLOCKED) in static-cells.json; nothing is ever inferred or defaulted to PASS.
  */
+const treeId = (trees) => crypto.createHash('sha256').update(JSON.stringify(trees ?? {})).digest('hex').slice(0, 16);
+
 async function matrixPhase() {
   const source = sourceIdentity();
   const outDir = path.join(repoRoot, 'outputs', 'mcp-conformance', source.sha.slice(0, 12));
@@ -130,12 +132,15 @@ async function matrixPhase() {
   for (const client of CLIENTS) {
     const src = path.join(outDir, fileFor(client));
     const have = fs.existsSync(src);
+    const blockedSrc = path.join(outDir, `blocked-${client.id}.json`);
+    if (fs.existsSync(blockedSrc)) fs.copyFileSync(blockedSrc, path.join(receiptsDir, `blocked-${client.id}.json`));
     let receipt = null;
     let rel = null;
     let hash = null;
     if (have) {
       receipt = JSON.parse(fs.readFileSync(src, 'utf8'));
-      if (receipt.source?.sha !== source.sha) problems.push(`${client.id}: receipt is for ${String(receipt.source?.sha).slice(0, 8)}, not ${source.sha.slice(0, 8)}`);
+      if (!/^[0-9a-f]{40}$/.test(receipt.source?.sha ?? '')) problems.push(`${client.id}: receipt has no exact SHA`);
+      if (treeId(receipt.source?.trees) !== treeId(source.trees)) problems.push(`${client.id}: receipt was produced from a different product tree than HEAD (the executable must match the sources)`);
       if (receipt.dirty_tree) problems.push(`${client.id}: receipt was produced from a dirty tree`);
       const text = fs.readFileSync(src);
       fs.writeFileSync(path.join(receiptsDir, fileFor(client)), text);
@@ -148,7 +153,8 @@ async function matrixPhase() {
       if (fromReceipt && fromReceipt.checks?.length) {
         cells[client.id][claim.id] = {
           result: fromReceipt.result,
-          sha: source.sha,
+          sha: receipt.source.sha,
+          product_tree_id: treeId(receipt.source.trees),
           evidence: client.synthetic
             ? { kind: 'SYNTHETIC_HTTP', receipt: rel, receipt_sha256: hash, transport: client.transport }
             : { kind: 'REAL_CLIENT', receipt: rel, receipt_sha256: hash, transport: client.transport, observed_client: receipt.observed_client ?? undefined },
@@ -164,7 +170,7 @@ async function matrixPhase() {
       }
     }
   }
-  const matrix = { sha: source.sha, generated_at: new Date().toISOString(), executable_sha256: JSON.parse(fs.readFileSync(path.join(outDir, 'synthetic.json'), 'utf8')).executable_sha256, rust_trees: source.trees, cells };
+  const matrix = { sha: source.sha, product_tree_id: treeId(source.trees), generated_at: new Date().toISOString(), executable_sha256: JSON.parse(fs.readFileSync(path.join(outDir, 'synthetic.json'), 'utf8')).executable_sha256, rust_trees: source.trees, cells };
   problems.push(...validateMatrix(matrix));
   fs.writeFileSync(path.join(docsDir, 'matrix.json'), JSON.stringify(matrix, null, 2) + '\n');
   fs.writeFileSync(path.join(docsDir, 'PARITY-MATRIX.md'), renderMatrixMarkdown(matrix));

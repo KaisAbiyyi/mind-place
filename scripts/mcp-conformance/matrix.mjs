@@ -78,8 +78,11 @@ export function validateMatrix(matrix) {
       const cell = matrix?.cells?.[client.id]?.[claim.id];
       if (!cell) { problems.push(`${client.id}/${claim.id}: cell missing (every cell must be explicit)`); continue; }
       problems.push(...validateCell(client.id, claim.id, cell));
-      if (matrix.sha && cell.sha && cell.sha !== matrix.sha && (cell.result === 'PASS' || cell.result === 'FAIL')) {
-        problems.push(`${client.id}/${claim.id}: cell SHA ${cell.sha.slice(0, 8)} differs from the matrix SHA`);
+      if (cell.product_tree_id && matrix.product_tree_id && cell.product_tree_id !== matrix.product_tree_id) {
+        problems.push(`${client.id}/${claim.id}: cell was run on a different product (tree ${String(cell.product_tree_id).slice(0, 8)}) than the matrix (${String(matrix.product_tree_id).slice(0, 8)})`);
+      }
+      if (cell.executable_sha256 && matrix.executable_sha256 && cell.executable_sha256 !== matrix.executable_sha256) {
+        problems.push(`${client.id}/${claim.id}: cell was run on a different executable`);
       }
     }
   }
@@ -93,6 +96,8 @@ export function renderMatrixMarkdown(matrix) {
   lines.push('# Release 1 read-only MCP Parity Matrix');
   lines.push('');
   lines.push(`Source SHA: \`${matrix.sha}\` · generated ${matrix.generated_at}`);
+  lines.push('');
+  lines.push(`Product under test: mind-place.exe sha256 \`${matrix.executable_sha256}\`, product source tree id \`${matrix.product_tree_id}\`. Each PASS or FAIL cell cites the commit it ran at; the harness may advance between runs, the product (executable and product trees) may not.`);
   lines.push('');
   lines.push('Legend: PASS = a REAL provider client did it on this exact SHA (client name and version observed on the wire). The synthetic row is a server reference, never provider proof. NOT_RUN and PROVIDER_BLOCKED are explicit, not hidden.');
   lines.push('');
