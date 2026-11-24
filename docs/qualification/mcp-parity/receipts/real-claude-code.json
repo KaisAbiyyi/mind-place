@@ -1,7 +1,7 @@
 {
   "kind": "REAL_CLIENT run: the actual provider client behind a recording proxy against the packaged app (disposable synthetic corpus). Verdicts come from the wire log, not the model transcript.",
   "source": {
-    "sha": "dd50987b82c494c125711156535282f856a54bf3",
+    "sha": "985592b55fdbf7682719910c52e5a5d2b4fdfbf5",
     "dirty": false,
     "trees": {
       "crates": "0fde859bda4eeddb5d24f573af21c28947c4215e",
@@ -10,8 +10,9 @@
       "src": "3eb1dc4ac7bc1768ca24fcf52621f4315a631106"
     },
     "harness": {
-      "conformance": "469d0167d75322d22364634730200fe90d0c2fe3",
-      "lib": "6810a45c3b08a128f2083a5542ba43d5a7b49bc5"
+      "conformance": "cecfc1661d6d799b450f5216186992218db55ddd",
+      "lib": "6810a45c3b08a128f2083a5542ba43d5a7b49bc5",
+      "stdio_bridge": "1ee46c1637dc0729941055381b15e0d2acbe86c1"
     }
   },
   "executable_sha256": "4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301",
@@ -343,7 +344,7 @@
   },
   "exchange_summary": [
     {
-      "at": "2026-11-23T23:17:50.687Z",
+      "at": "2026-11-24T05:10:15.306Z",
       "http": "POST",
       "rpc": "server/discover",
       "tool": null,
@@ -351,7 +352,7 @@
       "bytes": 285
     },
     {
-      "at": "2026-11-23T23:17:50.719Z",
+      "at": "2026-11-24T05:10:15.368Z",
       "http": "POST",
       "rpc": "tools/list",
       "tool": null,
@@ -359,7 +360,7 @@
       "bytes": 4868
     },
     {
-      "at": "2026-11-23T23:17:54.138Z",
+      "at": "2026-11-24T05:10:19.932Z",
       "http": "POST",
       "rpc": "tools/call",
       "tool": "memory_search",
@@ -369,7 +370,7 @@
       "bytes": 309
     },
     {
-      "at": "2026-11-23T23:17:54.873Z",
+      "at": "2026-11-24T05:10:20.403Z",
       "http": "POST",
       "rpc": "tools/call",
       "tool": "memory_fetch",
@@ -382,7 +383,7 @@
       "snapshot": "4b23d9625423"
     },
     {
-      "at": "2026-11-23T23:17:57.373Z",
+      "at": "2026-11-24T05:10:23.128Z",
       "http": "POST",
       "rpc": "server/discover",
       "tool": null,
@@ -390,7 +391,7 @@
       "bytes": 285
     },
     {
-      "at": "2026-11-23T23:17:57.403Z",
+      "at": "2026-11-24T05:10:23.170Z",
       "http": "POST",
       "rpc": "tools/list",
       "tool": null,
@@ -398,7 +399,7 @@
       "bytes": 4868
     },
     {
-      "at": "2026-11-23T23:18:00.451Z",
+      "at": "2026-11-24T05:10:27.710Z",
       "http": "POST",
       "rpc": "tools/call",
       "tool": "memory_search",
@@ -408,7 +409,7 @@
       "bytes": 2261
     },
     {
-      "at": "2026-11-23T23:18:00.651Z",
+      "at": "2026-11-24T05:10:27.981Z",
       "http": "POST",
       "rpc": "tools/call",
       "tool": "memory_search",
@@ -418,7 +419,7 @@
       "bytes": 309
     },
     {
-      "at": "2026-11-23T23:18:00.808Z",
+      "at": "2026-11-24T05:10:28.048Z",
       "http": "POST",
       "rpc": "tools/call",
       "tool": "memory_search",
@@ -428,7 +429,7 @@
       "bytes": 309
     },
     {
-      "at": "2026-11-23T23:18:03.566Z",
+      "at": "2026-11-24T05:10:30.879Z",
       "http": "POST",
       "rpc": "server/discover",
       "tool": null,
@@ -436,7 +437,7 @@
       "bytes": 285
     },
     {
-      "at": "2026-11-23T23:18:03.595Z",
+      "at": "2026-11-24T05:10:30.917Z",
       "http": "POST",
       "rpc": "tools/list",
       "tool": null,
@@ -444,7 +445,7 @@
       "bytes": 4868
     },
     {
-      "at": "2026-11-23T23:18:07.773Z",
+      "at": "2026-11-24T05:10:38.999Z",
       "http": "POST",
       "rpc": "tools/call",
       "tool": "memory_fetch",
@@ -455,7 +456,7 @@
       "snapshot": "4b23d9625423"
     },
     {
-      "at": "2026-11-23T23:18:10.491Z",
+      "at": "2026-11-24T05:10:41.520Z",
       "http": "POST",
       "rpc": "tools/call",
       "tool": "memory_fetch",
@@ -466,7 +467,7 @@
       "snapshot": "4b23d9625423"
     },
     {
-      "at": "2026-11-23T23:18:12.644Z",
+      "at": "2026-11-24T05:10:43.805Z",
       "http": "POST",
       "rpc": "tools/call",
       "tool": "memory_fetch",
@@ -477,7 +478,7 @@
       "snapshot": "4b23d9625423"
     },
     {
-      "at": "2026-11-23T23:18:16.777Z",
+      "at": "2026-11-24T05:10:47.264Z",
       "http": "POST",
       "rpc": "tools/call",
       "tool": "memory_fetch",
@@ -488,7 +489,7 @@
       "snapshot": "4b23d9625423"
     },
     {
-      "at": "2026-11-23T23:18:20.135Z",
+      "at": "2026-11-24T05:10:50.547Z",
       "http": "POST",
       "rpc": "tools/call",
       "tool": "memory_fetch",
@@ -499,7 +500,7 @@
       "snapshot": "4b23d9625423"
     },
     {
-      "at": "2026-11-23T23:18:23.500Z",
+      "at": "2026-11-24T05:10:55.181Z",
       "http": "POST",
       "rpc": "tools/call",
       "tool": "memory_fetch",
@@ -510,7 +511,7 @@
       "snapshot": "4b23d9625423"
     },
     {
-      "at": "2026-11-23T23:18:26.603Z",
+      "at": "2026-11-24T05:10:58.561Z",
       "http": "POST",
       "rpc": "tools/call",
       "tool": "memory_fetch",
@@ -521,7 +522,7 @@
       "snapshot": "4b23d9625423"
     },
     {
-      "at": "2026-11-23T23:18:30.439Z",
+      "at": "2026-11-24T05:11:02.280Z",
       "http": "POST",
       "rpc": "tools/call",
       "tool": "memory_fetch",
@@ -532,7 +533,7 @@
       "snapshot": "50a731683b07"
     },
     {
-      "at": "2026-11-23T23:18:33.326Z",
+      "at": "2026-11-24T05:11:05.458Z",
       "http": "POST",
       "rpc": "tools/call",
       "tool": "memory_fetch",
@@ -543,7 +544,7 @@
       "snapshot": "50a731683b07"
     },
     {
-      "at": "2026-11-23T23:18:36.031Z",
+      "at": "2026-11-24T05:11:08.940Z",
       "http": "POST",
       "rpc": "tools/call",
       "tool": "memory_fetch",
@@ -554,7 +555,7 @@
       "snapshot": "50a731683b07"
     },
     {
-      "at": "2026-11-23T23:18:38.804Z",
+      "at": "2026-11-24T05:11:12.405Z",
       "http": "POST",
       "rpc": "tools/call",
       "tool": "memory_fetch",
@@ -565,7 +566,7 @@
       "snapshot": "50a731683b07"
     },
     {
-      "at": "2026-11-23T23:18:41.347Z",
+      "at": "2026-11-24T05:11:15.579Z",
       "http": "POST",
       "rpc": "tools/call",
       "tool": "memory_fetch",
@@ -576,7 +577,7 @@
       "snapshot": "50a731683b07"
     },
     {
-      "at": "2026-11-23T23:18:45.025Z",
+      "at": "2026-11-24T05:11:18.842Z",
       "http": "POST",
       "rpc": "server/discover",
       "tool": null,
@@ -584,7 +585,7 @@
       "bytes": 285
     },
     {
-      "at": "2026-11-23T23:18:45.045Z",
+      "at": "2026-11-24T05:11:18.890Z",
       "http": "POST",
       "rpc": "tools/list",
       "tool": null,
@@ -592,7 +593,7 @@
       "bytes": 4868
     },
     {
-      "at": "2026-11-23T23:18:49.151Z",
+      "at": "2026-11-24T05:11:22.929Z",
       "http": "POST",
       "rpc": "tools/call",
       "tool": "memory_search",
@@ -602,7 +603,7 @@
       "bytes": 309
     },
     {
-      "at": "2026-11-23T23:18:50.043Z",
+      "at": "2026-11-24T05:11:24.647Z",
       "http": "POST",
       "rpc": "tools/call",
       "tool": "memory_fetch",
@@ -615,7 +616,7 @@
       "snapshot": "4b23d9625423"
     },
     {
-      "at": "2026-11-23T23:18:52.640Z",
+      "at": "2026-11-24T05:11:27.656Z",
       "http": "POST",
       "rpc": "server/discover",
       "tool": null,
@@ -623,7 +624,7 @@
       "bytes": 285
     },
     {
-      "at": "2026-11-23T23:18:52.663Z",
+      "at": "2026-11-24T05:11:27.700Z",
       "http": "POST",
       "rpc": "tools/list",
       "tool": null,
@@ -631,7 +632,7 @@
       "bytes": 4868
     },
     {
-      "at": "2026-11-23T23:18:56.082Z",
+      "at": "2026-11-24T05:11:32.427Z",
       "http": "POST",
       "rpc": "tools/call",
       "tool": "memory_search",
@@ -641,7 +642,7 @@
       "bytes": 2261
     },
     {
-      "at": "2026-11-23T23:18:58.371Z",
+      "at": "2026-11-24T05:11:34.880Z",
       "http": "POST",
       "rpc": "server/discover",
       "tool": null,
@@ -653,7 +654,7 @@
       "bytes": 97
     },
     {
-      "at": "2026-11-23T23:18:58.394Z",
+      "at": "2026-11-24T05:11:34.899Z",
       "http": "POST",
       "rpc": "initialize",
       "tool": null,
@@ -665,49 +666,49 @@
       "bytes": 73
     },
     {
-      "at": "2026-11-23T23:19:05.554Z",
+      "at": "2026-11-24T05:11:43.344Z",
       "http": "POST",
       "rpc": "server/discover",
       "status": 502,
       "upstreamError": true
     },
     {
-      "at": "2026-11-23T23:19:05.560Z",
+      "at": "2026-11-24T05:11:43.358Z",
       "http": "POST",
       "rpc": "initialize",
       "status": 502,
       "upstreamError": true
     },
     {
-      "at": "2026-11-23T23:19:06.090Z",
+      "at": "2026-11-24T05:11:43.890Z",
       "http": "POST",
       "rpc": "server/discover",
       "status": 502,
       "upstreamError": true
     },
     {
-      "at": "2026-11-23T23:19:06.092Z",
+      "at": "2026-11-24T05:11:43.892Z",
       "http": "POST",
       "rpc": "initialize",
       "status": 502,
       "upstreamError": true
     },
     {
-      "at": "2026-11-23T23:19:07.599Z",
+      "at": "2026-11-24T05:11:45.398Z",
       "http": "POST",
       "rpc": "server/discover",
       "status": 502,
       "upstreamError": true
     },
     {
-      "at": "2026-11-23T23:19:07.601Z",
+      "at": "2026-11-24T05:11:45.401Z",
       "http": "POST",
       "rpc": "initialize",
       "status": 502,
       "upstreamError": true
     },
     {
-      "at": "2026-11-23T23:19:10.557Z",
+      "at": "2026-11-24T05:11:49.612Z",
       "http": "POST",
       "rpc": "server/discover",
       "tool": null,
@@ -715,7 +716,7 @@
       "bytes": 285
     },
     {
-      "at": "2026-11-23T23:19:10.587Z",
+      "at": "2026-11-24T05:11:49.647Z",
       "http": "POST",
       "rpc": "tools/list",
       "tool": null,
@@ -723,7 +724,7 @@
       "bytes": 4868
     },
     {
-      "at": "2026-11-23T23:19:14.312Z",
+      "at": "2026-11-24T05:11:55.138Z",
       "http": "POST",
       "rpc": "tools/call",
       "tool": "memory_search",
@@ -733,7 +734,7 @@
       "bytes": 2261
     },
     {
-      "at": "2026-11-23T23:19:14.460Z",
+      "at": "2026-11-24T05:11:55.264Z",
       "http": "POST",
       "rpc": "tools/call",
       "tool": "memory_search",

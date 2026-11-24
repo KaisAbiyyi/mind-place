@@ -1,8 +1,8 @@
 # Release 1 read-only MCP Parity Matrix
 
-Source SHA: `dd50987b82c494c125711156535282f856a54bf3` · generated 2026-11-23T23:40:01.666Z
+Source SHA: `985592b55fdbf7682719910c52e5a5d2b4fdfbf5` · generated 2026-11-24T05:29:34.099Z
 
-Product under test: mind-place.exe sha256 `4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301`, product source tree id `7deaa1b3f7e67857`, conformance harness tree id `0c707fbe626c2f67`. Every PASS or FAIL cell ran at exactly this commit with exactly this harness and product (enforced by the validator). The commit that records this matrix adds only the documentation and receipts under `docs/qualification/mcp-parity/`.
+Product under test: mind-place.exe sha256 `4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301`, product source tree id `7deaa1b3f7e67857`, conformance harness tree id `9e2e56b405ef0709`. Every PASS or FAIL cell ran at exactly this commit with exactly this harness and product (enforced by the validator). The commit that records this matrix adds only the documentation and receipts under `docs/qualification/mcp-parity/`.
 
 Legend: PASS = a REAL provider client did it on this exact SHA (client name and version observed on the wire). The synthetic row is a server reference, never provider proof. NOT_RUN and PROVIDER_BLOCKED are explicit, not hidden.
 

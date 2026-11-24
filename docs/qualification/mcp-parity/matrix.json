@@ -1,8 +1,8 @@
 {
-  "sha": "dd50987b82c494c125711156535282f856a54bf3",
+  "sha": "985592b55fdbf7682719910c52e5a5d2b4fdfbf5",
   "product_tree_id": "7deaa1b3f7e67857",
-  "harness_tree_id": "0c707fbe626c2f67",
-  "generated_at": "2026-11-23T23:40:01.666Z",
+  "harness_tree_id": "9e2e56b405ef0709",
+  "generated_at": "2026-11-24T05:29:34.099Z",
   "executable_sha256": "4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301",
   "rust_trees": {
     "crates": "0fde859bda4eeddb5d24f573af21c28947c4215e",
@@ -14,13 +14,13 @@
     "synthetic-http": {
       "C1": {
         "result": "PASS",
-        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "sha": "985592b55fdbf7682719910c52e5a5d2b4fdfbf5",
         "product_tree_id": "7deaa1b3f7e67857",
-        "harness_tree_id": "0c707fbe626c2f67",
+        "harness_tree_id": "9e2e56b405ef0709",
         "evidence": {
           "kind": "SYNTHETIC_HTTP",
           "receipt": "receipts/synthetic.json",
-          "receipt_sha256": "73b732bc4506d31364235c9b7d71a671e4b4c3ce0023847cb7d1b2ddf1cf4e70",
+          "receipt_sha256": "2fb0c7cebe61412fb8c3e45f86c1a6583290e2934e3e9e9498b33fdf0b613dc4",
           "transport": "streamable-http-loopback"
         },
         "note": "13/13 checks",
@@ -28,13 +28,13 @@
       },
       "C2": {
         "result": "PASS",
-        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "sha": "985592b55fdbf7682719910c52e5a5d2b4fdfbf5",
         "product_tree_id": "7deaa1b3f7e67857",
-        "harness_tree_id": "0c707fbe626c2f67",
+        "harness_tree_id": "9e2e56b405ef0709",
         "evidence": {
           "kind": "SYNTHETIC_HTTP",
           "receipt": "receipts/synthetic.json",
-          "receipt_sha256": "73b732bc4506d31364235c9b7d71a671e4b4c3ce0023847cb7d1b2ddf1cf4e70",
+          "receipt_sha256": "2fb0c7cebe61412fb8c3e45f86c1a6583290e2934e3e9e9498b33fdf0b613dc4",
           "transport": "streamable-http-loopback"
         },
         "note": "15/15 checks",
@@ -42,13 +42,13 @@
       },
       "C3": {
         "result": "PASS",
-        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "sha": "985592b55fdbf7682719910c52e5a5d2b4fdfbf5",
         "product_tree_id": "7deaa1b3f7e67857",
-        "harness_tree_id": "0c707fbe626c2f67",
+        "harness_tree_id": "9e2e56b405ef0709",
         "evidence": {
           "kind": "SYNTHETIC_HTTP",
           "receipt": "receipts/synthetic.json",
-          "receipt_sha256": "73b732bc4506d31364235c9b7d71a671e4b4c3ce0023847cb7d1b2ddf1cf4e70",
+          "receipt_sha256": "2fb0c7cebe61412fb8c3e45f86c1a6583290e2934e3e9e9498b33fdf0b613dc4",
           "transport": "streamable-http-loopback"
         },
         "note": "12/12 checks",
@@ -56,14 +56,14 @@
       },
       "C4": {
         "result": "PASS",
-        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "sha": "985592b55fdbf7682719910c52e5a5d2b4fdfbf5",
         "product_tree_id": "7deaa1b3f7e67857",
-        "harness_tree_id": "0c707fbe626c2f67",
+        "harness_tree_id": "9e2e56b405ef0709",
         "scope": "Long chat (over 256 KB, 3 revisions, multi-byte, astral-plane and right-to-left text): latest revision at 64 KB and 9 KB pages in two protocol eras and every earlier revision; medium chat in 4 KB pages. A server reference, not a provider client.",
         "evidence": {
           "kind": "SYNTHETIC_HTTP",
           "receipt": "receipts/synthetic.json",
-          "receipt_sha256": "73b732bc4506d31364235c9b7d71a671e4b4c3ce0023847cb7d1b2ddf1cf4e70",
+          "receipt_sha256": "2fb0c7cebe61412fb8c3e45f86c1a6583290e2934e3e9e9498b33fdf0b613dc4",
           "transport": "streamable-http-loopback"
         },
         "note": "8/8 checks",
@@ -71,13 +71,13 @@
       },
       "C5": {
         "result": "PASS",
-        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "sha": "985592b55fdbf7682719910c52e5a5d2b4fdfbf5",
         "product_tree_id": "7deaa1b3f7e67857",
-        "harness_tree_id": "0c707fbe626c2f67",
+        "harness_tree_id": "9e2e56b405ef0709",
         "evidence": {
           "kind": "SYNTHETIC_HTTP",
           "receipt": "receipts/synthetic.json",
-          "receipt_sha256": "73b732bc4506d31364235c9b7d71a671e4b4c3ce0023847cb7d1b2ddf1cf4e70",
+          "receipt_sha256": "2fb0c7cebe61412fb8c3e45f86c1a6583290e2934e3e9e9498b33fdf0b613dc4",
           "transport": "streamable-http-loopback"
         },
         "note": "15/15 checks",
@@ -85,13 +85,13 @@
       },
       "C6": {
         "result": "PASS",
-        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "sha": "985592b55fdbf7682719910c52e5a5d2b4fdfbf5",
         "product_tree_id": "7deaa1b3f7e67857",
-        "harness_tree_id": "0c707fbe626c2f67",
+        "harness_tree_id": "9e2e56b405ef0709",
         "evidence": {
           "kind": "SYNTHETIC_HTTP",
           "receipt": "receipts/synthetic.json",
-          "receipt_sha256": "73b732bc4506d31364235c9b7d71a671e4b4c3ce0023847cb7d1b2ddf1cf4e70",
+          "receipt_sha256": "2fb0c7cebe61412fb8c3e45f86c1a6583290e2934e3e9e9498b33fdf0b613dc4",
           "transport": "streamable-http-loopback"
         },
         "note": "23/23 checks",
@@ -99,13 +99,13 @@
       },
       "C7": {
         "result": "PASS",
-        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "sha": "985592b55fdbf7682719910c52e5a5d2b4fdfbf5",
         "product_tree_id": "7deaa1b3f7e67857",
-        "harness_tree_id": "0c707fbe626c2f67",
+        "harness_tree_id": "9e2e56b405ef0709",
         "evidence": {
           "kind": "SYNTHETIC_HTTP",
           "receipt": "receipts/synthetic.json",
-          "receipt_sha256": "73b732bc4506d31364235c9b7d71a671e4b4c3ce0023847cb7d1b2ddf1cf4e70",
+          "receipt_sha256": "2fb0c7cebe61412fb8c3e45f86c1a6583290e2934e3e9e9498b33fdf0b613dc4",
           "transport": "streamable-http-loopback"
         },
         "note": "6/6 checks",
@@ -113,13 +113,13 @@
       },
       "C8": {
         "result": "PASS",
-        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "sha": "985592b55fdbf7682719910c52e5a5d2b4fdfbf5",
         "product_tree_id": "7deaa1b3f7e67857",
-        "harness_tree_id": "0c707fbe626c2f67",
+        "harness_tree_id": "9e2e56b405ef0709",
         "evidence": {
           "kind": "SYNTHETIC_HTTP",
           "receipt": "receipts/synthetic.json",
-          "receipt_sha256": "73b732bc4506d31364235c9b7d71a671e4b4c3ce0023847cb7d1b2ddf1cf4e70",
+          "receipt_sha256": "2fb0c7cebe61412fb8c3e45f86c1a6583290e2934e3e9e9498b33fdf0b613dc4",
           "transport": "streamable-http-loopback"
         },
         "note": "4/4 checks",
@@ -127,13 +127,13 @@
       },
       "C9": {
         "result": "PASS",
-        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "sha": "985592b55fdbf7682719910c52e5a5d2b4fdfbf5",
         "product_tree_id": "7deaa1b3f7e67857",
-        "harness_tree_id": "0c707fbe626c2f67",
+        "harness_tree_id": "9e2e56b405ef0709",
         "evidence": {
           "kind": "SYNTHETIC_HTTP",
           "receipt": "receipts/synthetic.json",
-          "receipt_sha256": "73b732bc4506d31364235c9b7d71a671e4b4c3ce0023847cb7d1b2ddf1cf4e70",
+          "receipt_sha256": "2fb0c7cebe61412fb8c3e45f86c1a6583290e2934e3e9e9498b33fdf0b613dc4",
           "transport": "streamable-http-loopback"
         },
         "note": "8/8 checks",
@@ -143,13 +143,13 @@
     "claude-code": {
       "C1": {
         "result": "PASS",
-        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "sha": "985592b55fdbf7682719910c52e5a5d2b4fdfbf5",
         "product_tree_id": "7deaa1b3f7e67857",
-        "harness_tree_id": "0c707fbe626c2f67",
+        "harness_tree_id": "9e2e56b405ef0709",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-claude-code.json",
-          "receipt_sha256": "7e5110b189721d6c7021f5c581940608058eb78149521b7051db91740aaa61b5",
+          "receipt_sha256": "db6db346d2c6d527028bcef0209dfbc5e9c4396b1872b87d9dc1dc3993785a58",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "claude-code",
@@ -164,13 +164,13 @@
       },
       "C2": {
         "result": "PASS",
-        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "sha": "985592b55fdbf7682719910c52e5a5d2b4fdfbf5",
         "product_tree_id": "7deaa1b3f7e67857",
-        "harness_tree_id": "0c707fbe626c2f67",
+        "harness_tree_id": "9e2e56b405ef0709",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-claude-code.json",
-          "receipt_sha256": "7e5110b189721d6c7021f5c581940608058eb78149521b7051db91740aaa61b5",
+          "receipt_sha256": "db6db346d2c6d527028bcef0209dfbc5e9c4396b1872b87d9dc1dc3993785a58",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "claude-code",
@@ -185,13 +185,13 @@
       },
       "C3": {
         "result": "PASS",
-        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "sha": "985592b55fdbf7682719910c52e5a5d2b4fdfbf5",
         "product_tree_id": "7deaa1b3f7e67857",
-        "harness_tree_id": "0c707fbe626c2f67",
+        "harness_tree_id": "9e2e56b405ef0709",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-claude-code.json",
-          "receipt_sha256": "7e5110b189721d6c7021f5c581940608058eb78149521b7051db91740aaa61b5",
+          "receipt_sha256": "db6db346d2c6d527028bcef0209dfbc5e9c4396b1872b87d9dc1dc3993785a58",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "claude-code",
@@ -206,14 +206,14 @@
       },
       "C4": {
         "result": "PASS",
-        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "sha": "985592b55fdbf7682719910c52e5a5d2b4fdfbf5",
         "product_tree_id": "7deaa1b3f7e67857",
-        "harness_tree_id": "0c707fbe626c2f67",
+        "harness_tree_id": "9e2e56b405ef0709",
         "scope": "Medium multi-byte two-revision chat: latest revision 20102 bytes read in 7 pages of at most 3000 bytes, earlier revision also read. The long chat over 256 KB was NOT read by this real client (NOT_RUN for real clients; covered by the synthetic reference only).",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-claude-code.json",
-          "receipt_sha256": "7e5110b189721d6c7021f5c581940608058eb78149521b7051db91740aaa61b5",
+          "receipt_sha256": "db6db346d2c6d527028bcef0209dfbc5e9c4396b1872b87d9dc1dc3993785a58",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "claude-code",
@@ -228,13 +228,13 @@
       },
       "C5": {
         "result": "PASS",
-        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "sha": "985592b55fdbf7682719910c52e5a5d2b4fdfbf5",
         "product_tree_id": "7deaa1b3f7e67857",
-        "harness_tree_id": "0c707fbe626c2f67",
+        "harness_tree_id": "9e2e56b405ef0709",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-claude-code.json",
-          "receipt_sha256": "7e5110b189721d6c7021f5c581940608058eb78149521b7051db91740aaa61b5",
+          "receipt_sha256": "db6db346d2c6d527028bcef0209dfbc5e9c4396b1872b87d9dc1dc3993785a58",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "claude-code",
@@ -249,13 +249,13 @@
       },
       "C6": {
         "result": "PASS",
-        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "sha": "985592b55fdbf7682719910c52e5a5d2b4fdfbf5",
         "product_tree_id": "7deaa1b3f7e67857",
-        "harness_tree_id": "0c707fbe626c2f67",
+        "harness_tree_id": "9e2e56b405ef0709",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-claude-code.json",
-          "receipt_sha256": "7e5110b189721d6c7021f5c581940608058eb78149521b7051db91740aaa61b5",
+          "receipt_sha256": "db6db346d2c6d527028bcef0209dfbc5e9c4396b1872b87d9dc1dc3993785a58",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "claude-code",
@@ -270,13 +270,13 @@
       },
       "C7": {
         "result": "PASS",
-        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "sha": "985592b55fdbf7682719910c52e5a5d2b4fdfbf5",
         "product_tree_id": "7deaa1b3f7e67857",
-        "harness_tree_id": "0c707fbe626c2f67",
+        "harness_tree_id": "9e2e56b405ef0709",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-claude-code.json",
-          "receipt_sha256": "7e5110b189721d6c7021f5c581940608058eb78149521b7051db91740aaa61b5",
+          "receipt_sha256": "db6db346d2c6d527028bcef0209dfbc5e9c4396b1872b87d9dc1dc3993785a58",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "claude-code",
@@ -291,13 +291,13 @@
       },
       "C8": {
         "result": "PASS",
-        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "sha": "985592b55fdbf7682719910c52e5a5d2b4fdfbf5",
         "product_tree_id": "7deaa1b3f7e67857",
-        "harness_tree_id": "0c707fbe626c2f67",
+        "harness_tree_id": "9e2e56b405ef0709",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-claude-code.json",
-          "receipt_sha256": "7e5110b189721d6c7021f5c581940608058eb78149521b7051db91740aaa61b5",
+          "receipt_sha256": "db6db346d2c6d527028bcef0209dfbc5e9c4396b1872b87d9dc1dc3993785a58",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "claude-code",
@@ -312,13 +312,13 @@
       },
       "C9": {
         "result": "PASS",
-        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "sha": "985592b55fdbf7682719910c52e5a5d2b4fdfbf5",
         "product_tree_id": "7deaa1b3f7e67857",
-        "harness_tree_id": "0c707fbe626c2f67",
+        "harness_tree_id": "9e2e56b405ef0709",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-claude-code.json",
-          "receipt_sha256": "7e5110b189721d6c7021f5c581940608058eb78149521b7051db91740aaa61b5",
+          "receipt_sha256": "db6db346d2c6d527028bcef0209dfbc5e9c4396b1872b87d9dc1dc3993785a58",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "claude-code",
@@ -335,13 +335,13 @@
     "codex": {
       "C1": {
         "result": "PASS",
-        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "sha": "985592b55fdbf7682719910c52e5a5d2b4fdfbf5",
         "product_tree_id": "7deaa1b3f7e67857",
-        "harness_tree_id": "0c707fbe626c2f67",
+        "harness_tree_id": "9e2e56b405ef0709",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-codex.json",
-          "receipt_sha256": "c652140885693d022794f0b0d23b3fede5e77313f8246a567331f65fdc215e52",
+          "receipt_sha256": "dc280f2c309c99083d9c4f835f3fdb83fb7222de2bf541ac388e4ac601ca4650",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "codex-mcp-client",
@@ -356,13 +356,13 @@
       },
       "C2": {
         "result": "PASS",
-        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "sha": "985592b55fdbf7682719910c52e5a5d2b4fdfbf5",
         "product_tree_id": "7deaa1b3f7e67857",
-        "harness_tree_id": "0c707fbe626c2f67",
+        "harness_tree_id": "9e2e56b405ef0709",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-codex.json",
-          "receipt_sha256": "c652140885693d022794f0b0d23b3fede5e77313f8246a567331f65fdc215e52",
+          "receipt_sha256": "dc280f2c309c99083d9c4f835f3fdb83fb7222de2bf541ac388e4ac601ca4650",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "codex-mcp-client",
@@ -377,13 +377,13 @@
       },
       "C3": {
         "result": "PASS",
-        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "sha": "985592b55fdbf7682719910c52e5a5d2b4fdfbf5",
         "product_tree_id": "7deaa1b3f7e67857",
-        "harness_tree_id": "0c707fbe626c2f67",
+        "harness_tree_id": "9e2e56b405ef0709",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-codex.json",
-          "receipt_sha256": "c652140885693d022794f0b0d23b3fede5e77313f8246a567331f65fdc215e52",
+          "receipt_sha256": "dc280f2c309c99083d9c4f835f3fdb83fb7222de2bf541ac388e4ac601ca4650",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "codex-mcp-client",
@@ -398,14 +398,14 @@
       },
       "C4": {
         "result": "PASS",
-        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "sha": "985592b55fdbf7682719910c52e5a5d2b4fdfbf5",
         "product_tree_id": "7deaa1b3f7e67857",
-        "harness_tree_id": "0c707fbe626c2f67",
+        "harness_tree_id": "9e2e56b405ef0709",
         "scope": "Medium multi-byte two-revision chat: latest revision 20102 bytes read in 7 pages of at most 3000 bytes, earlier revision also read. The long chat over 256 KB was NOT read by this real client (NOT_RUN for real clients; covered by the synthetic reference only).",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-codex.json",
-          "receipt_sha256": "c652140885693d022794f0b0d23b3fede5e77313f8246a567331f65fdc215e52",
+          "receipt_sha256": "dc280f2c309c99083d9c4f835f3fdb83fb7222de2bf541ac388e4ac601ca4650",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "codex-mcp-client",
@@ -420,13 +420,13 @@
       },
       "C5": {
         "result": "PASS",
-        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "sha": "985592b55fdbf7682719910c52e5a5d2b4fdfbf5",
         "product_tree_id": "7deaa1b3f7e67857",
-        "harness_tree_id": "0c707fbe626c2f67",
+        "harness_tree_id": "9e2e56b405ef0709",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-codex.json",
-          "receipt_sha256": "c652140885693d022794f0b0d23b3fede5e77313f8246a567331f65fdc215e52",
+          "receipt_sha256": "dc280f2c309c99083d9c4f835f3fdb83fb7222de2bf541ac388e4ac601ca4650",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "codex-mcp-client",
@@ -441,13 +441,13 @@
       },
       "C6": {
         "result": "PASS",
-        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "sha": "985592b55fdbf7682719910c52e5a5d2b4fdfbf5",
         "product_tree_id": "7deaa1b3f7e67857",
-        "harness_tree_id": "0c707fbe626c2f67",
+        "harness_tree_id": "9e2e56b405ef0709",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-codex.json",
-          "receipt_sha256": "c652140885693d022794f0b0d23b3fede5e77313f8246a567331f65fdc215e52",
+          "receipt_sha256": "dc280f2c309c99083d9c4f835f3fdb83fb7222de2bf541ac388e4ac601ca4650",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "codex-mcp-client",
@@ -462,13 +462,13 @@
       },
       "C7": {
         "result": "PASS",
-        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "sha": "985592b55fdbf7682719910c52e5a5d2b4fdfbf5",
         "product_tree_id": "7deaa1b3f7e67857",
-        "harness_tree_id": "0c707fbe626c2f67",
+        "harness_tree_id": "9e2e56b405ef0709",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-codex.json",
-          "receipt_sha256": "c652140885693d022794f0b0d23b3fede5e77313f8246a567331f65fdc215e52",
+          "receipt_sha256": "dc280f2c309c99083d9c4f835f3fdb83fb7222de2bf541ac388e4ac601ca4650",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "codex-mcp-client",
@@ -483,13 +483,13 @@
       },
       "C8": {
         "result": "PASS",
-        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "sha": "985592b55fdbf7682719910c52e5a5d2b4fdfbf5",
         "product_tree_id": "7deaa1b3f7e67857",
-        "harness_tree_id": "0c707fbe626c2f67",
+        "harness_tree_id": "9e2e56b405ef0709",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-codex.json",
-          "receipt_sha256": "c652140885693d022794f0b0d23b3fede5e77313f8246a567331f65fdc215e52",
+          "receipt_sha256": "dc280f2c309c99083d9c4f835f3fdb83fb7222de2bf541ac388e4ac601ca4650",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "codex-mcp-client",
@@ -504,13 +504,13 @@
       },
       "C9": {
         "result": "PASS",
-        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "sha": "985592b55fdbf7682719910c52e5a5d2b4fdfbf5",
         "product_tree_id": "7deaa1b3f7e67857",
-        "harness_tree_id": "0c707fbe626c2f67",
+        "harness_tree_id": "9e2e56b405ef0709",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-codex.json",
-          "receipt_sha256": "c652140885693d022794f0b0d23b3fede5e77313f8246a567331f65fdc215e52",
+          "receipt_sha256": "dc280f2c309c99083d9c4f835f3fdb83fb7222de2bf541ac388e4ac601ca4650",
           "transport": "streamable-http-loopback",
           "observed_client": {
             "name": "codex-mcp-client",
@@ -583,13 +583,13 @@
     "antigravity": {
       "C1": {
         "result": "PASS",
-        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "sha": "985592b55fdbf7682719910c52e5a5d2b4fdfbf5",
         "product_tree_id": "7deaa1b3f7e67857",
-        "harness_tree_id": "0c707fbe626c2f67",
+        "harness_tree_id": "9e2e56b405ef0709",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-antigravity.json",
-          "receipt_sha256": "45fe507e28b783597e83627c95cdfd84b88dba47b804d23d2f47766a40ca35b9",
+          "receipt_sha256": "26121f0c04fe79f0e15147f55c643bae0eac7012eb01354051e25021486ad5fb",
           "transport": "stdio-bridge -> streamable-http-loopback",
           "observed_client": {
             "name": "antigravity-client",
@@ -604,13 +604,13 @@
       },
       "C2": {
         "result": "PASS",
-        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "sha": "985592b55fdbf7682719910c52e5a5d2b4fdfbf5",
         "product_tree_id": "7deaa1b3f7e67857",
-        "harness_tree_id": "0c707fbe626c2f67",
+        "harness_tree_id": "9e2e56b405ef0709",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-antigravity.json",
-          "receipt_sha256": "45fe507e28b783597e83627c95cdfd84b88dba47b804d23d2f47766a40ca35b9",
+          "receipt_sha256": "26121f0c04fe79f0e15147f55c643bae0eac7012eb01354051e25021486ad5fb",
           "transport": "stdio-bridge -> streamable-http-loopback",
           "observed_client": {
             "name": "antigravity-client",
@@ -625,13 +625,13 @@
       },
       "C3": {
         "result": "PASS",
-        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "sha": "985592b55fdbf7682719910c52e5a5d2b4fdfbf5",
         "product_tree_id": "7deaa1b3f7e67857",
-        "harness_tree_id": "0c707fbe626c2f67",
+        "harness_tree_id": "9e2e56b405ef0709",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-antigravity.json",
-          "receipt_sha256": "45fe507e28b783597e83627c95cdfd84b88dba47b804d23d2f47766a40ca35b9",
+          "receipt_sha256": "26121f0c04fe79f0e15147f55c643bae0eac7012eb01354051e25021486ad5fb",
           "transport": "stdio-bridge -> streamable-http-loopback",
           "observed_client": {
             "name": "antigravity-client",
@@ -646,14 +646,14 @@
       },
       "C4": {
         "result": "PASS",
-        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "sha": "985592b55fdbf7682719910c52e5a5d2b4fdfbf5",
         "product_tree_id": "7deaa1b3f7e67857",
-        "harness_tree_id": "0c707fbe626c2f67",
+        "harness_tree_id": "9e2e56b405ef0709",
         "scope": "Medium multi-byte two-revision chat: latest revision 20102 bytes read in 7 pages of at most 3000 bytes, earlier revision also read. The long chat over 256 KB was NOT read by this real client (NOT_RUN for real clients; covered by the synthetic reference only).",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-antigravity.json",
-          "receipt_sha256": "45fe507e28b783597e83627c95cdfd84b88dba47b804d23d2f47766a40ca35b9",
+          "receipt_sha256": "26121f0c04fe79f0e15147f55c643bae0eac7012eb01354051e25021486ad5fb",
           "transport": "stdio-bridge -> streamable-http-loopback",
           "observed_client": {
             "name": "antigravity-client",
@@ -668,13 +668,13 @@
       },
       "C5": {
         "result": "PASS",
-        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "sha": "985592b55fdbf7682719910c52e5a5d2b4fdfbf5",
         "product_tree_id": "7deaa1b3f7e67857",
-        "harness_tree_id": "0c707fbe626c2f67",
+        "harness_tree_id": "9e2e56b405ef0709",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-antigravity.json",
-          "receipt_sha256": "45fe507e28b783597e83627c95cdfd84b88dba47b804d23d2f47766a40ca35b9",
+          "receipt_sha256": "26121f0c04fe79f0e15147f55c643bae0eac7012eb01354051e25021486ad5fb",
           "transport": "stdio-bridge -> streamable-http-loopback",
           "observed_client": {
             "name": "antigravity-client",
@@ -689,13 +689,13 @@
       },
       "C6": {
         "result": "PASS",
-        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "sha": "985592b55fdbf7682719910c52e5a5d2b4fdfbf5",
         "product_tree_id": "7deaa1b3f7e67857",
-        "harness_tree_id": "0c707fbe626c2f67",
+        "harness_tree_id": "9e2e56b405ef0709",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-antigravity.json",
-          "receipt_sha256": "45fe507e28b783597e83627c95cdfd84b88dba47b804d23d2f47766a40ca35b9",
+          "receipt_sha256": "26121f0c04fe79f0e15147f55c643bae0eac7012eb01354051e25021486ad5fb",
           "transport": "stdio-bridge -> streamable-http-loopback",
           "observed_client": {
             "name": "antigravity-client",
@@ -710,13 +710,13 @@
       },
       "C7": {
         "result": "PASS",
-        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "sha": "985592b55fdbf7682719910c52e5a5d2b4fdfbf5",
         "product_tree_id": "7deaa1b3f7e67857",
-        "harness_tree_id": "0c707fbe626c2f67",
+        "harness_tree_id": "9e2e56b405ef0709",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-antigravity.json",
-          "receipt_sha256": "45fe507e28b783597e83627c95cdfd84b88dba47b804d23d2f47766a40ca35b9",
+          "receipt_sha256": "26121f0c04fe79f0e15147f55c643bae0eac7012eb01354051e25021486ad5fb",
           "transport": "stdio-bridge -> streamable-http-loopback",
           "observed_client": {
             "name": "antigravity-client",
@@ -731,13 +731,13 @@
       },
       "C8": {
         "result": "PASS",
-        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "sha": "985592b55fdbf7682719910c52e5a5d2b4fdfbf5",
         "product_tree_id": "7deaa1b3f7e67857",
-        "harness_tree_id": "0c707fbe626c2f67",
+        "harness_tree_id": "9e2e56b405ef0709",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-antigravity.json",
-          "receipt_sha256": "45fe507e28b783597e83627c95cdfd84b88dba47b804d23d2f47766a40ca35b9",
+          "receipt_sha256": "26121f0c04fe79f0e15147f55c643bae0eac7012eb01354051e25021486ad5fb",
           "transport": "stdio-bridge -> streamable-http-loopback",
           "observed_client": {
             "name": "antigravity-client",
@@ -752,13 +752,13 @@
       },
       "C9": {
         "result": "PASS",
-        "sha": "dd50987b82c494c125711156535282f856a54bf3",
+        "sha": "985592b55fdbf7682719910c52e5a5d2b4fdfbf5",
         "product_tree_id": "7deaa1b3f7e67857",
-        "harness_tree_id": "0c707fbe626c2f67",
+        "harness_tree_id": "9e2e56b405ef0709",
         "evidence": {
           "kind": "REAL_CLIENT",
           "receipt": "receipts/real-antigravity.json",
-          "receipt_sha256": "45fe507e28b783597e83627c95cdfd84b88dba47b804d23d2f47766a40ca35b9",
+          "receipt_sha256": "26121f0c04fe79f0e15147f55c643bae0eac7012eb01354051e25021486ad5fb",
           "transport": "stdio-bridge -> streamable-http-loopback",
           "observed_client": {
             "name": "antigravity-client",

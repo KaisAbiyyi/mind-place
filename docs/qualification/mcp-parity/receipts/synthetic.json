@@ -1,7 +1,7 @@
 {
   "kind": "SYNTHETIC_HTTP reference run against the packaged app (disposable synthetic corpus). Not proof of any provider client.",
   "source": {
-    "sha": "dd50987b82c494c125711156535282f856a54bf3",
+    "sha": "985592b55fdbf7682719910c52e5a5d2b4fdfbf5",
     "dirty": false,
     "trees": {
       "crates": "0fde859bda4eeddb5d24f573af21c28947c4215e",
@@ -10,8 +10,9 @@
       "src": "3eb1dc4ac7bc1768ca24fcf52621f4315a631106"
     },
     "harness": {
-      "conformance": "469d0167d75322d22364634730200fe90d0c2fe3",
-      "lib": "6810a45c3b08a128f2083a5542ba43d5a7b49bc5"
+      "conformance": "cecfc1661d6d799b450f5216186992218db55ddd",
+      "lib": "6810a45c3b08a128f2083a5542ba43d5a7b49bc5",
+      "stdio_bridge": "1ee46c1637dc0729941055381b15e0d2acbe86c1"
     }
   },
   "executable_sha256": "4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301",
@@ -21,37 +22,37 @@
     "long": [
       {
         "messages": 240,
-        "raw_sha256": "e5c124ce625a808b33f48c7337e69fc796a7ab38724121ed1da6c2f830787fbc"
+        "raw_sha256": "ed065de0a556fdf904b2c099f93eb96e71813f26989a2ccb9b6163146d46a39f"
       },
       {
         "messages": 260,
-        "raw_sha256": "d483f54d9750990c50fd5dfb7b358d0c1f495f6aeebe8d8662a6fc2ada8ac0d8"
+        "raw_sha256": "94d050ccd6d6f3b66eee7b33d50d07c9fc16a4c7f6adb815f665f73965fac68e"
       },
       {
         "messages": 260,
-        "raw_sha256": "8a2990971dcd0e51f45d2279244840054ae56cd8da08a7802759dd5ad10c5e02"
+        "raw_sha256": "9b5e343ca3c76e92307f90bce7c4aab124586641026ec6d3809cc010db310f41"
       }
     ],
     "medium": [
       {
         "messages": 30,
-        "raw_sha256": "ccd090d6fab882229db13350095f5f27492899d0880904d0eb349e8b4786bada"
+        "raw_sha256": "dac07415836e13954d8ddadfb1346f618048e142bbab5c6a970b8ab9fe76c416"
       },
       {
         "messages": 34,
-        "raw_sha256": "92cbd9b0de786661395a74355e95bfc2d07c1a5c4eb087d11edc7156449bfba1"
+        "raw_sha256": "1617a2c2ec35be864609e7fb109b936e972a236497d23af6c95579e090057b52"
       }
     ],
     "second": [
       {
         "messages": 6,
-        "raw_sha256": "fef3b482b599ade0184f4c6ec70173153967db02aee45398f0e5df5dbe584f32"
+        "raw_sha256": "f5f1ac6abd964ef2907c659e891f0c5ddcb79bfca1673d78144d9948ce157d68"
       }
     ],
     "other": [
       {
         "messages": 6,
-        "raw_sha256": "2db00e04050611e54fec6c937084505c71d251552f3d81faf16fb704fcc2c791"
+        "raw_sha256": "a3b6cb51d5fd72f58b42e9df63be3d91f082a52cfc256eeb5592e06c6a8fdb8f"
       }
     ]
   },
@@ -344,7 +345,7 @@
         {
           "name": "revision 1 carries stable identity and provenance",
           "ok": true,
-          "detail": "{\"s\":true,\"p\":\"chatgpt\",\"t\":\"2026-11-23T23:16:58.556Z\"}"
+          "detail": "{\"s\":true,\"p\":\"chatgpt\",\"t\":\"2026-11-24T05:09:15.098Z\"}"
         },
         {
           "name": "revision 1 segments carry message id, index, role and byte range",
@@ -359,7 +360,7 @@
         {
           "name": "revision 2 carries stable identity and provenance",
           "ok": true,
-          "detail": "{\"s\":true,\"p\":\"chatgpt\",\"t\":\"2026-11-23T23:16:59.039Z\"}"
+          "detail": "{\"s\":true,\"p\":\"chatgpt\",\"t\":\"2026-11-24T05:09:16.412Z\"}"
         },
         {
           "name": "revision 2 segments carry message id, index, role and byte range",
@@ -374,7 +375,7 @@
         {
           "name": "revision 3 carries stable identity and provenance",
           "ok": true,
-          "detail": "{\"s\":true,\"p\":\"chatgpt\",\"t\":\"2026-11-23T23:16:59.465Z\"}"
+          "detail": "{\"s\":true,\"p\":\"chatgpt\",\"t\":\"2026-11-24T05:09:17.661Z\"}"
         },
         {
           "name": "revision 3 segments carry message id, index, role and byte range",
