@@ -114,7 +114,12 @@ export async function runRealClient(clientId, { startSession, log = () => {} }) 
         log(`${label}: exit ${out.exit}, ${exs.length} exchanges`);
         return { out, exs };
       } finally {
-        fs.rmSync(workDir, { recursive: true, force: true });
+        try {
+          fs.rmSync(workDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 250 });
+        } catch {
+          // Best-effort cleanup on Windows when a child bridge process releases the temp dir briefly after exit;
+          // workDir contains only non-secret config files (tokens are passed via env only).
+        }
       }
     };
     const unknownFetch = async (rev) => outcomeOf(await wire.call(K.credential, 'memory_fetch', { source_id: `src:v1:${'0'.repeat(64)}`, archive_id: rev.archive_id, snapshot_id: rev.snapshot_id, granularity: 'revision' }, MODERN));
