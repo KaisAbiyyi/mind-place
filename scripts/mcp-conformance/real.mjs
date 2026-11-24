@@ -306,7 +306,7 @@ export async function runRealClient(clientId, { startSession, log = () => {} }) 
     progress = 'done';
   } catch (error) {
     if (notConnected) { /* reported below as blocked */ } else {
-    const reason = scrubDiagnostic(`harness stopped during ${progress}: ${String(error?.message ?? error).split(/\r?\n/)[0]}`, secrets);
+    const reason = scrubDiagnostic(`harness stopped during ${progress}: ${String(error?.message ?? error)}`, secrets).split(/\r?\n/)[0];
     for (const claim of Object.values(claims)) if (claim.checks.length === 0) claim.check('claim could not run', false, reason);
     transcript.push({ label: 'harness', failure: reason });
     }

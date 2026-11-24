@@ -171,8 +171,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { antigravitySessionSettings, antigravityWorkspaceConfig, geminiProjectSettings } from '../scripts/mcp-conformance/clients.mjs';
-import { formatSafeJson, formatSafeLine, safeUrlPath, sanitizeBlocked, scrubDiagnostic, writeDebugArtifact } from '../scripts/mcp-conformance/hygiene.mjs';
+import { formatSafeJson, formatSafeLine, safePreview, safeUrlPath, sanitizeBlocked, scrubDiagnostic, writeDebugArtifact } from '../scripts/mcp-conformance/hygiene.mjs';
 import { argsDigest, classifyFetchArgsMatch, fullArgsDigest, identityArgs } from '../scripts/mcp-conformance/real.mjs';
+import { sourceIdentity } from '../scripts/mcp-conformance/run.mjs';
 import { isChatGptConversationUrl } from '../scripts/mcp-conformance/suite.mjs';
 import { createBridgeSession, parseBridgeArgs, validateLoopbackUrl } from '../scripts/mcp-stdio-bridge.mjs';
 
@@ -402,4 +403,90 @@ test('Antigravity driver and owner test cards never place bearer tokens on CLI o
   assert.match(cards, /P0.*BEFORE any grant/i);
   assert.match(cards, /Key 2/);
   assert.match(cards, /P6b/);
+  assert.match(cards, /Do \*\*not\*\* expose the local loopback listener or local-tier keys over HTTPS/i);
+  assert.match(cards, /owner-serve-\*\.json.*does \*\*not\*\* record byte-exact paged reassembly/is);
+  assert.match(cards, /NOT yet bundled into the Windows desktop installer/i);
+});
+
+test('safePreview scrubs before truncating across head and tail boundary splits for all secret classes', async () => {
+  const knownUnlock = 'unlock-boundary-9988776655443322';
+  const knownMcp = `mpc_v1_${'cafe9876'.repeat(8)}`;
+  const unknownMcp = `mpc_v1_${'deadbeef'.repeat(8)}`;
+  const knownApiKey = 'sk-boundaryknown1234567890abcdef';
+  const unknownApiKey = 'sk-boundaryunknown0987654321zyxw';
+  const bearerHeader = `Bearer ${'AbCdEf0123456789'.repeat(3)}`;
+  const secrets = [knownUnlock, knownMcp, knownApiKey];
+
+  const cases = [
+    { label: 'known-unlock', secret: knownUnlock, fragments: ['unlock-boundary', '99887766', '55443322'] },
+    { label: 'known-mcp', secret: knownMcp, fragments: ['mpc_v1_', 'cafe9876'] },
+    { label: 'unknown-mcp', secret: unknownMcp, fragments: ['mpc_v1_', 'deadbeef'] },
+    { label: 'known-sk', secret: knownApiKey, fragments: ['sk-boundaryknown', '1234567890abcdef'] },
+    { label: 'unknown-sk', secret: unknownApiKey, fragments: ['sk-boundaryunknown', '0987654321zyxw'] },
+    { label: 'bearer-header', secret: bearerHeader, fragments: ['Bearer ', 'AbCdEf0123456789'] },
+  ];
+
+  for (const c of cases) {
+    // Head preview split: raw position 28..40 only captures a 12-char prefix of the secret;
+    // scrub-before-truncate must turn the full secret into [redacted] before capping at 40.
+    const headInput = `${'x'.repeat(28)}${c.secret}${'y'.repeat(20)}`;
+    const headOut = safePreview(headInput, secrets, 40, false);
+    assert.ok(headOut.includes('[redacted]'), `${c.label} head should contain [redacted]: ${headOut}`);
+    for (const frag of c.fragments) {
+      assert.equal(headOut.includes(frag), false, `${c.label} head leaked fragment ${frag}: ${headOut}`);
+    }
+
+    // Tail preview split: raw last 40 chars start inside the secret (suffix + 26 'q's).
+    const tailInput = `${'p'.repeat(25)}${c.secret}${'q'.repeat(26)}`;
+    const tailOut = safePreview(tailInput, secrets, 40, true);
+    assert.ok(tailOut.includes('[redacted]'), `${c.label} tail should contain [redacted]: ${tailOut}`);
+    for (const frag of c.fragments) {
+      assert.equal(tailOut.includes(frag), false, `${c.label} tail leaked fragment ${frag}: ${tailOut}`);
+    }
+  }
+
+  // sanitizeBlocked applies scrub-before-truncate across head (280) and tail (240) preview boundaries.
+  const blocked = sanitizeBlocked({
+    kind: 'BLOCKED',
+    detail: `${'d'.repeat(272)}${knownUnlock} tail`,
+    reason: `${'r'.repeat(272)}${unknownApiKey} tail`,
+    stderr: `head ${knownMcp}${'s'.repeat(232)}`,
+    stdoutTail: `head ${bearerHeader}${'o'.repeat(230)}`,
+  }, secrets);
+  const serialized = JSON.stringify(blocked);
+  assert.doesNotMatch(serialized, /unlock-boundary|99887766|55443322|sk-boundaryunknown|0987654321|mpc_v1_|cafe9876|Bearer |AbCdEf01/);
+
+  // recording-proxy userAgent (capped at 160 chars) scrubs boundary-split secrets before truncating.
+  const upstream = await fakeUpstream();
+  const proxy = await startRecordingProxy({ targetPort: upstream.port, secrets });
+  try {
+    const boundaryUa = `${'agent/1.0 '.padEnd(154, 'a')}${knownUnlock}z`;
+    await new Promise((resolve, reject) => {
+      const req = http.request({
+        host: '127.0.0.1',
+        port: proxy.port,
+        path: '/mcp',
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${TOKEN}`,
+          'user-agent': boundaryUa,
+        },
+      }, (res) => { res.resume(); res.on('end', resolve); });
+      req.on('error', reject);
+      req.end(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }));
+    });
+    const proxyDump = JSON.stringify({ received: proxy.received, exchanges: proxy.exchanges });
+    assert.doesNotMatch(proxyDump, /unlock-boundary|99887766|55443322/);
+  } finally {
+    await proxy.close();
+    await upstream.close();
+  }
+});
+
+test('sourceIdentity binds scripts/mcp-stdio-bridge.mjs in harness provenance', () => {
+  const id = sourceIdentity();
+  assert.match(id.harness.conformance, /^[0-9a-f]{40}$/);
+  assert.match(id.harness.lib, /^[0-9a-f]{40}$/);
+  assert.match(id.harness.stdio_bridge, /^[0-9a-f]{40}$/);
 });

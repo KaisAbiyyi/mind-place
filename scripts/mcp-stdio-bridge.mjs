@@ -2,6 +2,11 @@
  * Loopback-only stdio-to-Streamable-HTTP MCP bridge for clients whose config
  * does not expand environment variables in HTTP headers (such as Antigravity).
  *
+ * Installation status: standalone Node.js (>= 20) script in the repository
+ * (used by the conformance harness); it is NOT yet bundled into the Windows
+ * desktop installer (`mind-place.exe` / MSI / NSIS). See
+ * `docs/qualification/mcp-parity/README.md` for supported release usage.
+ *
  * Security invariants:
  * - Reads the bearer credential ONLY from an environment variable (`--token-env`).
  *   Rejects `--token`, `--bearer`, `--header`, or any inline credential flag.
@@ -66,9 +71,12 @@ export function validateLoopbackUrl(rawUrl) {
 }
 
 function scrubBridgeError(msg, token) {
-  let text = String(msg ?? 'Bridge error');
+  let text = String(msg ?? 'Bridge error').replace(
+    /mpc_v1_[0-9A-Za-z]{8,}|Bearer\s+[A-Za-z0-9._~+/=-]{12,}|sk-[A-Za-z0-9_-]{16,}/g,
+    '[redacted]',
+  );
   if (token && token.length >= 8) text = text.split(token).join('[redacted]');
-  return text.replace(/mpc_v1_[0-9A-Za-z]{8,}|Bearer\s+[A-Za-z0-9._~+/=-]{12,}/g, '[redacted]').slice(0, 240);
+  return text.slice(0, 240);
 }
 
 function forwardJsonRpc(targetUrl, token, bodyText, protocolVersion) {

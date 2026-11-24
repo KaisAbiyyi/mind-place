@@ -24,13 +24,13 @@ export function scrubDiagnostic(text, secrets = []) {
   return out;
 }
 
-/** Fail-closed cap + scrub for any bounded diagnostic preview string. */
+/** Fail-closed cap + scrub for any bounded diagnostic preview string. Always scrubs BEFORE truncating. */
 export function safePreview(text, secrets = [], maxLen = 240, fromEnd = false) {
-  const raw = String(text ?? '');
-  const slice = fromEnd ? raw.slice(-maxLen) : raw.slice(0, maxLen);
-  const scrubbed = scrubDiagnostic(slice, secrets);
-  if (containsSecret(scrubbed, secrets)) return '[redacted-diagnostic]';
-  return scrubbed;
+  const scrubbed = scrubDiagnostic(String(text ?? ''), secrets);
+  if (maxLen <= 0) return '';
+  const clipped = fromEnd ? scrubbed.slice(-maxLen) : scrubbed.slice(0, maxLen);
+  if (containsSecret(clipped, secrets)) return '[redacted-diagnostic]';
+  return clipped;
 }
 
 /** Strip query strings and scrub the path segment from an HTTP URL. */

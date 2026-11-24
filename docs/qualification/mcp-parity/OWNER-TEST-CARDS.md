@@ -43,6 +43,7 @@ archive** and never touches your real vault or archive.
 
 - **Model text answers and screenshots alone are NOT sufficient** to mark a hosted client cell wire-verified `PASS` in `PARITY-MATRIX.md`; without sanitized transport/server tool-call evidence they may be recorded only as manual partial observations.
 - Wire-verified `PASS` requires sanitized observable tool-call / server-side evidence bound to the exact commit SHA and `mind-place.exe` sha256 (for example, the scrubbed `owner-serve-*.json` proxy wire receipt from `run.mjs serve --proxy`, or a sanitized server-side MCP audit/transport summary from the disposable session with scoped client identity), plus `owner-result-template.json` filled out.
+- **Scope limit of `owner-serve-*.json`:** `owner-serve-*.json` summarizes request counts, tool names, and HTTP/RPC statuses only. It does **not** record byte-exact paged reassembly (`C4`), cursor-chain proof, or per-client key isolation (`P4`/`P6b`), so do not infer those claims solely from `owner-serve-*.json` without separate verified inspection/receipts.
 
 ## Card: ChatGPT (hosted, Secure MCP Tunnel)
 
@@ -53,21 +54,23 @@ archive** and never touches your real vault or archive.
 
 ## Card: Claude app (desktop or web custom connector)
 
-- **Needs:** An account that can add a custom connector, and an HTTPS MCP URL reachable by Claude. Mind Place Release 1 ships no general public gateway, so this surface is **NOT_RUN** unless you front the disposable loopback endpoint with your own TLS/HTTPS reverse proxy (pointing to the `run.mjs serve --proxy` loopback port so wire exchanges are captured without exposing secrets).
-- **Steps:** Place the disposable Key 1 (and later Key 2 for `P4`/`P6b`) only in the connector's own credential field, then run `P0` through `P6b`. If the client cannot reach a local/tunneled address or your plan disallows custom connectors, record **PROVIDER_BLOCKED** with the exact vendor restriction.
+- **Boundary rule:** Forwarding the local loopback listener (`127.0.0.1:43731`) or a local-tier bearer key over HTTPS does **not** prove the hosted credential boundary and violates the hosted/local tier separation. Do **not** expose the local loopback listener or local-tier keys over HTTPS as a shortcut for a hosted client.
+- **Status:** Release 1 ships no supported hosted-tier authenticated endpoint for Claude custom connectors (`MP-NET-03` is not yet shipped). Keep Claude app **NOT_RUN** until a supported hosted-tier authenticated endpoint exists and sanitized wire evidence is collected on that endpoint. If your account plan disallows custom connectors when evaluated on a supported endpoint, record **PROVIDER_BLOCKED** with the exact vendor restriction.
 
 ## Card: Gemini (hosted app)
 
-- **Needs:** A Gemini account that offers "Connect to an MCP server" or Developer Mode (`gemini.google.com/devmode`), and HTTPS reachability as in the Claude app card.
-- **Schema check:** Use Developer Mode to verify whether Gemini accepts Mind Place's three read-only tool input schemas (`oneOf`, type arrays `["string", "null"]`, `exclusiveMinimum`, `format: "date-time"`, `additionalProperties: false`). Strict Gemini schema validators may reject some of these keywords — record any schema rejection verbatim as a finding.
+- **Boundary rule:** Forwarding the local loopback listener (`127.0.0.1:43731`) or a local-tier bearer key over HTTPS does **not** prove the hosted credential boundary and violates the hosted/local tier separation. Do **not** expose the local loopback listener or local-tier keys over HTTPS as a shortcut for a hosted client.
+- **Needs when a supported hosted-tier endpoint (`MP-NET-03`) is available:** A Gemini account that offers "Connect to an MCP server" or Developer Mode (`gemini.google.com/devmode`) targeting a supported hosted-tier authenticated endpoint (not the loopback listener). Until then, keep Gemini hosted **NOT_RUN**.
+- **Schema check:** When evaluated on a supported endpoint, verify whether Gemini Developer Mode accepts Mind Place's three read-only tool input schemas (`oneOf`, type arrays `["string", "null"]`, `exclusiveMinimum`, `format: "date-time"`, `additionalProperties: false`). Strict Gemini schema validators may reject some of these keywords — record any schema rejection verbatim as a finding.
 - **Fallback/blocked rule:** Record **PROVIDER_BLOCKED** with the vendor message if your account is not eligible.
 
 ## Card: Antigravity CLI
 
+- **Bridge packaging status:** `scripts/mcp-stdio-bridge.mjs` is currently a standalone Node.js (`>= 20`) script in the repository (used by the qualification driver) and is **NOT yet bundled into the Windows desktop installer** (`mind-place.exe` / MSI / NSIS). On a released build without a repository checkout, install the SHA-256-verified script from the release commit into a user-owned path (for example `%LOCALAPPDATA%\MindPlace\bin\mcp-stdio-bridge.mjs`).
 - Antigravity's direct HTTP `mcp_config.json` does not expand `${ENV_VAR}` inside `headers`, so **never** pass a bearer key via command-line flags or store a literal bearer key in `~/.gemini/config/mcp_config.json`.
-- Instead, use the workspace loopback stdio bridge (`scripts/mcp-stdio-bridge.mjs`), which reads the disposable key **only** from an environment variable (`MP_CONFORMANCE_TOKEN` or `MIND_PLACE_MCP_TOKEN`) and forwards only to `127.0.0.1`:
+- Instead, use the workspace loopback stdio bridge (`mcp-stdio-bridge.mjs`), which reads the disposable key **only** from an environment variable (`MP_CONFORMANCE_TOKEN` or `MIND_PLACE_MCP_TOKEN`) and forwards only to `127.0.0.1`:
   - Automated conformance run: `node scripts/mcp-conformance/run.mjs real antigravity` (writes workspace-only `.agents/mcp_config.json` + session-only `--settings` allowlisting only `mcp(mpconformance/memory_search)`, `mcp(mpconformance/memory_fetch)`, and `mcp(mpconformance/context_build)`).
-  - If you run manually in a disposable folder with `run.mjs serve --proxy`, configure `<workDir>/.agents/mcp_config.json` to launch `node <repo>/scripts/mcp-stdio-bridge.mjs --url http://127.0.0.1:<proxyPort>/mcp --token-env MIND_PLACE_MCP_TOKEN` and keep the disposable token in process memory only (do not write it to disk or command arguments). If your Antigravity account/mode blocks execution, leave the cell `NOT_RUN` or `PROVIDER_BLOCKED` with the sanitized reason.
+  - Manual released-build run with `run.mjs serve --proxy`: configure `<workDir>/.agents/mcp_config.json` to launch `node <installed-path>\mcp-stdio-bridge.mjs --url http://127.0.0.1:<proxyPort>/mcp --token-env MIND_PLACE_MCP_TOKEN` and keep the disposable token in process memory only (do not write it to disk or command arguments). If your Antigravity account/mode blocks execution, leave the cell `NOT_RUN` or `PROVIDER_BLOCKED` with the sanitized reason.
 
 ## Card: Gemini CLI (eligible account)
 

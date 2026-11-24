@@ -64,7 +64,7 @@ export async function launchApp({ exe, runtimeDir, dataDir }) {
   assert.ok(page, 'App page unavailable');
   page.setDefaultTimeout(20000);
   const pageErrors = [];
-  page.on('pageerror', (error) => pageErrors.push(String(error.message).slice(0, 250)));
+  page.on('pageerror', (error) => pageErrors.push(String(error.message)));
 
   /** Owner command. Right after unlock the state migration may still be running; that is a retryable condition. */
   const invoke = async (command, args = {}) => {

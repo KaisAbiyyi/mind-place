@@ -35,8 +35,12 @@ export function sourceIdentity() {
     dirty,
     // The binary is built from Rust sources and the frontend. Binding both lets a reader see exactly what the executable embodies.
     trees: { crates: git('rev-parse', 'HEAD:crates'), src_tauri: git('rev-parse', 'HEAD:src-tauri'), cargo_lock: git('rev-parse', 'HEAD:Cargo.lock'), src: git('rev-parse', 'HEAD:src') },
-    // The conformance harness that produced the evidence. Recorded separately from the product so both are verifiable.
-    harness: { conformance: git('rev-parse', 'HEAD:scripts/mcp-conformance'), lib: git('rev-parse', 'HEAD:scripts/lib') },
+    // The conformance harness (including the stdio bridge) that produced the evidence. Recorded separately from the product so both are verifiable.
+    harness: {
+      conformance: git('rev-parse', 'HEAD:scripts/mcp-conformance'),
+      lib: git('rev-parse', 'HEAD:scripts/lib'),
+      stdio_bridge: git('rev-parse', 'HEAD:scripts/mcp-stdio-bridge.mjs'),
+    },
   };
 }
 
