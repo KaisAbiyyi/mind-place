@@ -17,7 +17,7 @@ interface Client {
   policy_revision: number;
 }
 
-function rig(options: { running?: boolean; failShare?: boolean; failIssue?: boolean; failRegister?: boolean; registered?: string[]; tunnelError?: string; clipboard?: "ok" | "missing" | "reject" } = {}) {
+function rig(options: { running?: boolean; failShare?: boolean; failIssue?: boolean; failRegister?: boolean; registered?: string[]; tunnelError?: string; clipboard?: "ok" | "missing" | "reject"; clientReload?: Promise<void>; grantCount?: Promise<void> } = {}) {
   const dom = new JSDOM('<!doctype html><body><div id="root"></div></body>', { pretendToBeVisual: true });
   const doc = dom.window.document;
   Object.assign(globalThis, { document: doc, window: dom.window });
@@ -42,8 +42,10 @@ function rig(options: { running?: boolean; failShare?: boolean; failIssue?: bool
         running = command === "start_local_mcp";
         return { running, endpoint: "x" } as T;
       case "list_local_mcp_clients":
+        if (calls.filter((call) => call.command === command).length > 1) await options.clientReload;
         return clients.map((c) => ({ ...c })) as T;
       case "list_local_mcp_client_sources":
+        await options.grantCount;
         return (sources[String(args.clientId)] ?? []) as T;
       case "issue_local_mcp_reader": {
         if (options.failIssue) throw new Error("MP_X");
@@ -200,6 +202,25 @@ test("copy never reports success when the clipboard rejects, and a later success
   assert.equal(ok.button("Select key"), undefined);
 });
 
+test("manual key selection survives the client refresh after issuance", async () => {
+  let reload!: () => void;
+  const clientReload = new Promise<void>((resolve) => { reload = resolve; });
+  const r = rig({ clipboard: "missing", clientReload });
+  await r.settle();
+  r.button("Create access")!.click();
+  await r.settle();
+  const select = r.button("Select key")!;
+  select.focus();
+  select.click();
+  assert.equal(r.doc.getSelection()?.toString(), KEY);
+  reload();
+  await r.settle();
+  assert.equal(r.doc.activeElement, r.button("Select key"));
+  assert.equal(r.doc.getSelection()?.toString(), KEY);
+  r.page.destroy();
+  assert.equal(r.doc.getSelection()?.toString(), "");
+});
+
 test("keyboard focus stays put when the card re-renders (switch, create, revoke)", async () => {
   const r = rig();
   await r.settle();
@@ -253,7 +274,9 @@ test("revoke is an inline two-step; revoking moves the app to the revoked list",
 });
 
 test("revoke describes the question on focused Cancel and Escape restores the same trigger", async () => {
-  const r = rig();
+  let refreshCounts!: () => void;
+  const grantCount = new Promise<void>((resolve) => { refreshCounts = resolve; });
+  const r = rig({ grantCount });
   await r.settle();
   const row = r.page.element.querySelectorAll(".ui2-conn-app")[1]!;
   const trigger = row.querySelector<HTMLButtonElement>(".ui2-inline-confirm > button")!;
@@ -266,6 +289,10 @@ test("revoke describes the question on focused Cancel and Escape restores the sa
   assert.match(r.doc.getElementById(question)?.textContent ?? "", /Turn off Empty app's access\?/);
   assert.equal(r.doc.activeElement, cancel);
   assert.equal(cancel.getAttribute("aria-describedby"), question);
+  refreshCounts();
+  await r.settle();
+  assert.equal(group.isConnected, true, "grant-count refresh keeps the confirmation open");
+  assert.equal(r.doc.activeElement, cancel);
   const escape = new r.dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
   cancel.dispatchEvent(escape);
   assert.equal(escape.defaultPrevented, true);

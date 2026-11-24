@@ -14,6 +14,7 @@ import {
   createUi2Switch,
   renderUi2TechnicalCode,
   type Ui2DialogHandle,
+  type Ui2InlineConfirmHandle,
 } from "../ui-kit/primitives.js";
 import { openChooseChatsDialog } from "./choose-chats-dialog.js";
 import type { ConnectionsSection } from "./section.js";
@@ -67,6 +68,7 @@ export function createAiAccessSection(deps: AiAccessDeps): ConnectionsSection {
   let hasMore = false;
   let listState: "loading" | "ready" | "error" = "loading";
   const counts = new Map<string, number | null>();
+  let confirmations = new Map<string, { question: string; control: Ui2InlineConfirmHandle }>();
   let openDialog: Ui2DialogHandle | undefined;
 
   const live = () => alive && root.isConnected !== false;
@@ -141,6 +143,11 @@ export function createAiAccessSection(deps: AiAccessDeps): ConnectionsSection {
   function render(): void {
     if (!alive) return;
     const saved = captureFocus();
+    const active = doc.activeElement as HTMLElement | null;
+    const selection = doc.getSelection();
+    const oldCode = root.querySelector(".ui2-tech-code");
+    const keySelected = issued && oldCode?.contains(selection?.anchorNode ?? null)
+      && selection?.toString() === issued.credential;
     const card = createUi2Card(doc);
     const body = card.body;
 
@@ -188,7 +195,8 @@ export function createAiAccessSection(deps: AiAccessDeps): ConnectionsSection {
     form.append(field.element, create);
     body.append(form);
 
-    if (issued) body.append(renderKey(issued));
+    const keyView = issued ? renderKey(issued) : null;
+    if (keyView) body.append(keyView.box);
 
     // Apps with access.
     const label = doc.createElement("p");
@@ -218,10 +226,22 @@ export function createAiAccessSection(deps: AiAccessDeps): ConnectionsSection {
 
     if (deps.hosted) body.append(deps.hosted.element);
     root.replaceChildren(sharingCard, card.element);
-    restoreFocus(saved);
+    // An open confirmation can retain its buttons across a background refresh.
+    if (active && root.contains(active) && active.closest(".ui2-inline-confirm-box")) active.focus();
+    else restoreFocus(saved);
+    if (keySelected && keyView) selectKeyText(keyView.code);
   }
 
-  function renderKey(key: IssuedKey): HTMLElement {
+  function selectKeyText(code: HTMLElement): void {
+    const selection = doc.getSelection();
+    if (!selection) return;
+    const range = doc.createRange();
+    range.selectNodeContents(code);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
+  function renderKey(key: IssuedKey): { box: HTMLElement; code: HTMLElement } {
     const box = doc.createElement("div");
     box.className = "ui2-stack-sm";
     box.append(createUi2Banner(doc, { tone: "ok", title: i18n.t("conn.keyT"), message: i18n.t("conn.keyV") }));
@@ -264,17 +284,12 @@ export function createAiAccessSection(deps: AiAccessDeps): ConnectionsSection {
         size: "sm",
         onClick: () => {
           if (!live() || issued !== key || !code.isConnected) return;
-          const selection = doc.getSelection();
-          if (!selection) return;
-          const range = doc.createRange();
-          range.selectNodeContents(code);
-          selection.removeAllRanges();
-          selection.addRange(range);
+          selectKeyText(code);
         },
       });
       box.append(mark(select, "select-key"), hint);
     }
-    return box;
+    return { box, code };
   }
 
   function appsToShow(): ClientRow[] {
@@ -282,6 +297,8 @@ export function createAiAccessSection(deps: AiAccessDeps): ConnectionsSection {
   }
 
   function renderApps(): HTMLElement {
+    const previousConfirmations = confirmations;
+    confirmations = new Map();
     if (listState === "error" && clients.length === 0) {
       return createUi2Banner(doc, {
         tone: "danger",
@@ -304,6 +321,18 @@ export function createAiAccessSection(deps: AiAccessDeps): ConnectionsSection {
       createUi2ListCard(
         doc,
         apps.map((client) => {
+          const question = i18n.t("conn.revokeQuestion", { app: client.display_name });
+          const previous = previousConfirmations.get(client.id);
+          const confirmation = previous?.question === question && previous.control.isOpen()
+            ? previous.control
+            : createUi2InlineConfirm(doc, {
+                triggerLabel: i18n.t("action.revoke"),
+                question,
+                confirmLabel: i18n.t("action.revoke"),
+                cancelLabel: i18n.t("action.cancel"),
+                onConfirm: () => void revoke(client),
+              });
+          confirmations.set(client.id, { question, control: confirmation });
           const actions = doc.createElement("div");
           actions.className = "ui2-row-flex";
           actions.append(
@@ -316,16 +345,7 @@ export function createAiAccessSection(deps: AiAccessDeps): ConnectionsSection {
               }),
               `choose:${appKey(client.id)}`,
             ),
-            mark(
-              createUi2InlineConfirm(doc, {
-                triggerLabel: i18n.t("action.revoke"),
-                question: i18n.t("conn.revokeQuestion", { app: client.display_name }),
-                confirmLabel: i18n.t("action.revoke"),
-                cancelLabel: i18n.t("action.cancel"),
-                onConfirm: () => void revoke(client),
-              }).element,
-              `revoke:${appKey(client.id)}`,
-            ),
+            mark(confirmation.element, `revoke:${appKey(client.id)}`),
           );
           const count = counts.get(client.id);
           const tag =
@@ -487,6 +507,7 @@ export function createAiAccessSection(deps: AiAccessDeps): ConnectionsSection {
       nameValue = "";
       appKeys.clear();
       counts.clear();
+      confirmations.clear();
       clients = [];
       root.replaceChildren();
     },
