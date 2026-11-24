@@ -652,10 +652,13 @@ export function createUi2InlineConfirm(
   const box = doc.createElement("div");
   box.className = "ui2-inline-confirm-box";
   box.hidden = true;
+  box.setAttribute("role", "group");
 
   const questionEl = doc.createElement("span");
   questionEl.className = "ui2-banner-text";
   questionEl.textContent = options.question;
+  questionEl.id = uid("confirm-question");
+  box.setAttribute("aria-labelledby", questionEl.id);
 
   const actions = doc.createElement("div");
   actions.className = "ui2-row-flex";
@@ -677,9 +680,7 @@ export function createUi2InlineConfirm(
     variant: "secondary",
     size: "sm",
     onClick: () => {
-      open = false;
-      box.hidden = true;
-      trigger.hidden = false;
+      close();
       trigger.focus();
     },
   });
@@ -689,12 +690,26 @@ export function createUi2InlineConfirm(
     variant: "danger-solid",
     size: "sm",
     onClick: () => {
-      open = false;
-      box.hidden = true;
-      trigger.hidden = false;
+      close();
       options.onConfirm();
       trigger.focus();
     },
+  });
+
+  function close(): void {
+    open = false;
+    box.hidden = true;
+    trigger.hidden = false;
+  }
+
+  cancelBtn.setAttribute("aria-describedby", questionEl.id);
+  confirmBtn.setAttribute("aria-describedby", questionEl.id);
+  box.addEventListener("keydown", (event) => {
+    if (!open || event.key !== "Escape") return;
+    event.preventDefault();
+    event.stopPropagation();
+    close();
+    trigger.focus();
   });
 
   actions.append(cancelBtn, confirmBtn);
@@ -705,11 +720,7 @@ export function createUi2InlineConfirm(
     element: wrap,
     trigger,
     isOpen: () => open,
-    cancel: () => {
-      open = false;
-      box.hidden = true;
-      trigger.hidden = false;
-    },
+    cancel: close,
   };
 }
 

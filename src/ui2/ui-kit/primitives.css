@@ -271,6 +271,19 @@
   transform: translateX(20px);
 }
 
+@media (forced-colors: active) {
+  .ui2-switch .ui2-switch-thumb,
+  .ui2-switch[aria-checked="true"] .ui2-switch-thumb {
+    /* Keep the moving thumb visible against the system button face. */
+    forced-color-adjust: none;
+    background: ButtonText;
+  }
+
+  .ui2-switch:disabled .ui2-switch-thumb {
+    background: GrayText;
+  }
+}
+
 /* Segmented control */
 .ui2-seg {
   display: inline-flex;

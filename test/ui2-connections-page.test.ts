@@ -166,13 +166,14 @@ test("copy never reports success when the clipboard is missing", async () => {
   await r.settle();
   r.button("Create access")!.click();
   await r.settle();
-  const copy = r.button("Copy")!;
-  assert.ok(copy, "the Copy button is still present");
-  assert.equal(copy.disabled, true, "cannot be clicked when nothing can be copied");
-  copy.click();
-  await r.settle();
+  assert.equal(r.button("Copy"), undefined);
+  const select = r.button("Select key")!;
+  select.focus();
+  select.click();
+  assert.equal(r.doc.activeElement, select);
+  assert.equal(r.doc.getSelection()?.toString(), KEY);
   assert.equal(r.button("Copied"), undefined, "no false success");
-  assert.match(r.page.element.textContent ?? "", /copy it yourself/);
+  assert.match(r.page.element.textContent ?? "", /press Ctrl\+C/);
   assert.ok((r.page.element.textContent ?? "").includes(KEY), "the key stays visible for manual copy");
 });
 
@@ -186,6 +187,8 @@ test("copy never reports success when the clipboard rejects, and a later success
   assert.equal(r.button("Copied"), undefined, "no false success");
   assert.ok(r.button("Copy"), "button stays available for another try");
   assert.match(r.page.element.textContent ?? "", /Could not copy automatically/);
+  r.button("Select key")!.click();
+  assert.equal(r.doc.getSelection()?.toString(), KEY);
   assert.deepEqual(r.written, []);
   const ok = rig();
   await ok.settle();
@@ -194,7 +197,7 @@ test("copy never reports success when the clipboard rejects, and a later success
   ok.button("Copy")!.click();
   await ok.settle();
   assert.ok(ok.button("Copied"));
-  assert.doesNotMatch(ok.page.element.textContent ?? "", /copy it yourself/);
+  assert.equal(ok.button("Select key"), undefined);
 });
 
 test("keyboard focus stays put when the card re-renders (switch, create, revoke)", async () => {
@@ -249,6 +252,28 @@ test("revoke is an inline two-step; revoking moves the app to the revoked list",
   assert.match(r.page.element.textContent ?? "", /Revoked apps \(2\)/);
 });
 
+test("revoke describes the question on focused Cancel and Escape restores the same trigger", async () => {
+  const r = rig();
+  await r.settle();
+  const row = r.page.element.querySelectorAll(".ui2-conn-app")[1]!;
+  const trigger = row.querySelector<HTMLButtonElement>(".ui2-inline-confirm > button")!;
+  trigger.focus();
+  trigger.click();
+  const group = row.querySelector<HTMLElement>("[role=group]")!;
+  const cancel = group.querySelector("button")!;
+  const question = group.getAttribute("aria-labelledby")!;
+  assert.equal(group.hidden, false);
+  assert.match(r.doc.getElementById(question)?.textContent ?? "", /Turn off Empty app's access\?/);
+  assert.equal(r.doc.activeElement, cancel);
+  assert.equal(cancel.getAttribute("aria-describedby"), question);
+  const escape = new r.dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+  cancel.dispatchEvent(escape);
+  assert.equal(escape.defaultPrevented, true);
+  assert.equal(group.hidden, true);
+  assert.equal(r.doc.activeElement, trigger);
+  assert.equal(r.calls.some((call) => call.command === "revoke_local_mcp_client"), false);
+});
+
 test("Choose chats opens the approved dialog for that app", async () => {
   const r = rig();
   await r.settle();
@@ -272,6 +297,18 @@ test("browser registration shows registered browsers and registers the others", 
   [...failing.page.element.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Register")!.click();
   await failing.settle();
   assert.match(failing.page.element.textContent ?? "", /Could not register this browser\. Nothing was changed\. Try again\./);
+});
+
+test("Register keeps its visible label and names each browser in both locales", async () => {
+  const r = rig({ registered: [] });
+  await r.settle();
+  const names = (label: string) =>
+    [...r.page.element.querySelectorAll("button")]
+      .filter((button) => button.textContent === label)
+      .map((button) => button.getAttribute("aria-label"));
+  assert.deepEqual(names("Register"), ["Register Chrome", "Register Edge", "Register Brave"]);
+  r.i18n.setLocale("id");
+  assert.deepEqual(names("Daftarkan"), ["Daftarkan Chrome", "Daftarkan Edge", "Daftarkan Brave"]);
 });
 
 test("the shell mounts the page on Connections only, and destroys it on leaving, locking and destroy", async () => {

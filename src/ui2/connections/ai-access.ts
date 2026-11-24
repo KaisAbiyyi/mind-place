@@ -232,32 +232,47 @@ export function createAiAccessSection(deps: AiAccessDeps): ConnectionsSection {
       label: i18n.t(copied ? "action.copied" : "action.copy"),
       variant: "secondary",
       size: "sm",
-      // No clipboard writer: the button cannot succeed, so it is disabled and
-      // the hint below says the key has to be copied by hand.
       disabled: !clipboard,
       onClick: () => {
-        if (!clipboard) return;
+        if (!clipboard || !live() || issued !== key || !copy.isConnected) return;
         void (async () => {
-          copied = false;
-          copyFailed = false;
+          let success = false;
           try {
             await clipboard.writeText(key.credential);
-            copied = true;
+            success = true;
           } catch {
-            copyFailed = true;
+            // A rejected write leaves the one-time key available for manual copy.
           }
-          if (live()) render();
+          if (!live() || issued !== key) return;
+          copied = success;
+          copyFailed = !success;
+          render();
         })();
       },
     });
     mark(copy, "copy");
-    box.append(code, copy);
+    box.append(code);
+    if (clipboard) box.append(copy);
     if (!clipboard || copyFailed) {
       const hint = doc.createElement("p");
       hint.className = "ui2-field-hint";
       hint.setAttribute("role", "status");
       hint.textContent = i18n.t("conn.copyManual");
-      box.append(hint);
+      const select = createUi2Button(doc, {
+        label: i18n.t("conn.selectKey"),
+        variant: "secondary",
+        size: "sm",
+        onClick: () => {
+          if (!live() || issued !== key || !code.isConnected) return;
+          const selection = doc.getSelection();
+          if (!selection) return;
+          const range = doc.createRange();
+          range.selectNodeContents(code);
+          selection.removeAllRanges();
+          selection.addRange(range);
+        },
+      });
+      box.append(mark(select, "select-key"), hint);
     }
     return box;
   }

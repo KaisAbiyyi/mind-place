@@ -53,8 +53,9 @@ export async function mountApplication({ root, invoke, clipboard }: ApplicationO
             // Pages only ever get the epoch-fenced invoke: a call that starts or
             // finishes after Lock or a new unlock fails instead of disclosing.
             const pageInvoke = fenceUi2EpochInvoke(invoke, () => generation === epoch && !locking);
+            const pageClipboard = clipboard ?? root.ownerDocument.defaultView?.navigator.clipboard;
             ui2Shell = mountUi2Shell(root, {
-              pages: createUi2Pages({ invoke: pageInvoke, ...(clipboard ? { clipboard } : {}) }),
+              pages: createUi2Pages({ invoke: pageInvoke, clipboard: pageClipboard }),
               onLock: () => { void lock(); },
               onSwitchClassic: () => {
                 if (setUi2ShellEnabled(false)) root.ownerDocument.defaultView?.location.reload();
