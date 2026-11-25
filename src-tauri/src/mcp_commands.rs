@@ -1,11 +1,63 @@
 //! Trusted desktop owner controls; never exposed through MCP.
 use super::{begin_unlocked, finish_unlocked, legacy_archive, owner_vault, AppState};
+use mind_place_index::IndexError;
 use mind_place_integration::{transport::LocalMcpServer, ClientAuthority};
-use mind_place_state::{ClientCapability, ClientRecord};
+use mind_place_state::{ClientCapability, ClientRecord, StateError, StateStore};
 use serde::Serialize;
+use std::time::{Duration, Instant};
 use tauri::State;
 
 const ENDPOINT: &str = "http://127.0.0.1:43731/mcp";
+
+/// Longest an owner access command waits for the state schema lock.
+const AUTHORITY_WAIT: Duration = Duration::from_secs(5);
+const AUTHORITY_POLL: Duration = Duration::from_millis(10);
+
+/// Opening the state store takes a short exclusive schema lock that fails at
+/// once with `Busy`. Every MCP request takes the same lock, so a busy client
+/// could make the owner's revoke fail while its key stayed valid. Wait for
+/// `Busy` only, within `wait`; every other failure is immediate. The owner's
+/// authorization is rechecked before each attempt, so Lock ends the wait.
+fn wait_for_authority<T>(
+    wait: Duration,
+    mut still_authorized: impl FnMut() -> Result<(), String>,
+    mut open: impl FnMut() -> mind_place_index::Result<T>,
+) -> Result<T, String> {
+    let deadline = Instant::now() + wait;
+    loop {
+        still_authorized()?;
+        match open() {
+            Ok(authority) => return Ok(authority),
+            Err(IndexError::State(StateError::Busy)) if Instant::now() < deadline => {
+                std::thread::sleep(AUTHORITY_POLL);
+            }
+            Err(_) => return Err("MP_MCP_AUTHORITY:Unavailable".to_owned()),
+        }
+    }
+}
+
+/// Runs one owner access operation on a blocking worker, so a wait can never
+/// hold the UI thread and Lock stays available. The unlock lease is pinned
+/// before the wait and revalidated before the result is returned.
+async fn with_authority<T: Send + 'static>(
+    state: &AppState,
+    operation: impl FnOnce(&AppState, &StateStore) -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    let lease = begin_unlocked(state)?;
+    let state = state.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let authority = wait_for_authority(
+            AUTHORITY_WAIT,
+            || finish_unlocked(&state, lease),
+            || super::open_owner_state(&owner_vault(&state), &state.state_path),
+        )?;
+        let result = operation(&state, &authority)?;
+        finish_unlocked(&state, lease)?;
+        Ok(result)
+    })
+    .await
+    .map_err(|_| "MP_MCP_AUTHORITY:Unavailable".to_owned())?
+}
 
 #[derive(Serialize)]
 pub struct McpStatus {
@@ -82,43 +134,40 @@ pub(super) fn stop_local_mcp(state: State<'_, AppState>) -> Result<McpStatus, St
     })
 }
 #[tauri::command]
-pub(super) fn issue_local_mcp_reader(
+pub(super) async fn issue_local_mcp_reader(
     state: State<'_, AppState>,
     display_name: String,
 ) -> Result<McpReaderCredential, String> {
-    let lease = begin_unlocked(&state)?;
-    let authority = super::open_owner_state(&owner_vault(&state), &state.state_path)
-        .map_err(|_| "MP_MCP_AUTHORITY:Unavailable".to_string())?;
-    let issued = ClientAuthority::new(&authority, &state.security)
-        .issue(&display_name, &[ClientCapability::Read])
-        .map_err(|_| "MP_MCP_CLIENT:Cannot issue credential".to_string())?;
-    finish_unlocked(&state, lease)?;
-    let credential = issued.credential().to_owned();
-    Ok(McpReaderCredential {
-        client_id: issued.client.id,
-        display_name: issued.client.display_name,
-        credential,
-        endpoint: ENDPOINT,
+    with_authority(&state, move |state, authority| {
+        let issued = ClientAuthority::new(authority, &state.security)
+            .issue(&display_name, &[ClientCapability::Read])
+            .map_err(|_| "MP_MCP_CLIENT:Cannot issue credential".to_string())?;
+        let credential = issued.credential().to_owned();
+        Ok(McpReaderCredential {
+            client_id: issued.client.id,
+            display_name: issued.client.display_name,
+            credential,
+            endpoint: ENDPOINT,
+        })
     })
+    .await
 }
 
 #[tauri::command]
-pub(super) fn list_local_mcp_clients(
+pub(super) async fn list_local_mcp_clients(
     state: State<'_, AppState>,
     after: Option<String>,
 ) -> Result<Vec<ClientRecord>, String> {
-    let lease = begin_unlocked(&state)?;
-    let authority = super::open_owner_state(&owner_vault(&state), &state.state_path)
-        .map_err(|_| "MP_MCP_AUTHORITY:Unavailable".to_string())?;
-    let clients = authority
-        .list_credentialed_clients(after.as_deref(), 50)
-        .map_err(|_| "MP_MCP_CLIENT:Could not list clients".to_string())?;
-    finish_unlocked(&state, lease)?;
-    Ok(clients)
+    with_authority(&state, move |_, authority| {
+        authority
+            .list_credentialed_clients(after.as_deref(), 50)
+            .map_err(|_| "MP_MCP_CLIENT:Could not list clients".to_string())
+    })
+    .await
 }
 
 #[tauri::command]
-pub(super) fn revoke_local_mcp_client(
+pub(super) async fn revoke_local_mcp_client(
     state: State<'_, AppState>,
     client_id: String,
 ) -> Result<(), String> {
@@ -127,11 +176,12 @@ pub(super) fn revoke_local_mcp_client(
         super::hosted_tunnel::stop_and_revoke(&state)?;
         return finish_unlocked(&state, lease);
     }
-    let authority = super::open_owner_state(&owner_vault(&state), &state.state_path)
-        .map_err(|_| "MP_MCP_AUTHORITY:Unavailable".to_string())?;
-    ClientAuthority::new(&authority, &state.security)
-        .revoke(&client_id)
-        .map_err(|_| "MP_MCP_CLIENT:Cannot revoke client".to_string())?;
+    with_authority(&state, move |state, authority| {
+        ClientAuthority::new(authority, &state.security)
+            .revoke(&client_id)
+            .map_err(|_| "MP_MCP_CLIENT:Cannot revoke client".to_string())
+    })
+    .await?;
     finish_unlocked(&state, lease)
 }
 
@@ -141,66 +191,58 @@ pub(super) fn revoke_local_mcp_client(
 // rejected by the state layer, and failures are deliberately opaque.
 
 #[tauri::command]
-pub(super) fn grant_local_mcp_client_sources(
+pub(super) async fn grant_local_mcp_client_sources(
     state: State<'_, AppState>,
     client_id: String,
     source_ids: Vec<String>,
 ) -> Result<usize, String> {
-    let lease = begin_unlocked(&state)?;
-    let authority = super::open_owner_state(&owner_vault(&state), &state.state_path)
-        .map_err(|_| "MP_MCP_AUTHORITY:Unavailable".to_string())?;
-    let changed = ClientAuthority::new(&authority, &state.security)
-        .grant_read_sources(&client_id, &source_ids)
-        .map_err(|_| "MP_MCP_GRANT:Cannot grant read access".to_string())?;
-    finish_unlocked(&state, lease)?;
-    Ok(changed)
+    with_authority(&state, move |state, authority| {
+        ClientAuthority::new(authority, &state.security)
+            .grant_read_sources(&client_id, &source_ids)
+            .map_err(|_| "MP_MCP_GRANT:Cannot grant read access".to_string())
+    })
+    .await
 }
 
 #[tauri::command]
-pub(super) fn revoke_local_mcp_client_sources(
+pub(super) async fn revoke_local_mcp_client_sources(
     state: State<'_, AppState>,
     client_id: String,
     source_ids: Vec<String>,
 ) -> Result<usize, String> {
-    let lease = begin_unlocked(&state)?;
-    let authority = super::open_owner_state(&owner_vault(&state), &state.state_path)
-        .map_err(|_| "MP_MCP_AUTHORITY:Unavailable".to_string())?;
-    let changed = ClientAuthority::new(&authority, &state.security)
-        .revoke_read_sources(&client_id, &source_ids)
-        .map_err(|_| "MP_MCP_GRANT:Cannot revoke read access".to_string())?;
-    finish_unlocked(&state, lease)?;
-    Ok(changed)
+    with_authority(&state, move |state, authority| {
+        ClientAuthority::new(authority, &state.security)
+            .revoke_read_sources(&client_id, &source_ids)
+            .map_err(|_| "MP_MCP_GRANT:Cannot revoke read access".to_string())
+    })
+    .await
 }
 
 #[tauri::command]
-pub(super) fn revoke_all_local_mcp_client_sources(
+pub(super) async fn revoke_all_local_mcp_client_sources(
     state: State<'_, AppState>,
     client_id: String,
 ) -> Result<usize, String> {
-    let lease = begin_unlocked(&state)?;
-    let authority = super::open_owner_state(&owner_vault(&state), &state.state_path)
-        .map_err(|_| "MP_MCP_AUTHORITY:Unavailable".to_string())?;
-    let changed = ClientAuthority::new(&authority, &state.security)
-        .revoke_all_read_sources(&client_id)
-        .map_err(|_| "MP_MCP_GRANT:Cannot revoke read access".to_string())?;
-    finish_unlocked(&state, lease)?;
-    Ok(changed)
+    with_authority(&state, move |state, authority| {
+        ClientAuthority::new(authority, &state.security)
+            .revoke_all_read_sources(&client_id)
+            .map_err(|_| "MP_MCP_GRANT:Cannot revoke read access".to_string())
+    })
+    .await
 }
 
 /// Sorted canonical source ids this client may read (at most 10,000).
 #[tauri::command]
-pub(super) fn list_local_mcp_client_sources(
+pub(super) async fn list_local_mcp_client_sources(
     state: State<'_, AppState>,
     client_id: String,
 ) -> Result<Vec<String>, String> {
-    let lease = begin_unlocked(&state)?;
-    let authority = super::open_owner_state(&owner_vault(&state), &state.state_path)
-        .map_err(|_| "MP_MCP_AUTHORITY:Unavailable".to_string())?;
-    let sources = ClientAuthority::new(&authority, &state.security)
-        .read_sources(&client_id)
-        .map_err(|_| "MP_MCP_GRANT:Could not list read access".to_string())?;
-    finish_unlocked(&state, lease)?;
-    Ok(sources)
+    with_authority(&state, move |state, authority| {
+        ClientAuthority::new(authority, &state.security)
+            .read_sources(&client_id)
+            .map_err(|_| "MP_MCP_GRANT:Could not list read access".to_string())
+    })
+    .await
 }
 
 /// One saved chat as the owner grant screen needs it. `source_id` is the
@@ -244,16 +286,15 @@ pub(super) async fn list_local_mcp_grantable_chats(
         let store = legacy_archive(&state)?;
         super::gated_blocking(&state, move || store.list(&q)).await?
     };
-    let lease = begin_unlocked(&state)?;
-    let authority = super::open_owner_state(&owner_vault(&state), &state.state_path)
-        .map_err(|_| "MP_MCP_AUTHORITY:Unavailable".to_string())?;
     let granted: std::collections::HashSet<String> =
-        ClientAuthority::new(&authority, &state.security)
-            .read_sources(&client_id)
-            .map_err(|_| "MP_MCP_GRANT:Could not list read access".to_string())?
-            .into_iter()
-            .collect();
-    finish_unlocked(&state, lease)?;
+        with_authority(&state, move |state, authority| {
+            ClientAuthority::new(authority, &state.security)
+                .read_sources(&client_id)
+                .map_err(|_| "MP_MCP_GRANT:Could not list read access".to_string())
+        })
+        .await?
+        .into_iter()
+        .collect();
     let limit = limit.unwrap_or(25).clamp(1, GRANTABLE_PAGE_MAX);
     let offset = offset.unwrap_or(0);
     let mut chats = Vec::new();
@@ -281,4 +322,110 @@ pub(super) async fn list_local_mcp_grantable_chats(
         allowed,
         rows,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    fn held_schema_lock(root: &std::path::Path) -> std::fs::File {
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(root.join(".state-schema.lock"))
+            .unwrap();
+        file.try_lock().unwrap();
+        file
+    }
+
+    #[test]
+    fn owner_command_waits_for_a_busy_schema_lock() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("state.sqlite3");
+        StateStore::open(&path).unwrap();
+        let lock = held_schema_lock(temp.path());
+        // Without the wait this is exactly the failure the owner saw.
+        assert!(matches!(StateStore::open(&path), Err(StateError::Busy)));
+        let holder = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            drop(lock);
+        });
+        let opened = wait_for_authority(
+            Duration::from_secs(5),
+            || Ok(()),
+            || Ok(StateStore::open(&path)?),
+        );
+        assert!(opened.is_ok());
+        holder.join().unwrap();
+    }
+
+    #[test]
+    fn owner_command_wait_is_bounded_and_fails_visibly() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("state.sqlite3");
+        StateStore::open(&path).unwrap();
+        let _lock = held_schema_lock(temp.path());
+        let started = Instant::now();
+        let error = wait_for_authority(
+            Duration::from_millis(250),
+            || Ok(()),
+            || Ok(StateStore::open(&path)?),
+        )
+        .unwrap_err();
+        assert_eq!(error, "MP_MCP_AUTHORITY:Unavailable");
+        assert!(started.elapsed() >= Duration::from_millis(250));
+        assert!(started.elapsed() < Duration::from_secs(10));
+    }
+
+    #[test]
+    fn only_busy_is_retried() {
+        let attempts = AtomicUsize::new(0);
+        let error = wait_for_authority(
+            Duration::from_secs(5),
+            || Ok(()),
+            || -> mind_place_index::Result<()> {
+                attempts.fetch_add(1, Ordering::Relaxed);
+                Err(IndexError::State(StateError::Corrupt))
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error, "MP_MCP_AUTHORITY:Unavailable");
+        assert_eq!(attempts.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn lock_ends_the_wait() {
+        let locked = Arc::new(AtomicBool::new(false));
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let (gate, counter) = (locked.clone(), attempts.clone());
+        let waiter = std::thread::spawn(move || {
+            wait_for_authority(
+                Duration::from_secs(60),
+                || {
+                    if gate.load(Ordering::Acquire) {
+                        Err("MP_SECURITY_LOCKED:locked".to_owned())
+                    } else {
+                        Ok(())
+                    }
+                },
+                || -> mind_place_index::Result<()> {
+                    counter.fetch_add(1, Ordering::AcqRel);
+                    Err(IndexError::State(StateError::Busy))
+                },
+            )
+        });
+        while attempts.load(Ordering::Acquire) < 3 {
+            std::thread::yield_now();
+        }
+        let started = Instant::now();
+        locked.store(true, Ordering::Release);
+        assert_eq!(
+            waiter.join().unwrap().unwrap_err(),
+            "MP_SECURITY_LOCKED:locked"
+        );
+        assert!(started.elapsed() < Duration::from_secs(10));
+    }
 }
