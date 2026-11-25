@@ -87,10 +87,10 @@ export function schemaFeatures(tools) {
 }
 
 /**
- * @param {{wire: ReturnType<import('./wire.mjs').createWire>, app: any, corpus: any, unlockSecret: string, log?: (s: string) => void}} ctx
+ * @param {{wire: ReturnType<import('./wire.mjs').createWire>, app: any, corpus: any, unlockSecret: string, secrets?: string[], log?: (s: string) => void}} ctx
  */
 export async function runSyntheticSuite(ctx) {
-  const { wire, app, corpus, unlockSecret } = ctx;
+  const { wire, app, corpus, unlockSecret, secrets = [] } = ctx;
   const log = ctx.log ?? (() => {});
   const claims = Object.fromEntries(['C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7', 'C8', 'C9'].map((id) => [id, new Claim(id)]));
   let progress = 'setup';
@@ -105,9 +105,11 @@ export async function runSyntheticSuite(ctx) {
 
   // Two read credentials: A will read the long and medium chats, B only the second one.
   const A = await app.issueReader('Conformance client A');
+  secrets.push(A.credential);
   const B = await app.issueReader('Conformance client B');
+  secrets.push(B.credential);
   const C = await app.issueReader('Conformance client C (never granted)');
-  ctx.secrets?.push(A.credential, B.credential, C.credential);
+  secrets.push(C.credential);
   const rows = await app.grantableChats(A.clientId);
   ctx.sourceIds = Object.fromEntries(rows.map((row) => [row.title, row.source_id]));
   log('credentials issued');

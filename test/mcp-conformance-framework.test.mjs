@@ -125,7 +125,7 @@ test('recording proxy can simulate a dropped connection for reconnect checks', a
   }
 });
 
-import { schemaFeatures, verifyRevision } from '../scripts/mcp-conformance/suite.mjs';
+import { runSyntheticSuite, schemaFeatures, verifyRevision } from '../scripts/mcp-conformance/suite.mjs';
 
 const seg = (i, text, start, end, total) => ({ message_id: `m-${i + 1}`, message_index: i, role: 'user', text, byte_start: start, byte_end: end, message_total_bytes: total });
 const page = (segments, next) => ({ status: 200, json: { result: { structuredContent: { snapshot_id: 's1', segments, truncated: Boolean(next), next_cursor: next ?? null } } } });
@@ -261,6 +261,19 @@ test('an interrupted run cannot publish passing checks gathered before the failu
   assert.match(validateReceiptRun({ ...receipt, harness_failure: 'Interrupted during C7' }), /did not complete/);
   assert.match(validateReceiptRun({ ...receipt, failure: 'App did not launch' }), /did not complete/);
   assert.match(validateReceiptRun({ ...receipt, store_mode: 'legacy' }), /encrypted vault/);
+});
+
+test('synthetic setup failure is scrubbed and every claim is marked failed', async () => {
+  const canary = 'disposable-known-canary';
+  const result = await runSyntheticSuite({
+    app: { async issueReader() { throw new Error(`fixture unavailable ${canary}`); } },
+    unlockSecret: canary,
+    secrets: [canary],
+  });
+  assert.match(result.harnessFailure, /fixture unavailable/);
+  assert.ok(!JSON.stringify(result).includes(canary));
+  assert.equal(Object.keys(result.claims).length, CLAIMS.length);
+  assert.ok(Object.values(result.claims).every((claim) => claim.result === 'FAIL'));
 });
 
 test('recording proxy keeps only allowlisted headers and no query string', async () => {
