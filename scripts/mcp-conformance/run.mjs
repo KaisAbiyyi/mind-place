@@ -9,8 +9,10 @@
  * Everything runs against a disposable synthetic archive and a disposable unlock
  * secret. Keys never touch a command line, URL, log, receipt or screenshot.
  */
+import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -22,7 +24,7 @@ import { runSyntheticSuite } from './suite.mjs';
 import { createWire } from './wire.mjs';
 import { runRealClient } from './real.mjs';
 import { startRecordingProxy } from './recording-proxy.mjs';
-import { CLAIMS, CLIENTS, renderMatrixMarkdown, validateMatrix } from './matrix.mjs';
+import { CLAIMS, CLIENTS, STORE_MODE, renderMatrixMarkdown, validateMatrix } from './matrix.mjs';
 
 export const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const git = (...args) => spawnSync('git', args, { cwd: repoRoot, encoding: 'utf8' }).stdout.trim();
@@ -34,7 +36,15 @@ export function sourceIdentity() {
     sha,
     dirty,
     // The binary is built from Rust sources and the frontend. Binding both lets a reader see exactly what the executable embodies.
-    trees: { crates: git('rev-parse', 'HEAD:crates'), src_tauri: git('rev-parse', 'HEAD:src-tauri'), cargo_lock: git('rev-parse', 'HEAD:Cargo.lock'), src: git('rev-parse', 'HEAD:src') },
+    trees: {
+      crates: git('rev-parse', 'HEAD:crates'),
+      src_tauri: git('rev-parse', 'HEAD:src-tauri'),
+      cargo_manifest: git('rev-parse', 'HEAD:Cargo.toml'),
+      cargo_lock: git('rev-parse', 'HEAD:Cargo.lock'),
+      src: git('rev-parse', 'HEAD:src'),
+      extension: git('rev-parse', 'HEAD:extension'),
+      frontend_lock: git('rev-parse', 'HEAD:package-lock.json'),
+    },
     // The conformance harness (including the stdio bridge) that produced the evidence. Recorded separately from the product so both are verifiable.
     harness: {
       conformance: git('rev-parse', 'HEAD:scripts/mcp-conformance'),
@@ -53,34 +63,62 @@ export function sha256File(file) {
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 }
 
-/** Fresh disposable runtime: archive seeded through the real capture host, app launched, unlocked, sharing on. */
+const VAULT_DATABASES = ['archive-index.sqlite3', 'state.sqlite3', 'index.sqlite3'];
+
+export function verifyVaultFiles(runtime, legacyPath) {
+  assert.ok(!fs.existsSync(legacyPath), 'a legacy archive appeared during the vault run');
+  for (const name of VAULT_DATABASES) {
+    const fd = fs.openSync(path.join(runtime, 'encrypted-vault-v1', name), 'r');
+    try {
+      const header = Buffer.alloc(16);
+      assert.equal(fs.readSync(fd, header), header.length, `${name} has no database header`);
+      assert.ok(!header.equals(Buffer.from('SQLite format 3\0')), `${name} has a plaintext SQLite header`);
+    } finally {
+      fs.closeSync(fd);
+    }
+  }
+}
+
+/** Provision the vault before the first capture, then verify the owner read for every fixture revision. */
 export async function startSession({ label, corpusOptions, log = () => {} }) {
   const { exe, host } = productPaths();
   if (!fs.existsSync(exe) || !fs.existsSync(host)) throw new Error('Missing packaged app: run npm run build first');
   if (await portIsBusy(43731)) throw new Error('MCP port 43731 is in use: close any running Mind Place first');
-  const base = process.env.MP_CONFORMANCE_DIR ?? 'D:/mp-conf';
+  const base = path.resolve(process.env.MP_CONFORMANCE_DIR ?? os.tmpdir());
   fs.mkdirSync(base, { recursive: true });
   const runtime = fs.mkdtempSync(path.join(base, `${label}-`));
   const dataDir = path.join(runtime, 'archive-v1');
-  const corpus = seedCorpus({ host, archiveRoot: dataDir, ...corpusOptions });
-  log(`seeded ${Object.keys(corpus).length} conversations`);
-  const app = await launchApp({ exe, runtimeDir: runtime, dataDir });
-  const secrets = [];
-  const unlockSecret = await app.firstRunUnlock();
-  secrets.push(unlockSecret);
-  // Ensure the post-unlock vault->index FTS5 sync completes before any MCP query or fetch runs.
-  for (let attempt = 0; attempt < 120; attempt += 1) {
+  const unlockSecret = crypto.randomBytes(24).toString('hex');
+  const secrets = [unlockSecret];
+  let app;
+  const close = async () => {
     try {
-      await app.invoke('refresh_archive_index', {});
-      break;
-    } catch (error) {
-      if (!/MP_STATE_BUSY|locked/i.test(String(error?.message ?? error)) || attempt === 119) throw error;
-      await new Promise((r) => setTimeout(r, 250));
+      await app?.close();
+    } finally {
+      fs.rmSync(runtime, { recursive: true, force: true, maxRetries: 10, retryDelay: 250 });
     }
+  };
+  try {
+    app = await launchApp({ exe, runtimeDir: runtime, dataDir });
+    await app.provisionVault(unlockSecret, secrets);
+    const corpus = seedCorpus({ host, archiveRoot: dataDir, ...corpusOptions });
+    await app.invoke('refresh_archive_index');
+    verifyVaultFiles(runtime, dataDir);
+    for (const { revisions } of Object.values(corpus)) {
+      for (const revision of revisions) {
+        const ownerRead = await app.invoke('read_conversation', { id: revision.archive_id, snapshotId: revision.snapshot_id });
+        assert.equal(ownerRead.snapshot_id, revision.snapshot_id, 'owner read returned the wrong revision');
+        const digest = crypto.createHash('sha256').update(JSON.stringify(ownerRead.capture.messages.map((message) => message.text))).digest('hex');
+        assert.equal(digest, revision.expected_messages_sha256, 'owner read differs from the captured fixture');
+      }
+    }
+    await app.startSharing();
+    log(`encrypted vault unlocked, ${Object.keys(corpus).length} conversations verified, sharing on`);
+    return { app, close, corpus, unlockSecret, secrets, exe, storeMode: STORE_MODE };
+  } catch (error) {
+    await close().catch(() => {});
+    throw new Error(safePreview(String(error?.message ?? error), secrets, 400));
   }
-  await app.startSharing();
-  log('app unlocked, indexed, sharing on');
-  return { app, corpus, unlockSecret, secrets, runtime, exe };
 }
 
 export function writeReceipt(dir, name, body, secrets) {
@@ -108,15 +146,16 @@ async function syntheticPhase() {
   } catch (error) {
     failure = formatSafeLine(String(error?.message ?? error), secrets);
   } finally {
-    await app.close();
+    await session.close();
   }
   const body = {
     kind: 'SYNTHETIC_HTTP reference run against the packaged app (disposable synthetic corpus). Not proof of any provider client.',
     source,
     executable_sha256: sha256File(session.exe),
+    store_mode: session.storeMode,
     dirty_tree: source.dirty,
     page_errors: app.pageErrors.map((e) => safePreview(e, secrets, 250)),
-    corpus_summary: Object.fromEntries(Object.entries(corpus).map(([k, v]) => [k, v.revisions.map((r) => ({ messages: r.message_count, raw_sha256: r.raw_sha256 }))])),
+    corpus_summary: Object.fromEntries(Object.entries(corpus).map(([k, v]) => [k, v.revisions.map((r) => ({ messages: r.message_count, expected_messages_sha256: r.expected_messages_sha256 }))])),
     schema_features: result?.schemaFeatures ?? [],
     c4_scope: 'Long chat (over 256 KB, 3 revisions, multi-byte, astral-plane and right-to-left text): latest revision at 64 KB and 9 KB pages in two protocol eras and every earlier revision; medium chat in 4 KB pages. A server reference, not a provider client.',
     harness_failure: result?.harnessFailure ? formatSafeLine(result.harnessFailure, secrets) : null,
@@ -164,7 +203,9 @@ async function matrixPhase() {
       if (treeId(receipt.source?.trees) !== treeId(source.trees)) problems.push(`${client.id}: receipt was produced from a different product tree than HEAD (the executable must match the sources)`);
       if (receipt.dirty_tree) problems.push(`${client.id}: receipt was produced from a dirty tree`);
       if (receipt.source?.sha !== source.sha) problems.push(`${client.id}: receipt ran at ${String(receipt.source?.sha).slice(0, 9)}, not at ${source.sha.slice(0, 9)}: rerun every client at one frozen commit`);
-      if (treeId(receipt.source?.harness) !== treeId(source.harness)) problems.push(`${client.id}: receipt was produced by a different conformance harness than HEAD`);      const text = fs.readFileSync(src);
+      if (treeId(receipt.source?.harness) !== treeId(source.harness)) problems.push(`${client.id}: receipt was produced by a different conformance harness than HEAD`);
+      if (receipt.store_mode !== STORE_MODE) problems.push(`${client.id}: receipt did not verify the encrypted vault`);
+      const text = fs.readFileSync(src);
       fs.writeFileSync(path.join(receiptsDir, fileFor(client)), text);
       rel = `receipts/${fileFor(client)}`;
       hash = crypto.createHash('sha256').update(text).digest('hex');
@@ -178,6 +219,7 @@ async function matrixPhase() {
           sha: receipt.source.sha,
           product_tree_id: treeId(receipt.source.trees),
           harness_tree_id: treeId(receipt.source.harness),
+          store_mode: receipt.store_mode,
           ...(claim.id === 'C4' && receipt.c4_scope ? { scope: receipt.c4_scope } : {}),
           evidence: client.synthetic
             ? { kind: 'SYNTHETIC_HTTP', receipt: rel, receipt_sha256: hash, transport: client.transport }
@@ -194,7 +236,7 @@ async function matrixPhase() {
       }
     }
   }
-  const matrix = { sha: source.sha, product_tree_id: treeId(source.trees), harness_tree_id: treeId(source.harness), generated_at: new Date().toISOString(), executable_sha256: JSON.parse(fs.readFileSync(path.join(outDir, 'synthetic.json'), 'utf8')).executable_sha256, rust_trees: source.trees, cells };
+  const matrix = { sha: source.sha, product_tree_id: treeId(source.trees), harness_tree_id: treeId(source.harness), store_mode: STORE_MODE, generated_at: new Date().toISOString(), executable_sha256: JSON.parse(fs.readFileSync(path.join(outDir, 'synthetic.json'), 'utf8')).executable_sha256, product_trees: source.trees, cells };
   problems.push(...validateMatrix(matrix));
   fs.writeFileSync(path.join(docsDir, 'matrix.json'), JSON.stringify(matrix, null, 2) + '\n');
   fs.writeFileSync(path.join(docsDir, 'PARITY-MATRIX.md'), renderMatrixMarkdown(matrix));
@@ -231,6 +273,7 @@ async function servePhase(useProxy = false) {
       kind: 'OWNER_SERVE_SESSION_RECEIPT',
       source,
       executable_sha256: sha256File(session.exe),
+      store_mode: session.storeMode,
       dirty_tree: source.dirty,
       proxy_used: Boolean(proxy),
       observed_client: proxy ? (await import('./recording-proxy.mjs')).observedClientIdentity(proxy.exchanges) : null,
@@ -247,7 +290,7 @@ async function servePhase(useProxy = false) {
     const saved = writeReceipt(outDir, `owner-serve-${stamp}.json`, receiptBody, session.secrets);
     console.log(formatSafeJson({ owner_serve_receipt: saved.file, sha256: saved.sha256 }, session.secrets));
     if (proxy) await proxy.close();
-    await session.app.close();
+    await session.close();
     process.exit(0);
   };
   process.on('SIGINT', stop);

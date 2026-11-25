@@ -317,7 +317,7 @@ export async function runRealClient(clientId, { startSession, log = () => {} }) 
     }
   } finally {
     await proxy.close();
-    await app.close();
+    await session.close();
   }
   identity = identity ?? observedClientIdentity(proxy.exchanges);
   if (notConnected) return { clientId, label: driver.label, installed: found, blocked: sanitizeBlocked({ kind: 'CLIENT_COULD_NOT_USE_THE_SERVER', detail: 'The real client was run with a task that needs the MCP server but never completed a handshake. Nothing can be concluded about Mind Place from this run.', ...notConnected }, secrets), secrets };
@@ -326,6 +326,7 @@ export async function runRealClient(clientId, { startSession, log = () => {} }) 
     label: driver.label,
     installed: found,
     observed_client: identity,
+    store_mode: session.storeMode,
     permission_proof: permissionProof,
     // What this real client actually read for C4. The long (over 256 KB) chat is verified by the synthetic row only.
     c4_scope: `Medium multi-byte two-revision chat: latest revision ${c4Verdict?.bytes ?? 'n/a'} bytes read in ${c4Verdict?.pages ?? 'n/a'} pages of at most 3000 bytes, earlier revision also read. The long chat over 256 KB was NOT read by this real client (NOT_RUN for real clients; covered by the synthetic reference only).`,

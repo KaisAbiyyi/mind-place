@@ -283,11 +283,16 @@ export async function runSyntheticSuite(ctx) {
     c.check('revoking one chat takes effect on the very next fetch', medium.status !== 200, outcome(medium));
     c.check('revoking one chat takes effect on the very next search', mediumSearch.hits.length === 0, `${mediumSearch.hits.length}`);
     c.check('other grants of the same client are unaffected', stillLong.hits.length > 0, `${stillLong.hits.length}`);
+    // Keep the surviving credential active while the owner revokes B.
+    const siblingReads = Promise.allSettled(Array.from({ length: 6 }, () =>
+      wire.search(A.credential, ['sentinel-long-5'])));
     await app.revokeClient(B.clientId);
     const dead = await wire.toolsList(B.credential, MODERN);
     const deadSearch = await wire.search(B.credential, ['sentinel-second-2']);
     c.check('revoking a client denies its key on the next request', [401, 403].includes(dead.status), outcome(dead));
     c.check('a revoked client reads nothing', deadSearch.hits.length === 0 && deadSearch.status !== 200, `${deadSearch.status}`);
+    c.check('parallel reads from the surviving client completed during the revoke probe', (await siblingReads).every((read) =>
+      read.status === 'fulfilled' && [200, 401, 403].includes(read.value.status)), '');
     const aStill = await wire.search(A.credential, ['sentinel-long-5']);
     c.check("revoking B does not disturb A (no cross-client effect)", aStill.hits.length > 0, `${aStill.hits.length}`);
   }

@@ -9,6 +9,7 @@
 import { containsSecret } from '../lib/e2e-secret-guard.mjs';
 
 export const RESULTS = ['PASS', 'FAIL', 'NOT_RUN', 'PROVIDER_BLOCKED'];
+export const STORE_MODE = 'encrypted';
 
 export const CLAIMS = [
   { id: 'C1', title: 'Handshake and initialization', detail: 'Real initialize (or discovery) accepted; protocol negotiated; client identity observed on the wire' },
@@ -48,6 +49,7 @@ export function validateCell(clientId, claimId, cell) {
   if (containsSecret(JSON.stringify(cell))) problems.push(`${where}: cell contains a secret-shaped value`);
   const kind = cell.evidence?.kind ?? null;
   if (cell.result === 'PASS' || cell.result === 'FAIL') {
+    if (cell.store_mode !== STORE_MODE) problems.push(`${where}: executed cells require verified encrypted-vault evidence`);
     if (!cell.sha || !SHA.test(cell.sha)) problems.push(`${where}: ${cell.result} needs the exact 40-hex source SHA`);
     if (!cell.evidence?.receipt || !HEX64.test(cell.evidence.receipt_sha256 ?? '')) problems.push(`${where}: needs a receipt file and its sha256`);
     if (client.synthetic) {
@@ -74,6 +76,7 @@ export function validateCell(clientId, claimId, cell) {
 export function validateMatrix(matrix) {
   const problems = [];
   if (!matrix?.sha || !SHA.test(matrix.sha)) problems.push('matrix: exact source SHA missing');
+  if (matrix?.store_mode !== STORE_MODE) problems.push('matrix: encrypted vault store mode required');
   for (const client of CLIENTS) {
     for (const claim of CLAIMS) {
       const cell = matrix?.cells?.[client.id]?.[claim.id];
@@ -106,6 +109,8 @@ export function renderMatrixMarkdown(matrix) {
   lines.push(`Source SHA: \`${matrix.sha}\` · generated ${matrix.generated_at}`);
   lines.push('');
   lines.push(`Product under test: mind-place.exe sha256 \`${matrix.executable_sha256}\`, product source tree id \`${matrix.product_tree_id}\`, conformance harness tree id \`${matrix.harness_tree_id ?? 'n/a'}\`. Every PASS or FAIL cell ran at exactly this commit with exactly this harness and product (enforced by the validator). The commit that records this matrix adds only the documentation and receipts under \`docs/qualification/mcp-parity/\`.`);
+  lines.push('');
+  lines.push('Store under test: packaged encrypted vault populated with disposable synthetic captures.');
   lines.push('');
   lines.push('Legend: PASS = a REAL provider client did it on this exact SHA (client name and version observed on the wire). The synthetic row is a server reference, never provider proof. NOT_RUN and PROVIDER_BLOCKED are explicit, not hidden.');
   lines.push('');

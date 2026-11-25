@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import http from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import { CLAIMS, CLIENTS, renderMatrixMarkdown, validateCell, validateMatrix } from '../scripts/mcp-conformance/matrix.mjs';
 import { observedClientIdentity, startRecordingProxy } from '../scripts/mcp-conformance/recording-proxy.mjs';
@@ -12,6 +15,7 @@ const TOKEN = `mpc_v1_${'0123abcd'.repeat(8)}`;
 const real = (over = {}) => ({
   result: 'PASS',
   sha: SHA,
+  store_mode: 'encrypted',
   evidence: { kind: 'REAL_CLIENT', receipt: 'receipt.json', receipt_sha256: HASH, transport: 'streamable-http-loopback', observed_client: { name: 'claude-code', version: '2.1.322' } },
   ...over,
 });
@@ -29,7 +33,7 @@ test('real-client PASS needs the client identity observed on the wire, the exact
 });
 
 test('the synthetic reference row only accepts synthetic evidence', () => {
-  const synthetic = { result: 'PASS', sha: SHA, evidence: { kind: 'SYNTHETIC_HTTP', receipt: 'r.json', receipt_sha256: HASH } };
+  const synthetic = { result: 'PASS', sha: SHA, store_mode: 'encrypted', evidence: { kind: 'SYNTHETIC_HTTP', receipt: 'r.json', receipt_sha256: HASH } };
   assert.deepEqual(validateCell('synthetic-http', 'C4', synthetic), []);
   assert.ok(validateCell('synthetic-http', 'C4', real()).some((p) => /only carry SYNTHETIC_HTTP/.test(p)));
 });
@@ -51,11 +55,11 @@ test('a matrix must be complete, on one SHA, and renders every client', () => {
     cells[client.id] = {};
     for (const claim of CLAIMS) {
       cells[client.id][claim.id] = client.synthetic
-        ? { result: 'PASS', sha: SHA, evidence: { kind: 'SYNTHETIC_HTTP', receipt: 'r.json', receipt_sha256: HASH } }
+        ? { result: 'PASS', sha: SHA, store_mode: 'encrypted', evidence: { kind: 'SYNTHETIC_HTTP', receipt: 'r.json', receipt_sha256: HASH } }
         : { result: 'NOT_RUN', reason: 'not exercised', owner_card: 'OWNER-TEST-CARDS.md' };
     }
   }
-  const matrix = { sha: SHA, generated_at: '2026-11-24T00:00:00Z', cells };
+  const matrix = { sha: SHA, store_mode: 'encrypted', generated_at: '2026-11-24T00:00:00Z', cells };
   assert.deepEqual(validateMatrix(matrix), []);
   const md = renderMatrixMarkdown(matrix);
   for (const client of CLIENTS) assert.ok(md.includes(client.label), `rendered matrix lists ${client.id}`);
@@ -167,13 +171,10 @@ test('client identity falls back to modern _meta clientInfo, then the User-Agent
   assert.equal(observedClientIdentity([{ rpcMethod: 'tools/list' }]), null);
 });
 
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import { antigravitySessionSettings, antigravityWorkspaceConfig, geminiProjectSettings } from '../scripts/mcp-conformance/clients.mjs';
 import { formatSafeJson, formatSafeLine, safePreview, safeUrlPath, sanitizeBlocked, scrubDiagnostic, writeDebugArtifact } from '../scripts/mcp-conformance/hygiene.mjs';
 import { argsDigest, classifyFetchArgsMatch, fullArgsDigest, identityArgs } from '../scripts/mcp-conformance/real.mjs';
-import { sourceIdentity } from '../scripts/mcp-conformance/run.mjs';
+import { sourceIdentity, verifyVaultFiles } from '../scripts/mcp-conformance/run.mjs';
 import { isChatGptConversationUrl } from '../scripts/mcp-conformance/suite.mjs';
 import { createBridgeSession, parseBridgeArgs, validateLoopbackUrl } from '../scripts/mcp-stdio-bridge.mjs';
 
@@ -214,13 +215,16 @@ test('the matrix is one frozen version: every executed cell must run at the matr
     for (const client of CLIENTS) {
       cells[client.id] = {};
       for (const claim of CLAIMS) {
-        if (client.synthetic) cells[client.id][claim.id] = { result: 'PASS', sha: SHA, harness_tree_id: 'h1', evidence: { kind: 'SYNTHETIC_HTTP', receipt: 'r.json', receipt_sha256: HASH } };
+        if (client.synthetic) cells[client.id][claim.id] = { result: 'PASS', sha: SHA, store_mode: 'encrypted', harness_tree_id: 'h1', evidence: { kind: 'SYNTHETIC_HTTP', receipt: 'r.json', receipt_sha256: HASH } };
         else cells[client.id][claim.id] = { result: 'NOT_RUN', reason: 'not exercised', owner_card: 'OWNER-TEST-CARDS.md' };
       }
     }
-    return { sha: SHA, harness_tree_id: 'h1', cells, ...over };
+    return { sha: SHA, store_mode: 'encrypted', harness_tree_id: 'h1', cells, ...over };
   };
   assert.deepEqual(validateMatrix(build()), []);
+  const legacy = build();
+  legacy.cells.codex.C1 = real({ harness_tree_id: 'h1', store_mode: 'legacy' });
+  assert.ok(validateMatrix(legacy).some((p) => /executed cells require verified encrypted-vault evidence/.test(p)));
   const staleCommit = build();
   staleCommit.cells.codex.C1 = real({ sha: OTHER, harness_tree_id: 'h1' });
   assert.ok(validateMatrix(staleCommit).some((p) => /codex\/C1: cell ran at ccccccccc but the matrix is for aaaaaaaaa/.test(p)));
@@ -232,6 +236,23 @@ test('the matrix is one frozen version: every executed cell must run at the matr
   assert.ok(validateMatrix(noScope).some((p) => /C4 cell must state its measured scope/.test(p)));
   noScope.cells.codex.C4 = real({ harness_tree_id: 'h1', scope: 'medium chat only; long chat NOT_RUN' });
   assert.ok(!validateMatrix(noScope).some((p) => /measured scope/.test(p)));
+});
+
+test('vault proof rejects a missing database, a plaintext SQLite header and a legacy archive', (t) => {
+  const runtime = fs.mkdtempSync(path.join(os.tmpdir(), 'mp-vault-proof-'));
+  t.after(() => fs.rmSync(runtime, { recursive: true, force: true }));
+  const legacy = path.join(runtime, 'archive-v1');
+  const vault = path.join(runtime, 'encrypted-vault-v1');
+  fs.mkdirSync(vault);
+  assert.throws(() => verifyVaultFiles(runtime, legacy), { code: 'ENOENT' });
+  for (const name of ['archive-index.sqlite3', 'state.sqlite3', 'index.sqlite3']) {
+    fs.writeFileSync(path.join(vault, name), Buffer.alloc(16, 1));
+  }
+  assert.doesNotThrow(() => verifyVaultFiles(runtime, legacy));
+  fs.writeFileSync(path.join(vault, 'state.sqlite3'), Buffer.from('SQLite format 3\0'));
+  assert.throws(() => verifyVaultFiles(runtime, legacy), /plaintext SQLite header/);
+  fs.mkdirSync(legacy);
+  assert.throws(() => verifyVaultFiles(runtime, legacy), /a legacy archive appeared/);
 });
 
 test('recording proxy keeps only allowlisted headers and no query string', async () => {

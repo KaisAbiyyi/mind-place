@@ -1,11 +1,15 @@
 //! Trusted desktop owner controls; never exposed through MCP.
 use super::{begin_unlocked, finish_unlocked, legacy_archive, owner_vault, AppState};
 use mind_place_integration::{transport::LocalMcpServer, ClientAuthority};
-use mind_place_state::{ClientCapability, ClientRecord};
+use mind_place_security::{SecurityGate, UnlockLease};
+use mind_place_state::{ClientCapability, ClientRecord, StateError};
 use serde::Serialize;
+use std::time::{Duration, Instant};
 use tauri::State;
 
 const ENDPOINT: &str = "http://127.0.0.1:43731/mcp";
+const REVOCATION_OPEN_TIMEOUT: Duration = Duration::from_secs(3);
+const REVOCATION_OPEN_RETRY: Duration = Duration::from_millis(25);
 
 #[derive(Serialize)]
 pub struct McpStatus {
@@ -69,6 +73,53 @@ pub(super) async fn start_local_mcp(state: State<'_, AppState>) -> Result<McpSta
         endpoint: ENDPOINT,
     })
 }
+
+fn open_for_revocation<T>(
+    security: &SecurityGate,
+    lease: UnlockLease,
+    mut open: impl FnMut() -> mind_place_index::Result<T>,
+) -> Result<T, String> {
+    let deadline = Instant::now() + REVOCATION_OPEN_TIMEOUT;
+    loop {
+        security
+            .validate_lease(lease)
+            .map_err(super::security_error)?;
+        match open() {
+            Ok(authority) => return Ok(authority),
+            Err(mind_place_index::IndexError::State(StateError::Busy)) => {
+                // Reads take a short exclusive schema lock while opening state.
+                // Retry only this pre-mutation contention, with the original lease.
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    return Err("MP_MCP_AUTHORITY:Unavailable".into());
+                }
+                std::thread::sleep(remaining.min(REVOCATION_OPEN_RETRY));
+            }
+            Err(_) => return Err("MP_MCP_AUTHORITY:Unavailable".into()),
+        }
+    }
+}
+
+async fn revoke_with_owner_lease<T: Send + 'static>(
+    state: &AppState,
+    lease: UnlockLease,
+    revoke: impl FnOnce(ClientAuthority<'_>) -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    let security = state.security.clone();
+    let vault = owner_vault(state);
+    let path = state.state_path.clone();
+    let gate = state.document_authority_gate.clone();
+    let ready = state.authority_ready.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let authority =
+            open_for_revocation(&security, lease, || super::open_owner_state(&vault, &path))?;
+        super::with_document_authority(&gate, &ready, &security, lease, || {
+            revoke(ClientAuthority::new(&authority, &security))
+        })
+    })
+    .await
+    .map_err(|_| "MP_MCP_AUTHORITY:Unavailable".to_owned())?
+}
 #[tauri::command]
 pub(super) fn stop_local_mcp(state: State<'_, AppState>) -> Result<McpStatus, String> {
     let lease = begin_unlocked(&state)?;
@@ -118,7 +169,7 @@ pub(super) fn list_local_mcp_clients(
 }
 
 #[tauri::command]
-pub(super) fn revoke_local_mcp_client(
+pub(super) async fn revoke_local_mcp_client(
     state: State<'_, AppState>,
     client_id: String,
 ) -> Result<(), String> {
@@ -127,12 +178,12 @@ pub(super) fn revoke_local_mcp_client(
         super::hosted_tunnel::stop_and_revoke(&state)?;
         return finish_unlocked(&state, lease);
     }
-    let authority = super::open_owner_state(&owner_vault(&state), &state.state_path)
-        .map_err(|_| "MP_MCP_AUTHORITY:Unavailable".to_string())?;
-    ClientAuthority::new(&authority, &state.security)
-        .revoke(&client_id)
-        .map_err(|_| "MP_MCP_CLIENT:Cannot revoke client".to_string())?;
-    finish_unlocked(&state, lease)
+    revoke_with_owner_lease(&state, lease, move |authority| {
+        authority
+            .revoke(&client_id)
+            .map_err(|_| "MP_MCP_CLIENT:Cannot revoke client".to_owned())
+    })
+    .await
 }
 
 // MP-7MCP-02 / MP-ADR-006: owner-only read grants. A read credential discloses
@@ -157,34 +208,32 @@ pub(super) fn grant_local_mcp_client_sources(
 }
 
 #[tauri::command]
-pub(super) fn revoke_local_mcp_client_sources(
+pub(super) async fn revoke_local_mcp_client_sources(
     state: State<'_, AppState>,
     client_id: String,
     source_ids: Vec<String>,
 ) -> Result<usize, String> {
     let lease = begin_unlocked(&state)?;
-    let authority = super::open_owner_state(&owner_vault(&state), &state.state_path)
-        .map_err(|_| "MP_MCP_AUTHORITY:Unavailable".to_string())?;
-    let changed = ClientAuthority::new(&authority, &state.security)
-        .revoke_read_sources(&client_id, &source_ids)
-        .map_err(|_| "MP_MCP_GRANT:Cannot revoke read access".to_string())?;
-    finish_unlocked(&state, lease)?;
-    Ok(changed)
+    revoke_with_owner_lease(&state, lease, move |authority| {
+        authority
+            .revoke_read_sources(&client_id, &source_ids)
+            .map_err(|_| "MP_MCP_GRANT:Cannot revoke read access".to_owned())
+    })
+    .await
 }
 
 #[tauri::command]
-pub(super) fn revoke_all_local_mcp_client_sources(
+pub(super) async fn revoke_all_local_mcp_client_sources(
     state: State<'_, AppState>,
     client_id: String,
 ) -> Result<usize, String> {
     let lease = begin_unlocked(&state)?;
-    let authority = super::open_owner_state(&owner_vault(&state), &state.state_path)
-        .map_err(|_| "MP_MCP_AUTHORITY:Unavailable".to_string())?;
-    let changed = ClientAuthority::new(&authority, &state.security)
-        .revoke_all_read_sources(&client_id)
-        .map_err(|_| "MP_MCP_GRANT:Cannot revoke read access".to_string())?;
-    finish_unlocked(&state, lease)?;
-    Ok(changed)
+    revoke_with_owner_lease(&state, lease, move |authority| {
+        authority
+            .revoke_all_read_sources(&client_id)
+            .map_err(|_| "MP_MCP_GRANT:Cannot revoke read access".to_owned())
+    })
+    .await
 }
 
 /// Sorted canonical source ids this client may read (at most 10,000).
@@ -201,6 +250,55 @@ pub(super) fn list_local_mcp_client_sources(
         .map_err(|_| "MP_MCP_GRANT:Could not list read access".to_string())?;
     finish_unlocked(&state, lease)?;
     Ok(sources)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn revocation_retries_only_schema_contention() {
+        let temp = tempfile::tempdir().unwrap();
+        let security = SecurityGate::open(temp.path().join("security.json")).unwrap();
+        security.initialize(b"disposable revocation test").unwrap();
+        let lease = security.require_unlocked().unwrap();
+        let mut attempts = 0;
+        let opened = open_for_revocation(&security, lease, || {
+            attempts += 1;
+            match attempts {
+                1 => Err(StateError::Busy.into()),
+                _ => Ok(()),
+            }
+        });
+        assert_eq!(opened, Ok(()));
+        assert_eq!(attempts, 2);
+
+        let mut attempts = 0;
+        let error = open_for_revocation::<()>(&security, lease, || {
+            attempts += 1;
+            Err(StateError::UnsafePath.into())
+        });
+        assert_eq!(error.unwrap_err(), "MP_MCP_AUTHORITY:Unavailable");
+        assert_eq!(attempts, 1);
+    }
+
+    #[test]
+    fn revocation_wait_does_not_reopen_on_a_new_unlock_epoch() {
+        let temp = tempfile::tempdir().unwrap();
+        let security = SecurityGate::open(temp.path().join("security.json")).unwrap();
+        let secret = b"disposable revocation test";
+        security.initialize(secret).unwrap();
+        let lease = security.require_unlocked().unwrap();
+        let mut attempts = 0;
+        let error = open_for_revocation::<()>(&security, lease, || {
+            attempts += 1;
+            security.lock();
+            security.unlock(secret).unwrap();
+            Err(StateError::Busy.into())
+        });
+        assert!(error.is_err());
+        assert_eq!(attempts, 1);
+    }
 }
 
 /// One saved chat as the owner grant screen needs it. `source_id` is the

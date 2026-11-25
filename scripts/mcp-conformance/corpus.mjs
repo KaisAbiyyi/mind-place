@@ -2,12 +2,12 @@
  * Disposable synthetic corpus for MCP conformance. Conversations are produced by
  * the production extension DOM capture function and written through the real
  * native-messaging host, exactly like the existing native smoke fixture. The
- * ground truth for "exact content" is the raw immutable capture file on disk,
- * never the generator input.
+ * ground truth for "exact content" is the exact captured message text submitted
+ * to the host. The harness verifies it through the trusted owner read before
+ * comparing MCP results. The vault never needs a plaintext file on disk.
  *
  * No owner data, no private archive content: everything here is generated.
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
@@ -76,17 +76,16 @@ export function hostRoundtrip(host, archiveRoot, request) {
 }
 
 function saveRevision(host, archiveRoot, id, title, texts) {
-  const saved = hostRoundtrip(host, archiveRoot, { protocol: 1, operation: 'save', capture: captureOf(id, title, texts) });
+  const capture = captureOf(id, title, texts);
+  const saved = hostRoundtrip(host, archiveRoot, { protocol: 1, operation: 'save', capture });
   if (!saved.ok) throw new Error(`Save failed: ${JSON.stringify(saved).slice(0, 200)}`);
-  const file = path.join(archiveRoot, 'conversations', saved.id, 'captures', `${saved.snapshot_id}.jsonl`);
-  const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const messages = capture.messages.map((message) => message.text);
   return {
     archive_id: saved.id,
     snapshot_id: saved.snapshot_id,
-    message_count: raw.messages.length,
-    /** Ground truth: the exact text of every message as stored in the immutable raw capture. */
-    messages: raw.messages.map((m) => m.text),
-    raw_sha256: crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'),
+    message_count: messages.length,
+    messages,
+    expected_messages_sha256: crypto.createHash('sha256').update(JSON.stringify(messages)).digest('hex'),
   };
 }
 
@@ -98,7 +97,6 @@ function saveRevision(host, archiveRoot, id, title, texts) {
  *  other  - never granted to anyone (canary for default deny and isolation)
  */
 export function seedCorpus({ host, archiveRoot, longMessages = 240, longBytes = 2200, mediumMessages = 30, mediumBytes = 1400 }) {
-  fs.mkdirSync(archiveRoot, { recursive: true });
   const ids = {
     long: '1a2b3c4d-1111-4111-8111-aaaaaaaaaaa1',
     medium: '1a2b3c4d-2222-4222-8222-bbbbbbbbbbb2',
@@ -111,7 +109,8 @@ export function seedCorpus({ host, archiveRoot, longMessages = 240, longBytes = 
   const longTitle = 'Conformance long conversation';
   const long1 = gen('long', longMessages, longBytes);
   const long2 = [...long1, ...gen('long-added', 20, longBytes)];
-  const long3 = long2.map((t, i) => (i === 120 ? messageText('long-edited', 121, longBytes) : t));
+  const editedIndex = Math.min(120, long1.length - 1);
+  const long3 = long2.map((t, i) => (i === editedIndex ? messageText('long-edited', i + 1, longBytes) : t));
   out.long = { title: longTitle, revisions: [long1, long2, long3].map((texts) => saveRevision(host, archiveRoot, ids.long, longTitle, texts)) };
 
   const mediumTitle = 'Conformance medium conversation';
