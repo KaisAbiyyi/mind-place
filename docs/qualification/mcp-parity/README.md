@@ -54,3 +54,11 @@ node scripts/mcp-conformance/run.mjs matrix
 The runner launches the packaged app with a disposable data directory and profile, provisions and unlocks a vault, and seeds it through the packaged native capture host. It drives the same commands as Connections and discards the synthetic vault after the run. Run from a clean, committed tree. The matrix requires receipts from that source SHA and store mode.
 
 Framework tests (no app needed): `node --import tsx --test test/mcp-conformance-framework.test.mjs`.
+
+## Encrypted-vault run on `dadedd82528c`
+
+- The synthetic HTTP reference and Claude Code passed C1–C9. Codex passed C1–C9 on its second attempt after the first attempt duplicated a page and used a cursor that differed from the server response. The [first Codex receipt](receipts/attempt-1-codex.json) and the [passing retry](receipts/real-codex.json) record both outcomes.
+- Antigravity's full run began on CLI 1.5.15. It negotiated the protocol and listed tools. The proxy observed zero tool calls. A [single-search diagnostic](receipts/diagnostic-antigravity.json) on CLI 1.5.17 also observed zero tool calls and reported that the tool was unavailable. The matrix records the full run.
+- Gemini CLI 0.34.0 also negotiated the protocol and listed tools but exited before any tool call. Its [single-search diagnostic](receipts/diagnostic-gemini-cli.json) did not establish the cause. The account restriction described in `static-cells.json` was observed during an earlier legacy-store run.
+- The synthetic suite verified a normal burst of six parallel searches. During the whole-client revoke probe, all six overlapping reads from the surviving credential received temporary HTTP 503 responses with no content. The revoked credential's next request was denied and the surviving credential recovered.
+- Real-client reads of chats larger than 256 KB and the hosted app rows remain NOT_RUN. This run used a disposable corpus in a staged Windows package.

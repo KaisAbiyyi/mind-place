@@ -1,0 +1,61 @@
+{
+  "kind": "REAL_CLIENT single granted-search diagnostic",
+  "source": {
+    "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+    "dirty": false,
+    "trees": {
+      "crates": "0fde859bda4eeddb5d24f573af21c28947c4215e",
+      "src_tauri": "940d0636b0b4ba6fc441d4fdefc9d76911eaa53e",
+      "cargo_manifest": "23a6d201d730db71be1feaa7af8a38ae9131efa5",
+      "cargo_lock": "589caf765a4827bb5b3ee858db1f65c77f73423b",
+      "src": "6db2c73808c6a55647629ebdd2dc3022a4f8b6c6",
+      "extension": "ea84a4fbe020705d26adbe3589ca76989d9e13e7",
+      "frontend_lock": "06ada74991515cb18372fc8a2b736d4841ae630d"
+    },
+    "harness": {
+      "conformance": "d71a26d2a0dd4d536e2bcd16b95c588ff0de9407",
+      "lib": "6810a45c3b08a128f2083a5542ba43d5a7b49bc5",
+      "stdio_bridge": "1ee46c1637dc0729941055381b15e0d2acbe86c1"
+    }
+  },
+  "store_mode": "encrypted",
+  "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7",
+  "clientId": "gemini-cli",
+  "installed_version": "0.34.0",
+  "observed_client": {
+    "name": "gemini-cli-mcp-client",
+    "version": "0.34.0",
+    "protocolVersion": "2025-11-25",
+    "source": "initialize.clientInfo"
+  },
+  "exit": 1,
+  "exchanges": [
+    {
+      "rpc": "initialize",
+      "status": 200,
+      "tool": null
+    },
+    {
+      "rpc": "notifications/initialized",
+      "status": 202,
+      "tool": null
+    },
+    {
+      "rpc": null,
+      "status": 405,
+      "tool": null
+    },
+    {
+      "rpc": "tools/list",
+      "status": 200,
+      "tool": null
+    }
+  ],
+  "diagnostics": {
+    "ineligibleTierError": false,
+    "vendorEndOfSupport": false,
+    "rateLimit": false,
+    "authenticationFailure": false,
+    "toolUnavailable": false
+  }
+}

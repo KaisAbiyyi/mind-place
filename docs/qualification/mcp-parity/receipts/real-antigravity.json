@@ -1,21 +1,24 @@
 {
   "kind": "REAL_CLIENT run: the actual provider client behind a recording proxy against the packaged app (disposable synthetic corpus). Verdicts come from the wire log, not the model transcript.",
   "source": {
-    "sha": "985592b55fdbf7682719910c52e5a5d2b4fdfbf5",
+    "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
     "dirty": false,
     "trees": {
       "crates": "0fde859bda4eeddb5d24f573af21c28947c4215e",
-      "src_tauri": "43380c0c461fd1b07bfb6cab5bba010c3c35e73e",
-      "cargo_lock": "d205240176426ffeec45956f651c92729e5bf1f0",
-      "src": "3eb1dc4ac7bc1768ca24fcf52621f4315a631106"
+      "src_tauri": "940d0636b0b4ba6fc441d4fdefc9d76911eaa53e",
+      "cargo_manifest": "23a6d201d730db71be1feaa7af8a38ae9131efa5",
+      "cargo_lock": "589caf765a4827bb5b3ee858db1f65c77f73423b",
+      "src": "6db2c73808c6a55647629ebdd2dc3022a4f8b6c6",
+      "extension": "ea84a4fbe020705d26adbe3589ca76989d9e13e7",
+      "frontend_lock": "06ada74991515cb18372fc8a2b736d4841ae630d"
     },
     "harness": {
-      "conformance": "cecfc1661d6d799b450f5216186992218db55ddd",
+      "conformance": "d71a26d2a0dd4d536e2bcd16b95c588ff0de9407",
       "lib": "6810a45c3b08a128f2083a5542ba43d5a7b49bc5",
       "stdio_bridge": "1ee46c1637dc0729941055381b15e0d2acbe86c1"
     }
   },
-  "executable_sha256": "4795a8bed5184e713ed35c68823dd9d7dc12b1c9425f8e719a86fe4ff6527301",
+  "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7",
   "dirty_tree": false,
   "clientId": "antigravity",
   "label": "Antigravity",
@@ -29,56 +32,51 @@
     "protocolVersion": "2025-11-25",
     "source": "initialize.clientInfo"
   },
+  "store_mode": "encrypted",
+  "harness_failure": null,
   "permission_proof": {
     "canonical_full_digest": "c8339224e6fb",
     "identity_digest": "c8339224e6fb",
     "valid_granted_200": true,
-    "r0": {
-      "mode": "complete_args_equal",
-      "client_full_digest": "c8339224e6fb",
-      "replayed_while_granted_200": true
-    },
-    "r3": {
-      "mode": "complete_args_equal",
-      "client_full_digest": "c8339224e6fb"
-    }
+    "r0": null,
+    "r3": null
   },
-  "c4_scope": "Medium multi-byte two-revision chat: latest revision 20102 bytes read in 7 pages of at most 3000 bytes, earlier revision also read. The long chat over 256 KB was NOT read by this real client (NOT_RUN for real clients; covered by the synthetic reference only).",
+  "c4_scope": "Medium multi-byte two-revision chat: latest revision n/a bytes read in n/a pages of at most 3000 bytes, earlier revision also read. The long chat over 256 KB was NOT read by this real client (NOT_RUN for real clients; covered by the synthetic reference only).",
   "transcript": [
     {
       "label": "R0 default deny",
       "exit": 0,
       "serverStatus": null,
       "discoveredTools": null,
-      "exchanges": 6
+      "exchanges": 4
     },
     {
       "label": "R1 scoped search",
       "exit": 0,
       "serverStatus": null,
       "discoveredTools": null,
-      "exchanges": 7
+      "exchanges": 4
     },
     {
       "label": "R2 paged exact read",
       "exit": 0,
       "serverStatus": null,
       "discoveredTools": null,
-      "exchanges": 16
+      "exchanges": 4
     },
     {
       "label": "R3 after chat revoke",
-      "exit": 0,
+      "exit": 1,
       "serverStatus": null,
       "discoveredTools": null,
-      "exchanges": 6
+      "exchanges": 0
     },
     {
       "label": "R3b client works before revoke",
       "exit": 0,
       "serverStatus": null,
       "discoveredTools": null,
-      "exchanges": 5
+      "exchanges": 4
     },
     {
       "label": "R3b client after client revoke",
@@ -99,7 +97,7 @@
       "exit": 0,
       "serverStatus": null,
       "discoveredTools": null,
-      "exchanges": 6
+      "exchanges": 4
     }
   ],
   "claims": {
@@ -126,7 +124,7 @@
     },
     "C2": {
       "id": "C2",
-      "result": "PASS",
+      "result": "FAIL",
       "checks": [
         {
           "name": "the client requested tools/list and received the three read-only tools",
@@ -135,29 +133,29 @@
         },
         {
           "name": "the client went on to call a discovered tool (it accepted the tool schemas)",
-          "ok": true,
-          "detail": "3 search call(s)"
+          "ok": false,
+          "detail": "0 search call(s)"
         }
       ]
     },
     "C3": {
       "id": "C3",
-      "result": "PASS",
+      "result": "FAIL",
       "checks": [
         {
           "name": "the real client found its granted chat",
-          "ok": true,
-          "detail": "1 hits"
+          "ok": false,
+          "detail": "no search sent"
         },
         {
           "name": "the real client got nothing for the never-granted canary chat",
-          "ok": true,
-          "detail": "0 hits"
+          "ok": false,
+          "detail": "no search sent"
         },
         {
           "name": "the real client got nothing for the other collection",
-          "ok": true,
-          "detail": "0 hits"
+          "ok": false,
+          "detail": "no search sent"
         },
         {
           "name": "the real client never received an ungranted conversation id in any response",
@@ -168,12 +166,12 @@
     },
     "C4": {
       "id": "C4",
-      "result": "PASS",
+      "result": "FAIL",
       "checks": [
         {
-          "name": "the real client read the latest revision exactly (7 pages, 20102 bytes)",
-          "ok": true,
-          "detail": "7 pages"
+          "name": "the real client read the latest revision exactly (0 pages, 0 bytes)",
+          "ok": false,
+          "detail": "no pages"
         },
         {
           "name": "the client followed the server cursors and sent nothing else (no fabricated cursor)",
@@ -184,38 +182,38 @@
     },
     "C5": {
       "id": "C5",
-      "result": "PASS",
+      "result": "FAIL",
       "checks": [
         {
           "name": "the latest revision came back with stable identity and provenance",
-          "ok": true,
-          "detail": "{\"p\":\"chatgpt\",\"s\":true}"
+          "ok": false,
+          "detail": "{\"s\":false}"
         },
         {
-          "name": "the real client read the earlier revision exactly (5 pages, 14371 bytes)",
-          "ok": true,
-          "detail": "5 pages"
+          "name": "the real client read the earlier revision exactly (0 pages, 0 bytes)",
+          "ok": false,
+          "detail": "no pages"
         },
         {
           "name": "the earlier revision came back with stable identity and provenance",
-          "ok": true,
-          "detail": "{\"p\":\"chatgpt\",\"s\":true}"
+          "ok": false,
+          "detail": "{\"s\":false}"
         },
         {
           "name": "both revisions of the same chat were read through one source id",
-          "ok": true,
+          "ok": false,
           "detail": ""
         }
       ]
     },
     "C6": {
       "id": "C6",
-      "result": "PASS",
+      "result": "FAIL",
       "checks": [
         {
           "name": "the real client searched before any grant and got nothing",
-          "ok": true,
-          "detail": "200:0"
+          "ok": false,
+          "detail": "client sent no search"
         },
         {
           "name": "before any grant the harness, with the proven-valid canonical fetch arguments, is denied exactly like an unknown id",
@@ -224,29 +222,29 @@
         },
         {
           "name": "the real client fetched with valid arguments before any grant and was denied like an unknown id",
-          "ok": true,
-          "detail": "complete_args_equal (client_full c8339224e6fb vs canonical_full c8339224e6fb, identity c8339224e6fb): 400:{\"code\":-32602,\"message\":\"Invalid params\"}"
+          "ok": false,
+          "detail": "client sent no fetch matching canonical_full c8339224e6fb or identity c8339224e6fb"
         },
         {
           "name": "the same arguments are valid once granted: HTTP 200 with the revision content (so the denial was permission, not malformed input)",
           "ok": true,
-          "detail": "complete_args_equal (canonical_full c8339224e6fb, client_full c8339224e6fb): 200:null"
+          "detail": "canonical (canonical_full c8339224e6fb, client_full n/a): 200:null"
         },
         {
           "name": "after the grant the canary and second collections stay invisible to the real client",
-          "ok": true,
+          "ok": false,
           "detail": ""
         }
       ]
     },
     "C7": {
       "id": "C7",
-      "result": "PASS",
+      "result": "FAIL",
       "checks": [
         {
           "name": "the very next search by the real client returns nothing after the chat was revoked",
-          "ok": true,
-          "detail": "0"
+          "ok": false,
+          "detail": "no search"
         },
         {
           "name": "after the revoke the canonical arguments that were accepted (HTTP 200) while granted are denied exactly like an unknown id",
@@ -255,13 +253,13 @@
         },
         {
           "name": "the very next fetch by the real client, with valid arguments, is denied like an unknown id",
-          "ok": true,
-          "detail": "complete_args_equal (client_full c8339224e6fb vs canonical_full c8339224e6fb, identity c8339224e6fb): 400:{\"code\":-32602,\"message\":\"Invalid params\"}"
+          "ok": false,
+          "detail": "client sent no fetch matching canonical_full c8339224e6fb or identity c8339224e6fb"
         },
         {
           "name": "a second real-client credential worked before it was revoked",
-          "ok": true,
-          "detail": "1 hits"
+          "ok": false,
+          "detail": "no search"
         },
         {
           "name": "after the whole client was revoked the real client was refused and read nothing",
@@ -288,17 +286,17 @@
     },
     "C9": {
       "id": "C9",
-      "result": "PASS",
+      "result": "FAIL",
       "checks": [
         {
           "name": "with the same key and configuration the real client reconnected and reads its grant",
-          "ok": true,
-          "detail": "1 hits"
+          "ok": false,
+          "detail": "no search"
         },
         {
           "name": "after reconnecting it still cannot read the canary chat (no escalation)",
-          "ok": true,
-          "detail": "0"
+          "ok": false,
+          "detail": "no search"
         },
         {
           "name": "the grant set after reconnect is exactly the one before Lock",
@@ -315,7 +313,7 @@
   },
   "exchange_summary": [
     {
-      "at": "2026-11-24T05:18:05.814Z",
+      "at": "2026-11-25T15:11:21.465Z",
       "http": "POST",
       "rpc": "server/discover",
       "tool": null,
@@ -327,7 +325,7 @@
       "bytes": 75
     },
     {
-      "at": "2026-11-24T05:18:05.843Z",
+      "at": "2026-11-25T15:11:21.581Z",
       "http": "POST",
       "rpc": "initialize",
       "tool": null,
@@ -335,7 +333,7 @@
       "bytes": 166
     },
     {
-      "at": "2026-11-24T05:18:05.867Z",
+      "at": "2026-11-25T15:11:21.665Z",
       "http": "POST",
       "rpc": "notifications/initialized",
       "tool": null,
@@ -343,7 +341,7 @@
       "bytes": 0
     },
     {
-      "at": "2026-11-24T05:18:05.894Z",
+      "at": "2026-11-25T15:11:21.761Z",
       "http": "POST",
       "rpc": "tools/list",
       "tool": null,
@@ -351,30 +349,7 @@
       "bytes": 4724
     },
     {
-      "at": "2026-11-24T05:18:16.012Z",
-      "http": "POST",
-      "rpc": "tools/call",
-      "tool": "memory_search",
-      "status": 200,
-      "hits": 0,
-      "truncated": false,
-      "bytes": 198
-    },
-    {
-      "at": "2026-11-24T05:18:27.078Z",
-      "http": "POST",
-      "rpc": "tools/call",
-      "tool": "memory_fetch",
-      "status": 400,
-      "error": {
-        "code": -32602,
-        "message": "Invalid params"
-      },
-      "bytes": 75,
-      "snapshot": "4b23d9625423"
-    },
-    {
-      "at": "2026-11-24T05:18:42.606Z",
+      "at": "2026-11-25T15:11:56.498Z",
       "http": "POST",
       "rpc": "server/discover",
       "tool": null,
@@ -386,7 +361,7 @@
       "bytes": 75
     },
     {
-      "at": "2026-11-24T05:18:42.636Z",
+      "at": "2026-11-25T15:11:56.601Z",
       "http": "POST",
       "rpc": "initialize",
       "tool": null,
@@ -394,7 +369,7 @@
       "bytes": 166
     },
     {
-      "at": "2026-11-24T05:18:42.651Z",
+      "at": "2026-11-25T15:11:56.681Z",
       "http": "POST",
       "rpc": "notifications/initialized",
       "tool": null,
@@ -402,7 +377,7 @@
       "bytes": 0
     },
     {
-      "at": "2026-11-24T05:18:42.670Z",
+      "at": "2026-11-25T15:11:56.773Z",
       "http": "POST",
       "rpc": "tools/list",
       "tool": null,
@@ -410,37 +385,7 @@
       "bytes": 4724
     },
     {
-      "at": "2026-11-24T05:18:51.272Z",
-      "http": "POST",
-      "rpc": "tools/call",
-      "tool": "memory_search",
-      "status": 200,
-      "hits": 1,
-      "truncated": false,
-      "bytes": 2150
-    },
-    {
-      "at": "2026-11-24T05:18:52.414Z",
-      "http": "POST",
-      "rpc": "tools/call",
-      "tool": "memory_search",
-      "status": 200,
-      "hits": 0,
-      "truncated": false,
-      "bytes": 198
-    },
-    {
-      "at": "2026-11-24T05:18:54.050Z",
-      "http": "POST",
-      "rpc": "tools/call",
-      "tool": "memory_search",
-      "status": 200,
-      "hits": 0,
-      "truncated": false,
-      "bytes": 198
-    },
-    {
-      "at": "2026-11-24T05:19:07.350Z",
+      "at": "2026-11-25T15:12:21.215Z",
       "http": "POST",
       "rpc": "server/discover",
       "tool": null,
@@ -452,7 +397,7 @@
       "bytes": 75
     },
     {
-      "at": "2026-11-24T05:19:07.379Z",
+      "at": "2026-11-25T15:12:21.298Z",
       "http": "POST",
       "rpc": "initialize",
       "tool": null,
@@ -460,7 +405,7 @@
       "bytes": 166
     },
     {
-      "at": "2026-11-24T05:19:07.392Z",
+      "at": "2026-11-25T15:12:21.381Z",
       "http": "POST",
       "rpc": "notifications/initialized",
       "tool": null,
@@ -468,7 +413,7 @@
       "bytes": 0
     },
     {
-      "at": "2026-11-24T05:19:07.419Z",
+      "at": "2026-11-25T15:12:21.450Z",
       "http": "POST",
       "rpc": "tools/list",
       "tool": null,
@@ -476,139 +421,7 @@
       "bytes": 4724
     },
     {
-      "at": "2026-11-24T05:19:20.120Z",
-      "http": "POST",
-      "rpc": "tools/call",
-      "tool": "memory_fetch",
-      "status": 200,
-      "segments": 3,
-      "truncated": true,
-      "bytes": 8672,
-      "snapshot": "4b23d9625423"
-    },
-    {
-      "at": "2026-11-24T05:19:30.023Z",
-      "http": "POST",
-      "rpc": "tools/call",
-      "tool": "memory_fetch",
-      "status": 200,
-      "segments": 3,
-      "truncated": true,
-      "bytes": 8676,
-      "snapshot": "4b23d9625423"
-    },
-    {
-      "at": "2026-11-24T05:19:38.301Z",
-      "http": "POST",
-      "rpc": "tools/call",
-      "tool": "memory_fetch",
-      "status": 200,
-      "segments": 3,
-      "truncated": true,
-      "bytes": 8676,
-      "snapshot": "4b23d9625423"
-    },
-    {
-      "at": "2026-11-24T05:19:44.865Z",
-      "http": "POST",
-      "rpc": "tools/call",
-      "tool": "memory_fetch",
-      "status": 200,
-      "segments": 3,
-      "truncated": true,
-      "bytes": 8678,
-      "snapshot": "4b23d9625423"
-    },
-    {
-      "at": "2026-11-24T05:19:53.975Z",
-      "http": "POST",
-      "rpc": "tools/call",
-      "tool": "memory_fetch",
-      "status": 200,
-      "segments": 3,
-      "truncated": true,
-      "bytes": 8684,
-      "snapshot": "4b23d9625423"
-    },
-    {
-      "at": "2026-11-24T05:19:59.950Z",
-      "http": "POST",
-      "rpc": "tools/call",
-      "tool": "memory_fetch",
-      "status": 200,
-      "segments": 3,
-      "truncated": true,
-      "bytes": 8690,
-      "snapshot": "4b23d9625423"
-    },
-    {
-      "at": "2026-11-24T05:20:05.871Z",
-      "http": "POST",
-      "rpc": "tools/call",
-      "tool": "memory_fetch",
-      "status": 200,
-      "segments": 2,
-      "truncated": false,
-      "bytes": 6475,
-      "snapshot": "4b23d9625423"
-    },
-    {
-      "at": "2026-11-24T05:20:13.841Z",
-      "http": "POST",
-      "rpc": "tools/call",
-      "tool": "memory_fetch",
-      "status": 200,
-      "segments": 3,
-      "truncated": true,
-      "bytes": 8675,
-      "snapshot": "50a731683b07"
-    },
-    {
-      "at": "2026-11-24T05:20:27.598Z",
-      "http": "POST",
-      "rpc": "tools/call",
-      "tool": "memory_fetch",
-      "status": 200,
-      "segments": 3,
-      "truncated": true,
-      "bytes": 8679,
-      "snapshot": "50a731683b07"
-    },
-    {
-      "at": "2026-11-24T05:20:37.489Z",
-      "http": "POST",
-      "rpc": "tools/call",
-      "tool": "memory_fetch",
-      "status": 200,
-      "segments": 3,
-      "truncated": true,
-      "bytes": 8679,
-      "snapshot": "50a731683b07"
-    },
-    {
-      "at": "2026-11-24T05:20:45.079Z",
-      "http": "POST",
-      "rpc": "tools/call",
-      "tool": "memory_fetch",
-      "status": 200,
-      "segments": 3,
-      "truncated": true,
-      "bytes": 8681,
-      "snapshot": "50a731683b07"
-    },
-    {
-      "at": "2026-11-24T05:20:52.336Z",
-      "http": "POST",
-      "rpc": "tools/call",
-      "tool": "memory_fetch",
-      "status": 200,
-      "segments": 2,
-      "truncated": false,
-      "bytes": 7009,
-      "snapshot": "50a731683b07"
-    },
-    {
-      "at": "2026-11-24T05:21:15.109Z",
+      "at": "2026-11-25T15:13:02.210Z",
       "http": "POST",
       "rpc": "server/discover",
       "tool": null,
@@ -620,7 +433,7 @@
       "bytes": 75
     },
     {
-      "at": "2026-11-24T05:21:15.133Z",
+      "at": "2026-11-25T15:13:02.316Z",
       "http": "POST",
       "rpc": "initialize",
       "tool": null,
@@ -628,7 +441,7 @@
       "bytes": 166
     },
     {
-      "at": "2026-11-24T05:21:15.151Z",
+      "at": "2026-11-25T15:13:02.410Z",
       "http": "POST",
       "rpc": "notifications/initialized",
       "tool": null,
@@ -636,7 +449,7 @@
       "bytes": 0
     },
     {
-      "at": "2026-11-24T05:21:15.176Z",
+      "at": "2026-11-25T15:13:02.477Z",
       "http": "POST",
       "rpc": "tools/list",
       "tool": null,
@@ -644,30 +457,7 @@
       "bytes": 4724
     },
     {
-      "at": "2026-11-24T05:21:30.762Z",
-      "http": "POST",
-      "rpc": "tools/call",
-      "tool": "memory_search",
-      "status": 200,
-      "hits": 0,
-      "truncated": false,
-      "bytes": 198
-    },
-    {
-      "at": "2026-11-24T05:21:43.113Z",
-      "http": "POST",
-      "rpc": "tools/call",
-      "tool": "memory_fetch",
-      "status": 400,
-      "error": {
-        "code": -32602,
-        "message": "Invalid params"
-      },
-      "bytes": 75,
-      "snapshot": "4b23d9625423"
-    },
-    {
-      "at": "2026-11-24T05:21:58.272Z",
+      "at": "2026-11-25T15:13:24.845Z",
       "http": "POST",
       "rpc": "server/discover",
       "tool": null,
@@ -679,53 +469,7 @@
       "bytes": 75
     },
     {
-      "at": "2026-11-24T05:21:58.314Z",
-      "http": "POST",
-      "rpc": "initialize",
-      "tool": null,
-      "status": 200,
-      "bytes": 166
-    },
-    {
-      "at": "2026-11-24T05:21:58.340Z",
-      "http": "POST",
-      "rpc": "notifications/initialized",
-      "tool": null,
-      "status": 202,
-      "bytes": 0
-    },
-    {
-      "at": "2026-11-24T05:21:58.365Z",
-      "http": "POST",
-      "rpc": "tools/list",
-      "tool": null,
-      "status": 200,
-      "bytes": 4724
-    },
-    {
-      "at": "2026-11-24T05:22:08.039Z",
-      "http": "POST",
-      "rpc": "tools/call",
-      "tool": "memory_search",
-      "status": 200,
-      "hits": 1,
-      "truncated": false,
-      "bytes": 2150
-    },
-    {
-      "at": "2026-11-24T05:22:27.179Z",
-      "http": "POST",
-      "rpc": "server/discover",
-      "tool": null,
-      "status": 400,
-      "error": {
-        "code": -32602,
-        "message": "Invalid params"
-      },
-      "bytes": 75
-    },
-    {
-      "at": "2026-11-24T05:22:27.199Z",
+      "at": "2026-11-25T15:13:24.928Z",
       "http": "POST",
       "rpc": "initialize",
       "tool": null,
@@ -737,14 +481,14 @@
       "bytes": 73
     },
     {
-      "at": "2026-11-24T05:23:20.657Z",
+      "at": "2026-11-25T15:13:43.429Z",
       "http": "POST",
       "rpc": "server/discover",
       "status": 502,
       "upstreamError": true
     },
     {
-      "at": "2026-11-24T05:28:45.244Z",
+      "at": "2026-11-25T15:19:12.489Z",
       "http": "POST",
       "rpc": "server/discover",
       "tool": null,
@@ -756,7 +500,7 @@
       "bytes": 75
     },
     {
-      "at": "2026-11-24T05:28:45.287Z",
+      "at": "2026-11-25T15:19:12.544Z",
       "http": "POST",
       "rpc": "initialize",
       "tool": null,
@@ -764,7 +508,7 @@
       "bytes": 166
     },
     {
-      "at": "2026-11-24T05:28:45.303Z",
+      "at": "2026-11-25T15:19:12.593Z",
       "http": "POST",
       "rpc": "notifications/initialized",
       "tool": null,
@@ -772,33 +516,12 @@
       "bytes": 0
     },
     {
-      "at": "2026-11-24T05:28:45.328Z",
+      "at": "2026-11-25T15:19:12.672Z",
       "http": "POST",
       "rpc": "tools/list",
       "tool": null,
       "status": 200,
       "bytes": 4724
-    },
-    {
-      "at": "2026-11-24T05:28:55.540Z",
-      "http": "POST",
-      "rpc": "tools/call",
-      "tool": "memory_search",
-      "status": 200,
-      "hits": 1,
-      "truncated": false,
-      "bytes": 2150
-    },
-    {
-      "at": "2026-11-24T05:28:57.571Z",
-      "http": "POST",
-      "rpc": "tools/call",
-      "tool": "memory_search",
-      "status": 200,
-      "hits": 0,
-      "truncated": false,
-      "bytes": 198
     }
-  ],
-  "sourceKey": "C:\\Users\\kaisa\\.gemini\\antigravity\\worktrees\\mind-place\\mcp_release1_remediation\\release\\win32-x64\\mind-place.exe"
+  ]
 }

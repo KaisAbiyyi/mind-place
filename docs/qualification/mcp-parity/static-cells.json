@@ -3,8 +3,8 @@
     "_all": {
       "result": "PROVIDER_BLOCKED",
       "blocker": "Gemini CLI 0.34.0 refuses to run a session with the owner's stored Google login (IneligibleTierError in @google/gemini-cli-core/dist/src/code_assist/setup.js _doSetupUser: \"This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products\"). Observed 2026-11-24 at exact commit dd50987b82c4: the CLI connected for initialize + tools/list (2025-11-25) and exited 1 at setup before any LLM turn or tools/call.",
-      "fallback": "Antigravity CLI (separate row, PASS C1-C9 via scripts/mcp-stdio-bridge.mjs). Gemini CLI on an eligible (for example Workspace or paid) account is covered by owner card 'any local CLI that failed in the agent run'.",
-      "note": "Not a Mind Place defect: the vendor account tier blocked LLM execution."
+      "fallback": "See the independent Antigravity CLI row and the owner card for other local CLI runs.",
+      "note": "This is the vendor account outcome from the cited legacy-store run. Check the encrypted-vault matrix for current execution evidence."
     }
   },
   "claude-app": {
