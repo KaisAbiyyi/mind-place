@@ -17,7 +17,7 @@ export const CLAIMS = [
   { id: 'C3', title: 'Authenticated, scoped search', detail: 'memory_search returns hits from granted chats only' },
   { id: 'C4', title: 'Exact full-content fetch', detail: 'A conversation read byte-exact across cursor pages; no silent truncation. Measured scope differs by row: the synthetic reference reads a long (over 256 KB, multi-revision, multi-byte) chat; a real client reads the medium multi-byte two-revision chat in small pages (a long-chat result stream does not fit a CLI model\'s context). Real-client long-chat read is NOT_RUN and is stated in each cell\'s scope.' },
   { id: 'C5', title: 'Revisions, identity, provenance', detail: 'Historical revisions fetchable; stable source/snapshot ids, provider and timestamps preserved' },
-  { id: 'C6', title: 'Default deny and isolation', detail: 'Nothing readable before a grant; ungranted fetch looks like an unknown id; other clients cannot read this client\'s chats' },
+  { id: 'C6', title: 'Default deny and isolation', detail: 'Nothing is readable before a grant, and a denied fetch looks like an unknown ID. Real clients exercise their granted scope. The synthetic reference also checks two distinct credentials with disjoint grants.' },
   { id: 'C7', title: 'Immediate revocation', detail: 'Chat grant and whole-client revocation take effect on the next request' },
   { id: 'C8', title: 'Lock enforcement', detail: 'After Lock the listener refuses or closes; nothing is disclosed' },
   { id: 'C9', title: 'Reconnect without escalation', detail: 'After a dropped connection or restart the client regains only what it was granted' },

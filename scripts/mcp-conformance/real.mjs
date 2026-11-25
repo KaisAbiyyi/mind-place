@@ -100,8 +100,9 @@ export async function runRealClient(clientId, { startSession, log = () => {} }) 
   let harnessFailure = null;
   try {
     const K = await app.issueReader('Real client');
+    secrets.push(K.credential);
     const K2 = await app.issueReader('Real client (client-revoke test)');
-    secrets.push(K.credential, K2.credential);
+    secrets.push(K2.credential);
     const rows = await app.grantableChats(K.clientId);
     const sid = Object.fromEntries(rows.map((r) => [r.title, r.source_id]));
     const med = corpus.medium;
@@ -221,8 +222,10 @@ export async function runRealClient(clientId, { startSession, log = () => {} }) 
     }
     {
       const c = claims.C6;
-      const b = calls(r1.exs, 'memory_search').find((e) => JSON.stringify(e.params?.arguments?.queries ?? '').includes('sentinel-canary-2'));
-      c.check('after the grant the canary and second collections stay invisible to the real client', Boolean(b) && hitsOf(b).length === 0, '');
+      const searches = calls(r1.exs, 'memory_search');
+      const ungranted = ['sentinel-canary-2', 'sentinel-second-2'].map((word) =>
+        searches.find((e) => JSON.stringify(e.params?.arguments?.queries ?? '').includes(word)));
+      c.check('after the grant the canary and second collections stay invisible to the real client', ungranted.every((e) => e && ok(e) && hitsOf(e).length === 0), '');
     }
 
     // R2 exact full-content read, both revisions, small pages so the client really pages.
