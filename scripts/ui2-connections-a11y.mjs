@@ -198,16 +198,18 @@ try {
     await context.close();
   });
 
-  // K3c: without a clipboard the Copy control is disabled and says why (no false success).
+  // K3c: without a writer, the keyboard can select the key for native copy.
   await guarded("K3", async () => {
     const { context, page } = await openPage("?clipboard=none");
     await page.getByRole("button", { name: "Create access" }).focus();
     await page.keyboard.press("Enter");
     await page.waitForSelector(".ui2-tech-code");
-    const disabled = await page.getByRole("button", { name: "Copy" }).isDisabled();
-    const hint = await page.getByText(/copy it yourself/).count();
+    await page.getByRole("button", { name: "Select key" }).focus();
+    await page.keyboard.press("Enter");
+    const selected = await page.locator(".ui2-tech-code").evaluate((code) => window.getSelection()?.toString() === code.textContent);
+    const hint = await page.getByText(/press Ctrl\+C/).count();
     const copied = await page.getByRole("button", { name: "Copied" }).count();
-    record("K3c", "Without a clipboard, Copy is disabled, a hint explains manual copy, and nothing says Copied", disabled && hint === 1 && copied === 0, `disabled=${disabled} hint=${hint} copied=${copied}`);
+    record("K3c", "Without a writer, Enter selects the full key and nothing says Copied", selected && hint === 1 && copied === 0, `selected=${selected} hint=${hint} copied=${copied}`);
     await context.close();
   });
 
@@ -240,6 +242,13 @@ try {
     await page.keyboard.press("Enter");
     await page.getByText(/stops working right away/).filter({ visible: true }).waitFor();
     const afterOpen = await focusInfo(page);
+    const group = page.getByRole("group", { name: /Turn off Claude Code/ });
+    const described = await group.getByRole("button", { name: "Cancel" }).evaluate((button) =>
+      button.matches(":focus") && /stops working right away/.test(document.getElementById(button.getAttribute("aria-describedby"))?.textContent ?? ""));
+    await page.keyboard.press("Escape");
+    const returned = await trigger.evaluate((button) => button.matches(":focus"));
+    record("K5c", "The revoke question describes focused Cancel and Escape restores the opener", described && returned && await group.count() === 0, `described=${described} returned=${returned}`);
+    await page.keyboard.press("Enter");
     await page.keyboard.press("Tab");
     const next = await focusInfo(page);
     const cancel = page.locator(".ui2-inline-confirm-box").getByRole("button", { name: "Cancel" });
@@ -256,6 +265,20 @@ try {
     await page.getByText(/Revoked apps/).waitFor();
     const afterRevoke = await focusInfo(page);
     record("K5b", "Confirming revoke from the keyboard moves the app to Revoked apps and focus is not lost", !afterRevoke.lost, `focusAfter=${afterRevoke.label ?? "BODY"}`);
+    await context.close();
+  });
+
+  await guarded("H02", async () => {
+    const { context, page } = await openPage();
+    await page.emulateMedia({ forcedColors: "active", reducedMotion: "reduce" });
+    const sw = page.getByRole("switch", { name: "Share memory with AI apps" });
+    const off = await sw.screenshot({ animations: "disabled" });
+    await sw.focus();
+    await page.keyboard.press("Space");
+    await page.getByText("Sharing is on").first().waitFor();
+    await sw.blur();
+    const on = await sw.screenshot({ animations: "disabled" });
+    record("H02", "Off and On have distinct pixels in forced colors with focus outside the switch", !off.equals(on));
     await context.close();
   });
 

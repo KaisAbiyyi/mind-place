@@ -70,6 +70,7 @@ export function createCaptureSection(deps: CaptureDeps): ConnectionsSection {
     return createUi2ListCard(
       doc,
       BROWSERS.map((id) => {
+        const browserName = i18n.t(BROWSER_LABEL[id]);
         const isRegistered = registered?.has(id) === true;
         const trailing =
           setupState === "loading" || registered === null
@@ -78,13 +79,14 @@ export function createCaptureSection(deps: CaptureDeps): ConnectionsSection {
               ? undefined
               : createUi2Button(doc, {
                   label: i18n.t("conn.register"),
+                  ariaLabel: i18n.t("conn.registerBrowser", { browser: browserName }),
                   variant: "secondary",
                   size: "sm",
                   disabled: registering.has(id),
                   onClick: () => void register(id),
                 });
         return createUi2ListRow(doc, {
-          title: i18n.t(BROWSER_LABEL[id]),
+          title: browserName,
           ...(isRegistered ? { tag: { label: i18n.t("conn.registered"), tone: "ok" as const } } : {}),
           ...(trailing ? { trailing } : {}),
         });
