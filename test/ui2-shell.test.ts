@@ -279,12 +279,25 @@ test("MP-UI2-04: fresh install preserves classic first-run onboarding under v2 f
         legacy_available: false,
       } as T;
     }
+    if (command === "issue_local_mcp_reader") {
+      return { client_id: "fixture-client", credential: "fixture-access-key" } as T;
+    }
     if (command === "refresh_archive_index") return {} as T;
     return { running: false } as T;
   };
 
   try {
-    await mountApplication({ root, invoke, clipboard: { writeText: async () => {} } });
+    // Match the desktop entry point: it supplies invoke and the root, and
+    // clipboard writes must reach the platform API without dependency injection.
+    const copied: string[] = [];
+    const clipboard = {
+      async writeText(value: string) {
+        assert.equal(this, clipboard);
+        copied.push(value);
+      },
+    };
+    Object.defineProperty(dom.window.navigator, "clipboard", { value: clipboard });
+    await mountApplication({ root, invoke });
     assert.ok(root.querySelector("#security-secret-confirm"), "fresh install asks for secret confirmation");
     root.querySelector<HTMLInputElement>("#security-secret")!.value = "correct horse battery";
     root.querySelector<HTMLInputElement>("#security-secret-confirm")!.value = "correct horse battery";
@@ -313,6 +326,17 @@ test("MP-UI2-04: fresh install preserves classic first-run onboarding under v2 f
     await delay(50);
     assert.ok(root.querySelector(".ui2-shell"), "subsequent unlock enters flagged v2 shell");
     assert.equal(root.querySelector(".onboarding-workspace"), null);
+
+    root.querySelector<HTMLButtonElement>('[data-ui2-route="/connections"]')!.click();
+    const button = (label: string) =>
+      [...root.querySelectorAll<HTMLButtonElement>("button")].find((candidate) => candidate.textContent === label)!;
+    button("Create access").click();
+    await delay(20);
+    assert.equal(button("Copy").disabled, false);
+    button("Copy").click();
+    await delay(20);
+    assert.deepEqual(copied, ["fixture-access-key"]);
+    assert.ok(button("Copied"));
 
     root.querySelector<HTMLButtonElement>('[data-ui2-seg-value="id"]')!.click();
     assert.equal(dom.window.document.documentElement.lang, "id");

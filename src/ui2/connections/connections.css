@@ -1,0 +1,32 @@
+/* MP-UI2-09: layout only, tokens only. An AI app row carries a title, a status
+   tag and two actions, and its revoke question opens inline. The row wraps
+   instead of squeezing the title into one character per line. */
+.ui2-conn-app {
+  flex-wrap: wrap;
+  row-gap: var(--s2);
+}
+
+.ui2-conn-app .ui2-list-row-main {
+  flex: 1 1 40%;
+}
+
+.ui2-conn-app .ui2-list-row-end {
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.ui2-conn-app .ui2-row-flex {
+  flex-wrap: wrap;
+}
+
+@media (max-width: 780px) {
+  .ui2-conn-app .ui2-list-row-main {
+    flex: 1 1 100%;
+  }
+
+  .ui2-conn-app .ui2-list-row-end {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}

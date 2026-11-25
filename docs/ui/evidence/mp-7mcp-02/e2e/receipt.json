@@ -1,0 +1,77 @@
+{
+  "kind": "packaged app + real WebView2 UI2 Connections page + real local MCP listener + HTTP MCP client (disposable synthetic data)",
+  "executable_sha256": "3dc526f0795a474eab89066e3d72a7f38bda7accf50b4061a372973f317f7bb1",
+  "checks": [
+    {
+      "gate": "first-run-unlock",
+      "result": "PASS",
+      "detail": "Disposable profile unlocked"
+    },
+    {
+      "gate": "ui2-connections-opens",
+      "result": "PASS",
+      "detail": "Real WebView2 shows the Connections page"
+    },
+    {
+      "gate": "sharing-on",
+      "result": "PASS",
+      "detail": "Switch started the local MCP listener"
+    },
+    {
+      "gate": "create-access-shows-key-once",
+      "result": "PASS",
+      "detail": "Key displayed once in the UI (value not recorded)"
+    },
+    {
+      "gate": "mcp-tools-list-works",
+      "result": "PASS",
+      "detail": "Authenticated client lists the three read-only tools"
+    },
+    {
+      "gate": "default-deny-before-any-grant",
+      "result": "PASS",
+      "detail": "Both synthetic conversations are invisible until granted"
+    },
+    {
+      "gate": "grant-via-ui",
+      "result": "PASS",
+      "detail": "Choose, Review, Approve saved one grant"
+    },
+    {
+      "gate": "granted-chat-visible-only",
+      "result": "PASS",
+      "detail": "Only the granted conversation is returned; hit titles seen for the other conversation words: Rust archive decision"
+    },
+    {
+      "gate": "real-claude-client-reads-only-granted",
+      "result": "PASS",
+      "detail": "Claude Code 2.1.322 (Claude Code) (model alias haiku) connected over Streamable HTTP, discovered 3 mindplace tools, made 2 search calls; hit counts per result [0,2,0]; every hit belonged to the granted chat"
+    },
+    {
+      "gate": "ungranted-fetch-looks-unknown",
+      "result": "PASS",
+      "detail": "Ungranted fetch and unknown-id fetch both answer 400 with the same error; granted fetch answers 200"
+    },
+    {
+      "gate": "revoked-grant-takes-effect-immediately",
+      "result": "PASS",
+      "detail": "Next request after revoking the chat returns nothing"
+    },
+    {
+      "gate": "revoked-app-is-denied",
+      "result": "PASS",
+      "detail": "Revoked key answers 401"
+    },
+    {
+      "gate": "lock-closes-mcp",
+      "result": "PASS",
+      "detail": "After Lock the listener is closed"
+    },
+    {
+      "gate": "page-errors",
+      "result": "PASS",
+      "detail": "No uncaught page errors"
+    }
+  ],
+  "verdict": "PASS"
+}
