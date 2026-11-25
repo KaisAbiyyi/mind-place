@@ -10,7 +10,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { Claim, verifyRevision } from './suite.mjs';
 import { DRIVERS, makeWorkDir } from './clients.mjs';
-import { safePreview, sanitizeBlocked, scrubDiagnostic } from './hygiene.mjs';
+import { safePreview, sanitizeBlocked } from './hygiene.mjs';
 import { observedClientIdentity, startRecordingProxy } from './recording-proxy.mjs';
 import { createWire, MODERN } from './wire.mjs';
 
@@ -85,7 +85,10 @@ export async function runRealClient(clientId, { startSession, log = () => {} }) 
 
   const session = await startSession({ label: `real-${clientId}`, corpusOptions: { longMessages: 6, longBytes: 500, mediumMessages: 10, mediumBytes: 1400 }, log });
   const { app, corpus, secrets, unlockSecret } = session;
-  const proxy = await startRecordingProxy({ secrets });
+  const proxy = await startRecordingProxy({ secrets }).catch(async (error) => {
+    await session.close();
+    throw error;
+  });
   const wire = createWire();
   const claims = Object.fromEntries(['C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7', 'C8', 'C9'].map((id) => [id, new Claim(id)]));
   const transcript = [];
@@ -94,6 +97,7 @@ export async function runRealClient(clientId, { startSession, log = () => {} }) 
   let notConnected = null;
   let c4Verdict = null;
   let permissionProof = null;
+  let harnessFailure = null;
   try {
     const K = await app.issueReader('Real client');
     const K2 = await app.issueReader('Real client (client-revoke test)');
@@ -310,23 +314,26 @@ export async function runRealClient(clientId, { startSession, log = () => {} }) 
     }
     progress = 'done';
   } catch (error) {
-    if (notConnected) { /* reported below as blocked */ } else {
-    const reason = scrubDiagnostic(`harness stopped during ${progress}: ${String(error?.message ?? error)}`, secrets).split(/\r?\n/)[0];
-    for (const claim of Object.values(claims)) if (claim.checks.length === 0) claim.check('claim could not run', false, reason);
-    transcript.push({ label: 'harness', failure: reason });
+    if (!notConnected) {
+      harnessFailure = safePreview(`harness stopped during ${progress}: ${String(error?.message ?? error)}`, secrets, 300);
+      for (const claim of Object.values(claims)) claim.check('run did not complete', false, harnessFailure);
     }
   } finally {
-    await proxy.close();
-    await session.close();
+    try {
+      await proxy.close();
+    } finally {
+      await session.close();
+    }
   }
   identity = identity ?? observedClientIdentity(proxy.exchanges);
-  if (notConnected) return { clientId, label: driver.label, installed: found, blocked: sanitizeBlocked({ kind: 'CLIENT_COULD_NOT_USE_THE_SERVER', detail: 'The real client was run with a task that needs the MCP server but never completed a handshake. Nothing can be concluded about Mind Place from this run.', ...notConnected }, secrets), secrets };
+  if (notConnected) return { clientId, label: driver.label, installed: found, store_mode: session.storeMode, blocked: sanitizeBlocked({ kind: 'CLIENT_COULD_NOT_USE_THE_SERVER', detail: 'The requested real-client tool scenario did not start.', ...notConnected }, secrets), secrets };
   return {
     clientId,
     label: driver.label,
     installed: found,
     observed_client: identity,
     store_mode: session.storeMode,
+    harness_failure: harnessFailure,
     permission_proof: permissionProof,
     // What this real client actually read for C4. The long (over 256 KB) chat is verified by the synthetic row only.
     c4_scope: `Medium multi-byte two-revision chat: latest revision ${c4Verdict?.bytes ?? 'n/a'} bytes read in ${c4Verdict?.pages ?? 'n/a'} pages of at most 3000 bytes, earlier revision also read. The long chat over 256 KB was NOT read by this real client (NOT_RUN for real clients; covered by the synthetic reference only).`,
@@ -339,7 +346,6 @@ export async function runRealClient(clientId, { startSession, log = () => {} }) 
       error: e.error ? { code: e.error.code, message: safePreview(e.error.message, secrets, 160) } : undefined,
       truncated: e.result?.structuredContent?.truncated, bytes: e.responseBytes, snapshot: e.params?.arguments?.snapshot_id ? String(e.params.arguments.snapshot_id).slice(0, 12) : undefined,
     })),
-    sourceKey: session.exe,
     secrets,
   };
 }

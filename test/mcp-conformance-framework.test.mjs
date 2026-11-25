@@ -174,7 +174,7 @@ test('client identity falls back to modern _meta clientInfo, then the User-Agent
 import { antigravitySessionSettings, antigravityWorkspaceConfig, geminiProjectSettings } from '../scripts/mcp-conformance/clients.mjs';
 import { formatSafeJson, formatSafeLine, safePreview, safeUrlPath, sanitizeBlocked, scrubDiagnostic, writeDebugArtifact } from '../scripts/mcp-conformance/hygiene.mjs';
 import { argsDigest, classifyFetchArgsMatch, fullArgsDigest, identityArgs } from '../scripts/mcp-conformance/real.mjs';
-import { sourceIdentity, verifyVaultFiles } from '../scripts/mcp-conformance/run.mjs';
+import { sourceIdentity, validateReceiptRun, verifyVaultFiles } from '../scripts/mcp-conformance/run.mjs';
 import { isChatGptConversationUrl } from '../scripts/mcp-conformance/suite.mjs';
 import { createBridgeSession, parseBridgeArgs, validateLoopbackUrl } from '../scripts/mcp-stdio-bridge.mjs';
 
@@ -253,6 +253,14 @@ test('vault proof rejects a missing database, a plaintext SQLite header and a le
   assert.throws(() => verifyVaultFiles(runtime, legacy), /plaintext SQLite header/);
   fs.mkdirSync(legacy);
   assert.throws(() => verifyVaultFiles(runtime, legacy), /a legacy archive appeared/);
+});
+
+test('an interrupted run cannot publish passing checks gathered before the failure', () => {
+  const receipt = { store_mode: 'encrypted', claims: { C7: { result: 'PASS' } } };
+  assert.equal(validateReceiptRun(receipt), null);
+  assert.match(validateReceiptRun({ ...receipt, harness_failure: 'Interrupted during C7' }), /did not complete/);
+  assert.match(validateReceiptRun({ ...receipt, failure: 'App did not launch' }), /did not complete/);
+  assert.match(validateReceiptRun({ ...receipt, store_mode: 'legacy' }), /encrypted vault/);
 });
 
 test('recording proxy keeps only allowlisted headers and no query string', async () => {

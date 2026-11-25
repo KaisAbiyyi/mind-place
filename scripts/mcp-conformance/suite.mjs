@@ -6,6 +6,7 @@
  * reference those results are compared with.
  */
 import crypto from 'node:crypto';
+import { safePreview } from './hygiene.mjs';
 import { LEGACY_ERAS, MODERN } from './wire.mjs';
 
 const TOOLS = ['memory_search', 'memory_fetch', 'context_build'];
@@ -291,8 +292,12 @@ export async function runSyntheticSuite(ctx) {
     const deadSearch = await wire.search(B.credential, ['sentinel-second-2']);
     c.check('revoking a client denies its key on the next request', [401, 403].includes(dead.status), outcome(dead));
     c.check('a revoked client reads nothing', deadSearch.hits.length === 0 && deadSearch.status !== 200, `${deadSearch.status}`);
-    c.check('parallel reads from the surviving client completed during the revoke probe', (await siblingReads).every((read) =>
-      read.status === 'fulfilled' && [200, 401, 403].includes(read.value.status)), '');
+    const siblings = await siblingReads;
+    c.check('parallel reads completed with content or a bounded refusal during revocation', siblings.every((read) =>
+      read.status === 'fulfilled' && (read.value.status === 200
+        ? read.value.hits.length > 0
+        : [401, 403, 503].includes(read.value.status) && read.value.hits.length === 0)),
+    siblings.map((read) => read.status === 'fulfilled' ? read.value.status : 'closed').join(','));
     const aStill = await wire.search(A.credential, ['sentinel-long-5']);
     c.check("revoking B does not disturb A (no cross-client effect)", aStill.hits.length > 0, `${aStill.hits.length}`);
   }
@@ -349,10 +354,9 @@ export async function runSyntheticSuite(ctx) {
 
   progress = 'done';
   } catch (error) {
-    // Keep every claim result gathered so far; the failure is reported, not hidden.
-    const reason = `harness stopped during ${progress}: ${String(error?.message ?? error).split(/\r?\n/)[0]}`;
+    const reason = safePreview(`harness stopped during ${progress}: ${String(error?.message ?? error)}`, secrets, 300);
     for (const claim of Object.values(claims)) {
-      if (claim.checks.length === 0) claim.check('claim could not run', false, reason);
+      if (claim.checks.length === 0 || progress.startsWith(claim.id)) claim.check('claim did not complete', false, reason);
     }
     ctx.harnessFailure = reason;
   }

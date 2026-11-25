@@ -108,17 +108,21 @@ async fn revoke_with_owner_lease<T: Send + 'static>(
     let security = state.security.clone();
     let vault = owner_vault(state);
     let path = state.state_path.clone();
-    let gate = state.document_authority_gate.clone();
-    let ready = state.authority_ready.clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    let changed = tauri::async_runtime::spawn_blocking(move || {
         let authority =
             open_for_revocation(&security, lease, || super::open_owner_state(&vault, &path))?;
-        super::with_document_authority(&gate, &ready, &security, lease, || {
-            revoke(ClientAuthority::new(&authority, &security))
-        })
+        // Do not hold the Lock gate across SQLite or the vault writer fence.
+        // A revocation already in flight only removes access, and the command
+        // still refuses to acknowledge it if the original epoch has ended.
+        security
+            .validate_lease(lease)
+            .map_err(super::security_error)?;
+        revoke(ClientAuthority::new(&authority, &security))
     })
     .await
-    .map_err(|_| "MP_MCP_AUTHORITY:Unavailable".to_owned())?
+    .map_err(|_| "MP_MCP_AUTHORITY:Unavailable".to_owned())??;
+    finish_unlocked(state, lease)?;
+    Ok(changed)
 }
 #[tauri::command]
 pub(super) fn stop_local_mcp(state: State<'_, AppState>) -> Result<McpStatus, String> {
