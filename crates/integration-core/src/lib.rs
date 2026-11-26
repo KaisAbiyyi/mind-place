@@ -15,6 +15,7 @@ use thiserror::Error;
 
 pub mod clients;
 pub mod mcp;
+pub mod output_boundary;
 pub mod transport;
 pub use clients::{ClientAuthority, IssuedClient, CREDENTIAL_PREFIX};
 

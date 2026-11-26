@@ -8,6 +8,7 @@
 import crypto from 'node:crypto';
 import { safePreview } from './hygiene.mjs';
 import { LEGACY_ERAS, MODERN } from './wire.mjs';
+import { verifyBoundaryEnvelope, verifyBoundaryText } from './boundary.mjs';
 
 const TOOLS = ['memory_search', 'memory_fetch', 'context_build'];
 const ZERO_SOURCE = `src:v1:${'0'.repeat(64)}`;
@@ -245,6 +246,13 @@ export async function runSyntheticSuite(ctx) {
       const first = pages[0]?.json?.result?.structuredContent;
       sources.add(first?.source_id);
       c.check(`revision ${i + 1} carries stable identity and provenance`, first?.snapshot_id === rev.snapshot_id && first?.provider === 'chatgpt' && /^\d{4}-\d\d-\d\dT/.test(first?.captured_at ?? '') && first?.title === corpus.long.title && isChatGptConversationUrl(first?.source_url), JSON.stringify({ s: first?.snapshot_id === rev.snapshot_id, p: first?.provider, t: first?.captured_at }));
+      // MP-SEC-11: retrieved content is labelled untrusted data with provenance (structured and text channels).
+      const fetchEnvelope = verifyBoundaryEnvelope(first, 'memory_fetch');
+      c.check(`revision ${i + 1} fetch result is wrapped in the untrusted-data envelope`, fetchEnvelope.ok, fetchEnvelope.reason ?? '');
+      const fetchProvenance = first?._mp_boundary?.provenance?.[0];
+      c.check(`revision ${i + 1} envelope provenance names the source, archive, snapshot and provider`, fetchProvenance?.source_id === first?.source_id && fetchProvenance?.snapshot_id === rev.snapshot_id && fetchProvenance?.provider === 'chatgpt', JSON.stringify(fetchProvenance ?? null).slice(0, 120));
+      const fetchText = verifyBoundaryText(pages[0]?.json?.result?.content?.[0]?.text, first);
+      c.check(`revision ${i + 1} text block carries the same envelope first`, fetchText.ok, fetchText.reason ?? '');
       const seg = first?.segments?.[0];
       c.check(`revision ${i + 1} segments carry message id, index, role and byte range`, Boolean(seg?.message_id) && Number.isInteger(seg?.message_index) && Boolean(seg?.role) && Number.isInteger(seg?.byte_end), JSON.stringify(seg ? { id: seg.message_id, i: seg.message_index, r: seg.role } : null));
     }
@@ -253,6 +261,12 @@ export async function runSyntheticSuite(ctx) {
     const hist = await wire.search(A.credential, ['sentinel-long-3'], { filters: { include_history: true }, limit: 100 });
     const snaps = new Set(hist.hits.map((h) => h.snapshot_id));
     c.check('search with history sees more than one revision of the same chat', snaps.size > 1, `${snaps.size} snapshot(s)`);
+    const searchStructured = hist.json?.result?.structuredContent;
+    const searchEnvelope = verifyBoundaryEnvelope(searchStructured, 'memory_search');
+    c.check('a search result is wrapped in the untrusted-data envelope', searchEnvelope.ok, searchEnvelope.reason ?? '');
+    const searchText = verifyBoundaryText(hist.json?.result?.content?.[0]?.text, searchStructured);
+    c.check('the search text block carries the same envelope first', searchText.ok, searchText.reason ?? '');
+    c.check('search envelope provenance covers every revision returned', (searchStructured?._mp_boundary?.provenance ?? []).length >= snaps.size && [...snaps].every((s) => searchStructured?._mp_boundary?.provenance?.some((p) => p.snapshot_id === s)), `${snaps.size} snapshot(s)`);
     for (const hit of hist.hits.slice(0, 3)) c.check('a search hit carries source, archive, snapshot and message ids, provider and timestamp', Boolean(hit.source_id && hit.archive_id && hit.snapshot_id && hit.message_id && hit.provider && hit.captured_at), '');
   }
 

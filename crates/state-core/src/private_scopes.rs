@@ -29,7 +29,7 @@ fn scope_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<PrivateScope> {
 
 /// Recheck the precise unrevoked admin credential inside the same transaction
 /// that creates/reads scope metadata. Never authorize from a client-supplied ID.
-fn require_owner_admin(db: &rusqlite::Connection, hash: &str) -> Result<()> {
+pub(crate) fn require_owner_admin(db: &rusqlite::Connection, hash: &str) -> Result<()> {
     if !valid_hash(hash) {
         return Err(StateError::InvalidValue);
     }

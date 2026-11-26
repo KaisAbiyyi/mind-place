@@ -1,6 +1,6 @@
 //! MCP 2026-07-28 stateless and 2025-11-25 handshake-era wire projection.
 //! Only Phase 3B's credential-authorized read dispatcher may serve evidence.
-use crate::{tool_catalog, IntegrationCore, ToolBatch, ToolCall, ToolName};
+use crate::{output_boundary, tool_catalog, IntegrationCore, ToolBatch, ToolCall, ToolName};
 use mind_place_state::{ClientCapability, StateStore};
 use serde_json::{json, Value};
 
@@ -223,9 +223,15 @@ pub fn dispatch(
                 }
                 Err(_) => return McpReply::error(500, id, -32603, "Internal error"),
             };
-            let content = &response.results[0].result;
-            let text = match serde_json::to_string(content) {
-                Ok(s) => s,
+            // MP-SEC-11: the only place tool content leaves the server. Both the
+            // text block and structuredContent carry the untrusted-data
+            // envelope; a result that cannot be wrapped is never disclosed.
+            let (content, text) = match output_boundary::wrap_untrusted(
+                name(tool),
+                output_boundary::ORIGIN_ARCHIVED_CAPTURE,
+                &response.results[0].result,
+            ) {
+                Ok(wrapped) => wrapped,
                 Err(_) => return McpReply::error(500, id, -32603, "Internal error"),
             };
             if modern {

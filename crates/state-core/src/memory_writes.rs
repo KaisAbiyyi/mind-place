@@ -4,6 +4,7 @@
 //! supply a SHA-256 derived from a verified bearer in the unlocked security path.
 use crate::{
     memory::{add_evidence, events, next_claim_clock, validate_claim},
+    model_writes::{enforce_model_write, CredentialTier},
     valid_id, valid_text, ClaimEvidence, ClientCapability, MemoryClaim, Result, StateError,
     StateStore,
 };
@@ -136,11 +137,28 @@ impl StateStore {
     /// One SQLite IMMEDIATE transaction covers authentication, idempotency,
     /// state, evidence, tombstone and receipt. Revocation cannot race after
     /// authentication but before the commit. Never accept an untrusted client_id.
+    ///
+    /// MP-SEC-11: this is the OWNER/trusted path. It accepts a caller-built
+    /// claim (any `asserted_by`, status `active`), so it must never be reachable
+    /// from an MCP handler. Model-client credentials use
+    /// `StateStore::apply_model_memory_write`, which forces `asserted_by=model`,
+    /// `status=uncertain` and tier-confined scope. A source-scan test keeps
+    /// `integration-core` from calling this function.
     pub fn apply_memory_write(
         &self,
         token_sha256: &str,
         request_key: &str,
         operation: &MemoryWrite<'_>,
+    ) -> Result<MemoryWriteReceipt> {
+        self.apply_memory_write_inner(token_sha256, request_key, operation, None)
+    }
+
+    pub(crate) fn apply_memory_write_inner(
+        &self,
+        token_sha256: &str,
+        request_key: &str,
+        operation: &MemoryWrite<'_>,
+        model_tier: Option<CredentialTier>,
     ) -> Result<MemoryWriteReceipt> {
         if !valid_hash(token_sha256)
             || !(16..=128).contains(&request_key.len())
@@ -185,16 +203,24 @@ impl StateStore {
         // scope. A scoped create/supersession requires both Write and Admin
         // on the SAME verified credential, rechecked under this transaction.
         // Scope labels alone must never act as model-client permissions.
-        let scoped_write = matches!(
-            operation,
-            MemoryWrite::Create {
-                scope_id: Some(_),
-                ..
-            } | MemoryWrite::Supersede {
-                scope_id: Some(_),
-                ..
-            }
-        );
+        // MP-SEC-11: a model-tier write is validated against the authenticated
+        // client id inside this same transaction, before anything is written for
+        // it. Its own quarantine scope is owner-provisioned, so the Write+Admin
+        // rule below applies only to the owner path.
+        if let Some(tier) = model_tier {
+            enforce_model_write(&tx, &client_id, tier, operation)?;
+        }
+        let scoped_write = model_tier.is_none()
+            && matches!(
+                operation,
+                MemoryWrite::Create {
+                    scope_id: Some(_),
+                    ..
+                } | MemoryWrite::Supersede {
+                    scope_id: Some(_),
+                    ..
+                }
+            );
         if scoped_write {
             let admin: bool = tx.query_row(
                 "SELECT EXISTS(
