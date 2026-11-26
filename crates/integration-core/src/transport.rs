@@ -308,6 +308,10 @@ struct ServerContext {
     security: SecurityGate,
     active: Arc<AtomicBool>,
     dispatch_slots: Arc<Semaphore>,
+    /// One request touches the encrypted stores at a time. Opening them takes a short exclusive schema lock
+    /// that fails fast with `Busy`; without this queue, parallel tool calls from one client (normal for
+    /// real clients) raced and all but one received HTTP 503.
+    serial: Arc<tokio::sync::Mutex<()>>,
 }
 
 async fn handle(
@@ -418,6 +422,17 @@ async fn handle_bounded(request: Request<Incoming>, ctx: ServerContext) -> WireR
             )
         }
     };
+    dispatch_parsed_request(ctx, authorization, parsed, version, method, name).await
+}
+
+async fn dispatch_parsed_request(
+    ctx: ServerContext,
+    authorization: Zeroizing<String>,
+    parsed: serde_json::Value,
+    version: String,
+    method: Option<String>,
+    name: Option<String>,
+) -> WireResponse {
     // Pin the original unlock epoch for the entire HTTP exchange. Merely
     // checking 'unlocked' at the end could accept a lock-then-unlock race.
     let lease = match ctx.security.require_unlocked() {
@@ -427,6 +442,9 @@ async fn handle_bounded(request: Request<Incoming>, ctx: ServerContext) -> WireR
     if !ctx.active.load(Ordering::Acquire) {
         return error(503);
     }
+    // Wait for our turn (bounded by the request deadline). The guard is moved into the blocking worker so a
+    // disconnect cannot release the turn while the store connections are still open.
+    let serial_turn = ctx.serial.clone().lock_owned().await;
     // Unlike a per-connection limit, this permit is owned by the blocking
     // worker. Disconnects and Tokio deadlines cannot release it prematurely.
     let dispatch_permit = match acquire_dispatch_permit(&ctx.dispatch_slots) {
@@ -438,8 +456,12 @@ async fn handle_bounded(request: Request<Incoming>, ctx: ServerContext) -> WireR
     let active_for_task = active.clone();
     let task = tokio::task::spawn_blocking(move || {
         let _dispatch_permit = dispatch_permit;
+        let _serial_turn = serial_turn;
         if !active_for_task.load(Ordering::Acquire) {
             return error(503);
+        }
+        if ctx.security.validate_lease(lease).is_err() {
+            return error(403);
         }
         let reply: McpReply = match &ctx.source {
             ServerSource::Legacy {
@@ -569,6 +591,7 @@ impl LocalMcpServer {
             security,
             active: active.clone(),
             dispatch_slots: Arc::new(Semaphore::new(MAX_DISPATCH_TASKS)),
+            serial: Arc::new(tokio::sync::Mutex::new(())),
         };
         let keep_active = active.clone();
         let stop = shutdown.clone();
@@ -810,5 +833,336 @@ mod tests {
             .await
             .expect("permit returns only after the worker exits");
         drop(recovered);
+    }
+
+    struct ConcurrencyFixture {
+        _temp: tempfile::TempDir,
+        ctx: ServerContext,
+        state_path: PathBuf,
+        security: SecurityGate,
+        client_a_id: String,
+        token_a: String,
+        source_a: String,
+        client_b_id: String,
+        token_b: String,
+        source_b: String,
+    }
+
+    fn setup_concurrency_fixture() -> ConcurrencyFixture {
+        use mind_place_archive::{Capture, Message};
+        use mind_place_state::ClientCapability;
+        let temp = tempfile::tempdir().unwrap();
+        let archive = ArchiveStore::open(temp.path().join("archive-v1")).unwrap();
+        let state_path = temp.path().join("state.sqlite3");
+        let index_path = temp.path().join("index.sqlite3");
+        let state = StateStore::open(&state_path).unwrap();
+        let index = IndexStore::open(&index_path).unwrap();
+        for (cid, title, text) in [
+            (
+                "11111111-1111-4111-8111-111111111111",
+                "Alpha chat",
+                "alpha-secret-phrase",
+            ),
+            (
+                "22222222-2222-4222-8222-222222222222",
+                "Beta chat",
+                "beta-secret-phrase",
+            ),
+        ] {
+            archive
+                .save(Capture {
+                    schema_version: 1,
+                    provider: "chatgpt".into(),
+                    conversation_id: cid.into(),
+                    source_url: format!("https://chatgpt.com/c/{cid}"),
+                    title: title.into(),
+                    conversation_created_at: None,
+                    conversation_updated_at: None,
+                    captured_at: "2026-11-24T00:00:00Z".into(),
+                    capture_method: "manual-dom".into(),
+                    completeness: "partial".into(),
+                    warnings: vec![],
+                    messages: vec![Message {
+                        id: format!("m-{cid}"),
+                        role: "user".into(),
+                        text: text.into(),
+                        format: "plain".into(),
+                        authored_at: None,
+                        model: None,
+                        attachments: vec![],
+                    }],
+                })
+                .unwrap();
+        }
+        index.sync(&archive, &state).unwrap();
+        let security = SecurityGate::open(temp.path().join("security.json")).unwrap();
+        security.initialize(b"concurrency-test-secret-789").unwrap();
+        let core = crate::IntegrationCore::new(&archive, &index, &security);
+        let find_source = |q: &str| {
+            let batch = core
+                .execute_batch(
+                    &crate::ToolBatch {
+                        calls: vec![crate::ToolCall {
+                            name: crate::ToolName::MemorySearch,
+                            arguments: serde_json::json!({"queries": [q]}),
+                        }],
+                    },
+                    || Ok(()),
+                )
+                .unwrap();
+            batch.results[0].result["hits"][0]["source_id"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        };
+        let source_a = find_source("alpha-secret-phrase");
+        let source_b = find_source("beta-secret-phrase");
+        let auth = crate::ClientAuthority::new(&state, &security);
+        let a = auth.issue("Client A", &[ClientCapability::Read]).unwrap();
+        let b = auth.issue("Client B", &[ClientCapability::Read]).unwrap();
+        auth.grant_read_sources(&a.client.id, std::slice::from_ref(&source_a))
+            .unwrap();
+        auth.grant_read_sources(&b.client.id, std::slice::from_ref(&source_b))
+            .unwrap();
+        let ctx = ServerContext {
+            source: ServerSource::Legacy {
+                archive,
+                state_path: state_path.clone(),
+                index_path,
+            },
+            security: security.clone(),
+            active: Arc::new(AtomicBool::new(true)),
+            dispatch_slots: Arc::new(Semaphore::new(MAX_DISPATCH_TASKS)),
+            serial: Arc::new(tokio::sync::Mutex::new(())),
+        };
+        let token_a = a.credential().to_string();
+        let token_b = b.credential().to_string();
+        ConcurrencyFixture {
+            _temp: temp,
+            ctx,
+            state_path,
+            security,
+            client_a_id: a.client.id,
+            token_a,
+            source_a,
+            client_b_id: b.client.id,
+            token_b,
+            source_b,
+        }
+    }
+
+    async fn read_wire_body(response: WireResponse) -> (StatusCode, String) {
+        let status = response.status();
+        let collected = response.into_body().collect().await.unwrap().to_bytes();
+        (status, String::from_utf8_lossy(&collected).into_owned())
+    }
+
+    fn search_rpc(query: &str) -> serde_json::Value {
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "memory_search",
+                "arguments": { "queries": [query] }
+            }
+        })
+    }
+
+    #[tokio::test]
+    async fn queued_requests_fail_closed_when_locked_before_turn() {
+        let f = setup_concurrency_fixture();
+        let guard = f.ctx.serial.clone().lock_owned().await;
+        let tasks: Vec<_> = (0..4)
+            .map(|_| {
+                tokio::spawn(dispatch_parsed_request(
+                    f.ctx.clone(),
+                    Zeroizing::new(f.token_a.clone()),
+                    search_rpc("alpha-secret-phrase"),
+                    mcp::CLAUDE_LEGACY.to_string(),
+                    None,
+                    None,
+                ))
+            })
+            .collect();
+        tokio::task::yield_now().await;
+        f.security.lock();
+        drop(guard);
+        for task in tasks {
+            let (status, body) = read_wire_body(task.await.unwrap()).await;
+            assert!(
+                status == StatusCode::FORBIDDEN || status == StatusCode::SERVICE_UNAVAILABLE,
+                "locked queued request returned {status}"
+            );
+            assert!(!body.contains("alpha-secret-phrase"));
+            assert!(!body.contains(&f.source_a));
+        }
+        assert_eq!(f.ctx.dispatch_slots.available_permits(), MAX_DISPATCH_TASKS);
+    }
+
+    #[tokio::test]
+    async fn queued_requests_fail_closed_across_lock_and_unlock_epoch_change() {
+        let f = setup_concurrency_fixture();
+        let guard = f.ctx.serial.clone().lock_owned().await;
+        let stale_tasks: Vec<_> = (0..3)
+            .map(|_| {
+                tokio::spawn(dispatch_parsed_request(
+                    f.ctx.clone(),
+                    Zeroizing::new(f.token_a.clone()),
+                    search_rpc("alpha-secret-phrase"),
+                    mcp::CLAUDE_LEGACY.to_string(),
+                    None,
+                    None,
+                ))
+            })
+            .collect();
+        tokio::task::yield_now().await;
+        f.security.lock();
+        f.security.unlock(b"concurrency-test-secret-789").unwrap();
+        drop(guard);
+        for task in stale_tasks {
+            let (status, body) = read_wire_body(task.await.unwrap()).await;
+            assert!(
+                status == StatusCode::FORBIDDEN || status == StatusCode::SERVICE_UNAVAILABLE,
+                "stale-epoch queued request returned {status}"
+            );
+            assert!(!body.contains("alpha-secret-phrase"));
+        }
+        let fresh = dispatch_parsed_request(
+            f.ctx.clone(),
+            Zeroizing::new(f.token_a.clone()),
+            search_rpc("alpha-secret-phrase"),
+            mcp::CLAUDE_LEGACY.to_string(),
+            None,
+            None,
+        )
+        .await;
+        let (status, body) = read_wire_body(fresh).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.contains("alpha-secret-phrase"));
+        assert_eq!(f.ctx.dispatch_slots.available_permits(), MAX_DISPATCH_TASKS);
+    }
+
+    #[tokio::test]
+    async fn grant_revocation_during_queueing_denies_revoked_grant_without_affecting_disjoint_client(
+    ) {
+        let f = setup_concurrency_fixture();
+        let guard = f.ctx.serial.clone().lock_owned().await;
+        let task_a = tokio::spawn(dispatch_parsed_request(
+            f.ctx.clone(),
+            Zeroizing::new(f.token_a.clone()),
+            search_rpc("alpha-secret-phrase"),
+            mcp::CLAUDE_LEGACY.to_string(),
+            None,
+            None,
+        ));
+        let task_b = tokio::spawn(dispatch_parsed_request(
+            f.ctx.clone(),
+            Zeroizing::new(f.token_b.clone()),
+            search_rpc("beta-secret-phrase"),
+            mcp::CLAUDE_LEGACY.to_string(),
+            None,
+            None,
+        ));
+        tokio::task::yield_now().await;
+        {
+            let state = StateStore::open(&f.state_path).unwrap();
+            crate::ClientAuthority::new(&state, &f.security)
+                .revoke_read_sources(&f.client_a_id, std::slice::from_ref(&f.source_a))
+                .unwrap();
+        }
+        drop(guard);
+        let (status_a, body_a) = read_wire_body(task_a.await.unwrap()).await;
+        assert_eq!(status_a, StatusCode::OK);
+        assert!(!body_a.contains("alpha-secret-phrase"));
+        assert!(!body_a.contains(&f.source_a));
+        let (status_b, body_b) = read_wire_body(task_b.await.unwrap()).await;
+        assert_eq!(status_b, StatusCode::OK);
+        assert!(body_b.contains("beta-secret-phrase"));
+        assert!(!body_b.contains("alpha-secret-phrase"));
+    }
+
+    #[tokio::test]
+    async fn whole_client_revocation_during_queueing_refuses_revoked_client() {
+        let f = setup_concurrency_fixture();
+        let guard = f.ctx.serial.clone().lock_owned().await;
+        let task_b = tokio::spawn(dispatch_parsed_request(
+            f.ctx.clone(),
+            Zeroizing::new(f.token_b.clone()),
+            search_rpc("beta-secret-phrase"),
+            mcp::CLAUDE_LEGACY.to_string(),
+            None,
+            None,
+        ));
+        let task_a = tokio::spawn(dispatch_parsed_request(
+            f.ctx.clone(),
+            Zeroizing::new(f.token_a.clone()),
+            search_rpc("alpha-secret-phrase"),
+            mcp::CLAUDE_LEGACY.to_string(),
+            None,
+            None,
+        ));
+        tokio::task::yield_now().await;
+        {
+            let state = StateStore::open(&f.state_path).unwrap();
+            crate::ClientAuthority::new(&state, &f.security)
+                .revoke(&f.client_b_id)
+                .unwrap();
+        }
+        drop(guard);
+        let (status_b, body_b) = read_wire_body(task_b.await.unwrap()).await;
+        assert!(
+            status_b == StatusCode::UNAUTHORIZED || status_b == StatusCode::FORBIDDEN,
+            "revoked queued client returned {status_b}"
+        );
+        assert!(!body_b.contains("beta-secret-phrase"));
+        assert!(!body_b.contains(&f.source_b));
+        let (status_a, body_a) = read_wire_body(task_a.await.unwrap()).await;
+        assert_eq!(status_a, StatusCode::OK);
+        assert!(body_a.contains("alpha-secret-phrase"));
+        assert_eq!(f.ctx.dispatch_slots.available_permits(), MAX_DISPATCH_TASKS);
+    }
+
+    #[tokio::test]
+    async fn queued_timeout_and_disconnect_preserve_bounded_permits_and_recover() {
+        let f = setup_concurrency_fixture();
+        let guard = f.ctx.serial.clone().lock_owned().await;
+        let timed_out_req = tokio::spawn(tokio::time::timeout(
+            Duration::from_millis(10),
+            dispatch_parsed_request(
+                f.ctx.clone(),
+                Zeroizing::new(f.token_a.clone()),
+                search_rpc("alpha-secret-phrase"),
+                mcp::CLAUDE_LEGACY.to_string(),
+                None,
+                None,
+            ),
+        ));
+        let disconnected_req = tokio::spawn(dispatch_parsed_request(
+            f.ctx.clone(),
+            Zeroizing::new(f.token_b.clone()),
+            search_rpc("beta-secret-phrase"),
+            mcp::CLAUDE_LEGACY.to_string(),
+            None,
+            None,
+        ));
+        assert!(timed_out_req.await.unwrap().is_err());
+        disconnected_req.abort();
+        let _ = disconnected_req.await;
+        drop(guard);
+        assert_eq!(f.ctx.dispatch_slots.available_permits(), MAX_DISPATCH_TASKS);
+        assert!(f.ctx.serial.try_lock().is_ok());
+        let recovered = dispatch_parsed_request(
+            f.ctx.clone(),
+            Zeroizing::new(f.token_a.clone()),
+            search_rpc("alpha-secret-phrase"),
+            mcp::CLAUDE_LEGACY.to_string(),
+            None,
+            None,
+        )
+        .await;
+        let (status, body) = read_wire_body(recovered).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.contains("alpha-secret-phrase"));
     }
 }

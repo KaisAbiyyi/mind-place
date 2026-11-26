@@ -1,0 +1,1093 @@
+{
+  "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+  "product_tree_id": "379bb2424466e64a",
+  "harness_tree_id": "936d8f697a3cef86",
+  "store_mode": "encrypted",
+  "generated_at": "2026-11-25T15:31:11.549Z",
+  "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7",
+  "product_trees": {
+    "crates": "0fde859bda4eeddb5d24f573af21c28947c4215e",
+    "src_tauri": "940d0636b0b4ba6fc441d4fdefc9d76911eaa53e",
+    "cargo_manifest": "23a6d201d730db71be1feaa7af8a38ae9131efa5",
+    "cargo_lock": "589caf765a4827bb5b3ee858db1f65c77f73423b",
+    "src": "6db2c73808c6a55647629ebdd2dc3022a4f8b6c6",
+    "extension": "ea84a4fbe020705d26adbe3589ca76989d9e13e7",
+    "frontend_lock": "06ada74991515cb18372fc8a2b736d4841ae630d"
+  },
+  "cells": {
+    "synthetic-http": {
+      "C1": {
+        "result": "PASS",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "evidence": {
+          "kind": "SYNTHETIC_HTTP",
+          "receipt": "receipts/synthetic.json",
+          "receipt_sha256": "a2e0e552fc4485b511c71f1b45767a9642a4980a93c6c12bdd7089451b132360",
+          "transport": "streamable-http-loopback"
+        },
+        "note": "13/13 checks",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7"
+      },
+      "C2": {
+        "result": "PASS",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "evidence": {
+          "kind": "SYNTHETIC_HTTP",
+          "receipt": "receipts/synthetic.json",
+          "receipt_sha256": "a2e0e552fc4485b511c71f1b45767a9642a4980a93c6c12bdd7089451b132360",
+          "transport": "streamable-http-loopback"
+        },
+        "note": "15/15 checks",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7"
+      },
+      "C3": {
+        "result": "PASS",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "evidence": {
+          "kind": "SYNTHETIC_HTTP",
+          "receipt": "receipts/synthetic.json",
+          "receipt_sha256": "a2e0e552fc4485b511c71f1b45767a9642a4980a93c6c12bdd7089451b132360",
+          "transport": "streamable-http-loopback"
+        },
+        "note": "12/12 checks",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7"
+      },
+      "C4": {
+        "result": "PASS",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "scope": "Long chat (over 256 KB, 3 revisions, multi-byte, astral-plane and right-to-left text): latest revision at 64 KB and 9 KB pages in two protocol eras and every earlier revision; medium chat in 4 KB pages. A server reference, not a provider client.",
+        "evidence": {
+          "kind": "SYNTHETIC_HTTP",
+          "receipt": "receipts/synthetic.json",
+          "receipt_sha256": "a2e0e552fc4485b511c71f1b45767a9642a4980a93c6c12bdd7089451b132360",
+          "transport": "streamable-http-loopback"
+        },
+        "note": "8/8 checks",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7"
+      },
+      "C5": {
+        "result": "PASS",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "evidence": {
+          "kind": "SYNTHETIC_HTTP",
+          "receipt": "receipts/synthetic.json",
+          "receipt_sha256": "a2e0e552fc4485b511c71f1b45767a9642a4980a93c6c12bdd7089451b132360",
+          "transport": "streamable-http-loopback"
+        },
+        "note": "15/15 checks",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7"
+      },
+      "C6": {
+        "result": "PASS",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "evidence": {
+          "kind": "SYNTHETIC_HTTP",
+          "receipt": "receipts/synthetic.json",
+          "receipt_sha256": "a2e0e552fc4485b511c71f1b45767a9642a4980a93c6c12bdd7089451b132360",
+          "transport": "streamable-http-loopback"
+        },
+        "note": "23/23 checks",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7"
+      },
+      "C7": {
+        "result": "PASS",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "evidence": {
+          "kind": "SYNTHETIC_HTTP",
+          "receipt": "receipts/synthetic.json",
+          "receipt_sha256": "a2e0e552fc4485b511c71f1b45767a9642a4980a93c6c12bdd7089451b132360",
+          "transport": "streamable-http-loopback"
+        },
+        "note": "7/7 checks",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7"
+      },
+      "C8": {
+        "result": "PASS",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "evidence": {
+          "kind": "SYNTHETIC_HTTP",
+          "receipt": "receipts/synthetic.json",
+          "receipt_sha256": "a2e0e552fc4485b511c71f1b45767a9642a4980a93c6c12bdd7089451b132360",
+          "transport": "streamable-http-loopback"
+        },
+        "note": "4/4 checks",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7"
+      },
+      "C9": {
+        "result": "PASS",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "evidence": {
+          "kind": "SYNTHETIC_HTTP",
+          "receipt": "receipts/synthetic.json",
+          "receipt_sha256": "a2e0e552fc4485b511c71f1b45767a9642a4980a93c6c12bdd7089451b132360",
+          "transport": "streamable-http-loopback"
+        },
+        "note": "8/8 checks",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7"
+      }
+    },
+    "claude-code": {
+      "C1": {
+        "result": "PASS",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-claude-code.json",
+          "receipt_sha256": "2bf451656fea9b5bcc9bad37c956b8402061156d0884878b4a1d0683a7b18427",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "claude-code",
+            "version": "2.1.322",
+            "protocolVersion": "2026-07-28",
+            "source": "_meta.clientInfo"
+          }
+        },
+        "note": "3/3 checks",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7",
+        "client_version": "2.1.322 (Claude Code)"
+      },
+      "C2": {
+        "result": "PASS",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-claude-code.json",
+          "receipt_sha256": "2bf451656fea9b5bcc9bad37c956b8402061156d0884878b4a1d0683a7b18427",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "claude-code",
+            "version": "2.1.322",
+            "protocolVersion": "2026-07-28",
+            "source": "_meta.clientInfo"
+          }
+        },
+        "note": "3/3 checks",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7",
+        "client_version": "2.1.322 (Claude Code)"
+      },
+      "C3": {
+        "result": "PASS",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-claude-code.json",
+          "receipt_sha256": "2bf451656fea9b5bcc9bad37c956b8402061156d0884878b4a1d0683a7b18427",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "claude-code",
+            "version": "2.1.322",
+            "protocolVersion": "2026-07-28",
+            "source": "_meta.clientInfo"
+          }
+        },
+        "note": "4/4 checks",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7",
+        "client_version": "2.1.322 (Claude Code)"
+      },
+      "C4": {
+        "result": "PASS",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "scope": "Medium multi-byte two-revision chat: latest revision 20102 bytes read in 7 pages of at most 3000 bytes, earlier revision also read. The long chat over 256 KB was NOT read by this real client (NOT_RUN for real clients; covered by the synthetic reference only).",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-claude-code.json",
+          "receipt_sha256": "2bf451656fea9b5bcc9bad37c956b8402061156d0884878b4a1d0683a7b18427",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "claude-code",
+            "version": "2.1.322",
+            "protocolVersion": "2026-07-28",
+            "source": "_meta.clientInfo"
+          }
+        },
+        "note": "2/2 checks",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7",
+        "client_version": "2.1.322 (Claude Code)"
+      },
+      "C5": {
+        "result": "PASS",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-claude-code.json",
+          "receipt_sha256": "2bf451656fea9b5bcc9bad37c956b8402061156d0884878b4a1d0683a7b18427",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "claude-code",
+            "version": "2.1.322",
+            "protocolVersion": "2026-07-28",
+            "source": "_meta.clientInfo"
+          }
+        },
+        "note": "4/4 checks",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7",
+        "client_version": "2.1.322 (Claude Code)"
+      },
+      "C6": {
+        "result": "PASS",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-claude-code.json",
+          "receipt_sha256": "2bf451656fea9b5bcc9bad37c956b8402061156d0884878b4a1d0683a7b18427",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "claude-code",
+            "version": "2.1.322",
+            "protocolVersion": "2026-07-28",
+            "source": "_meta.clientInfo"
+          }
+        },
+        "note": "5/5 checks",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7",
+        "client_version": "2.1.322 (Claude Code)"
+      },
+      "C7": {
+        "result": "PASS",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-claude-code.json",
+          "receipt_sha256": "2bf451656fea9b5bcc9bad37c956b8402061156d0884878b4a1d0683a7b18427",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "claude-code",
+            "version": "2.1.322",
+            "protocolVersion": "2026-07-28",
+            "source": "_meta.clientInfo"
+          }
+        },
+        "note": "5/5 checks",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7",
+        "client_version": "2.1.322 (Claude Code)"
+      },
+      "C8": {
+        "result": "PASS",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-claude-code.json",
+          "receipt_sha256": "2bf451656fea9b5bcc9bad37c956b8402061156d0884878b4a1d0683a7b18427",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "claude-code",
+            "version": "2.1.322",
+            "protocolVersion": "2026-07-28",
+            "source": "_meta.clientInfo"
+          }
+        },
+        "note": "2/2 checks",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7",
+        "client_version": "2.1.322 (Claude Code)"
+      },
+      "C9": {
+        "result": "PASS",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-claude-code.json",
+          "receipt_sha256": "2bf451656fea9b5bcc9bad37c956b8402061156d0884878b4a1d0683a7b18427",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "claude-code",
+            "version": "2.1.322",
+            "protocolVersion": "2026-07-28",
+            "source": "_meta.clientInfo"
+          }
+        },
+        "note": "4/4 checks",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7",
+        "client_version": "2.1.322 (Claude Code)"
+      }
+    },
+    "codex": {
+      "C1": {
+        "result": "PASS",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-codex.json",
+          "receipt_sha256": "2741ad837ac43ebeeccfcd1e09ef360a4412b8ba05db76dbf8ebc332ff393146",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "codex-mcp-client",
+            "version": "0.164.0",
+            "protocolVersion": "2026-07-28",
+            "source": "_meta.clientInfo"
+          }
+        },
+        "note": "3/3 checks",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7",
+        "client_version": "codex-cli 0.164.0"
+      },
+      "C2": {
+        "result": "PASS",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-codex.json",
+          "receipt_sha256": "2741ad837ac43ebeeccfcd1e09ef360a4412b8ba05db76dbf8ebc332ff393146",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "codex-mcp-client",
+            "version": "0.164.0",
+            "protocolVersion": "2026-07-28",
+            "source": "_meta.clientInfo"
+          }
+        },
+        "note": "2/2 checks",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7",
+        "client_version": "codex-cli 0.164.0"
+      },
+      "C3": {
+        "result": "PASS",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-codex.json",
+          "receipt_sha256": "2741ad837ac43ebeeccfcd1e09ef360a4412b8ba05db76dbf8ebc332ff393146",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "codex-mcp-client",
+            "version": "0.164.0",
+            "protocolVersion": "2026-07-28",
+            "source": "_meta.clientInfo"
+          }
+        },
+        "note": "4/4 checks",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7",
+        "client_version": "codex-cli 0.164.0"
+      },
+      "C4": {
+        "result": "PASS",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "scope": "Medium multi-byte two-revision chat: latest revision 20102 bytes read in 7 pages of at most 3000 bytes, earlier revision also read. The long chat over 256 KB was NOT read by this real client (NOT_RUN for real clients; covered by the synthetic reference only).",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-codex.json",
+          "receipt_sha256": "2741ad837ac43ebeeccfcd1e09ef360a4412b8ba05db76dbf8ebc332ff393146",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "codex-mcp-client",
+            "version": "0.164.0",
+            "protocolVersion": "2026-07-28",
+            "source": "_meta.clientInfo"
+          }
+        },
+        "note": "2/2 checks",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7",
+        "client_version": "codex-cli 0.164.0"
+      },
+      "C5": {
+        "result": "PASS",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-codex.json",
+          "receipt_sha256": "2741ad837ac43ebeeccfcd1e09ef360a4412b8ba05db76dbf8ebc332ff393146",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "codex-mcp-client",
+            "version": "0.164.0",
+            "protocolVersion": "2026-07-28",
+            "source": "_meta.clientInfo"
+          }
+        },
+        "note": "4/4 checks",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7",
+        "client_version": "codex-cli 0.164.0"
+      },
+      "C6": {
+        "result": "PASS",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-codex.json",
+          "receipt_sha256": "2741ad837ac43ebeeccfcd1e09ef360a4412b8ba05db76dbf8ebc332ff393146",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "codex-mcp-client",
+            "version": "0.164.0",
+            "protocolVersion": "2026-07-28",
+            "source": "_meta.clientInfo"
+          }
+        },
+        "note": "5/5 checks",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7",
+        "client_version": "codex-cli 0.164.0"
+      },
+      "C7": {
+        "result": "PASS",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-codex.json",
+          "receipt_sha256": "2741ad837ac43ebeeccfcd1e09ef360a4412b8ba05db76dbf8ebc332ff393146",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "codex-mcp-client",
+            "version": "0.164.0",
+            "protocolVersion": "2026-07-28",
+            "source": "_meta.clientInfo"
+          }
+        },
+        "note": "5/5 checks",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7",
+        "client_version": "codex-cli 0.164.0"
+      },
+      "C8": {
+        "result": "PASS",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-codex.json",
+          "receipt_sha256": "2741ad837ac43ebeeccfcd1e09ef360a4412b8ba05db76dbf8ebc332ff393146",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "codex-mcp-client",
+            "version": "0.164.0",
+            "protocolVersion": "2026-07-28",
+            "source": "_meta.clientInfo"
+          }
+        },
+        "note": "2/2 checks",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7",
+        "client_version": "codex-cli 0.164.0"
+      },
+      "C9": {
+        "result": "PASS",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-codex.json",
+          "receipt_sha256": "2741ad837ac43ebeeccfcd1e09ef360a4412b8ba05db76dbf8ebc332ff393146",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "codex-mcp-client",
+            "version": "0.164.0",
+            "protocolVersion": "2026-07-28",
+            "source": "_meta.clientInfo"
+          }
+        },
+        "note": "4/4 checks",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7",
+        "client_version": "codex-cli 0.164.0"
+      }
+    },
+    "gemini-cli": {
+      "C1": {
+        "result": "PASS",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-gemini-cli.json",
+          "receipt_sha256": "5338fe85d2dc09fc855a9cc5ef26296f669736f268e7426445ba560f49bd407d",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "gemini-cli-mcp-client",
+            "version": "0.34.0",
+            "protocolVersion": "2025-11-25",
+            "source": "initialize.clientInfo"
+          }
+        },
+        "note": "3/3 checks",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7"
+      },
+      "C2": {
+        "result": "FAIL",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-gemini-cli.json",
+          "receipt_sha256": "5338fe85d2dc09fc855a9cc5ef26296f669736f268e7426445ba560f49bd407d",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "gemini-cli-mcp-client",
+            "version": "0.34.0",
+            "protocolVersion": "2025-11-25",
+            "source": "initialize.clientInfo"
+          }
+        },
+        "note": "1/2 checks; failing: the client went on to call a discovered tool (it accepted the tool schemas)",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7"
+      },
+      "C3": {
+        "result": "FAIL",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-gemini-cli.json",
+          "receipt_sha256": "5338fe85d2dc09fc855a9cc5ef26296f669736f268e7426445ba560f49bd407d",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "gemini-cli-mcp-client",
+            "version": "0.34.0",
+            "protocolVersion": "2025-11-25",
+            "source": "initialize.clientInfo"
+          }
+        },
+        "note": "1/4 checks; failing: the real client found its granted chat | the real client got nothing for the never-granted canary chat | the real client got nothing for the other collection",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7"
+      },
+      "C4": {
+        "result": "FAIL",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "scope": "Medium multi-byte two-revision chat: latest revision n/a bytes read in n/a pages of at most 3000 bytes, earlier revision also read. The long chat over 256 KB was NOT read by this real client (NOT_RUN for real clients; covered by the synthetic reference only).",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-gemini-cli.json",
+          "receipt_sha256": "5338fe85d2dc09fc855a9cc5ef26296f669736f268e7426445ba560f49bd407d",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "gemini-cli-mcp-client",
+            "version": "0.34.0",
+            "protocolVersion": "2025-11-25",
+            "source": "initialize.clientInfo"
+          }
+        },
+        "note": "1/2 checks; failing: the real client read the latest revision exactly (0 pages, 0 bytes)",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7"
+      },
+      "C5": {
+        "result": "FAIL",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-gemini-cli.json",
+          "receipt_sha256": "5338fe85d2dc09fc855a9cc5ef26296f669736f268e7426445ba560f49bd407d",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "gemini-cli-mcp-client",
+            "version": "0.34.0",
+            "protocolVersion": "2025-11-25",
+            "source": "initialize.clientInfo"
+          }
+        },
+        "note": "0/4 checks; failing: the latest revision came back with stable identity and provenance | the real client read the earlier revision exactly (0 pages, 0 bytes) | the earlier revision came back with stable identity and provenance | both revisions of the same chat were read through on",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7"
+      },
+      "C6": {
+        "result": "FAIL",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-gemini-cli.json",
+          "receipt_sha256": "5338fe85d2dc09fc855a9cc5ef26296f669736f268e7426445ba560f49bd407d",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "gemini-cli-mcp-client",
+            "version": "0.34.0",
+            "protocolVersion": "2025-11-25",
+            "source": "initialize.clientInfo"
+          }
+        },
+        "note": "2/5 checks; failing: the real client searched before any grant and got nothing | the real client fetched with valid arguments before any grant and was denied like an unknown id | after the grant the canary and second collections stay invisible to the real client",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7"
+      },
+      "C7": {
+        "result": "FAIL",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-gemini-cli.json",
+          "receipt_sha256": "5338fe85d2dc09fc855a9cc5ef26296f669736f268e7426445ba560f49bd407d",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "gemini-cli-mcp-client",
+            "version": "0.34.0",
+            "protocolVersion": "2025-11-25",
+            "source": "initialize.clientInfo"
+          }
+        },
+        "note": "2/5 checks; failing: the very next search by the real client returns nothing after the chat was revoked | the very next fetch by the real client, with valid arguments, is denied like an unknown id | a second real-client credential worked before it was revoked",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7"
+      },
+      "C8": {
+        "result": "PASS",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-gemini-cli.json",
+          "receipt_sha256": "5338fe85d2dc09fc855a9cc5ef26296f669736f268e7426445ba560f49bd407d",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "gemini-cli-mcp-client",
+            "version": "0.34.0",
+            "protocolVersion": "2025-11-25",
+            "source": "initialize.clientInfo"
+          }
+        },
+        "note": "2/2 checks",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7"
+      },
+      "C9": {
+        "result": "FAIL",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-gemini-cli.json",
+          "receipt_sha256": "5338fe85d2dc09fc855a9cc5ef26296f669736f268e7426445ba560f49bd407d",
+          "transport": "streamable-http-loopback",
+          "observed_client": {
+            "name": "gemini-cli-mcp-client",
+            "version": "0.34.0",
+            "protocolVersion": "2025-11-25",
+            "source": "initialize.clientInfo"
+          }
+        },
+        "note": "2/4 checks; failing: with the same key and configuration the real client reconnected and reads its grant | after reconnecting it still cannot read the canary chat (no escalation)",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7"
+      }
+    },
+    "antigravity": {
+      "C1": {
+        "result": "PASS",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-antigravity.json",
+          "receipt_sha256": "3bf6e9bac18f907b452e7a29a7059940e37160f4e4c255d69ff5b05de6e0798e",
+          "transport": "stdio-bridge -> streamable-http-loopback",
+          "observed_client": {
+            "name": "antigravity-client",
+            "version": "v1.0.0",
+            "protocolVersion": "2025-11-25",
+            "source": "initialize.clientInfo"
+          }
+        },
+        "note": "3/3 checks",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7",
+        "client_version": "1.5.15"
+      },
+      "C2": {
+        "result": "FAIL",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-antigravity.json",
+          "receipt_sha256": "3bf6e9bac18f907b452e7a29a7059940e37160f4e4c255d69ff5b05de6e0798e",
+          "transport": "stdio-bridge -> streamable-http-loopback",
+          "observed_client": {
+            "name": "antigravity-client",
+            "version": "v1.0.0",
+            "protocolVersion": "2025-11-25",
+            "source": "initialize.clientInfo"
+          }
+        },
+        "note": "1/2 checks; failing: the client went on to call a discovered tool (it accepted the tool schemas)",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7",
+        "client_version": "1.5.15"
+      },
+      "C3": {
+        "result": "FAIL",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-antigravity.json",
+          "receipt_sha256": "3bf6e9bac18f907b452e7a29a7059940e37160f4e4c255d69ff5b05de6e0798e",
+          "transport": "stdio-bridge -> streamable-http-loopback",
+          "observed_client": {
+            "name": "antigravity-client",
+            "version": "v1.0.0",
+            "protocolVersion": "2025-11-25",
+            "source": "initialize.clientInfo"
+          }
+        },
+        "note": "1/4 checks; failing: the real client found its granted chat | the real client got nothing for the never-granted canary chat | the real client got nothing for the other collection",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7",
+        "client_version": "1.5.15"
+      },
+      "C4": {
+        "result": "FAIL",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "scope": "Medium multi-byte two-revision chat: latest revision n/a bytes read in n/a pages of at most 3000 bytes, earlier revision also read. The long chat over 256 KB was NOT read by this real client (NOT_RUN for real clients; covered by the synthetic reference only).",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-antigravity.json",
+          "receipt_sha256": "3bf6e9bac18f907b452e7a29a7059940e37160f4e4c255d69ff5b05de6e0798e",
+          "transport": "stdio-bridge -> streamable-http-loopback",
+          "observed_client": {
+            "name": "antigravity-client",
+            "version": "v1.0.0",
+            "protocolVersion": "2025-11-25",
+            "source": "initialize.clientInfo"
+          }
+        },
+        "note": "1/2 checks; failing: the real client read the latest revision exactly (0 pages, 0 bytes)",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7",
+        "client_version": "1.5.15"
+      },
+      "C5": {
+        "result": "FAIL",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-antigravity.json",
+          "receipt_sha256": "3bf6e9bac18f907b452e7a29a7059940e37160f4e4c255d69ff5b05de6e0798e",
+          "transport": "stdio-bridge -> streamable-http-loopback",
+          "observed_client": {
+            "name": "antigravity-client",
+            "version": "v1.0.0",
+            "protocolVersion": "2025-11-25",
+            "source": "initialize.clientInfo"
+          }
+        },
+        "note": "0/4 checks; failing: the latest revision came back with stable identity and provenance | the real client read the earlier revision exactly (0 pages, 0 bytes) | the earlier revision came back with stable identity and provenance | both revisions of the same chat were read through on",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7",
+        "client_version": "1.5.15"
+      },
+      "C6": {
+        "result": "FAIL",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-antigravity.json",
+          "receipt_sha256": "3bf6e9bac18f907b452e7a29a7059940e37160f4e4c255d69ff5b05de6e0798e",
+          "transport": "stdio-bridge -> streamable-http-loopback",
+          "observed_client": {
+            "name": "antigravity-client",
+            "version": "v1.0.0",
+            "protocolVersion": "2025-11-25",
+            "source": "initialize.clientInfo"
+          }
+        },
+        "note": "2/5 checks; failing: the real client searched before any grant and got nothing | the real client fetched with valid arguments before any grant and was denied like an unknown id | after the grant the canary and second collections stay invisible to the real client",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7",
+        "client_version": "1.5.15"
+      },
+      "C7": {
+        "result": "FAIL",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-antigravity.json",
+          "receipt_sha256": "3bf6e9bac18f907b452e7a29a7059940e37160f4e4c255d69ff5b05de6e0798e",
+          "transport": "stdio-bridge -> streamable-http-loopback",
+          "observed_client": {
+            "name": "antigravity-client",
+            "version": "v1.0.0",
+            "protocolVersion": "2025-11-25",
+            "source": "initialize.clientInfo"
+          }
+        },
+        "note": "2/5 checks; failing: the very next search by the real client returns nothing after the chat was revoked | the very next fetch by the real client, with valid arguments, is denied like an unknown id | a second real-client credential worked before it was revoked",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7",
+        "client_version": "1.5.15"
+      },
+      "C8": {
+        "result": "PASS",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-antigravity.json",
+          "receipt_sha256": "3bf6e9bac18f907b452e7a29a7059940e37160f4e4c255d69ff5b05de6e0798e",
+          "transport": "stdio-bridge -> streamable-http-loopback",
+          "observed_client": {
+            "name": "antigravity-client",
+            "version": "v1.0.0",
+            "protocolVersion": "2025-11-25",
+            "source": "initialize.clientInfo"
+          }
+        },
+        "note": "2/2 checks",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7",
+        "client_version": "1.5.15"
+      },
+      "C9": {
+        "result": "FAIL",
+        "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+        "product_tree_id": "379bb2424466e64a",
+        "harness_tree_id": "936d8f697a3cef86",
+        "store_mode": "encrypted",
+        "evidence": {
+          "kind": "REAL_CLIENT",
+          "receipt": "receipts/real-antigravity.json",
+          "receipt_sha256": "3bf6e9bac18f907b452e7a29a7059940e37160f4e4c255d69ff5b05de6e0798e",
+          "transport": "stdio-bridge -> streamable-http-loopback",
+          "observed_client": {
+            "name": "antigravity-client",
+            "version": "v1.0.0",
+            "protocolVersion": "2025-11-25",
+            "source": "initialize.clientInfo"
+          }
+        },
+        "note": "2/4 checks; failing: with the same key and configuration the real client reconnected and reads its grant | after reconnecting it still cannot read the canary chat (no escalation)",
+        "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7",
+        "client_version": "1.5.15"
+      }
+    },
+    "claude-app": {
+      "C1": {
+        "result": "NOT_RUN",
+        "reason": "Claude web and desktop custom connectors need an HTTPS MCP URL reachable by Claude. Release 1 ships no general public gateway (only the OpenAI-only secure tunnel). An agent cannot sign in to the owner's Claude account or publish an endpoint.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-claude-app-desktop-or-web-custom-connector"
+      },
+      "C2": {
+        "result": "NOT_RUN",
+        "reason": "Claude web and desktop custom connectors need an HTTPS MCP URL reachable by Claude. Release 1 ships no general public gateway (only the OpenAI-only secure tunnel). An agent cannot sign in to the owner's Claude account or publish an endpoint.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-claude-app-desktop-or-web-custom-connector"
+      },
+      "C3": {
+        "result": "NOT_RUN",
+        "reason": "Claude web and desktop custom connectors need an HTTPS MCP URL reachable by Claude. Release 1 ships no general public gateway (only the OpenAI-only secure tunnel). An agent cannot sign in to the owner's Claude account or publish an endpoint.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-claude-app-desktop-or-web-custom-connector"
+      },
+      "C4": {
+        "result": "NOT_RUN",
+        "reason": "Claude web and desktop custom connectors need an HTTPS MCP URL reachable by Claude. Release 1 ships no general public gateway (only the OpenAI-only secure tunnel). An agent cannot sign in to the owner's Claude account or publish an endpoint.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-claude-app-desktop-or-web-custom-connector"
+      },
+      "C5": {
+        "result": "NOT_RUN",
+        "reason": "Claude web and desktop custom connectors need an HTTPS MCP URL reachable by Claude. Release 1 ships no general public gateway (only the OpenAI-only secure tunnel). An agent cannot sign in to the owner's Claude account or publish an endpoint.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-claude-app-desktop-or-web-custom-connector"
+      },
+      "C6": {
+        "result": "NOT_RUN",
+        "reason": "Claude web and desktop custom connectors need an HTTPS MCP URL reachable by Claude. Release 1 ships no general public gateway (only the OpenAI-only secure tunnel). An agent cannot sign in to the owner's Claude account or publish an endpoint.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-claude-app-desktop-or-web-custom-connector"
+      },
+      "C7": {
+        "result": "NOT_RUN",
+        "reason": "Claude web and desktop custom connectors need an HTTPS MCP URL reachable by Claude. Release 1 ships no general public gateway (only the OpenAI-only secure tunnel). An agent cannot sign in to the owner's Claude account or publish an endpoint.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-claude-app-desktop-or-web-custom-connector"
+      },
+      "C8": {
+        "result": "NOT_RUN",
+        "reason": "Claude web and desktop custom connectors need an HTTPS MCP URL reachable by Claude. Release 1 ships no general public gateway (only the OpenAI-only secure tunnel). An agent cannot sign in to the owner's Claude account or publish an endpoint.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-claude-app-desktop-or-web-custom-connector"
+      },
+      "C9": {
+        "result": "NOT_RUN",
+        "reason": "Claude web and desktop custom connectors need an HTTPS MCP URL reachable by Claude. Release 1 ships no general public gateway (only the OpenAI-only secure tunnel). An agent cannot sign in to the owner's Claude account or publish an endpoint.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-claude-app-desktop-or-web-custom-connector"
+      }
+    },
+    "chatgpt": {
+      "C1": {
+        "result": "NOT_RUN",
+        "reason": "Hosted ChatGPT needs the owner's OpenAI tunnel ID and runtime API key and ChatGPT developer mode. Those credentials must not be handled by an agent. An earlier real-ChatGPT run of search, fetch and context_build over the tunnel (MP-7MCP-04 baseline) was on an older build and is not claimed for this SHA.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-chatgpt-hosted-secure-mcp-tunnel"
+      },
+      "C2": {
+        "result": "NOT_RUN",
+        "reason": "Hosted ChatGPT needs the owner's OpenAI tunnel ID and runtime API key and ChatGPT developer mode. Those credentials must not be handled by an agent. An earlier real-ChatGPT run of search, fetch and context_build over the tunnel (MP-7MCP-04 baseline) was on an older build and is not claimed for this SHA.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-chatgpt-hosted-secure-mcp-tunnel"
+      },
+      "C3": {
+        "result": "NOT_RUN",
+        "reason": "Hosted ChatGPT needs the owner's OpenAI tunnel ID and runtime API key and ChatGPT developer mode. Those credentials must not be handled by an agent. An earlier real-ChatGPT run of search, fetch and context_build over the tunnel (MP-7MCP-04 baseline) was on an older build and is not claimed for this SHA.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-chatgpt-hosted-secure-mcp-tunnel"
+      },
+      "C4": {
+        "result": "NOT_RUN",
+        "reason": "Hosted ChatGPT needs the owner's OpenAI tunnel ID and runtime API key and ChatGPT developer mode. Those credentials must not be handled by an agent. An earlier real-ChatGPT run of search, fetch and context_build over the tunnel (MP-7MCP-04 baseline) was on an older build and is not claimed for this SHA.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-chatgpt-hosted-secure-mcp-tunnel"
+      },
+      "C5": {
+        "result": "NOT_RUN",
+        "reason": "Hosted ChatGPT needs the owner's OpenAI tunnel ID and runtime API key and ChatGPT developer mode. Those credentials must not be handled by an agent. An earlier real-ChatGPT run of search, fetch and context_build over the tunnel (MP-7MCP-04 baseline) was on an older build and is not claimed for this SHA.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-chatgpt-hosted-secure-mcp-tunnel"
+      },
+      "C6": {
+        "result": "NOT_RUN",
+        "reason": "Hosted ChatGPT needs the owner's OpenAI tunnel ID and runtime API key and ChatGPT developer mode. Those credentials must not be handled by an agent. An earlier real-ChatGPT run of search, fetch and context_build over the tunnel (MP-7MCP-04 baseline) was on an older build and is not claimed for this SHA.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-chatgpt-hosted-secure-mcp-tunnel"
+      },
+      "C7": {
+        "result": "NOT_RUN",
+        "reason": "Hosted ChatGPT needs the owner's OpenAI tunnel ID and runtime API key and ChatGPT developer mode. Those credentials must not be handled by an agent. An earlier real-ChatGPT run of search, fetch and context_build over the tunnel (MP-7MCP-04 baseline) was on an older build and is not claimed for this SHA.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-chatgpt-hosted-secure-mcp-tunnel"
+      },
+      "C8": {
+        "result": "NOT_RUN",
+        "reason": "Hosted ChatGPT needs the owner's OpenAI tunnel ID and runtime API key and ChatGPT developer mode. Those credentials must not be handled by an agent. An earlier real-ChatGPT run of search, fetch and context_build over the tunnel (MP-7MCP-04 baseline) was on an older build and is not claimed for this SHA.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-chatgpt-hosted-secure-mcp-tunnel"
+      },
+      "C9": {
+        "result": "NOT_RUN",
+        "reason": "Hosted ChatGPT needs the owner's OpenAI tunnel ID and runtime API key and ChatGPT developer mode. Those credentials must not be handled by an agent. An earlier real-ChatGPT run of search, fetch and context_build over the tunnel (MP-7MCP-04 baseline) was on an older build and is not claimed for this SHA.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-chatgpt-hosted-secure-mcp-tunnel"
+      }
+    },
+    "gemini-app": {
+      "C1": {
+        "result": "NOT_RUN",
+        "reason": "Hosted Gemini needs the owner's account (Connect to an MCP server or Developer Mode) and an HTTPS endpoint reachable by Gemini. The Gemini app custom-app feature is reported to require an eligible personal account; if the owner's account is not eligible the result is PROVIDER_BLOCKED, to be recorded on the card.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-gemini-hosted-app"
+      },
+      "C2": {
+        "result": "NOT_RUN",
+        "reason": "Hosted Gemini needs the owner's account (Connect to an MCP server or Developer Mode) and an HTTPS endpoint reachable by Gemini. The Gemini app custom-app feature is reported to require an eligible personal account; if the owner's account is not eligible the result is PROVIDER_BLOCKED, to be recorded on the card.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-gemini-hosted-app"
+      },
+      "C3": {
+        "result": "NOT_RUN",
+        "reason": "Hosted Gemini needs the owner's account (Connect to an MCP server or Developer Mode) and an HTTPS endpoint reachable by Gemini. The Gemini app custom-app feature is reported to require an eligible personal account; if the owner's account is not eligible the result is PROVIDER_BLOCKED, to be recorded on the card.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-gemini-hosted-app"
+      },
+      "C4": {
+        "result": "NOT_RUN",
+        "reason": "Hosted Gemini needs the owner's account (Connect to an MCP server or Developer Mode) and an HTTPS endpoint reachable by Gemini. The Gemini app custom-app feature is reported to require an eligible personal account; if the owner's account is not eligible the result is PROVIDER_BLOCKED, to be recorded on the card.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-gemini-hosted-app"
+      },
+      "C5": {
+        "result": "NOT_RUN",
+        "reason": "Hosted Gemini needs the owner's account (Connect to an MCP server or Developer Mode) and an HTTPS endpoint reachable by Gemini. The Gemini app custom-app feature is reported to require an eligible personal account; if the owner's account is not eligible the result is PROVIDER_BLOCKED, to be recorded on the card.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-gemini-hosted-app"
+      },
+      "C6": {
+        "result": "NOT_RUN",
+        "reason": "Hosted Gemini needs the owner's account (Connect to an MCP server or Developer Mode) and an HTTPS endpoint reachable by Gemini. The Gemini app custom-app feature is reported to require an eligible personal account; if the owner's account is not eligible the result is PROVIDER_BLOCKED, to be recorded on the card.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-gemini-hosted-app"
+      },
+      "C7": {
+        "result": "NOT_RUN",
+        "reason": "Hosted Gemini needs the owner's account (Connect to an MCP server or Developer Mode) and an HTTPS endpoint reachable by Gemini. The Gemini app custom-app feature is reported to require an eligible personal account; if the owner's account is not eligible the result is PROVIDER_BLOCKED, to be recorded on the card.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-gemini-hosted-app"
+      },
+      "C8": {
+        "result": "NOT_RUN",
+        "reason": "Hosted Gemini needs the owner's account (Connect to an MCP server or Developer Mode) and an HTTPS endpoint reachable by Gemini. The Gemini app custom-app feature is reported to require an eligible personal account; if the owner's account is not eligible the result is PROVIDER_BLOCKED, to be recorded on the card.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-gemini-hosted-app"
+      },
+      "C9": {
+        "result": "NOT_RUN",
+        "reason": "Hosted Gemini needs the owner's account (Connect to an MCP server or Developer Mode) and an HTTPS endpoint reachable by Gemini. The Gemini app custom-app feature is reported to require an eligible personal account; if the owner's account is not eligible the result is PROVIDER_BLOCKED, to be recorded on the card.",
+        "owner_card": "OWNER-TEST-CARDS.md#card-gemini-hosted-app"
+      }
+    }
+  }
+}

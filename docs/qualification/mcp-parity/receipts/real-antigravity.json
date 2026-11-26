@@ -1,0 +1,527 @@
+{
+  "kind": "REAL_CLIENT run: the actual provider client behind a recording proxy against the packaged app (disposable synthetic corpus). Verdicts come from the wire log, not the model transcript.",
+  "source": {
+    "sha": "dadedd82528c0cc74a61114cbb8bdc8b75495616",
+    "dirty": false,
+    "trees": {
+      "crates": "0fde859bda4eeddb5d24f573af21c28947c4215e",
+      "src_tauri": "940d0636b0b4ba6fc441d4fdefc9d76911eaa53e",
+      "cargo_manifest": "23a6d201d730db71be1feaa7af8a38ae9131efa5",
+      "cargo_lock": "589caf765a4827bb5b3ee858db1f65c77f73423b",
+      "src": "6db2c73808c6a55647629ebdd2dc3022a4f8b6c6",
+      "extension": "ea84a4fbe020705d26adbe3589ca76989d9e13e7",
+      "frontend_lock": "06ada74991515cb18372fc8a2b736d4841ae630d"
+    },
+    "harness": {
+      "conformance": "d71a26d2a0dd4d536e2bcd16b95c588ff0de9407",
+      "lib": "6810a45c3b08a128f2083a5542ba43d5a7b49bc5",
+      "stdio_bridge": "1ee46c1637dc0729941055381b15e0d2acbe86c1"
+    }
+  },
+  "executable_sha256": "83dfd783b5391fb241a7803ed646ed88351a9b28cbafc0a0b9bf10ee19098ff7",
+  "dirty_tree": false,
+  "clientId": "antigravity",
+  "label": "Antigravity",
+  "installed": {
+    "exe": "C:\\Users\\kaisa\\AppData\\Local\\agy\\bin\\agy.exe",
+    "version": "1.5.15"
+  },
+  "observed_client": {
+    "name": "antigravity-client",
+    "version": "v1.0.0",
+    "protocolVersion": "2025-11-25",
+    "source": "initialize.clientInfo"
+  },
+  "store_mode": "encrypted",
+  "harness_failure": null,
+  "permission_proof": {
+    "canonical_full_digest": "c8339224e6fb",
+    "identity_digest": "c8339224e6fb",
+    "valid_granted_200": true,
+    "r0": null,
+    "r3": null
+  },
+  "c4_scope": "Medium multi-byte two-revision chat: latest revision n/a bytes read in n/a pages of at most 3000 bytes, earlier revision also read. The long chat over 256 KB was NOT read by this real client (NOT_RUN for real clients; covered by the synthetic reference only).",
+  "transcript": [
+    {
+      "label": "R0 default deny",
+      "exit": 0,
+      "serverStatus": null,
+      "discoveredTools": null,
+      "exchanges": 4
+    },
+    {
+      "label": "R1 scoped search",
+      "exit": 0,
+      "serverStatus": null,
+      "discoveredTools": null,
+      "exchanges": 4
+    },
+    {
+      "label": "R2 paged exact read",
+      "exit": 0,
+      "serverStatus": null,
+      "discoveredTools": null,
+      "exchanges": 4
+    },
+    {
+      "label": "R3 after chat revoke",
+      "exit": 1,
+      "serverStatus": null,
+      "discoveredTools": null,
+      "exchanges": 0
+    },
+    {
+      "label": "R3b client works before revoke",
+      "exit": 0,
+      "serverStatus": null,
+      "discoveredTools": null,
+      "exchanges": 4
+    },
+    {
+      "label": "R3b client after client revoke",
+      "exit": 0,
+      "serverStatus": null,
+      "discoveredTools": null,
+      "exchanges": 2
+    },
+    {
+      "label": "R4 after Lock",
+      "exit": 0,
+      "serverStatus": null,
+      "discoveredTools": null,
+      "exchanges": 1
+    },
+    {
+      "label": "R5 after reconnect",
+      "exit": 0,
+      "serverStatus": null,
+      "discoveredTools": null,
+      "exchanges": 4
+    }
+  ],
+  "claims": {
+    "C1": {
+      "id": "C1",
+      "result": "PASS",
+      "checks": [
+        {
+          "name": "the client announced its own name and version on the wire",
+          "ok": true,
+          "detail": "{\"name\":\"antigravity-client\",\"version\":\"v1.0.0\",\"protocolVersion\":\"2025-11-25\",\"source\":\"initialize.clientInfo\"}"
+        },
+        {
+          "name": "the server accepted the client handshake",
+          "ok": true,
+          "detail": "initialize 200"
+        },
+        {
+          "name": "a protocol revision was negotiated",
+          "ok": true,
+          "detail": "2025-11-25"
+        }
+      ]
+    },
+    "C2": {
+      "id": "C2",
+      "result": "FAIL",
+      "checks": [
+        {
+          "name": "the client requested tools/list and received the three read-only tools",
+          "ok": true,
+          "detail": "memory_search,memory_fetch,context_build"
+        },
+        {
+          "name": "the client went on to call a discovered tool (it accepted the tool schemas)",
+          "ok": false,
+          "detail": "0 search call(s)"
+        }
+      ]
+    },
+    "C3": {
+      "id": "C3",
+      "result": "FAIL",
+      "checks": [
+        {
+          "name": "the real client found its granted chat",
+          "ok": false,
+          "detail": "no search sent"
+        },
+        {
+          "name": "the real client got nothing for the never-granted canary chat",
+          "ok": false,
+          "detail": "no search sent"
+        },
+        {
+          "name": "the real client got nothing for the other collection",
+          "ok": false,
+          "detail": "no search sent"
+        },
+        {
+          "name": "the real client never received an ungranted conversation id in any response",
+          "ok": true,
+          "detail": ""
+        }
+      ]
+    },
+    "C4": {
+      "id": "C4",
+      "result": "FAIL",
+      "checks": [
+        {
+          "name": "the real client read the latest revision exactly (0 pages, 0 bytes)",
+          "ok": false,
+          "detail": "no pages"
+        },
+        {
+          "name": "the client followed the server cursors and sent nothing else (no fabricated cursor)",
+          "ok": true,
+          "detail": "every accepted call used the previous next_cursor"
+        }
+      ]
+    },
+    "C5": {
+      "id": "C5",
+      "result": "FAIL",
+      "checks": [
+        {
+          "name": "the latest revision came back with stable identity and provenance",
+          "ok": false,
+          "detail": "{\"s\":false}"
+        },
+        {
+          "name": "the real client read the earlier revision exactly (0 pages, 0 bytes)",
+          "ok": false,
+          "detail": "no pages"
+        },
+        {
+          "name": "the earlier revision came back with stable identity and provenance",
+          "ok": false,
+          "detail": "{\"s\":false}"
+        },
+        {
+          "name": "both revisions of the same chat were read through one source id",
+          "ok": false,
+          "detail": ""
+        }
+      ]
+    },
+    "C6": {
+      "id": "C6",
+      "result": "FAIL",
+      "checks": [
+        {
+          "name": "the real client searched before any grant and got nothing",
+          "ok": false,
+          "detail": "client sent no search"
+        },
+        {
+          "name": "before any grant the harness, with the proven-valid canonical fetch arguments, is denied exactly like an unknown id",
+          "ok": true,
+          "detail": "canonical_full c8339224e6fb: 400:{\"code\":-32602,\"message\":\"Invalid params\"} vs 400:{\"code\":-32602,\"message\":\"Invalid params\"}"
+        },
+        {
+          "name": "the real client fetched with valid arguments before any grant and was denied like an unknown id",
+          "ok": false,
+          "detail": "client sent no fetch matching canonical_full c8339224e6fb or identity c8339224e6fb"
+        },
+        {
+          "name": "the same arguments are valid once granted: HTTP 200 with the revision content (so the denial was permission, not malformed input)",
+          "ok": true,
+          "detail": "canonical (canonical_full c8339224e6fb, client_full n/a): 200:null"
+        },
+        {
+          "name": "after the grant the canary and second collections stay invisible to the real client",
+          "ok": false,
+          "detail": ""
+        }
+      ]
+    },
+    "C7": {
+      "id": "C7",
+      "result": "FAIL",
+      "checks": [
+        {
+          "name": "the very next search by the real client returns nothing after the chat was revoked",
+          "ok": false,
+          "detail": "no search"
+        },
+        {
+          "name": "after the revoke the canonical arguments that were accepted (HTTP 200) while granted are denied exactly like an unknown id",
+          "ok": true,
+          "detail": "canonical_full c8339224e6fb: 400:{\"code\":-32602,\"message\":\"Invalid params\"} vs 400:{\"code\":-32602,\"message\":\"Invalid params\"}"
+        },
+        {
+          "name": "the very next fetch by the real client, with valid arguments, is denied like an unknown id",
+          "ok": false,
+          "detail": "client sent no fetch matching canonical_full c8339224e6fb or identity c8339224e6fb"
+        },
+        {
+          "name": "a second real-client credential worked before it was revoked",
+          "ok": false,
+          "detail": "no search"
+        },
+        {
+          "name": "after the whole client was revoked the real client was refused and read nothing",
+          "ok": true,
+          "detail": "1 refusals, results=false"
+        }
+      ]
+    },
+    "C8": {
+      "id": "C8",
+      "result": "PASS",
+      "checks": [
+        {
+          "name": "after Lock the real client received no tool result",
+          "ok": true,
+          "detail": "1 exchanges"
+        },
+        {
+          "name": "after Lock the real client tried to connect and the listener was unreachable or refused every request",
+          "ok": true,
+          "detail": "unreachable"
+        }
+      ]
+    },
+    "C9": {
+      "id": "C9",
+      "result": "FAIL",
+      "checks": [
+        {
+          "name": "with the same key and configuration the real client reconnected and reads its grant",
+          "ok": false,
+          "detail": "no search"
+        },
+        {
+          "name": "after reconnecting it still cannot read the canary chat (no escalation)",
+          "ok": false,
+          "detail": "no search"
+        },
+        {
+          "name": "the grant set after reconnect is exactly the one before Lock",
+          "ok": true,
+          "detail": "1 grant(s)"
+        },
+        {
+          "name": "the revoked client stayed revoked",
+          "ok": true,
+          "detail": "401"
+        }
+      ]
+    }
+  },
+  "exchange_summary": [
+    {
+      "at": "2026-11-25T15:11:21.465Z",
+      "http": "POST",
+      "rpc": "server/discover",
+      "tool": null,
+      "status": 400,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params"
+      },
+      "bytes": 75
+    },
+    {
+      "at": "2026-11-25T15:11:21.581Z",
+      "http": "POST",
+      "rpc": "initialize",
+      "tool": null,
+      "status": 200,
+      "bytes": 166
+    },
+    {
+      "at": "2026-11-25T15:11:21.665Z",
+      "http": "POST",
+      "rpc": "notifications/initialized",
+      "tool": null,
+      "status": 202,
+      "bytes": 0
+    },
+    {
+      "at": "2026-11-25T15:11:21.761Z",
+      "http": "POST",
+      "rpc": "tools/list",
+      "tool": null,
+      "status": 200,
+      "bytes": 4724
+    },
+    {
+      "at": "2026-11-25T15:11:56.498Z",
+      "http": "POST",
+      "rpc": "server/discover",
+      "tool": null,
+      "status": 400,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params"
+      },
+      "bytes": 75
+    },
+    {
+      "at": "2026-11-25T15:11:56.601Z",
+      "http": "POST",
+      "rpc": "initialize",
+      "tool": null,
+      "status": 200,
+      "bytes": 166
+    },
+    {
+      "at": "2026-11-25T15:11:56.681Z",
+      "http": "POST",
+      "rpc": "notifications/initialized",
+      "tool": null,
+      "status": 202,
+      "bytes": 0
+    },
+    {
+      "at": "2026-11-25T15:11:56.773Z",
+      "http": "POST",
+      "rpc": "tools/list",
+      "tool": null,
+      "status": 200,
+      "bytes": 4724
+    },
+    {
+      "at": "2026-11-25T15:12:21.215Z",
+      "http": "POST",
+      "rpc": "server/discover",
+      "tool": null,
+      "status": 400,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params"
+      },
+      "bytes": 75
+    },
+    {
+      "at": "2026-11-25T15:12:21.298Z",
+      "http": "POST",
+      "rpc": "initialize",
+      "tool": null,
+      "status": 200,
+      "bytes": 166
+    },
+    {
+      "at": "2026-11-25T15:12:21.381Z",
+      "http": "POST",
+      "rpc": "notifications/initialized",
+      "tool": null,
+      "status": 202,
+      "bytes": 0
+    },
+    {
+      "at": "2026-11-25T15:12:21.450Z",
+      "http": "POST",
+      "rpc": "tools/list",
+      "tool": null,
+      "status": 200,
+      "bytes": 4724
+    },
+    {
+      "at": "2026-11-25T15:13:02.210Z",
+      "http": "POST",
+      "rpc": "server/discover",
+      "tool": null,
+      "status": 400,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params"
+      },
+      "bytes": 75
+    },
+    {
+      "at": "2026-11-25T15:13:02.316Z",
+      "http": "POST",
+      "rpc": "initialize",
+      "tool": null,
+      "status": 200,
+      "bytes": 166
+    },
+    {
+      "at": "2026-11-25T15:13:02.410Z",
+      "http": "POST",
+      "rpc": "notifications/initialized",
+      "tool": null,
+      "status": 202,
+      "bytes": 0
+    },
+    {
+      "at": "2026-11-25T15:13:02.477Z",
+      "http": "POST",
+      "rpc": "tools/list",
+      "tool": null,
+      "status": 200,
+      "bytes": 4724
+    },
+    {
+      "at": "2026-11-25T15:13:24.845Z",
+      "http": "POST",
+      "rpc": "server/discover",
+      "tool": null,
+      "status": 400,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params"
+      },
+      "bytes": 75
+    },
+    {
+      "at": "2026-11-25T15:13:24.928Z",
+      "http": "POST",
+      "rpc": "initialize",
+      "tool": null,
+      "status": 401,
+      "error": {
+        "code": -32001,
+        "message": "Unauthorized"
+      },
+      "bytes": 73
+    },
+    {
+      "at": "2026-11-25T15:13:43.429Z",
+      "http": "POST",
+      "rpc": "server/discover",
+      "status": 502,
+      "upstreamError": true
+    },
+    {
+      "at": "2026-11-25T15:19:12.489Z",
+      "http": "POST",
+      "rpc": "server/discover",
+      "tool": null,
+      "status": 400,
+      "error": {
+        "code": -32602,
+        "message": "Invalid params"
+      },
+      "bytes": 75
+    },
+    {
+      "at": "2026-11-25T15:19:12.544Z",
+      "http": "POST",
+      "rpc": "initialize",
+      "tool": null,
+      "status": 200,
+      "bytes": 166
+    },
+    {
+      "at": "2026-11-25T15:19:12.593Z",
+      "http": "POST",
+      "rpc": "notifications/initialized",
+      "tool": null,
+      "status": 202,
+      "bytes": 0
+    },
+    {
+      "at": "2026-11-25T15:19:12.672Z",
+      "http": "POST",
+      "rpc": "tools/list",
+      "tool": null,
+      "status": 200,
+      "bytes": 4724
+    }
+  ]
+}
