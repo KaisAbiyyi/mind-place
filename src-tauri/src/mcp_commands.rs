@@ -127,7 +127,7 @@ async fn with_owner_authority<T: Send + 'static>(
         security
             .validate_lease(lease)
             .map_err(super::security_error)?;
-        Ok(result)
+        Ok::<T, String>(result)
     })
     .await
     .map_err(|_| "MP_MCP_AUTHORITY:Unavailable".to_owned())??;
