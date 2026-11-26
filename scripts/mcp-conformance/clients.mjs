@@ -23,6 +23,14 @@ const BRIDGE_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 /**
  * Antigravity workspace MCP config using the loopback stdio bridge so the bearer
  * key is read from TOKEN_ENV and never written to shared config or CLI flags.
+ *
+ * No per-tool `eager` flags (MP-7MCP-06): Antigravity 1.5.17 and later declare an `eager` tool to the
+ * model only while its description plus input schema is small. memory_search (about 1.5 KB cached) and
+ * context_build (about 1.9 KB) exceed that, so the model was told "tool memory_search is not enabled for
+ * server mpconformance (only memory_fetch is available)" and sent zero tools/call requests, even though
+ * tools/list was served. The default lazy mode (schema cached on disk, called through call_mcp_tool) works
+ * for the unchanged tool catalog and is what a plain user configuration gets. Which tools may run is still
+ * decided only by the session allowlist below and by Mind Place grants.
  */
 export function antigravityWorkspaceConfig(url, bridgePath = BRIDGE_PATH) {
   return {
@@ -30,11 +38,6 @@ export function antigravityWorkspaceConfig(url, bridgePath = BRIDGE_PATH) {
       [SERVER_NAME]: {
         command: process.execPath,
         args: [bridgePath, '--url', url, '--token-env', TOKEN_ENV],
-        tools: {
-          memory_search: { eager: true },
-          memory_fetch: { eager: true },
-          context_build: { eager: true },
-        },
       },
     },
   };
