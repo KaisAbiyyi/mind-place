@@ -161,17 +161,8 @@
   margin: var(--s0);
 }
 
-.ui2-chats-content p + p,
-.ui2-chats-content ul,
-.ui2-chats-content ol,
-.ui2-chats-content pre,
-.ui2-chats-content blockquote,
-.ui2-chats-content table {
-  margin: var(--s3) var(--s0) var(--s0);
-}
-
-.ui2-chats-content > :first-child {
-  margin-top: var(--s0);
+.ui2-chats-content > * + * {
+  margin-top: var(--s3);
 }
 
 .ui2-chats-content ul,

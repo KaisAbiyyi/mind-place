@@ -2,8 +2,8 @@
  * Captured pictures come back from the native `get_asset` command as data URLs.
  * These rules are the same as the classic reader's (`src/reader.ts`): only raster
  * image types, a size cap, an exact `data:<mime>;base64,` prefix and a strict
- * base64 body. The classic code is intentionally not touched; a test pins both
- * to the same behavior.
+ * base64 body. The classic code is intentionally not touched (its copy is
+ * private); `test/ui2-archive-display.test.ts` pins this module's behavior.
  */
 export const ALLOWED_IMAGE_MIME_TYPES: ReadonlySet<string> = new Set([
   "image/avif",
