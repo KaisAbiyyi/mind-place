@@ -1,4 +1,5 @@
 import type { ClipboardWriter, Invoke } from "../../reader.js";
+import { createArchivePage } from "../chats/page.js";
 import { createConnectionsPage } from "../connections/page.js";
 import type { Ui2PageMap } from "./page.js";
 
@@ -11,6 +12,12 @@ export interface Ui2PageServices {
 /** Pages the shell can mount. Destinations not listed keep the "not ready" placeholder. */
 export function createUi2Pages(services: Ui2PageServices): Ui2PageMap {
   return {
+    archive: (context) =>
+      createArchivePage({
+        ...context,
+        invoke: services.invoke,
+        ...(services.clipboard ? { clipboard: services.clipboard } : {}),
+      }),
     connections: ({ doc, i18n }) =>
       createConnectionsPage({
         doc,
