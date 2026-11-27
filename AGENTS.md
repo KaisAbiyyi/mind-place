@@ -1,5 +1,9 @@
 # Working on Mind Place
 
+> **Model roles (owner decision, 27 November 2026, all projects):** only Opus-price-tier models may write plans, work packages, ADRs or DAG changes (Claude Opus 5.5 or higher, Gemini 4 Neon, ChatGPT Astra). Independent review uses a Sonnet-price-tier model of Claude Sonnet 5.5 (effort High) capability. Curation workers may be Haiku-class. A plan from a lower tier is a draft until a planner-class model adopts it. Source: Notion "Projects" page.
+>
+> **Current priority (27 November 2026):** Release 1 and Release 2 work packages in `docs/implementation-plan/2026-11-27-release-1-2-work-packages.md`.
+
 > **Independent reviewer (owner decision, 26 November 2026):** Claude Sonnet 5.5 (effort High), replacing Antigravity · Gemini 4 Hydrogen (xhigh). Review stays remote and read-only; merge only after owner approval for the reviewed PR and SHA. Source: Notion "Projects" page.
 
 ## Universal execution board — direct successors only (2026-10-24)

@@ -2,6 +2,10 @@
 
 This file is the small execution-order pointer for cloud agents. Strategy lives in `../BIG-IMPLEMENTATION-PLAN.md`; detailed design notes live beside this file. If older phase labels conflict with this file, follow this file for the current execution order.
 
+## Current priority — Release 1 and Release 2 work packages (owner decision 2026-11-27)
+
+Execution order now follows [2026-11-27-release-1-2-work-packages.md](2026-11-27-release-1-2-work-packages.md). **R1:** import from ChatGPT, Gemini and Claude; MCP read from Claude Code, Claude Desktop, Antigravity and Gemini CLI; agent-swarm curation per topic into updatable Constellation nodes ([Curated Node Format](../curation/CURATED-NODE-FORMAT.md)). **R2:** Claude and Gemini write curated data from the chat (one topic or the active chat); Workspace task management with automatic lanes, claims and agent hand-off. Other v1.0 tasks keep their scope and come after these packages. Live status stays in Notion. Sections below are history.
+
 ## Repository governance gate — MP-GOV-01..04 (2026-10-31)
 
 The repository governance track is independent of product phase ordering. MP-GOV-01 prepares the owner-controlled PR policy and runbook; MP-GOV-02 audits fork-PR workflow trust; MP-GOV-03 hardens read-only AI review; MP-GOV-04 is the owner-only settings application and exact-readback gate. Agents may implement/test on isolated branches or contributor-owned forks, AI review is read-only, and only the owner may approve and manually merge. Auto-merge, merge queues, Brokers, and bot/AI/App bypass are not authorized.
