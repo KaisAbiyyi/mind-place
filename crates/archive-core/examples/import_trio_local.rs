@@ -218,17 +218,17 @@ fn verify_raw_blobs(root: &Path) -> Result<(u64, u64), BoxError> {
     Ok((blobs, corrupt))
 }
 
-/// A content-free category: quoted parts and digits are masked.
+/// A content-free category: everything from the first quote character on is dropped (a quoted
+/// part may echo a provider value), and digits are masked. Reasons and warnings are fixed texts
+/// written by the importers; only their fixed prefix is printed.
 fn category(text: &str) -> String {
     let mut out = String::new();
-    let mut quoted = false;
     for c in text.chars().take(160) {
         match c {
-            '\'' => {
-                quoted = !quoted;
-                out.push_str(if quoted { "'…" } else { "'" });
+            '\'' | '"' | '`' => {
+                out.push('…');
+                break;
             }
-            _ if quoted => {}
             c if c.is_ascii_digit() => {
                 if !out.ends_with('#') {
                     out.push('#');
@@ -238,4 +238,20 @@ fn category(text: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn categories_never_print_quoted_text() {
+        assert_eq!(
+            super::category("Sender 'it's private text' is not a known role"),
+            "Sender …"
+        );
+        assert_eq!(super::category("Content \"secret\" here"), "Content …");
+        assert_eq!(
+            super::category("More than 100 files on one message"),
+            "More than # files on one message"
+        );
+    }
 }

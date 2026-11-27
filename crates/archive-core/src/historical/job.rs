@@ -1072,6 +1072,7 @@ impl ArchiveStore {
             };
             let mut records = 0u64;
             let mut record_bytes = 0u64;
+            let mut shapes = ShapeTally::default();
             match member.kind {
                 MemberKind::ChatgptConversations => {
                     let mut tracker = std::mem::take(&mut stager.tracker);
@@ -1082,6 +1083,7 @@ impl ArchiveStore {
                         |span, item| {
                             records += 1;
                             record_bytes += span.length;
+                            shapes.observe(member.kind, &item);
                             stager
                                 .add(&ctx, span, item, records - 1)
                                 .map_err(|error| Box::new(error) as Box<dyn std::error::Error>)
@@ -1102,6 +1104,7 @@ impl ArchiveStore {
                         |span, item| {
                             records += 1;
                             record_bytes += span.length;
+                            shapes.observe(member.kind, &item);
                             stager
                                 .add(&ctx, span, item, records - 1)
                                 .map_err(|error| Box::new(error) as Box<dyn std::error::Error>)
@@ -1139,6 +1142,15 @@ impl ArchiveStore {
                         stager.add(&ctx, span, item, records - 1)?;
                     }
                 }
+            }
+            // A conversations file of another provider (ChatGPT and Claude both name it
+            // `conversations.json`) would be stored as raw evidence under the wrong provider
+            // label, permanently. Refuse before anything is published.
+            if shapes.foreign_only() {
+                return Err(coded(
+                    "E_PROVIDER_MISMATCH",
+                    "This export looks like it belongs to a different provider",
+                ));
             }
             let (bytes, digest) = reader
                 .finish_to_eof()
@@ -1523,6 +1535,43 @@ fn tally(receipt: &mut ImportJobReceipt, done: &ItemReceipt) {
 
 const ROOT_DOMAIN: &[u8] = b"mind-place/import-staged-root/v1\0";
 
+/// Counts, per conversations member, records that have this provider's record shape and records
+/// that have the other provider's shape. Only a member with foreign records and none of its own
+/// is refused; unrecognisable records stay raw-only evidence as before.
+#[derive(Default)]
+struct ShapeTally {
+    own: u64,
+    foreign: u64,
+}
+
+impl ShapeTally {
+    fn observe(&mut self, kind: MemberKind, item: &ReconciledItem) {
+        use crate::importers::{conversation_record_shape, RecordShape};
+        let payload = match item {
+            // A projection always has its own provider's shape.
+            ReconciledItem::Conversation { .. } => {
+                self.own += 1;
+                return;
+            }
+            ReconciledItem::PreservedRawOnly { evidence, .. } => &evidence.payload_bytes,
+        };
+        let own = match kind {
+            MemberKind::ChatgptConversations => RecordShape::ChatGpt,
+            MemberKind::ClaudeConversations => RecordShape::Claude,
+            _ => return,
+        };
+        match conversation_record_shape(payload) {
+            shape if shape == own => self.own += 1,
+            RecordShape::Unknown => {}
+            _ => self.foreign += 1,
+        }
+    }
+
+    fn foreign_only(&self) -> bool {
+        self.foreign > 0 && self.own == 0
+    }
+}
+
 struct MemberCtx {
     index: u32,
     path: String,
@@ -1677,6 +1726,17 @@ fn normalize_members(
         return Err(coded(
             "E_MEMBERS",
             "An import member does not belong to the authorized provider",
+        ));
+    }
+    // Each member's kind must be the one its file name implies (for example `projects.json` is
+    // never parsed as conversations); account files never get a kind at all.
+    if members
+        .iter()
+        .any(|m| MemberKind::for_member(provider, &m.path) != Some(m.kind))
+    {
+        return Err(coded(
+            "E_MEMBERS",
+            "An import member's kind does not match its file",
         ));
     }
     // Account files (name, e-mail, phone) are never staged, whatever kind a caller claims.

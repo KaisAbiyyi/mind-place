@@ -280,7 +280,7 @@ fn choose_members(
             "No conversations file was found in this export",
         ));
     }
-    paths
+    let members = paths
         .into_iter()
         .map(|path| match MemberKind::for_member(provider, &path) {
             Some(kind) => Ok(ImportMember { path, kind }),
@@ -289,7 +289,19 @@ fn choose_members(
                 "An import member is not a measured file of this provider",
             )),
         })
-        .collect()
+        .collect::<Result<Vec<_>, String>>()?;
+    // A Claude projects file alone imports no conversation: say so instead of running a job
+    // that projects nothing.
+    if members
+        .iter()
+        .all(|member| member.kind == MemberKind::ClaudeProjects)
+    {
+        return Err(coded(
+            "E_IMPORT_NO_MEMBERS",
+            "No conversations file was found in this export",
+        ));
+    }
+    Ok(members)
 }
 
 /// Bridges job checkpoints to throttled count-only events and honours cancel at points where
@@ -864,6 +876,26 @@ mod tests {
         .unwrap_err();
         assert!(
             explicit_member_error.starts_with("E_IMPORT_MEMBERS"),
+            "unexpected refusal code"
+        );
+        // A projects file alone is not an import of conversations.
+        let projects_only = run_import(
+            &fx.store,
+            &fx.gate,
+            lease,
+            CRED,
+            StartRequest {
+                provider: "claude",
+                path: &path,
+                source_token: &report.source_token,
+                members: Some(&["projects.json".to_owned()]),
+            },
+            &sink,
+            &AtomicBool::new(false),
+        )
+        .unwrap_err();
+        assert!(
+            projects_only.starts_with("E_IMPORT_NO_MEMBERS"),
             "unexpected refusal code"
         );
     }

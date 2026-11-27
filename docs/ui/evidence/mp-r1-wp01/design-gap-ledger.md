@@ -24,8 +24,9 @@ Scope of UI change in this work package: **catalog strings only** (EN + ID). No 
 | Guide | The review step shows `imp.note` ("Some exports hold only the active branch of a conversation. Anything missing is marked, never invented."). Nothing Claude-specific. |
 | Classification | Warning (informational), same place as `imp.note` on the Review step, shown only when the kind is Claude. |
 | Pattern | Same small muted paragraph as `imp.note`. |
-| Copy (EN) | `import.kind.claudeNote` "Claude exports do not say which model answered, and may not show edited branches. Anything missing is marked, never invented." |
-| Copy (ID) | `import.kind.claudeNote` "Ekspor Claude tidak menyebut model yang menjawab, dan mungkin tidak memuat cabang yang diedit. Yang tidak ada ditandai, tidak pernah dikarang." |
+| Copy (EN) | `import.kind.claudeNote` "Claude exports do not say which model answered. Chats with edited messages are kept safely but may not appear in your archive yet. Anything missing is marked, never invented." |
+| Copy (ID) | `import.kind.claudeNote` "Ekspor Claude tidak menyebut model yang menjawab. Obrolan dengan pesan yang diedit tetap disimpan dengan aman, tetapi mungkin belum muncul di arsip. Yang tidak ada ditandai, tidak pernah dikarang." |
+| Why this wording | A Claude chat whose message links fork (an edited message) is kept as raw evidence only, so it does not appear in the reader yet. The first draft ("may not show edited branches") understated that (independent review, P2). |
 | Screenshots | **NOT_RUN** (as above). |
 
 ## Also changed

@@ -110,8 +110,9 @@ const ID_KEYS = new Set(['id', 'parent', 'children', 'current_node', 'conversati
   // Claude.ai export
   'uuid', 'parent_message_uuid', 'file_uuid', 'project_uuid']);
 const ID_CONTAINER_KEYS = new Set(['mapping']);
-// The null-UUID parent of a Claude export's first message is structure, not an identifier.
-const KEEP_ID_LITERALS = new Set(['client-created-root', 'root', '00000000-0000-4000-8000-000000000000']);
+// Root parents of a Claude export's first message (the sentinel and the nil UUID) are structure, not identifiers.
+const KEEP_ID_LITERALS = new Set(['client-created-root', 'root', '00000000-0000-4000-8000-000000000000',
+  '00000000-0000-0000-0000-000000000000']);
 const TIMESTAMP_KEY = /(time|timestamp|created|updated|date|_at)$/i;
 // ISO 8601 date-time strings (Claude.ai export `created_at`, `start_timestamp`, ...).
 const ISO_TIMESTAMP = /^(\d{4}-\d{2}-\d{2})([Tt ])(\d{2}):(\d{2}):(\d{2})(\.\d{1,9})?(Z|z|[+-]\d{2}:?\d{2})?$/;

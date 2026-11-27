@@ -174,7 +174,7 @@ export const ID_CATALOG: Record<Ui2TranslationKey, string> = {
   "import.kind.claudeHint": "File .zip yang kamu unduh dari pengaturan Claude, di bagian Privasi",
   "import.kind.gemini": "Gemini (Google Takeout)",
   "import.kind.geminiHint": "File .zip dari Google Takeout yang memuat aktivitas Gemini-mu",
-  "import.kind.claudeNote": "Ekspor Claude tidak menyebut model yang menjawab, dan mungkin tidak memuat cabang yang diedit. Yang tidak ada ditandai, tidak pernah dikarang.",
+  "import.kind.claudeNote": "Ekspor Claude tidak menyebut model yang menjawab. Obrolan dengan pesan yang diedit tetap disimpan dengan aman, tetapi mungkin belum muncul di arsip. Yang tidak ada ditandai, tidak pernah dikarang.",
   "import.pasteNotes": "Impor berkas transkrip (hadir nanti)",
   "import.encryptedNotice": "Impor ekspor saat ini hanya tersedia untuk arsip tanpa enkripsi.",
   "import.inProgress": "Mengimpor dan memeriksa catatan...",

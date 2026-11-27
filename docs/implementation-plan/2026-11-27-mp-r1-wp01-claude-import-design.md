@@ -78,6 +78,19 @@ The signed-off guide's Import dialog lists ChatGPT, Gemini (Takeout) and a trans
 | N2 fallback to top-level `text` | Tightened (section 3, Content) |
 | N3 reader label/date for `export-import` | Pre-existing, outside WP01 |
 
+### Review round 2 (independent reviewer Claude Sonnet 5.5 High, read-only, advisory; APPROVE-ADVISORY at `4226f14`)
+
+| Item | Decision |
+| --- | --- |
+| P2 non-array `content` (and P3 non-array `attachments`/`files`) could still be `complete` | Fixed: a present, non-null, non-array value is a completeness gap ("unexpected shape") |
+| P2 an export imported under the other provider is stored with a wrong, immutable provider label | Fixed: while staging, a ChatGPT/Claude conversations member whose records have the other provider's top-level shape (`mapping` vs `chat_messages`) and none of its own fails the job with `E_PROVIDER_MISMATCH` before anything is published. Records of no known shape stay raw-only as before |
+| P2 Claude note understated fork handling | Reworded EN+ID: chats with edited messages are kept safely but may not appear yet; ledger updated |
+| P3 non-string parent link read as "no links" | Fixed: any present non-null link counts, so a wrong-typed link makes the chain `Broken` (raw-only), as section 3 says |
+| P3 sanitizer pseudonymized the nil UUID root | Fixed: nil UUID kept as a structural literal |
+| P3 harness category filter could print quoted text | Fixed: output stops at the first quote character |
+| P3 `projects.json`-only source; kind not checked against file name | Fixed: the commands refuse a projects-only selection (`E_IMPORT_NO_MEMBERS`); the job refuses a member whose kind is not the one its file name implies (`E_MEMBERS`) |
+| P3 no shard-duplicate test | Added (`duplicate_claude_conversations_across_shards_get_distinct_identities`) |
+
 ## 9. Residual risks
 
 1. Real Claude export layout unverified (keys, sharding, presence of `parent_message_uuid`, extra files such as memories). The explicit member list is the escape hatch; unexpected keys stay in raw evidence.

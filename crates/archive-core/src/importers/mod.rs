@@ -93,6 +93,42 @@ pub(crate) fn disambiguated_uuid(id: &str, count: usize) -> String {
     )
 }
 
+/// Which provider's conversation record a JSON record looks like, from its top-level keys only.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RecordShape {
+    /// A ChatGPT export conversation: has `mapping` and no `chat_messages`.
+    ChatGpt,
+    /// A Claude.ai export conversation: has `chat_messages`.
+    Claude,
+    Unknown,
+}
+
+/// Classifies one record without building a value tree (`IgnoredAny`). Used to refuse an export
+/// imported under the wrong provider before it is stored with a wrong provenance label.
+pub fn conversation_record_shape(raw: &[u8]) -> RecordShape {
+    #[derive(Deserialize)]
+    struct Keys {
+        #[serde(default)]
+        mapping: Option<de::IgnoredAny>,
+        #[serde(default)]
+        chat_messages: Option<de::IgnoredAny>,
+    }
+    // A derived struct also accepts a JSON array (by position); only objects have a shape.
+    if raw.iter().find(|byte| !byte.is_ascii_whitespace()) != Some(&b'{') {
+        return RecordShape::Unknown;
+    }
+    match serde_json::from_slice::<Keys>(raw) {
+        Ok(Keys {
+            chat_messages: Some(_),
+            ..
+        }) => RecordShape::Claude,
+        Ok(Keys {
+            mapping: Some(_), ..
+        }) => RecordShape::ChatGpt,
+        _ => RecordShape::Unknown,
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct BatchImportReceipt {
     pub total_records_scanned: usize,
@@ -601,6 +637,28 @@ mod tests {
     fn bounded_stream_propagates_callback_errors() {
         let result = stream_bounded_top_level_array(&b"[1,2]"[..], LIMITS, |_| Err("stop".into()));
         assert_eq!(result.unwrap_err().to_string(), "stop");
+    }
+
+    #[test]
+    fn record_shapes_are_told_apart_by_top_level_keys_only() {
+        assert_eq!(
+            conversation_record_shape(br#"{"id":"x","mapping":{},"current_node":null}"#),
+            RecordShape::ChatGpt
+        );
+        assert_eq!(
+            conversation_record_shape(br#"{"uuid":"x","chat_messages":[]}"#),
+            RecordShape::Claude
+        );
+        // A nested key does not count, null is absence, and non-objects are unknown.
+        for raw in [
+            &br#"{"x":{"chat_messages":[]}}"#[..],
+            br#"{"mapping":null}"#,
+            b"[1]",
+            b"7",
+            b"not json",
+        ] {
+            assert_eq!(conversation_record_shape(raw), RecordShape::Unknown);
+        }
     }
 
     #[test]

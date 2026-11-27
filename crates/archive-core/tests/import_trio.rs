@@ -244,6 +244,113 @@ fn the_three_official_exports_import_raw_first_from_sanitized_fixtures() {
     }
 }
 
+/// Runs one import and returns the error text (the import must fail).
+fn import_error(fx: &Fx, provider: &str, source: &Path, members: &[ImportMember]) -> String {
+    let manifest = SourceManifest::measure(source, ManifestLimits::default()).unwrap();
+    let lease = fx.gate.require_unlocked().unwrap();
+    let cap = fx
+        .gate
+        .authorize_import_session(
+            lease,
+            CRED,
+            provider,
+            source,
+            *manifest.sha256(),
+            Duration::from_secs(300),
+        )
+        .unwrap();
+    let request = SourceImportRequest::new(&fx.gate, lease, &cap, members);
+    fx.store
+        .import_authorized_source(&request)
+        .unwrap_err()
+        .to_string()
+}
+
+#[test]
+fn an_export_imported_under_the_other_provider_is_refused_before_anything_is_published() {
+    let fx = Fx::new();
+    let chatgpt = fx.export(
+        "chatgpt",
+        &[("conversations.json", "chatgpt-sanitized.json")],
+    );
+    let claude = fx.export("claude", &[("conversations.json", "claude-sanitized.json")]);
+    for (provider, source, kind) in [
+        ("claude", &chatgpt, MemberKind::ClaudeConversations),
+        ("chatgpt", &claude, MemberKind::ChatgptConversations),
+    ] {
+        let members = [ImportMember {
+            path: "conversations.json".into(),
+            kind,
+        }];
+        let error = import_error(&fx, provider, source, &members);
+        assert!(
+            error.starts_with("E_PROVIDER_MISMATCH"),
+            "{provider}: {error}"
+        );
+    }
+    assert!(fx.files_under("imports/raw").is_empty());
+    assert!(fx.files_under("imports/evidence").is_empty());
+    assert!(fx.files_under("conversations").is_empty());
+
+    // Records of no known shape stay raw-only evidence, as before (not a provider mismatch).
+    let odd = fx.home.path().join("odd");
+    std::fs::create_dir_all(&odd).unwrap();
+    std::fs::write(odd.join("conversations.json"), br#"[1, {"a": 2}]"#).unwrap();
+    let receipt = fx.import("claude", &odd);
+    assert_eq!((receipt.imported, receipt.raw_only), (0, 2));
+}
+
+#[test]
+fn duplicate_claude_conversations_across_shards_get_distinct_identities() {
+    let fx = Fx::new();
+    let claude = fx.export(
+        "claude",
+        &[
+            ("conversations-000.json", "claude-sanitized.json"),
+            ("conversations-001.json", "claude-sanitized.json"),
+        ],
+    );
+    let single = ClaudeExportParser::parse_conversations_json(
+        std::fs::read(claude.join("conversations-000.json"))
+            .unwrap()
+            .as_slice(),
+    )
+    .unwrap();
+    let (projected, _) = counts(&single);
+    let receipt = fx.import("claude", &claude);
+    // The tracker spans both shards: the second copy of each conversation is a new identity,
+    // not a duplicate write of the first.
+    assert_eq!(receipt.imported, 2 * projected);
+    assert_eq!(receipt.deduplicated, 0);
+    let conversations = std::fs::read_dir(fx.store.root().join("conversations"))
+        .unwrap()
+        .count() as u64;
+    assert_eq!(conversations, 2 * projected);
+}
+
+#[test]
+fn a_member_kind_that_does_not_match_its_file_is_refused() {
+    let fx = Fx::new();
+    let claude = fx.export(
+        "claude",
+        &[
+            ("conversations.json", "claude-sanitized.json"),
+            ("projects.json", "claude-projects-sanitized.json"),
+        ],
+    );
+    for (path, kind) in [
+        ("conversations.json", MemberKind::ClaudeProjects),
+        ("projects.json", MemberKind::ClaudeConversations),
+    ] {
+        let members = [ImportMember {
+            path: path.into(),
+            kind,
+        }];
+        let error = import_error(&fx, "claude", &claude, &members);
+        assert!(error.starts_with("E_MEMBERS"), "{path}: {error}");
+    }
+}
+
 #[test]
 fn an_account_file_named_explicitly_is_refused_before_anything_is_staged() {
     let fx = Fx::new();

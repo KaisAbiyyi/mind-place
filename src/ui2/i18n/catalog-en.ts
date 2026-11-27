@@ -172,7 +172,7 @@ export const EN_CATALOG = {
   "import.kind.claudeHint": "The .zip you download from Claude settings, under Privacy",
   "import.kind.gemini": "Gemini (Google Takeout)",
   "import.kind.geminiHint": "The .zip from Google Takeout with your Gemini activity",
-  "import.kind.claudeNote": "Claude exports do not say which model answered, and may not show edited branches. Anything missing is marked, never invented.",
+  "import.kind.claudeNote": "Claude exports do not say which model answered. Chats with edited messages are kept safely but may not appear in your archive yet. Anything missing is marked, never invented.",
   "import.pasteNotes": "Transcript file import (coming later)",
   "import.encryptedNotice": "Export import is available only for unencrypted archives right now.",
   "import.inProgress": "Importing and checking records...",

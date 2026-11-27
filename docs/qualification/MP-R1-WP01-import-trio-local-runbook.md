@@ -52,6 +52,7 @@ The harness prints counts, member names of the export (for example `conversation
 | reasons | Claude: projects are always raw-only; conversations whose parent links fork are raw-only by design. ChatGPT: branching DAGs without `current_node` are raw-only by design. |
 | `completeness` | Claude exports without parent links, or with thinking/tool blocks, are `partial` by design (nothing is guessed). |
 | `raw_blobs_hash_mismatch` | must be `0`. |
+| error `E_PROVIDER_MISMATCH` | the export belongs to the other provider (ChatGPT and Claude both use `conversations.json`). Nothing was written; rerun with the right provider. If you are sure the provider is right, report it: the layout differs from the documented one. |
 
 ## Report back (copy into the PR or the Notion card)
 

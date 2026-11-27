@@ -183,9 +183,13 @@ impl ClaudeExportParser {
             .and_then(Value::as_str)
             .unwrap_or("");
         let messages = conversation.get("chat_messages").and_then(Value::as_array);
+        // Any present, non-null link counts: a link of the wrong type makes the chain `Broken`
+        // (raw-only) instead of being mistaken for "no links".
         let has_parent_links = messages.is_some_and(|list| {
-            list.iter()
-                .any(|m| m.get("parent_message_uuid").is_some_and(Value::is_string))
+            list.iter().any(|m| {
+                m.get("parent_message_uuid")
+                    .is_some_and(|link| !link.is_null())
+            })
         });
         let project_uuid = conversation
             .get("project_uuid")
@@ -488,6 +492,13 @@ fn convert_message(raw: &Value, id: &str) -> Converted {
 
     let mut text = String::new();
     let content = raw.get("content").and_then(Value::as_array);
+    if raw
+        .get("content")
+        .is_some_and(|c| !c.is_null() && !c.is_array())
+    {
+        // A shape nobody has verified: never claim it was read.
+        gap.get_or_insert_with(|| "Message content has an unexpected shape".to_string());
+    }
     let mut text_blocks = 0usize;
     if let Some(blocks) = content {
         for block in blocks {
@@ -546,8 +557,13 @@ fn convert_message(raw: &Value, id: &str) -> Converted {
 
     let mut attachments = Vec::new();
     for (list_key, from_files) in [("attachments", false), ("files", true)] {
-        let Some(list) = raw.get(list_key).and_then(Value::as_array) else {
-            continue;
+        let list = match raw.get(list_key) {
+            None | Some(Value::Null) => continue,
+            Some(Value::Array(list)) => list,
+            Some(_) => {
+                gap.get_or_insert_with(|| "A file list has an unexpected shape".to_string());
+                continue;
+            }
         };
         for (index, entry) in list.iter().enumerate() {
             if attachments.len() >= MAX_ATTACHMENTS_PER_MESSAGE {
@@ -860,6 +876,46 @@ mod tests {
             message(M2, "assistant", Some(M1), text("b")),
         ]));
         assert_eq!(capture.completeness, "complete");
+    }
+
+    #[test]
+    fn unexpected_content_or_file_list_shapes_are_gaps_never_complete() {
+        for (field, value) in [
+            ("content", json!({"type": "text", "text": "x"})),
+            ("content", json!("plain")),
+            ("attachments", json!({"file_name": "a.txt"})),
+            ("files", json!("a.png")),
+        ] {
+            let mut odd = message(M2, "assistant", Some(M1), text("answer"));
+            odd[field] = value;
+            odd["text"] = "answer".into();
+            let capture = projected(conversation(vec![
+                message(M1, "human", Some(ROOT_PARENT_SENTINEL), text("q")),
+                odd,
+            ]));
+            assert_eq!(capture.completeness, "partial", "{field}");
+            assert!(
+                capture
+                    .warnings
+                    .iter()
+                    .any(|w| w.contains("unexpected shape")),
+                "{field}: {:?}",
+                capture.warnings
+            );
+        }
+    }
+
+    #[test]
+    fn non_string_parent_links_are_refused_not_read_as_missing() {
+        for link in [json!(7), json!({"uuid": M1}), json!(true)] {
+            let mut second = message(M2, "assistant", None, text("b"));
+            second["parent_message_uuid"] = link.clone();
+            let reason = refused(conversation(vec![
+                message(M1, "human", None, text("a")),
+                second,
+            ]));
+            assert!(reason.contains("one linear chain"), "{link}: {reason}");
+        }
     }
 
     #[test]
