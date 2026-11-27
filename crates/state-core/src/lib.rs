@@ -122,6 +122,8 @@ pub enum StateError {
     RevisionConflict,
     #[error("curated record limit exceeded")]
     CuratedLimit,
+    #[error("encrypted authoritative state schema v{current} requires explicit backed-up migration to v{target}")]
+    MigrationRequired { current: i64, target: i64 },
 }
 impl StateError {
     pub fn code(&self) -> &'static str {
@@ -143,6 +145,7 @@ impl StateError {
             Self::VaultRequired => "MP_PRIVACY_REQUIRES_VAULT",
             Self::RevisionConflict => "MP_CURATED_REVISION_CONFLICT",
             Self::CuratedLimit => "MP_CURATED_LIMIT",
+            Self::MigrationRequired { .. } => "MP_STATE_MIGRATION_REQUIRED",
         }
     }
 }
@@ -321,7 +324,13 @@ impl StateStore {
             if existed && cipher_key.is_some() {
                 // Encrypted schema migrations require separately consented staging
                 // (`migrate_encrypted_with_backup`); ordinary snapshots would leak plaintext.
-                return Err(StateError::Corrupt);
+                if previous_version == 0 {
+                    return Err(StateError::Corrupt);
+                }
+                return Err(StateError::MigrationRequired {
+                    current: previous_version,
+                    target: SCHEMA_VERSION,
+                });
             }
             if existed {
                 backup(&db, parent, previous_version)?;
@@ -332,8 +341,10 @@ impl StateStore {
             apply_pending_migrations_tx(&tx, previous_version)?;
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             tx.commit()?;
+            validate(&db)?;
+        } else if !existed {
+            validate(&db)?;
         }
-        validate(&db)?;
         drop(db);
         FileExt::unlock(&lock)?;
         Ok(Self { path, cipher_key })

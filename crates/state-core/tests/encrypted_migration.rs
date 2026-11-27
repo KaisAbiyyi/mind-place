@@ -67,11 +67,16 @@ fn encrypted_fixture_vault_migrates_v9_to_v10_with_encrypted_backup_only() {
         conn.pragma_update(None, "user_version", 9).unwrap();
     }
 
-    // Ordinary `open_encrypted` refuses silent upgrade without explicit encrypted backup.
+    // Ordinary `open_encrypted` refuses silent upgrade and surfaces explicit migration-required code.
+    let err = StateStore::open_encrypted(&db_path, key, &gate, lease).unwrap_err();
     assert!(matches!(
-        StateStore::open_encrypted(&db_path, key, &gate, lease),
-        Err(StateError::Corrupt)
+        err,
+        StateError::MigrationRequired {
+            current: 9,
+            target: 10
+        }
     ));
+    assert_eq!(err.code(), "MP_STATE_MIGRATION_REQUIRED");
     assert!(!vault_root.join("state-backups").exists());
 
     // Backup inside vault root is refused to preserve vault backup inventory rules.

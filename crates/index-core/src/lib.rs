@@ -134,6 +134,9 @@ impl IndexError {
             Self::Io(_) => "MP_INDEX_IO",
             Self::Sql(_) => "MP_INDEX_SQL",
             Self::Archive(_) => "MP_INDEX_ARCHIVE",
+            Self::State(mind_place_state::StateError::MigrationRequired { .. }) => {
+                "MP_STATE_MIGRATION_REQUIRED"
+            }
             Self::State(_) => "MP_INDEX_AUTHORITY",
             Self::UnsafePath => "MP_INDEX_UNSAFE_PATH",
             Self::ForeignDatabase => "MP_INDEX_FOREIGN_DATABASE",
