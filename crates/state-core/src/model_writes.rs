@@ -11,12 +11,19 @@
 //! 4. Scope is confined: cloud tier may write only into its own quarantine scope;
 //!    local tier only unscoped or its own quarantine scope. A scope label is never
 //!    a model permission (MP-9C).
+//! 5. Every cited evidence source must be readable by the writing client right
+//!    now (active `read` capability plus a per-source read grant). A source the
+//!    client cannot read, an unregistered id and a redacted source all yield the
+//!    same opaque `MemoryDenied`, checked before any lookup that could answer
+//!    `InvalidValue`, so the error cannot be used to probe whether an id exists.
 //!
 //! The tier is supplied by the trusted transport from the credential class, never
 //! from request content. No production caller exists yet (MP-7MCP-03/05).
 use crate::{
+    client_read_grants::client_can_read_source,
     memory_writes::{MemoryWrite, MemoryWriteReceipt},
     private_scopes::{require_owner_admin, PrivateScope},
+    source_redaction::source_is_redacted,
     valid_id, ClaimEvidence, MemoryClaim, Result, StateError, StateStore,
 };
 use rusqlite::{params, OptionalExtension, TransactionBehavior};
@@ -72,7 +79,9 @@ pub(crate) fn enforce_model_write(
     // Model credentials may only create. Superseding or forgetting would let a
     // model change the standing of an owner-authored claim.
     let MemoryWrite::Create {
-        claim, scope_id, ..
+        claim,
+        scope_id,
+        evidence,
     } = operation
     else {
         return Err(StateError::MemoryDenied);
@@ -81,20 +90,52 @@ pub(crate) fn enforce_model_write(
         return Err(StateError::MemoryDenied);
     }
     let own = quarantine_scope_id(client_id).map_err(|_| StateError::MemoryDenied)?;
-    match (tier, scope_id) {
-        (CredentialTier::Cloud, Some(scope)) if *scope == own => {}
-        (CredentialTier::Local, None) => return Ok(()),
-        (CredentialTier::Local, Some(scope)) if *scope == own => {}
+    let quarantined = match (tier, scope_id) {
+        (CredentialTier::Local, None) => false,
+        (CredentialTier::Cloud | CredentialTier::Local, Some(scope)) if *scope == own => true,
         // Cloud without scope, or any foreign/ordinary scope: opaque denial.
         _ => return Err(StateError::MemoryDenied),
+    };
+    if quarantined {
+        let provisioned: bool = db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM scopes WHERE id=?1)",
+            [&own],
+            |r| r.get(0),
+        )?;
+        if !provisioned {
+            return Err(StateError::MemoryDenied);
+        }
     }
-    let provisioned: bool = db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM scopes WHERE id=?1)",
-        [&own],
-        |r| r.get(0),
-    )?;
-    if !provisioned {
-        return Err(StateError::MemoryDenied);
+    enforce_evidence_read_authority(db, client_id, evidence)
+}
+
+/// Invariant 5. Runs before `add_evidence`, whose registry and redaction
+/// checks would otherwise distinguish an unknown id (`InvalidValue`) from a
+/// known one. The grant is checked first and short-circuits, so an ungranted
+/// id never reaches the registry lookup. Shape limits mirror `add_evidence`
+/// and depend on no stored state.
+fn enforce_evidence_read_authority(
+    db: &rusqlite::Connection,
+    client_id: &str,
+    evidence: &[ClaimEvidence],
+) -> Result<()> {
+    if evidence.is_empty() || evidence.len() > 32 {
+        return Err(StateError::InvalidValue);
+    }
+    for entry in evidence {
+        if !client_can_read_source(db, client_id, &entry.source_ref)? {
+            return Err(StateError::MemoryDenied);
+        }
+        // A grant can name an id that is not (or no longer) a usable source:
+        // grants are not tied to registration, and redaction happens later.
+        let registered: bool = db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM source_identities WHERE id=?1)",
+            [&entry.source_ref],
+            |r| r.get(0),
+        )?;
+        if !registered || source_is_redacted(db, &entry.source_ref)? {
+            return Err(StateError::MemoryDenied);
+        }
     }
     Ok(())
 }
