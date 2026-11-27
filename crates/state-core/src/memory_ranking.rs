@@ -604,9 +604,17 @@ pub fn serialize_ranked_context(ranked: &[RankedClaim]) -> Result<String> {
         } else {
             "DO_NOT_ASSERT_AS_FACT"
         };
+        // MP-SEC-11: authorship is part of every line so a model-authored
+        // candidate can never be mistaken for an owner statement. The value is
+        // closed-enum at the database CHECK, never free text.
         let line = format!(
-            "- [{}; {}; revision={}; id={}] {}\n",
-            reliability, item.disposition, item.claim.revision, item.claim.id, statement
+            "- [{}; {}; asserted_by={}; revision={}; id={}] {}\n",
+            reliability,
+            item.disposition,
+            item.claim.asserted_by,
+            item.claim.revision,
+            item.claim.id,
+            statement
         );
         result.push_str(&line);
     }

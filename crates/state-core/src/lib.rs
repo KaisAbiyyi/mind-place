@@ -20,6 +20,7 @@ mod memory;
 mod memory_inspection;
 mod memory_ranking;
 mod memory_writes;
+mod model_writes;
 mod ntfs;
 mod private_scopes;
 mod source_forget;
@@ -42,6 +43,9 @@ pub use memory_ranking::{
     RankingPolicy, RelationKind,
 };
 pub use memory_writes::{MemoryWrite, MemoryWriteReceipt};
+pub use model_writes::{
+    quarantine_scope_id, CredentialTier, ModelClaimProposal, QUARANTINE_SCOPE_PREFIX,
+};
 pub use private_scopes::PrivateScope;
 pub use source_forget::{SourceForgetPreview, SourceForgetProgress};
 pub use source_redaction::SourceRedactionReceipt;
