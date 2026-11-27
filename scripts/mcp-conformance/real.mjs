@@ -77,6 +77,16 @@ function chainHonest(chain) {
   return null;
 }
 
+/**
+ * A self-updating client can change version in the middle of a run (Antigravity did between its version
+ * probe and its first scenario, and the new build declared tools differently). Evidence from a run that
+ * spans two versions is attributable to neither, so the harness reports it instead of recording one version.
+ */
+export function clientVersionDrift(probeVersion, runVersions) {
+  const seen = [...new Set([probeVersion, ...runVersions].filter((v) => typeof v === 'string' && v !== ''))];
+  return seen.length > 1 ? `the client changed version during the run (${seen.join(' -> ')}); rerun on one version` : null;
+}
+
 export async function runRealClient(clientId, { startSession, log = () => {} }) {
   const driver = DRIVERS[clientId];
   if (!driver) throw new Error(`Unknown client ${clientId}`);
@@ -115,7 +125,7 @@ export async function runRealClient(clientId, { startSession, log = () => {} }) 
       try {
         const out = await driver.run({ url: proxy.url, token, prompt, workDir, timeoutMs, secrets });
         const exs = proxy.since(mark);
-        transcript.push({ label, exit: out.exit, serverStatus: out.serverStatus ?? null, discoveredTools: out.discoveredTools ?? null, exchanges: exs.length });
+        transcript.push({ label, exit: out.exit, clientVersion: out.clientVersion ?? null, serverStatus: out.serverStatus ?? null, discoveredTools: out.discoveredTools ?? null, exchanges: exs.length });
         log(`${label}: exit ${out.exit}, ${exs.length} exchanges`);
         return { out, exs };
       } finally {
@@ -316,6 +326,11 @@ export async function runRealClient(clientId, { startSession, log = () => {} }) 
       c.check('the revoked client stayed revoked', [401, 403].includes(refusedRevoked.status), String(refusedRevoked.status));
     }
     progress = 'done';
+    const drift = clientVersionDrift(found.version, transcript.map((t) => t.clientVersion));
+    if (drift) {
+      harnessFailure = drift;
+      claims.C1.check('the client kept one version for the whole run', false, drift);
+    }
   } catch (error) {
     if (!notConnected) {
       harnessFailure = safePreview(`harness stopped during ${progress}: ${String(error?.message ?? error)}`, secrets, 300);
