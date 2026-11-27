@@ -2,6 +2,12 @@
 
 This file is the small execution-order pointer for cloud agents. Strategy lives in `../BIG-IMPLEMENTATION-PLAN.md`; detailed design notes live beside this file. If older phase labels conflict with this file, follow this file for the current execution order.
 
+## Current execution pointer — 2026-11-10 (owner-approved main plan)
+
+**[`../MAIN-PLAN.md`](../MAIN-PLAN.md) is the main plan for all remaining work.** Live status and Focus Lane are in the Notion *Mind Place · Execution Tasks* database. Everything below this section is history: it records how earlier gates were reached and does not describe current priorities.
+
+Next release is **v0.9 Continuity Preview**: `MP-GOV-04` (minimal `main` protection), `MP-SEC-10` (hosted helper cannot outlive the app, issue #110), `MP-9C` re-scoped to slice 1 (logical redaction), `MP-9E`, `MP-7MCP-02` (Claude local read), `MP-UI-L1`, `MP-DOC-01`. Then **v1.0 Trust & Continuity** as listed in main plan §4.2. No gate is passed and no task is accepted by this pointer.
+
 ## Repository governance gate — MP-GOV-01..04 (2026-10-31)
 
 The repository governance track is independent of product phase ordering. MP-GOV-01 prepares the owner-controlled PR policy and runbook; MP-GOV-02 audits fork-PR workflow trust; MP-GOV-03 hardens read-only AI review; MP-GOV-04 is the owner-only settings application and exact-readback gate. Agents may implement/test on isolated branches or contributor-owned forks, AI review is read-only, and only the owner may approve and manually merge. Auto-merge, merge queues, Brokers, and bot/AI/App bypass are not authorized.

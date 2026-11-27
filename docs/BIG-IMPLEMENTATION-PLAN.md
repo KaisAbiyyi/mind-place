@@ -4,6 +4,8 @@ This is the high-level roadmap for Mind Place. It is intentionally less rigid th
 
 Where an older implementation plan conflicts with this document, this document is the current product direction.
 
+**2026-11-10 — owner-approved main plan.** Remaining and new work is governed by [`MAIN-PLAN.md`](MAIN-PLAN.md): release train (v0.9 → v3), task registry, and the owner decisions that refine this document — Mind Place is the brain and the data while work runs in agents; topic-first organization; the cloud tier reads the curated layer only; strict unlock by default; a locked GitHub-mirror Workspace. Where this document's roadmap (§7), MCP philosophy (§6) or feature universe (§8) disagree with the main plan about remaining work, the main plan wins. The principles in §1–§5 and §9 stand.
+
 ## P0 · AGPLv3 → MIT license migration (top priority, 22 October 2026)
 
 **Decision:** Make Mind Place permissively MIT-licensed for future releases so users can adapt, fork and distribute personal or proprietary variants. Baseline `LICENSE` on `main` at task claim is GNU AGPLv3; a proposed MIT change is kept in a separate cloud branch pending review; the policy change is about downstream distribution/network-source copyleft, **not** about a restriction on private modifications (already permitted by AGPLv3). Track as **MP-LIC-00 / P0 / NOW**, [GitHub issue #33](https://github.com/KaisAbiyyi/mind-place/issues/33), [Notion execution task](https://app.notion.com/p/401c4a6aaf7381778e6fe0d3ed83da62).
