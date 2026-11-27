@@ -53,7 +53,7 @@ impl ConversationIdTracker {
         }
     }
 
-    fn observe(&mut self, id: &str) -> Result<usize, Box<dyn std::error::Error>> {
+    pub(crate) fn observe(&mut self, id: &str) -> Result<usize, Box<dyn std::error::Error>> {
         let id = &id.to_ascii_lowercase();
         if let Some(count) = self.seen.get_mut(id) {
             *count += 1;
@@ -313,20 +313,7 @@ impl ChatGptExportParser {
                 format!("https://chatgpt.com/c/{}", conv.id),
             )
         } else {
-            // Generate deterministic UUIDv4 for duplicate occurrence to prevent collision
-            let hash = Sha256::digest(format!("{}:dup:{}", conv.id, count).as_bytes());
-            let mut uuid_bytes = [0u8; 16];
-            uuid_bytes.copy_from_slice(&hash[..16]);
-            uuid_bytes[6] = (uuid_bytes[6] & 0x0f) | 0x40; // Version 4
-            uuid_bytes[8] = (uuid_bytes[8] & 0x3f) | 0x80; // Variant 1
-            let disambiguated = format!(
-                "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-                uuid_bytes[0], uuid_bytes[1], uuid_bytes[2], uuid_bytes[3],
-                uuid_bytes[4], uuid_bytes[5],
-                uuid_bytes[6], uuid_bytes[7],
-                uuid_bytes[8], uuid_bytes[9],
-                uuid_bytes[10], uuid_bytes[11], uuid_bytes[12], uuid_bytes[13], uuid_bytes[14], uuid_bytes[15]
-            );
+            let disambiguated = crate::importers::disambiguated_uuid(&conv.id, count);
             warnings.push(
                 "Duplicate conversation UUID encountered in export; disambiguated identity assigned"
                     .into(),
@@ -715,12 +702,12 @@ fn note_omitted_empty(warnings: &mut Vec<String>, count: usize) {
     }
 }
 
-fn clip(value: &str) -> String {
+pub(crate) fn clip(value: &str) -> String {
     value.chars().take(48).collect()
 }
 
 /// Records why a projection is partial, without letting a hostile export flood the warnings.
-fn record_completeness_gaps(warnings: &mut Vec<String>, gaps: Vec<String>) {
+pub(crate) fn record_completeness_gaps(warnings: &mut Vec<String>, gaps: Vec<String>) {
     let mut distinct: Vec<String> = Vec::new();
     for gap in gaps {
         if !distinct.contains(&gap) {

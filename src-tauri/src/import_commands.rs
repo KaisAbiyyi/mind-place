@@ -153,10 +153,11 @@ fn archive_error(error: ArchiveError) -> String {
     }
 }
 
-fn check_provider(provider: &str) -> Result<MemberKind, String> {
+/// The providers with an official-export importer: ChatGPT export, Gemini Takeout, Claude.ai
+/// export. Member kinds are chosen per file by `MemberKind::for_member`.
+fn check_provider(provider: &str) -> Result<(), String> {
     match provider {
-        "chatgpt" => Ok(MemberKind::ChatgptConversations),
-        "gemini" => Ok(MemberKind::GeminiTakeoutHtml),
+        "chatgpt" | "gemini" | "claude" => Ok(()),
         _ => Err(coded("E_IMPORT_PROVIDER", "Unknown import provider")),
     }
 }
@@ -246,7 +247,6 @@ pub(crate) fn inspect_source(
 fn choose_members(
     manifest: &SourceManifest,
     provider: &str,
-    kind: MemberKind,
     explicit: Option<&[String]>,
 ) -> Result<Vec<ImportMember>, String> {
     let paths: Vec<String> = match explicit {
@@ -280,10 +280,16 @@ fn choose_members(
             "No conversations file was found in this export",
         ));
     }
-    Ok(paths
+    paths
         .into_iter()
-        .map(|path| ImportMember { path, kind })
-        .collect())
+        .map(|path| match MemberKind::for_member(provider, &path) {
+            Some(kind) => Ok(ImportMember { path, kind }),
+            None => Err(coded(
+                "E_IMPORT_MEMBERS",
+                "An import member is not a measured file of this provider",
+            )),
+        })
+        .collect()
 }
 
 /// Bridges job checkpoints to throttled count-only events and honours cancel at points where
@@ -395,7 +401,7 @@ fn run_import_with_ttl(
     cancel: &AtomicBool,
     ttl: Duration,
 ) -> Result<ImportJobReceipt, String> {
-    let kind = check_provider(request.provider)?;
+    check_provider(request.provider)?;
     let path = check_path(request.path)?;
     // Verify the owner before reading the source again (fail fast, same backoff as unlock).
     gate.verify_owner_credential(credential)
@@ -407,7 +413,7 @@ fn run_import_with_ttl(
             "The export changed since it was inspected; inspect it again",
         ));
     }
-    let members = choose_members(&manifest, request.provider, kind, request.members)?;
+    let members = choose_members(&manifest, request.provider, request.members)?;
     let capability = gate
         .authorize_import_session(
             lease,
@@ -764,6 +770,84 @@ mod tests {
         }
     }
 
+    fn claude_export() -> Vec<u8> {
+        serde_json::to_vec(&serde_json::json!([{
+            "uuid": "1b2c3d4e-0000-4000-8000-00000000c001", "name": "Synthetic",
+            "created_at": "2026-01-02T03:04:00Z", "updated_at": "2026-01-02T03:10:00Z",
+            "chat_messages": [
+                {"uuid": "1b2c3d4e-0000-4000-8000-0000000000a1", "sender": "human",
+                 "created_at": "2026-01-02T03:04:05Z", "text": "question",
+                 "content": [{"type": "text", "text": "question"}],
+                 "parent_message_uuid": "00000000-0000-4000-8000-000000000000"},
+                {"uuid": "1b2c3d4e-0000-4000-8000-0000000000a2", "sender": "assistant",
+                 "created_at": "2026-01-02T03:04:09Z", "text": "reply",
+                 "content": [{"type": "text", "text": "reply"}],
+                 "parent_message_uuid": "1b2c3d4e-0000-4000-8000-0000000000a1"}
+            ]
+        }]))
+        .unwrap()
+    }
+
+    #[test]
+    fn claude_export_zip_imports_conversations_keeps_projects_raw_and_never_reads_users() {
+        let fx = Fx::new();
+        let conversations = claude_export();
+        let projects = br#"[{"uuid":"1b2c3d4e-0000-4000-8000-0000000000b1","name":"P","docs":[]}]"#;
+        let users =
+            br#"[{"uuid":"u","full_name":"Synthetic Person","email_address":"x@example.invalid"}]"#;
+        let path = fx.write_zip(&[
+            ("conversations.json", &conversations),
+            ("projects.json", projects),
+            ("users.json", users),
+        ]);
+        let lease = fx.gate.require_unlocked().unwrap();
+        let report =
+            inspect_source(&fx.gate, lease, &AtomicBool::new(false), "claude", &path).unwrap();
+        let candidates: Vec<_> = report.candidates.iter().map(|c| c.path.as_str()).collect();
+        assert_eq!(candidates, ["conversations.json", "projects.json"]);
+        let events = Mutex::new(Vec::new());
+        let sink = |event: ProgressEvent| events.lock().unwrap().push(event);
+        let receipt = run_import(
+            &fx.store,
+            &fx.gate,
+            lease,
+            CRED,
+            StartRequest {
+                provider: "claude",
+                path: &path,
+                source_token: &report.source_token,
+                members: None,
+            },
+            &sink,
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        assert_eq!(receipt.provider, "claude");
+        assert_eq!(receipt.imported, 1);
+        assert_eq!(receipt.raw_only, 1);
+        assert_eq!(receipt.rejected, 0);
+        assert_eq!(fx.conversations(), 1);
+        // The account file is measured but never a member.
+        assert!(receipt.members.iter().all(|m| m.path != "users.json"));
+        // An explicit member list cannot name a file of another provider's shape.
+        let refused = run_import(
+            &fx.store,
+            &fx.gate,
+            lease,
+            CRED,
+            StartRequest {
+                provider: "claude",
+                path: &path,
+                source_token: &report.source_token,
+                members: Some(&["chat.html".to_owned()]),
+            },
+            &sink,
+            &AtomicBool::new(false),
+        )
+        .unwrap_err();
+        assert!(refused.starts_with("E_IMPORT_MEMBERS"), "{refused}");
+    }
+
     #[test]
     fn inspect_then_start_imports_a_zip_and_reports_count_only_progress() {
         let fx = Fx::new();
@@ -1093,7 +1177,7 @@ mod tests {
                 path,
             )
         };
-        assert!(inspect("claude", "/tmp/x.zip")
+        assert!(inspect("perplexity", "/tmp/x.zip")
             .unwrap_err()
             .starts_with("E_IMPORT_PROVIDER"));
         for path in [

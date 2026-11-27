@@ -5,6 +5,7 @@ use std::marker::PhantomData;
 use std::path::PathBuf;
 
 pub mod chatgpt_export;
+pub mod claude_export;
 pub mod gemini_takeout;
 
 use crate::Capture;
@@ -70,6 +71,26 @@ impl RecordSpan {
             sha256: format!("{:x}", Sha256::digest(bytes)),
         }
     }
+}
+
+/// Deterministic UUIDv4-shaped identity for the `count`-th (>= 2) occurrence of a conversation id
+/// within one export, so duplicates never collide with each other or with the first occurrence.
+pub(crate) fn disambiguated_uuid(id: &str, count: usize) -> String {
+    use sha2::{Digest, Sha256};
+    let hash = Sha256::digest(format!("{id}:dup:{count}").as_bytes());
+    let mut b = [0u8; 16];
+    b.copy_from_slice(&hash[..16]);
+    b[6] = (b[6] & 0x0f) | 0x40; // Version 4
+    b[8] = (b[8] & 0x3f) | 0x80; // Variant 1
+    let hex: String = b.iter().map(|byte| format!("{byte:02x}")).collect();
+    format!(
+        "{}-{}-{}-{}-{}",
+        &hex[0..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..32]
+    )
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq, Eq)]

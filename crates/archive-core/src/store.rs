@@ -253,7 +253,7 @@ pub(crate) fn snapshot_identity(capture: &Capture) -> Result<String> {
     Ok(digest(&serde_json::to_vec(&identity)?))
 }
 
-fn uuid(id: &str) -> bool {
+pub(crate) fn uuid(id: &str) -> bool {
     id.len() == 36
         && id.bytes().enumerate().all(|(i, c)| {
             if [8, 13, 18, 23].contains(&i) {
@@ -391,7 +391,12 @@ pub fn validate_capture(c: &mut Capture) -> Result<()> {
     } else if c.capture_method == "takeout-import" {
         validate_historical_capture(c, "gemini")
     } else if c.capture_method == "export-import" {
-        validate_historical_capture(c, "chatgpt")
+        let provider = if c.provider == "claude" {
+            "claude"
+        } else {
+            "chatgpt"
+        };
+        validate_historical_capture(c, provider)
     } else {
         validate_live_capture(c)
     }
@@ -421,7 +426,7 @@ pub fn validate_stored_capture(c: &Capture) -> Result<()> {
             }
         }
         "claude" => {
-            if c.capture_method != "manual-dom" {
+            if !matches!(c.capture_method.as_str(), "manual-dom" | "export-import") {
                 return Err(invalid("Invalid Claude stored capture method"));
             }
         }
@@ -572,6 +577,37 @@ pub fn validate_historical_capture(c: &mut Capture, expected_provider: &str) -> 
                 c.conversation_id = id.to_ascii_lowercase();
             } else {
                 return Err(invalid("Invalid ChatGPT export source URL"));
+            }
+        }
+        "claude" => {
+            if c.capture_method != "export-import" {
+                return Err(invalid(
+                    "Claude historical import must use export-import method",
+                ));
+            }
+            if c.source_url.starts_with("https://claude.ai/") {
+                let canonical_id = claude_conversation_id_from_url(&c.source_url)?;
+                if c.conversation_id.to_ascii_lowercase() != canonical_id {
+                    return Err(invalid(
+                        "Capture URL and conversation identity do not match",
+                    ));
+                }
+                c.conversation_id = canonical_id;
+            } else if let Some(id) = c
+                .source_url
+                .strip_prefix("mindplace-import://claude-export/")
+            {
+                if !uuid(id) {
+                    return Err(invalid("Invalid Claude export conversation UUID"));
+                }
+                if c.conversation_id.to_ascii_lowercase() != id.to_ascii_lowercase() {
+                    return Err(invalid(
+                        "Capture URL and conversation identity do not match",
+                    ));
+                }
+                c.conversation_id = id.to_ascii_lowercase();
+            } else {
+                return Err(invalid("Invalid Claude export source URL"));
             }
         }
         "generic" => {

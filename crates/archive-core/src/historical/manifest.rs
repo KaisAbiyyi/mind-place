@@ -452,13 +452,20 @@ impl SourceManifest {
 }
 
 /// ChatGPT: `conversations.json` or `conversations-*.json` at any depth. Gemini: an `.html` file
-/// with a path component that names Gemini (case-insensitive), at any depth.
+/// with a path component that names Gemini (case-insensitive), at any depth. Claude:
+/// `conversations.json`, `conversations-*.json` or `projects.json` at any depth; account files
+/// such as `users.json` are never candidates.
 pub fn entry_matches_provider_layout(path: &str, provider: &str) -> bool {
     let file_name = path.rsplit('/').next().unwrap_or(path);
     let lower = file_name.to_ascii_lowercase();
     match provider {
         "chatgpt" => {
             lower == "conversations.json"
+                || (lower.starts_with("conversations-") && lower.ends_with(".json"))
+        }
+        "claude" => {
+            lower == "conversations.json"
+                || lower == "projects.json"
                 || (lower.starts_with("conversations-") && lower.ends_with(".json"))
         }
         "gemini" => {
@@ -475,7 +482,7 @@ pub fn entry_matches_provider_layout(path: &str, provider: &str) -> bool {
 pub fn member_extension_allowed(path: &str, provider: &str) -> bool {
     let lower = path.rsplit('/').next().unwrap_or(path).to_ascii_lowercase();
     match provider {
-        "chatgpt" => lower.ends_with(".json"),
+        "chatgpt" | "claude" => lower.ends_with(".json"),
         "gemini" => lower.ends_with(".html") || lower.ends_with(".htm"),
         _ => false,
     }
