@@ -847,7 +847,7 @@ mod tests {
         .unwrap_err();
         assert!(refused.starts_with("E_IMPORT_MEMBERS"), "{refused}");
         // The account file is refused even when it is named explicitly.
-        let account = run_import(
+        let explicit_member_error = run_import(
             &fx.store,
             &fx.gate,
             lease,
@@ -862,7 +862,10 @@ mod tests {
             &AtomicBool::new(false),
         )
         .unwrap_err();
-        assert!(account.starts_with("E_IMPORT_MEMBERS"), "{account}");
+        assert!(
+            explicit_member_error.starts_with("E_IMPORT_MEMBERS"),
+            "unexpected refusal code"
+        );
     }
 
     #[test]
