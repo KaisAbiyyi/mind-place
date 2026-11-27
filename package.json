@@ -33,7 +33,7 @@
     "@types/jsdom": "^27.0.0",
     "@types/katex": "^0.16.7",
     "@types/node": "^24.10.0",
-    "jsdom": "^27.2.0",
+    "jsdom": "^31.0.1",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",
     "vite": "^7.2.0"
