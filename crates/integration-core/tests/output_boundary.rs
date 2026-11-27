@@ -494,7 +494,8 @@ fn wrapping_fails_closed_and_provenance_is_bounded() {
 }
 
 /// Tripwire: the MCP crate must not call any owner/trusted memory-write or
-/// promotion API. MP-7MCP-03/05 will add exactly one reviewed model-write call
+/// promotion API. Every `.rs` file under `src/` is scanned, at any depth.
+/// MP-7MCP-03/05 will add exactly one reviewed model-write call
 /// (`apply_model_memory_write`) and must extend this list deliberately.
 #[test]
 fn mcp_crate_source_never_calls_owner_write_or_promotion_apis() {
@@ -509,16 +510,81 @@ fn mcp_crate_source_never_calls_owner_write_or_promotion_apis() {
         "create_private_scope",
     ];
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    let mut scanned = 0;
-    for entry in std::fs::read_dir(&root).unwrap() {
-        let path = entry.unwrap().path();
-        if path.extension().is_some_and(|e| e == "rs") {
-            let text = std::fs::read_to_string(&path).unwrap();
-            for word in forbidden {
-                assert!(!text.contains(word), "{} references {word}", path.display());
-            }
-            scanned += 1;
+    let files = rust_sources_recursive(&root);
+    for path in &files {
+        let text = std::fs::read_to_string(path).unwrap();
+        for word in forbidden {
+            assert!(!text.contains(word), "{} references {word}", path.display());
         }
     }
-    assert!(scanned >= 4);
+    // The scan must never go quietly empty: these modules exist today, and a
+    // tree smaller than this means the walk (or the crate layout) broke.
+    let names: Vec<_> = files
+        .iter()
+        .map(|p| p.strip_prefix(&root).unwrap().to_path_buf())
+        .collect();
+    for required in [
+        "lib.rs",
+        "mcp.rs",
+        "clients.rs",
+        "transport.rs",
+        "output_boundary.rs",
+    ] {
+        assert!(
+            names.iter().any(|n| n == Path::new(required)),
+            "tripwire did not scan src/{required}; scanned {names:?}"
+        );
+    }
+    assert!(
+        files.len() >= 5,
+        "tripwire scanned only {} files",
+        files.len()
+    );
+}
+
+/// Every `.rs` file under `dir`, at any depth, sorted. Symlinks fail the test
+/// rather than being followed or skipped, so nothing can hide behind one.
+fn rust_sources_recursive(dir: &Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    let mut pending = vec![dir.to_path_buf()];
+    while let Some(current) = pending.pop() {
+        for entry in std::fs::read_dir(&current).unwrap() {
+            let path = entry.unwrap().path();
+            let kind = std::fs::symlink_metadata(&path).unwrap().file_type();
+            assert!(
+                !kind.is_symlink(),
+                "symlink in scanned tree: {}",
+                path.display()
+            );
+            if kind.is_dir() {
+                pending.push(path);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                out.push(path);
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+/// The walker itself must descend into nested module directories; otherwise a
+/// future `src/mcp/handlers.rs` would escape the tripwire above.
+#[test]
+fn tripwire_walker_descends_into_nested_module_directories() {
+    let dir = tempfile::tempdir().unwrap();
+    let nested = dir.path().join("mcp").join("handlers");
+    std::fs::create_dir_all(&nested).unwrap();
+    for file in ["lib.rs", "mcp/mod.rs", "mcp/handlers/write.rs", "notes.txt"] {
+        std::fs::write(dir.path().join(file), "// synthetic").unwrap();
+    }
+    let found: Vec<_> = rust_sources_recursive(dir.path())
+        .into_iter()
+        .map(|p| p.strip_prefix(dir.path()).unwrap().to_path_buf())
+        .collect();
+    assert_eq!(
+        found,
+        ["lib.rs", "mcp/handlers/write.rs", "mcp/mod.rs"]
+            .map(std::path::PathBuf::from)
+            .to_vec()
+    );
 }

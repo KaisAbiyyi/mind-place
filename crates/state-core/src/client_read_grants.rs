@@ -18,7 +18,7 @@
 use crate::clients::{audit, bump_policy, valid_hash};
 use crate::source_redaction::source_is_redacted;
 use crate::{valid_id, ClientCapability, Result, StateError, StateStore};
-use rusqlite::{params, OptionalExtension, TransactionBehavior};
+use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
 pub const MAX_READ_GRANTS_PER_CLIENT: usize = 10_000;
 const MAX_SOURCES_PER_CALL: usize = 1_000;
@@ -254,6 +254,33 @@ impl StateStore {
             .optional()
             .map_err(StateError::from)
     }
+}
+
+/// MP-SEC-11 follow-up: whether `client_id` holds effective read authority
+/// over `source_id` right now: an active global `read` capability AND an
+/// active per-source grant (the same rule as `authorize_client_read_scope`).
+/// Runs on the caller's connection so a writer can check it inside its own
+/// IMMEDIATE transaction. A malformed id is simply "not granted". The caller
+/// is responsible for the client's `enabled` state.
+pub(crate) fn client_can_read_source(
+    db: &Connection,
+    client_id: &str,
+    source_id: &str,
+) -> Result<bool> {
+    if !valid_source(source_id) {
+        return Ok(false);
+    }
+    db.query_row(
+        "SELECT EXISTS(
+           SELECT 1 FROM client_capabilities g
+           JOIN client_capabilities r ON r.client_id=g.client_id
+           WHERE g.client_id=?1 AND g.capability=?2 AND g.revoked_at IS NULL
+             AND r.capability='read' AND r.revoked_at IS NULL
+         )",
+        params![client_id, format!("{PREFIX}{source_id}")],
+        |r| r.get(0),
+    )
+    .map_err(StateError::from)
 }
 
 fn read_sources(db: &rusqlite::Connection, client_id: &str) -> Result<Vec<String>> {

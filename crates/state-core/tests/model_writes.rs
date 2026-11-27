@@ -34,9 +34,14 @@ fn fixture() -> Fixture {
             key: SourceKey::External("source-1"),
         })
         .unwrap();
-    db.issue_client(MODEL, "Model A", &h('a'), &[Cap::Write])
+    // Model clients cite only sources they can read (MP-SEC-11 follow-up).
+    db.issue_client(MODEL, "Model A", &h('a'), &[Cap::Write, Cap::Read])
         .unwrap();
-    db.issue_client(OTHER, "Model B", &h('d'), &[Cap::Write])
+    db.issue_client(OTHER, "Model B", &h('d'), &[Cap::Write, Cap::Read])
+        .unwrap();
+    db.grant_client_read_sources(MODEL, std::slice::from_ref(&source))
+        .unwrap();
+    db.grant_client_read_sources(OTHER, std::slice::from_ref(&source))
         .unwrap();
     db.issue_client("client:v1:reader", "Reader", &h('c'), &[Cap::Read])
         .unwrap();
@@ -267,7 +272,14 @@ fn capability_is_rechecked_and_reader_or_revoked_credentials_cannot_write() {
 fn quarantine_is_owner_provisioned_and_per_client() {
     let f = fixture();
     // A client whose quarantine scope the owner has not provisioned cannot write.
-    f.db.issue_client("client:v1:fresh", "Fresh", &h('f'), &[Cap::Write])
+    f.db.issue_client(
+        "client:v1:fresh",
+        "Fresh",
+        &h('f'),
+        &[Cap::Write, Cap::Read],
+    )
+    .unwrap();
+    f.db.grant_client_read_sources("client:v1:fresh", std::slice::from_ref(&f.source))
         .unwrap();
     let scope = quarantine_scope_id("client:v1:fresh").unwrap();
     let p = proposal(&f, "claim:fresh", Some(&scope), "inferred");
@@ -432,4 +444,216 @@ fn replay_with_same_key_is_idempotent_and_different_body_conflicts() {
         ),
         Err(StateError::InvalidValue)
     ));
+}
+
+// ---- MP-SEC-11 follow-up: evidence must be readable by the writing client ----
+
+/// A second registered source that no model client has been granted.
+fn register_ungranted(f: &Fixture) -> String {
+    f.db.register_source(&SourceDescriptor {
+        provider: "chatgpt",
+        source_namespace: "private",
+        source_kind: "conversation",
+        key: SourceKey::External("source-ungranted"),
+    })
+    .unwrap()
+}
+
+/// Well-formed `src:v1:` id that is not in the source registry.
+const UNREGISTERED: &str =
+    "src:v1:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+fn citing(id: &str, sources: &[&str]) -> ModelClaimProposal {
+    ModelClaimProposal {
+        id: id.into(),
+        statement: format!("Model proposal {id}"),
+        epistemic_origin: "inferred".into(),
+        scope_id: None,
+        evidence: sources
+            .iter()
+            .map(|s| ClaimEvidence {
+                source_ref: (*s).into(),
+                evidence_kind: "support".into(),
+            })
+            .collect(),
+    }
+}
+
+fn write(f: &Fixture, key: &str, p: &ModelClaimProposal) -> Result<(), StateError> {
+    f.db.apply_model_memory_write(&h('a'), key, CredentialTier::Local, p)
+        .map(|_| ())
+}
+
+fn assert_denied_and_absent(f: &Fixture, result: Result<(), StateError>, claim: &str) {
+    assert!(
+        matches!(result, Err(StateError::MemoryDenied)),
+        "{claim}: {result:?}"
+    );
+    assert!(f.db.claim_history(claim).unwrap().is_none(), "{claim}");
+}
+
+#[test]
+fn evidence_source_with_read_grant_is_accepted() {
+    let f = fixture();
+    write(
+        &f,
+        "mpsec11-ev-granted-0001",
+        &citing("claim:ev-ok", &[&f.source]),
+    )
+    .unwrap();
+    let state =
+        f.db.claim_as_of("claim:ev-ok", FAR_FUTURE_MS)
+            .unwrap()
+            .unwrap();
+    assert_eq!(state.asserted_by, "model");
+    assert_eq!(state.status, "uncertain");
+    // Cloud tier into its own quarantine follows the same rule.
+    let own = quarantine_scope_id(MODEL).unwrap();
+    f.db.apply_model_memory_write(
+        &h('a'),
+        "mpsec11-ev-granted-0002",
+        CredentialTier::Cloud,
+        &proposal(&f, "claim:ev-cloud", Some(&own), "inferred"),
+    )
+    .unwrap();
+}
+
+#[test]
+fn evidence_source_without_read_grant_is_denied_opaquely() {
+    let f = fixture();
+    let ungranted = register_ungranted(&f);
+    assert_denied_and_absent(
+        &f,
+        write(
+            &f,
+            "mpsec11-ev-nogrant-0001",
+            &citing("claim:ev-no", &[&ungranted]),
+        ),
+        "claim:ev-no",
+    );
+    // One readable source does not launder an unreadable one, in either order.
+    assert_denied_and_absent(
+        &f,
+        write(
+            &f,
+            "mpsec11-ev-nogrant-0002",
+            &citing("claim:ev-mix1", &[&f.source, &ungranted]),
+        ),
+        "claim:ev-mix1",
+    );
+    assert_denied_and_absent(
+        &f,
+        write(
+            &f,
+            "mpsec11-ev-nogrant-0003",
+            &citing("claim:ev-mix2", &[&ungranted, &f.source]),
+        ),
+        "claim:ev-mix2",
+    );
+    // A grant held by ANOTHER client confers nothing on this one.
+    f.db.grant_client_read_sources(OTHER, std::slice::from_ref(&ungranted))
+        .unwrap();
+    assert_denied_and_absent(
+        &f,
+        write(
+            &f,
+            "mpsec11-ev-nogrant-0004",
+            &citing("claim:ev-other", &[&ungranted]),
+        ),
+        "claim:ev-other",
+    );
+    // A per-source grant without the global read capability is not read authority.
+    f.db.issue_client("client:v1:writeonly", "Write only", &h('9'), &[Cap::Write])
+        .unwrap();
+    f.db.grant_client_read_sources("client:v1:writeonly", std::slice::from_ref(&f.source))
+        .unwrap();
+    let r =
+        f.db.apply_model_memory_write(
+            &h('9'),
+            "mpsec11-ev-nogrant-0005",
+            CredentialTier::Local,
+            &citing("claim:ev-wo", &[&f.source]),
+        )
+        .map(|_| ());
+    assert_denied_and_absent(&f, r, "claim:ev-wo");
+}
+
+#[test]
+fn unregistered_source_is_indistinguishable_from_ungranted_source() {
+    let f = fixture();
+    let ungranted = register_ungranted(&f);
+    let a = write(
+        &f,
+        "mpsec11-ev-probe-00001",
+        &citing("claim:probe-a", &[&ungranted]),
+    );
+    let b = write(
+        &f,
+        "mpsec11-ev-probe-00002",
+        &citing("claim:probe-b", &[UNREGISTERED]),
+    );
+    // Same variant, same rendering: nothing reveals which id exists.
+    assert_eq!(format!("{a:?}"), format!("{b:?}"));
+    assert_eq!(
+        a.as_ref().unwrap_err().to_string(),
+        b.as_ref().unwrap_err().to_string()
+    );
+    assert_denied_and_absent(&f, a, "claim:probe-a");
+    assert_denied_and_absent(&f, b, "claim:probe-b");
+    // Even a grant the owner issued for an unregistered id does not turn the
+    // denial into a registry answer.
+    f.db.grant_client_read_sources(MODEL, &[UNREGISTERED.to_owned()])
+        .unwrap();
+    let c = write(
+        &f,
+        "mpsec11-ev-probe-00003",
+        &citing("claim:probe-c", &[UNREGISTERED]),
+    );
+    assert_eq!(
+        format!("{c:?}"),
+        format!("{:?}", Err::<(), _>(StateError::MemoryDenied))
+    );
+    assert_denied_and_absent(&f, c, "claim:probe-c");
+}
+
+#[test]
+fn revoked_read_grant_denies_new_writes_and_replays() {
+    let f = fixture();
+    let p = citing("claim:ev-rev", &[&f.source]);
+    write(&f, "mpsec11-ev-revoke-00001", &p).unwrap();
+    f.db.revoke_client_read_sources(MODEL, std::slice::from_ref(&f.source))
+        .unwrap();
+    assert_denied_and_absent(
+        &f,
+        write(
+            &f,
+            "mpsec11-ev-revoke-00002",
+            &citing("claim:ev-rev2", &[&f.source]),
+        ),
+        "claim:ev-rev2",
+    );
+    // Replaying the earlier request is rechecked, not served from the receipt.
+    assert!(matches!(
+        write(&f, "mpsec11-ev-revoke-00001", &p),
+        Err(StateError::MemoryDenied)
+    ));
+    // Revoking the global read capability has the same effect as the grant.
+    f.db.grant_client_read_sources(MODEL, std::slice::from_ref(&f.source))
+        .unwrap();
+    write(
+        &f,
+        "mpsec11-ev-revoke-00003",
+        &citing("claim:ev-rev3", &[&f.source]),
+    )
+    .unwrap();
+    f.db.set_client_capability(MODEL, Cap::Read, false).unwrap();
+    assert_denied_and_absent(
+        &f,
+        write(
+            &f,
+            "mpsec11-ev-revoke-00004",
+            &citing("claim:ev-rev4", &[&f.source]),
+        ),
+        "claim:ev-rev4",
+    );
 }
