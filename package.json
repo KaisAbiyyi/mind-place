@@ -24,7 +24,7 @@
   "dependencies": {
     "@tauri-apps/api": "^2.10.1",
     "dompurify": "^3.3.0",
-    "katex": "^0.16.25",
+    "katex": "^0.19.1",
     "marked": "^17.0.1"
   },
   "devDependencies": {
