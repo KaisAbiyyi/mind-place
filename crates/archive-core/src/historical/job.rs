@@ -1728,18 +1728,8 @@ fn normalize_members(
             "An import member does not belong to the authorized provider",
         ));
     }
-    // Each member's kind must be the one its file name implies (for example `projects.json` is
-    // never parsed as conversations); account files never get a kind at all.
-    if members
-        .iter()
-        .any(|m| MemberKind::for_member(provider, &m.path) != Some(m.kind))
-    {
-        return Err(coded(
-            "E_MEMBERS",
-            "An import member's kind does not match its file",
-        ));
-    }
     // Account files (name, e-mail, phone) are never staged, whatever kind a caller claims.
+    // Checked first so the refusal names the real reason.
     if members
         .iter()
         .any(|m| super::manifest::is_account_file(&m.path))
@@ -1747,6 +1737,17 @@ fn normalize_members(
         return Err(coded(
             "E_MEMBERS",
             "An account file is never an import member",
+        ));
+    }
+    // Each member's kind must be the one its file name implies (for example `projects.json` is
+    // never parsed as conversations).
+    if members
+        .iter()
+        .any(|m| MemberKind::for_member(provider, &m.path) != Some(m.kind))
+    {
+        return Err(coded(
+            "E_MEMBERS",
+            "An import member's kind does not match its file",
         ));
     }
     members.sort_by(|a, b| a.path.as_bytes().cmp(b.path.as_bytes()));

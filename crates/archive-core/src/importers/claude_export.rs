@@ -528,10 +528,13 @@ fn convert_message(raw: &Value, id: &str) -> Converted {
             }
         }
     }
-    // The top-level `text` is used only when there are no content blocks at all. With blocks
-    // present (for example only `thinking` or `tool_use`), `text` is not proved to be the shown
-    // answer, so it is not projected; the blocks are completeness gaps and stay in raw evidence.
-    let has_blocks = content.is_some_and(|blocks| !blocks.is_empty());
+    // The top-level `text` is used only when `content` is absent, null or an empty array. With
+    // blocks present (for example only `thinking` or `tool_use`), or with `content` in a shape
+    // nobody has verified, `text` is not proved to be the shown answer, so it is not projected;
+    // the content is a completeness gap and stays in raw evidence.
+    let has_blocks = raw
+        .get("content")
+        .is_some_and(|c| !c.is_null() && c.as_array().is_none_or(|blocks| !blocks.is_empty()));
     if text_blocks == 0 && !has_blocks {
         match raw.get("text") {
             Some(Value::String(plain)) => text.push_str(plain),
@@ -902,6 +905,15 @@ mod tests {
                 "{field}: {:?}",
                 capture.warnings
             );
+            if field == "content" {
+                // An unverified `content` shape never lets the top-level `text` stand in for it:
+                // the message has nothing representable and is left out of the projection.
+                assert_eq!(capture.messages.len(), 1, "{field}");
+                assert!(
+                    capture.messages.iter().all(|m| m.text != "answer"),
+                    "{field}"
+                );
+            }
         }
     }
 

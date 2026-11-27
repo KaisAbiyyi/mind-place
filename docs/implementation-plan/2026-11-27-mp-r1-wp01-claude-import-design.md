@@ -32,7 +32,7 @@ No real Claude export was read (repository rule). The layout below is the public
 - **Identity.** `uuid` must be a UUID; otherwise raw-only. Duplicates in one job (across shards, case-insensitive) get a deterministic disambiguated UUID and the `mindplace-import://claude-export/<uuid>` source URL, exactly like ChatGPT. The first occurrence uses `https://claude.ai/chat/<uuid>`.
 - **Capture method** `export-import`, provider `claude`. `validate_historical_capture(.., "claude")` accepts only those two URL shapes and requires the identity to match. The stored-capture rule now accepts `export-import` for Claude; the ordinary `save` path still refuses it, and the keep-prior rule (an export never displaces a live capture) already covers `export-import`.
 - **Order and branches.** Messages are projected in `chat_messages` order. If any message has `parent_message_uuid`, the links must form exactly one chain in array order (each next message's parent is the previous message). The history is proved complete only when the first message's parent is an explicit root (absent, `null`, the `00000000-0000-4000-8000-000000000000` sentinel or the nil UUID). A first parent that is any other value not in the conversation (for example a truncated export) keeps the order but makes the projection `partial` with the warning that earlier history may be missing (review round 1). Anything else (a fork, a cycle, an out-of-order link, a non-string link, a duplicate message uuid) is **refused**: the record stays raw-only, because the active branch cannot be chosen without guessing. Without any parent links the projection is `partial` with the warning that branch structure is not proved by the export.
-- **Content.** With `content` present, `text` blocks are projected; every other block type (`thinking`, `tool_use`, `tool_result`, images, unknown) is not shown and makes the conversation `partial` with a bounded "Completeness not proved" warning; the block stays in raw evidence. `thinking` text is never shown as message text. The top-level `text` is projected only when `content` is absent or empty (review round 1: with only non-text blocks it is not proved to be the shown answer). A message with neither is a gap.
+- **Content.** With `content` present, `text` blocks are projected; every other block type (`thinking`, `tool_use`, `tool_result`, images, unknown) is not shown and makes the conversation `partial` with a bounded "Completeness not proved" warning; the block stays in raw evidence. `thinking` text is never shown as message text. The top-level `text` is projected only when `content` is absent, null or an empty array (review round 1: with only non-text blocks it is not proved to be the shown answer; review round 3: a `content` of any other shape does not fall back to `text` either). A message with neither is a gap.
 - **Roles.** `human` → `user`, `assistant` → `assistant`; anything else is shown as `tool` and is a gap.
 - **Model.** Always `None`: the export does not carry it.
 - **Timestamps.** Message `authored_at` is the message's own `created_at` when it parses as RFC 3339, else `None` plus a gap warning. Conversation created/updated come from the record. `captured_at` uses created, then updated, then import time with an explicit warning (same rule as ChatGPT).
@@ -42,7 +42,7 @@ No real Claude export was read (repository rule). The layout below is the public
 
 ## 4. Raw-first path
 
-Unchanged from RAW-01: measure → stage (raw bytes + validated projection) → verify root hash → publish raw blob, evidence, projection, disposition link, done marker. The importer version (`mp-import-raw-01/1`) is **not** bumped: ChatGPT and Gemini staging is byte-for-byte unchanged, and the job key already frames each member's kind label, so a Claude job can never reuse a spool of another kind. Both Claude kinds read through the same bounded JSON array limits as ChatGPT (`ImportJobLimits::chatgpt_stream`).
+Unchanged from RAW-01: measure → stage (raw bytes + validated projection) → verify root hash → publish raw blob, evidence, projection, disposition link, done marker. The importer version (`mp-import-raw-01/1`) is **not** bumped: ChatGPT and Gemini staging is byte-for-byte unchanged for accepted jobs (they only gain new refusals: an account file, a member whose kind does not match its file, and the provider-shape mismatch), and the job key already frames each member's kind label, so a Claude job can never reuse a spool of another kind. Both Claude kinds read through the same bounded JSON array limits as ChatGPT (`ImportJobLimits::chatgpt_stream`).
 
 ## 5. Sanitizer and fixtures
 
@@ -90,6 +90,15 @@ The signed-off guide's Import dialog lists ChatGPT, Gemini (Takeout) and a trans
 | P3 harness category filter could print quoted text | Fixed: output stops at the first quote character |
 | P3 `projects.json`-only source; kind not checked against file name | Fixed: the commands refuse a projects-only selection (`E_IMPORT_NO_MEMBERS`); the job refuses a member whose kind is not the one its file name implies (`E_MEMBERS`) |
 | P3 no shard-duplicate test | Added (`duplicate_claude_conversations_across_shards_get_distinct_identities`) |
+
+### Review round 3 (independent reviewer Claude Sonnet 5.5 High, read-only, advisory; APPROVE-ADVISORY at `434d413`, P3 only)
+
+| Item | Decision |
+| --- | --- |
+| P3-1 a non-array `content` still let the top-level `text` be shown | Fixed: only an absent, null or empty `content` falls back to `text` (section 3 and the unit test say so) |
+| P3-2 harness: a bare relative run directory was compared against canonical paths | Fixed: the current directory is canonicalized too |
+| P3-3 docs: "nothing was written" and "byte-for-byte unchanged" overstated | Fixed: runbook says nothing was published and to use a new run directory; section 4 names the new refusals |
+| P3-4 account-file refusal unreachable after the kind check; future error copy | Fixed: the account-file check runs first so the refusal names the real reason; the ledger records that the Import dialog needs human EN/ID copy for `E_PROVIDER_MISMATCH` and `E_IMPORT_NO_MEMBERS` |
 
 ## 9. Residual risks
 

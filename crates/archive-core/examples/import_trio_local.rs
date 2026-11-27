@@ -175,12 +175,12 @@ fn refuse_unless_disposable(scratch: &Path, source: &Path) -> Result<(), BoxErro
     if scratch.exists() && std::fs::read_dir(scratch)?.next().is_some() {
         return Err("the disposable directory must be new or empty".into());
     }
-    let parent = scratch
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .map(std::fs::canonicalize)
-        .transpose()?
-        .unwrap_or(std::env::current_dir()?);
+    // Canonical on every path (a bare relative name's parent is the current directory), so the
+    // `starts_with` checks below compare like with like (`\\?\` prefixes on Windows).
+    let parent = match scratch.parent().filter(|p| !p.as_os_str().is_empty()) {
+        Some(parent) => std::fs::canonicalize(parent)?,
+        None => std::fs::canonicalize(std::env::current_dir()?)?,
+    };
     if parent.starts_with(source) {
         return Err("the disposable directory must not be inside the export".into());
     }

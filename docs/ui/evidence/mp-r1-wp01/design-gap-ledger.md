@@ -33,6 +33,15 @@ Scope of UI change in this work package: **catalog strings only** (EN + ID). No 
 
 - `import.subtitle` and `import.chooseFile` now name Claude (EN and ID).
 
+## Forward note for the Import dialog PR
+
+No screen shows import errors yet, so this PR adds no error copy. The PR that builds the Import dialog must give human EN and ID copy (through the gap protocol) for at least:
+
+- `E_PROVIDER_MISMATCH`: the file belongs to the other service (ChatGPT and Claude both name it `conversations.json`); nothing was added.
+- `E_IMPORT_NO_MEMBERS`: nothing in the selection can be imported (for example only `projects.json`).
+
+Codes stay in Details/Info, never in the default view.
+
 ## Stale statements elsewhere (owner to reconcile, not edited here)
 
 - `docs/ui/MP-UI2-placement-matrix.md` rows 22 and the transcript-file gap still say the backend accepts only `chatgpt` and `gemini`. After this PR `check_provider` also accepts `claude`. The matrix is part of the `MP-UI2-00` contract, so it is left for the owner to update.
