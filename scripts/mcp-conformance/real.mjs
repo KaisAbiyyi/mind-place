@@ -125,7 +125,7 @@ export async function runRealClient(clientId, { startSession, log = () => {} }) 
       try {
         const out = await driver.run({ url: proxy.url, token, prompt, workDir, timeoutMs, secrets });
         const exs = proxy.since(mark);
-        transcript.push({ label, exit: out.exit, clientVersion: out.clientVersion ?? null, serverStatus: out.serverStatus ?? null, discoveredTools: out.discoveredTools ?? null, exchanges: exs.length });
+        transcript.push({ label, exit: out.exit, clientVersion: out.clientVersion ?? null, updatePauseRequested: out.updatePauseRequested ?? [], serverStatus: out.serverStatus ?? null, discoveredTools: out.discoveredTools ?? null, exchanges: exs.length });
         log(`${label}: exit ${out.exit}, ${exs.length} exchanges`);
         return { out, exs };
       } finally {

@@ -14,11 +14,36 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { safePreview, writeDebugArtifact } from './hygiene.mjs';
+import { ANTIGRAVITY_FILES, CLAUDE_CODE_FILES, antigravitySetup, assertReadOnlySetup, claudeCodeSetup } from '../lib/mcp-local-read-setup.mjs';
 
 export const TOKEN_ENV = 'MP_CONFORMANCE_TOKEN';
 // Distinct from any connector the account may already have (for example a hosted "mind_place" app).
 const SERVER_NAME = 'mpconformance';
 const BRIDGE_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'mcp-stdio-bridge.mjs');
+
+/**
+ * Auto-update pause requested for the client child process only (MP-R1-WP02). Claude Code documents
+ * DISABLE_AUTOUPDATER. Antigravity documents no switch; AGY_CLI_DISABLE_AUTO_UPDATE is a name found in the
+ * 1.5.18 executable and is NOT verified to work. Neither is trusted: clientVersionDrift in real.mjs still
+ * fails C1 whenever the client reports more than one version during a run.
+ */
+export const UPDATE_PAUSE_ENV = Object.freeze({
+  'claude-code': { DISABLE_AUTOUPDATER: '1' },
+  antigravity: { AGY_CLI_DISABLE_AUTO_UPDATE: '1' },
+});
+
+/**
+ * The conformance drivers use the SAME setup source a user is given (scripts/lib/mcp-local-read-setup.mjs),
+ * only with the harness server name, the recording proxy URL and the harness token variable. A parity cell
+ * therefore exercises the configuration in docs/setup/mcp-local-read.{en,id}.md.
+ */
+export function claudeCodeHarnessSetup(url) {
+  return assertReadOnlySetup(claudeCodeSetup({ serverName: SERVER_NAME, url, tokenEnv: TOKEN_ENV }));
+}
+
+export function antigravityHarnessSetup(url, bridgePath = BRIDGE_PATH) {
+  return assertReadOnlySetup(antigravitySetup({ serverName: SERVER_NAME, url, tokenEnv: TOKEN_ENV, bridgePath, command: process.execPath }));
+}
 
 /**
  * Antigravity workspace MCP config using the loopback stdio bridge so the bearer
@@ -33,30 +58,24 @@ const BRIDGE_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
  * decided only by the session allowlist below and by Mind Place grants.
  */
 export function antigravityWorkspaceConfig(url, bridgePath = BRIDGE_PATH) {
-  return {
-    mcpServers: {
-      [SERVER_NAME]: {
-        command: process.execPath,
-        args: [bridgePath, '--url', url, '--token-env', TOKEN_ENV],
-      },
-    },
-  };
+  return antigravityHarnessSetup(url, bridgePath).files[ANTIGRAVITY_FILES.mcp];
 }
 
 /**
  * Antigravity session-only permission allowlist restricted strictly to the three
  * read-only Mind Place tools (never wildcard MCP access and never auto-approve all tools).
  */
-export function antigravitySessionSettings() {
-  return {
-    permissions: {
-      allow: [
-        `mcp(${SERVER_NAME}/memory_search)`,
-        `mcp(${SERVER_NAME}/memory_fetch)`,
-        `mcp(${SERVER_NAME}/context_build)`,
-      ],
-    },
-  };
+export function antigravitySessionSettings(url = 'http://127.0.0.1:43731/mcp') {
+  return antigravityHarnessSetup(url).files[ANTIGRAVITY_FILES.settings];
+}
+
+/** Writes a setup's files under workDir exactly as `scripts/mcp-local-read-setup.mjs write` lays them out. */
+function writeSetupFiles(setup, workDir) {
+  for (const [rel, body] of Object.entries(setup.files)) {
+    const file = path.join(workDir, rel);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(body, null, 2));
+  }
 }
 
 /**
@@ -151,15 +170,14 @@ export const DRIVERS = {
       const found = this.detect();
       if (!found) throw new Error('Claude Code is not installed');
       const allSecrets = [o.token, ...(o.secrets ?? [])];
-      const config = path.join(o.workDir, 'claude-mcp.json');
-      fs.writeFileSync(config, JSON.stringify({
-        mcpServers: { [SERVER_NAME]: { type: 'http', url: o.url, headers: { Authorization: `Bearer \${${TOKEN_ENV}}` } } },
-      }));
-      const tools = ['memory_search', 'memory_fetch', 'context_build'].map((t) => `mcp__${SERVER_NAME}__${t}`);
-      const result = await run(found.exe, ['-p', '--mcp-config', config, '--strict-mcp-config', '--allowedTools', ...tools,
+      // Same files a user gets from the setup source; --strict-mcp-config keeps every other server out.
+      const setup = claudeCodeHarnessSetup(o.url);
+      writeSetupFiles(setup, o.workDir);
+      const config = path.join(o.workDir, CLAUDE_CODE_FILES.mcp);
+      const result = await run(found.exe, ['-p', '--mcp-config', config, '--strict-mcp-config', '--allowedTools', ...setup.allowedTools,
         '--model', 'haiku', '--max-turns', '60', '--output-format', 'stream-json', '--verbose'], {
         input: o.prompt, cwd: o.workDir, timeoutMs: o.timeoutMs ?? 300000,
-        env: { ...process.env, [TOKEN_ENV]: o.token },
+        env: { ...process.env, ...UPDATE_PAUSE_ENV['claude-code'], [TOKEN_ENV]: o.token },
       });
       const events = jsonLines(result.stdout);
       const init = events.find((e) => e.type === 'system' && e.subtype === 'init');
@@ -168,6 +186,7 @@ export const DRIVERS = {
       return {
         exit: result.status,
         clientVersion: found.version,
+        updatePauseRequested: Object.keys(UPDATE_PAUSE_ENV['claude-code']),
         connected: server?.status === 'connected',
         serverStatus: server?.status ?? 'absent',
         discoveredTools: discovered,
@@ -269,14 +288,13 @@ export const DRIVERS = {
       const found = this.detect();
       if (!found) throw new Error('Antigravity is not installed');
       const allSecrets = [o.token, ...(o.secrets ?? [])];
-      const env = { ...process.env, [TOKEN_ENV]: o.token };
+      const env = { ...process.env, ...UPDATE_PAUSE_ENV.antigravity, [TOKEN_ENV]: o.token };
       // Workspace-only .agents/mcp_config.json pointing to the loopback stdio bridge (no global config writes,
       // no CLI credential flags). Session-only --settings allowlists only the 3 read-only Mind Place tools.
-      const agentsDir = path.join(o.workDir, '.agents');
-      fs.mkdirSync(agentsDir, { recursive: true });
-      fs.writeFileSync(path.join(agentsDir, 'mcp_config.json'), JSON.stringify(antigravityWorkspaceConfig(o.url), null, 2));
-      const settingsPath = path.join(o.workDir, 'agy-settings.json');
-      fs.writeFileSync(settingsPath, JSON.stringify(antigravitySessionSettings(), null, 2));
+      // Both files come from the setup source, in the layout the user guide installs.
+      const setup = antigravityHarnessSetup(o.url);
+      writeSetupFiles(setup, o.workDir);
+      const settingsPath = path.join(o.workDir, ANTIGRAVITY_FILES.settings);
       const result = await run(found.exe, ['--settings', settingsPath, '--output-format', 'stream-json', '--print', o.prompt], {
         cwd: o.workDir, timeoutMs: o.timeoutMs ?? 300000, env,
       });
@@ -287,6 +305,7 @@ export const DRIVERS = {
         clientVersion: found.version,
         connected: null,
         events: events.length,
+        updatePauseRequested: Object.keys(UPDATE_PAUSE_ENV.antigravity),
         finalText: safePreview(finalEvent?.response ?? result.stdout, allSecrets, 400, true),
         stderr: safePreview(result.stderr, allSecrets, 400, true),
         stdoutTail: safePreview(result.stdout, allSecrets, 900, true),

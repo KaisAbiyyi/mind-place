@@ -551,3 +551,124 @@ test('sourceIdentity binds scripts/mcp-stdio-bridge.mjs in harness provenance', 
   assert.match(id.harness.lib, /^[0-9a-f]{40}$/);
   assert.match(id.harness.stdio_bridge, /^[0-9a-f]{40}$/);
 });
+
+// ---------------------------------------------------------------------------------------------------------
+// MP-R1-WP02: one read-only setup source for Claude Code and Antigravity, guides and local-read cells.
+import { READ_TOOLS, antigravitySetup, claudeCodeSetup, localReadSetup, readOnlySetupProblems, renderGuide } from '../scripts/lib/mcp-local-read-setup.mjs';
+import { guideDrift, writeSetup } from '../scripts/mcp-local-read-setup.mjs';
+import { UPDATE_PAUSE_ENV, antigravityHarnessSetup, claudeCodeHarnessSetup } from '../scripts/mcp-conformance/clients.mjs';
+import { localReadVerdict } from '../scripts/mcp-conformance/local-read.mjs';
+
+const BRIDGE = 'C:\\mp\\mcp-stdio-bridge.mjs';
+const clone = (v) => JSON.parse(JSON.stringify(v));
+
+test('WP02: the setup source gives both clients exactly the three read tools, by name, with the key by env only', () => {
+  assert.deepEqual(READ_TOOLS, ['memory_search', 'memory_fetch', 'context_build']);
+  const cc = claudeCodeSetup();
+  const ag = antigravitySetup({ bridgePath: BRIDGE });
+  assert.deepEqual(readOnlySetupProblems(cc), []);
+  assert.deepEqual(readOnlySetupProblems(ag), []);
+  assert.deepEqual(cc.files['.claude/settings.local.json'].permissions.allow, READ_TOOLS.map((t) => `mcp__mindplace_local__${t}`));
+  assert.deepEqual(ag.files['.agents/mind-place-read.settings.json'].permissions.allow, READ_TOOLS.map((t) => `mcp(mindplace_local/${t})`));
+  assert.equal(cc.files['.mcp.json'].mcpServers.mindplace_local.headers.Authorization, 'Bearer ${MIND_PLACE_MCP_TOKEN}');
+  assert.deepEqual(ag.files['.agents/mcp_config.json'].mcpServers.mindplace_local.args, [BRIDGE, '--url', 'http://127.0.0.1:43731/mcp', '--token-env', 'MIND_PLACE_MCP_TOKEN']);
+  for (const setup of [cc, ag]) {
+    assert.doesNotMatch(JSON.stringify(setup.files), /\*|eager|trust|autoApprove|alwaysAllow|enableAllProjectMcpServers|bypassPermissions|dangerously|mpc_v1_/i);
+  }
+  assert.ok(!('tools' in ag.files['.agents/mcp_config.json'].mcpServers.mindplace_local), 'Antigravity tools stay lazy');
+  assert.throws(() => localReadSetup('gemini-cli'), /Unknown local read client/);
+  assert.throws(() => antigravitySetup({}), /bridgePath is required/);
+});
+
+test('WP02: the read-only check rejects wildcards, whole-server rules, auto-approve, eager, literal keys and non-loopback URLs', () => {
+  const cc = claudeCodeSetup();
+  const ag = antigravitySetup({ bridgePath: BRIDGE });
+  const mutate = (setup, fn) => { const s = clone(setup); fn(s); return readOnlySetupProblems(s); };
+  const ccAllow = (s) => s.files['.claude/settings.local.json'].permissions;
+  const agAllow = (s) => s.files['.agents/mind-place-read.settings.json'].permissions;
+  const ccServer = (s) => s.files['.mcp.json'].mcpServers.mindplace_local;
+  const agServer = (s) => s.files['.agents/mcp_config.json'].mcpServers.mindplace_local;
+  assert.ok(mutate(cc, (s) => { ccAllow(s).allow = ['mcp__mindplace_local__*']; }).some((p) => /wildcard/.test(p)));
+  assert.ok(mutate(cc, (s) => { ccAllow(s).allow = ['mcp__mindplace_local']; }).some((p) => /exactly/.test(p)));
+  assert.ok(mutate(cc, (s) => { ccAllow(s).allow.push('Bash'); }).some((p) => /exactly/.test(p)));
+  assert.ok(mutate(cc, (s) => { s.files['.claude/settings.local.json'].enableAllProjectMcpServers = true; }).some((p) => /forbidden key/.test(p)));
+  assert.ok(mutate(cc, (s) => { ccAllow(s).defaultMode = 'bypassPermissions'; }).some((p) => /forbidden key/.test(p)));
+  assert.ok(mutate(cc, (s) => { ccServer(s).headers.Authorization = `Bearer ${TOKEN}`; }).some((p) => /literal/.test(p)));
+  assert.ok(mutate(cc, (s) => { ccServer(s).url = 'http://localhost:43731/mcp'; }).some((p) => /127\.0\.0\.1/.test(p)));
+  assert.ok(mutate(cc, (s) => { ccServer(s).url = 'https://example.com/mcp'; }).length > 0);
+  assert.ok(mutate(ag, (s) => { agAllow(s).allow = ['mcp(*)']; }).some((p) => /wildcard/.test(p)));
+  assert.ok(mutate(ag, (s) => { agServer(s).tools = { memory_search: { eager: true } }; }).some((p) => /forbidden key "tools"/.test(p)));
+  assert.ok(mutate(ag, (s) => { agServer(s).trust = true; }).some((p) => /forbidden key/.test(p)));
+  assert.ok(mutate(ag, (s) => { agServer(s).args.push('--dangerously-skip-permissions'); }).length > 0);
+  assert.ok(mutate(ag, (s) => { agServer(s).args.splice(3, 2, '--token', TOKEN); }).length > 0);
+  assert.ok(mutate(ag, (s) => { agServer(s).args[2] = 'http://127.0.0.1:43731/mcp?k=1'; }).length > 0);
+  assert.throws(() => claudeCodeSetup({ url: 'http://localhost:43731/mcp' }), /127\.0\.0\.1/);
+  assert.throws(() => claudeCodeSetup({ serverName: 'Mind Place' }), /serverName/);
+});
+
+test('WP02: the conformance drivers use the same setup source as the user guide', () => {
+  const url = 'http://127.0.0.1:5555/mcp';
+  assert.deepEqual(antigravityWorkspaceConfig(url, BRIDGE), antigravitySetup({ serverName: 'mpconformance', url, tokenEnv: 'MP_CONFORMANCE_TOKEN', bridgePath: BRIDGE, command: process.execPath }).files['.agents/mcp_config.json']);
+  assert.deepEqual(claudeCodeHarnessSetup(url).files, claudeCodeSetup({ serverName: 'mpconformance', url, tokenEnv: 'MP_CONFORMANCE_TOKEN' }).files);
+  assert.deepEqual(antigravityHarnessSetup(url).allowedTools, antigravitySessionSettings().permissions.allow);
+  const source = fs.readFileSync(new URL('../scripts/mcp-conformance/clients.mjs', import.meta.url), 'utf8');
+  // No second, hand-written copy of the tool list or server config in the drivers.
+  assert.doesNotMatch(source, /\['memory_search', 'memory_fetch', 'context_build'\]|type: 'http', url/);
+  assert.match(source, /claudeCodeHarnessSetup\(o\.url\)/);
+  assert.match(source, /antigravityHarnessSetup\(o\.url\)/);
+  // The update pause is a request only; it never replaces the drift check.
+  assert.deepEqual(Object.keys(UPDATE_PAUSE_ENV), ['claude-code', 'antigravity']);
+  assert.match(clientVersionDrift('1.5.18', ['1.5.19']), /rerun on one version/);
+});
+
+test('WP02: EN and ID setup guides are generated from the setup source and carry no key', () => {
+  assert.deepEqual(guideDrift(), [], 'run: node scripts/mcp-local-read-setup.mjs guides');
+  const en = renderGuide('en');
+  const id = renderGuide('id');
+  for (const guide of [en, id]) {
+    for (const tool of READ_TOOLS) assert.match(guide, new RegExp(`mcp__mindplace_local__${tool}`));
+    assert.match(guide, /mcp\(mindplace_local\/memory_search\)/);
+    assert.match(guide, /Read-Host -MaskInput/);
+    assert.match(guide, /agy --settings \.agents\/mind-place-read\.settings\.json/);
+    assert.doesNotMatch(guide, /mpc_v1_|Bearer [A-Za-z0-9]|"eager"/);
+  }
+  assert.match(en, /Choose chats/);
+  assert.match(en, /Revoke access/);
+  assert.match(id, /Pilih obrolan/);
+  assert.match(id, /Cabut akses/);
+  assert.equal(en.split('```json').length, id.split('```json').length, 'both languages show the same configs');
+});
+
+test('WP02: writing a setup never overwrites an existing file and writes nothing in that case', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mp-wp02-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const setup = antigravitySetup({ bridgePath: BRIDGE });
+  fs.mkdirSync(path.join(dir, '.agents'));
+  fs.writeFileSync(path.join(dir, '.agents', 'mind-place-read.settings.json'), '{"mine":true}');
+  assert.throws(() => writeSetup(setup, dir), /Not overwriting/);
+  assert.equal(fs.existsSync(path.join(dir, '.agents', 'mcp_config.json')), false);
+  assert.equal(fs.readFileSync(path.join(dir, '.agents', 'mind-place-read.settings.json'), 'utf8'), '{"mine":true}');
+  const fresh = path.join(dir, 'fresh');
+  assert.equal(writeSetup(claudeCodeSetup(), fresh).length, 2);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(fresh, '.claude', 'settings.local.json'), 'utf8')), claudeCodeSetup().files['.claude/settings.local.json']);
+});
+
+test('WP02: the local-read verdict is PASS only for both clients, all claims, one clean SHA and one version each', () => {
+  const allPass = Object.fromEntries(['C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7', 'C8', 'C9'].map((c) => [c, { result: 'PASS' }]));
+  const run = (over = {}) => ({ source: { sha: SHA }, claims: allPass, harness_failure: null, receipt: 'real-x.json', receipt_sha256: HASH, ...over });
+  const versions = { 'claude-code': '2.1.322', antigravity: '1.5.18' };
+  const base = { sha: SHA, dirty: false, runs: { 'claude-code': run(), antigravity: run() }, versionsBefore: versions, versionsAfter: versions };
+  assert.equal(localReadVerdict(base).result, 'PASS');
+  const drifted = localReadVerdict({ ...base, versionsAfter: { ...versions, antigravity: '1.5.19' } });
+  assert.equal(drifted.cells.antigravity.result, 'FAIL');
+  assert.equal(drifted.result, 'FAIL');
+  assert.equal(localReadVerdict({ ...base, versionsBefore: { ...versions, antigravity: null } }).result, 'FAIL');
+  assert.equal(localReadVerdict({ ...base, dirty: true }).result, 'FAIL');
+  assert.equal(localReadVerdict({ ...base, runs: { ...base.runs, antigravity: run({ source: { sha: 'c'.repeat(40) } }) } }).result, 'FAIL');
+  assert.equal(localReadVerdict({ ...base, runs: { ...base.runs, antigravity: run({ claims: { ...allPass, C3: { result: 'FAIL' } } }) } }).result, 'FAIL');
+  assert.equal(localReadVerdict({ ...base, runs: { ...base.runs, antigravity: run({ harness_failure: 'the client changed version during the run' }) } }).result, 'FAIL');
+  const blocked = localReadVerdict({ ...base, runs: { 'claude-code': run(), antigravity: { blocked: { kind: 'NOT_INSTALLED' } } } });
+  assert.equal(blocked.cells.antigravity.result, 'NOT_RUN');
+  assert.equal(blocked.result, 'FAIL', 'one client passing is never the WP02 pass');
+  assert.equal(localReadVerdict({ sha: SHA, dirty: false }).result, 'NOT_RUN');
+});
