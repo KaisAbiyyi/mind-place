@@ -56,7 +56,7 @@ jobs:
       native-contract-fingerprint: ${{ steps.decision.outputs.native-contract-fingerprint }}
       native-checkout-sha: ${{ steps.decision.outputs.native-checkout-sha }}
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       - name: Python gate decision and receipt regression tests
@@ -79,7 +79,7 @@ jobs:
       MP_10C_FILES: '100'
       MP_10C_RECEIPT: ${{ github.workspace }}/qualification/mp10c-100.json
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
           ref: ${{ needs.effective-input-gate.outputs.checkout-sha }}
@@ -146,7 +146,7 @@ jobs:
       NATIVE_CONTRACT_FINGERPRINT: ${{ needs.effective-input-gate.outputs.native-contract-fingerprint }}
       EXPECTED_FINGERPRINT: ${{ needs.effective-input-gate.outputs.fingerprint }}
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
           ref: ${{ needs.effective-input-gate.outputs.checkout-sha }}
@@ -186,7 +186,7 @@ jobs:
       NATIVE_CONTRACT_POLICY: ${{ needs.effective-input-gate.outputs.native-contract-policy }}
       NATIVE_CONTRACT_FINGERPRINT: ${{ needs.effective-input-gate.outputs.native-contract-fingerprint }}
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
           ref: ${{ needs.effective-input-gate.outputs.checkout-sha }}
@@ -270,7 +270,7 @@ jobs:
       NATIVE_CONTRACT_POLICY: ${{ needs.effective-input-gate.outputs.native-contract-policy }}
       NATIVE_CONTRACT_FINGERPRINT: ${{ needs.effective-input-gate.outputs.native-contract-fingerprint }}
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
           ref: ${{ needs.effective-input-gate.outputs.checkout-sha }}
@@ -320,7 +320,7 @@ jobs:
           SMOKE_RESULT: ${{ needs.document-smoke.result }}
           PREREQUISITE_RESULT: ${{ needs.prerequisite-coordination.result }}
         run: test "$SOURCE_GATE_RESULT" = success && test "$SMOKE_RESULT" = success && test "$PREREQUISITE_RESULT" = success
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
           ref: ${{ needs.effective-input-gate.outputs.checkout-sha }}
