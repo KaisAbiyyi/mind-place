@@ -4,7 +4,7 @@ This file is the small execution-order pointer for cloud agents. Strategy lives 
 
 ## Current priority — Release 1 and Release 2 work packages (owner decision 2026-11-27)
 
-Execution order now follows [2026-11-27-release-1-2-work-packages.md](2026-11-27-release-1-2-work-packages.md). **R1:** import from ChatGPT, Gemini and Claude; MCP read from Claude Code, Claude Desktop, Antigravity and Gemini CLI; agent-swarm curation per topic into updatable Constellation nodes ([Curated Node Format](../curation/CURATED-NODE-FORMAT.md)). **R2:** Claude and Gemini write curated data from the chat (one topic or the active chat); Workspace task management with automatic lanes, claims and agent hand-off. Other v1.0 tasks keep their scope and come after these packages. Live status stays in Notion. Sections below are history.
+Execution order now follows [2026-11-27-release-1-2-work-packages.md](2026-11-27-release-1-2-work-packages.md). **R1:** import from ChatGPT, Gemini and Claude; local read from Claude Code and Antigravity; remote read from Claude and Gemini through the remote gateway (curated layer); agent-swarm curation per topic written over local MCP into updatable Constellation nodes ([Curated Node Format](../curation/CURATED-NODE-FORMAT.md)). **R2:** remote curated write from Claude and Gemini (one topic or the active chat); Workspace task management with automatic lanes, claims and agent hand-off. A provider name alone means the remote surface; local agents are named Claude Code or Antigravity. Other v1.0 tasks keep their scope and come after these packages. Live status stays in Notion. Sections below are history.
 
 ## Repository governance gate — MP-GOV-01..04 (2026-10-31)
 
