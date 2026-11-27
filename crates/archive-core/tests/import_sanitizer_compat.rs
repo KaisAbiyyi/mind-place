@@ -4,7 +4,8 @@
 //! which also fails if the committed sanitized files drift from the tool's output).
 
 use mind_place_archive::importers::{
-    chatgpt_export::ChatGptExportParser, gemini_takeout::GeminiTakeoutParser, ReconciledItem,
+    chatgpt_export::ChatGptExportParser, claude_export::ClaudeExportParser,
+    gemini_takeout::GeminiTakeoutParser, ReconciledItem,
 };
 
 const CHATGPT_ORIGINAL: &[u8] =
@@ -15,6 +16,16 @@ const GEMINI_ORIGINAL: &[u8] =
     include_bytes!("../../../test/fixtures/import-sanitizer/parser-compat/gemini-synthetic.html");
 const GEMINI_SANITIZED: &[u8] =
     include_bytes!("../../../test/fixtures/import-sanitizer/parser-compat/gemini-sanitized.html");
+const CLAUDE_ORIGINAL: &[u8] =
+    include_bytes!("../../../test/fixtures/import-sanitizer/parser-compat/claude-synthetic.json");
+const CLAUDE_SANITIZED: &[u8] =
+    include_bytes!("../../../test/fixtures/import-sanitizer/parser-compat/claude-sanitized.json");
+const CLAUDE_PROJECTS_ORIGINAL: &[u8] = include_bytes!(
+    "../../../test/fixtures/import-sanitizer/parser-compat/claude-projects-synthetic.json"
+);
+const CLAUDE_PROJECTS_SANITIZED: &[u8] = include_bytes!(
+    "../../../test/fixtures/import-sanitizer/parser-compat/claude-projects-sanitized.json"
+);
 
 /// Everything about a parsed item that depends on structure rather than on text content.
 #[derive(Debug, PartialEq, Eq)]
@@ -151,10 +162,62 @@ fn sanitized_gemini_takeout_parses_with_the_same_shape_as_the_original() {
 }
 
 #[test]
+fn sanitized_claude_export_parses_with_the_same_shape_as_the_original() {
+    let original = ClaudeExportParser::parse_conversations_json(CLAUDE_ORIGINAL).unwrap();
+    let sanitized = ClaudeExportParser::parse_conversations_json(CLAUDE_SANITIZED).unwrap();
+    assert_eq!(original.len(), 6);
+    let (a, b): (Vec<_>, Vec<_>) = (
+        original.iter().map(shape).collect(),
+        sanitized.iter().map(shape).collect(),
+    );
+    assert_eq!(a, b);
+    // The fixture exercises: a proved-linear complete chat, thinking/tool blocks (partial), file
+    // metadata, no parent links (partial), legacy text-only messages, and a fork (raw-only).
+    assert!(a.iter().any(
+        |s| matches!(s, Shape::Conversation { completeness, .. } if completeness == "complete")
+    ));
+    assert!(a.iter().any(
+        |s| matches!(s, Shape::Conversation { completeness, .. } if completeness == "partial")
+    ));
+    assert!(a.iter().any(|s| matches!(s, Shape::Conversation { attachments, .. } if attachments.iter().any(|n| *n > 0))));
+    assert!(
+        a.iter().any(
+            |s| matches!(s, Shape::RawOnly { reason, .. } if reason.contains("one linear chain"))
+        ),
+        "the forked conversation must stay raw-only"
+    );
+    assert!(a.iter().all(|s| match s {
+        Shape::Conversation {
+            official_url,
+            message_times,
+            ..
+        } => *official_url && message_times.iter().all(|t| *t),
+        Shape::RawOnly { .. } => true,
+    }));
+    for item in original.iter().chain(&sanitized) {
+        if let ReconciledItem::Conversation { capture, .. } = item {
+            assert!(capture.messages.iter().all(|m| m.model.is_none()));
+        }
+    }
+    // Projects are raw-only in both.
+    let projects = ClaudeExportParser::parse_projects_json(CLAUDE_PROJECTS_ORIGINAL).unwrap();
+    let projects_sanitized =
+        ClaudeExportParser::parse_projects_json(CLAUDE_PROJECTS_SANITIZED).unwrap();
+    assert_eq!(
+        projects.iter().map(shape).collect::<Vec<_>>(),
+        projects_sanitized.iter().map(shape).collect::<Vec<_>>()
+    );
+    assert!(projects
+        .iter()
+        .all(|item| matches!(item, ReconciledItem::PreservedRawOnly { .. })));
+}
+
+#[test]
 fn sanitized_exports_do_not_contain_the_synthetic_private_strings() {
     for (name, original, sanitized) in [
         ("chatgpt", CHATGPT_ORIGINAL, CHATGPT_SANITIZED),
         ("gemini", GEMINI_ORIGINAL, GEMINI_SANITIZED),
+        ("claude", CLAUDE_ORIGINAL, CLAUDE_SANITIZED),
     ] {
         let original = String::from_utf8_lossy(original);
         let sanitized = String::from_utf8_lossy(sanitized);
@@ -168,6 +231,7 @@ fn sanitized_exports_do_not_contain_the_synthetic_private_strings() {
             "quartzfinch",
             "marmalade",
             "Notes about",
+            "Plans for",
         ] {
             assert!(!sanitized.contains(needle), "{name}: {needle} survived");
         }

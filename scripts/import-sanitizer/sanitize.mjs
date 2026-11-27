@@ -781,7 +781,9 @@ function buildReport({ rules, leak, members, checks, source, provider, written, 
       structure: summary,
     };
   });
+  // A Claude.ai export names its account file `users.json`; a ChatGPT export names it `user.json`.
   const detected = provider !== 'auto' ? provider
+    : members.some(m => /(?:^|\/)users\.json$/.test(m.name)) && members.some(m => /conversations(-\d+)?\.json$/.test(m.name)) ? 'claude'
     : members.some(m => /conversations(-\d+)?\.json$/.test(m.name)) ? 'chatgpt'
       : members.some(m => m.kind === 'html') ? 'gemini' : 'unknown';
   return {

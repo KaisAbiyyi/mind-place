@@ -19,3 +19,7 @@ tempfile.workspace = true
 flate2 = "=1.1.10"
 thiserror.workspace = true
 
+
+[dev-dependencies]
+# Only the owner-run local qualification example (examples/import_trio_local.rs).
+getrandom = "0.4.3"

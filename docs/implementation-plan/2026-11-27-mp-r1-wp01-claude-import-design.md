@@ -42,14 +42,16 @@ No real Claude export was read (repository rule). The layout below is the public
 
 ## 4. Raw-first path
 
-Unchanged from RAW-01: measure → stage (raw bytes + validated projection) → verify root hash → publish raw blob, evidence, projection, disposition link, done marker. The importer version in the job key becomes `mp-import-raw-01/2` so a spool staged by the previous version (which had no Claude kinds) is never reused.
+Unchanged from RAW-01: measure → stage (raw bytes + validated projection) → verify root hash → publish raw blob, evidence, projection, disposition link, done marker. The importer version (`mp-import-raw-01/1`) is **not** bumped: ChatGPT and Gemini staging is byte-for-byte unchanged, and the job key already frames each member's kind label, so a Claude job can never reuse a spool of another kind. Both Claude kinds read through the same bounded JSON array limits as ChatGPT (`ImportJobLimits::chatgpt_stream`).
 
 ## 5. Sanitizer and fixtures
 
-The MP-IMPORT-SANITIZE-01 tool learns the Claude vocabulary (default-deny stays): `uuid`-style id keys (`uuid`, `parent_message_uuid`, `file_uuid`, `project_uuid`), the `sender` enum, Claude content block types, the `claude.ai` host, `_at` timestamp keys, and detection of a Claude export in the report label. Fixtures:
+The MP-IMPORT-SANITIZE-01 tool learns the Claude vocabulary (default-deny stays): `uuid`-style id keys (`uuid`, `parent_message_uuid`, `file_uuid`, `project_uuid`), the null-UUID root parent as a kept literal, the `sender` and `file_type` enums, Claude content block types, the `claude.ai` host, ISO 8601 strings under time-like keys (including `_at`) kept with the time of day zeroed, `users.json` as a structural name, and detection of a Claude export (`users.json` beside `conversations.json`) in the report label. The committed ChatGPT and Gemini fixtures are unchanged by this. Fixtures:
 
-- `test/fixtures/import-sanitizer/parser-compat/claude-{synthetic,sanitized}.json`, generated like the other two (invented data, fixed key), with a drift test.
-- Rust tests prove sanitized and synthetic files parse to the same shapes for all three providers, and an end-to-end zip import (folder and zip) for Claude through `import_authorized_source`.
+- `test/fixtures/import-sanitizer/parser-compat/claude-{synthetic,sanitized}.json` and `claude-projects-{synthetic,sanitized}.json`, generated like the other two (invented data, fixed key), covered by the drift test.
+- `import_sanitizer_compat.rs`: sanitized and synthetic files parse to the same shapes for all three providers.
+- `import_trio.rs`: all three **sanitized** fixtures import end to end through `import_authorized_source` (counts, raw blob equals the source slice, idempotent re-run, `users.json` never a member).
+- `src-tauri` `import_commands` test: a Claude `.zip` through inspect and start (zip path, candidates, explicit-member refusal).
 
 ## 6. UI copy (gap protocol)
 
@@ -58,12 +60,12 @@ The signed-off guide's Import dialog lists ChatGPT, Gemini (Takeout) and a trans
 1. Job: "I want to add the conversations from my Claude export to my archive."
 2. Classification: Add, same destination (Archive → Import, kind list). No new destination.
 3. Pattern: one more row in the existing kind list (title + one-line hint), same tokens.
-4. Copy through i18n, EN + ID together: `import.kind.claude`, `import.kind.claudeHint`; the existing subtitle and choose-file strings name Claude too.
+4. Copy through i18n, EN + ID together: the kind list keys `import.kind.{chatgpt,claude,gemini}` and their `…Hint` lines (ChatGPT and Gemini copied verbatim from the guide's `imp.k.*` strings, Claude written in the same pattern), plus `import.kind.claudeNote` (the honest-limits line, same voice as the guide's `imp.note`). The existing subtitle and choose-file strings name Claude too. Ledger: `docs/ui/evidence/mp-r1-wp01/design-gap-ledger.md`.
 5. Screenshots: **NOT_RUN** — the Import dialog itself is not built yet (it lands with the picker after MP-UI2-06), so only catalog strings change here.
 
 ## 7. Local runbook
 
-`docs/runbooks/MP-R1-WP01-import-trio-local.md`: disposable archive, real ChatGPT/Gemini/Claude exports, inspect → import → re-import (idempotent) → receipt checks, optional sanitizer pass to share structure. Result is owner-reported `PASS`/`FAIL`/`PARTIAL`/`BLOCKED`; until then the local gate is `NOT_RUN`.
+`docs/qualification/MP-R1-WP01-import-trio-local-runbook.md` with the owner-run harness `crates/archive-core/examples/import_trio_local.rs`: real ChatGPT/Gemini/Claude exports (zip and folder) into a new, empty, disposable directory under a throwaway gate; import, re-import (idempotent), receipt and raw-blob hash checks; prints counts and content-free categories only; optional sanitizer pass to share structure. The in-app path cannot be qualified yet (no `G6` picker, so the commands refuse with `E_IMPORT_SELECTION`); the harness runs the same archive-core job the commands call. Result is owner-reported `PASS`/`FAIL`/`PARTIAL`/`BLOCKED`; until then the local gate is `NOT_RUN`.
 
 ## 8. Residual risks
 

@@ -223,3 +223,86 @@ fn test_stored_capture_reader_compatibility() {
     validate_historical_capture(&mut cap_export, "chatgpt").unwrap();
     assert!(validate_stored_capture(&cap_export).is_ok());
 }
+
+fn base_claude_export_capture() -> Capture {
+    let id = "1b2c3d4e-0000-4000-8000-00000000c001";
+    let mut cap = base_chatgpt_capture();
+    cap.provider = "claude".into();
+    cap.conversation_id = id.to_ascii_uppercase();
+    cap.source_url = format!("https://claude.ai/chat/{id}");
+    cap.capture_method = "export-import".into();
+    cap
+}
+
+/// MP-R1-WP01: Claude.ai export captures are historical `export-import` captures of provider
+/// `claude`, accepted only with an official chat URL or the importer's disambiguated URI.
+#[test]
+fn claude_export_captures_are_validated_as_their_own_provider() {
+    let mut cap = base_claude_export_capture();
+    validate_historical_capture(&mut cap, "claude").unwrap();
+    assert_eq!(cap.conversation_id, "1b2c3d4e-0000-4000-8000-00000000c001");
+    // validate_capture routes export-import by provider.
+    let mut routed = base_claude_export_capture();
+    assert!(validate_capture(&mut routed).is_ok());
+    assert!(validate_stored_capture(&cap).is_ok());
+    // A Claude capture is never validated as ChatGPT, and vice versa.
+    assert!(validate_historical_capture(&mut base_claude_export_capture(), "chatgpt").is_err());
+    let mut chatgpt = base_chatgpt_capture();
+    chatgpt.capture_method = "export-import".into();
+    assert!(validate_historical_capture(&mut chatgpt, "claude").is_err());
+
+    let synthetic = "abcdef12-3456-4890-abcd-ef1234567890";
+    let mut disambiguated = base_claude_export_capture();
+    disambiguated.conversation_id = synthetic.into();
+    disambiguated.source_url = format!("mindplace-import://claude-export/{synthetic}");
+    assert!(validate_historical_capture(&mut disambiguated, "claude").is_ok());
+
+    for (url, id) in [
+        (
+            "https://attacker.example/chat/1b2c3d4e-0000-4000-8000-00000000c001",
+            None,
+        ),
+        (
+            "https://claude.ai/chat/1b2c3d4e-0000-4000-8000-00000000c002",
+            None,
+        ),
+        ("https://claude.ai/chat/not-a-uuid", Some("not-a-uuid")),
+        (
+            "mindplace-import://claude-export/not-a-uuid",
+            Some("not-a-uuid"),
+        ),
+        (
+            "mindplace-import://chatgpt-export/1b2c3d4e-0000-4000-8000-00000000c001",
+            None,
+        ),
+    ] {
+        let mut forged = base_claude_export_capture();
+        if let Some(id) = id {
+            forged.conversation_id = id.into();
+        }
+        forged.source_url = url.into();
+        assert!(
+            validate_historical_capture(&mut forged, "claude").is_err(),
+            "{url}"
+        );
+    }
+    // Live methods and other historical methods are refused for a Claude import.
+    for method in ["manual-dom", "takeout-import", "generic-import"] {
+        let mut wrong = base_claude_export_capture();
+        wrong.capture_method = method.into();
+        assert!(
+            validate_historical_capture(&mut wrong, "claude").is_err(),
+            "{method}"
+        );
+    }
+}
+
+#[test]
+fn ordinary_save_refuses_a_claude_export_capture() {
+    let d = tempfile::tempdir().unwrap();
+    let store = mind_place_archive::ArchiveStore::open(d.path().join("archive")).unwrap();
+    assert!(store.save(base_claude_export_capture()).is_err());
+    let mut live_shaped = base_claude_export_capture();
+    live_shaped.capture_method = "automatic-dom".into();
+    assert!(validate_live_capture(&mut live_shaped).is_err());
+}
