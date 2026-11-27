@@ -173,7 +173,7 @@ test('client identity falls back to modern _meta clientInfo, then the User-Agent
 
 import { antigravitySessionSettings, antigravityWorkspaceConfig, geminiProjectSettings } from '../scripts/mcp-conformance/clients.mjs';
 import { formatSafeJson, formatSafeLine, safePreview, safeUrlPath, sanitizeBlocked, scrubDiagnostic, writeDebugArtifact } from '../scripts/mcp-conformance/hygiene.mjs';
-import { argsDigest, classifyFetchArgsMatch, fullArgsDigest, identityArgs } from '../scripts/mcp-conformance/real.mjs';
+import { argsDigest, classifyFetchArgsMatch, clientVersionDrift, fullArgsDigest, identityArgs } from '../scripts/mcp-conformance/real.mjs';
 import { sourceIdentity, validateReceiptRun, verifyVaultFiles } from '../scripts/mcp-conformance/run.mjs';
 import { isChatGptConversationUrl } from '../scripts/mcp-conformance/suite.mjs';
 import { createBridgeSession, parseBridgeArgs, validateLoopbackUrl } from '../scripts/mcp-stdio-bridge.mjs';
@@ -421,6 +421,25 @@ test('stdio bridge rejects non-loopback URLs, queries, and inline credentials, a
     await proxy.close();
     await upstream.close();
   }
+});
+
+test('Antigravity config leaves tools lazy: eager declarations of the large read tools made them unavailable (MP-7MCP-06)', () => {
+  const cfg = antigravityWorkspaceConfig('http://127.0.0.1:1/mcp');
+  const server = cfg.mcpServers.mpconformance;
+  // Antigravity 1.5.17+ answered "tool memory_search is not enabled for server mpconformance" and sent no tools/call
+  // when memory_search and context_build were marked eager; lazy (the default) calls the same schemas fine.
+  assert.equal('tools' in server, false, 'no per-tool settings');
+  assert.doesNotMatch(JSON.stringify(cfg), /eager/);
+  assert.doesNotMatch(fs.readFileSync(new URL('../scripts/mcp-conformance/clients.mjs', import.meta.url), 'utf8'), /eager\s*:\s*true/);
+  // The session allowlist stays the control over what may run; it still names exactly the three read tools.
+  assert.equal(antigravitySessionSettings().permissions.allow.length, 3);
+});
+
+test('a client that changes version mid-run is reported, not recorded under one version', () => {
+  assert.equal(clientVersionDrift('1.5.15', ['1.5.15', '1.5.15']), null);
+  assert.equal(clientVersionDrift('1.5.17', [null, undefined, '1.5.17']), null);
+  assert.match(clientVersionDrift('1.5.15', ['1.5.17', '1.5.17']), /1\.5\.15 -> 1\.5\.17/);
+  assert.match(clientVersionDrift('1.5.15', ['1.5.15', '1.5.18']), /rerun on one version/);
 });
 
 test('Antigravity driver and owner test cards never place bearer tokens on CLI or grant wildcard mcp(*)', () => {
