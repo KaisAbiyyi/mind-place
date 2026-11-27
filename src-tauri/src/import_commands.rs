@@ -846,6 +846,23 @@ mod tests {
         )
         .unwrap_err();
         assert!(refused.starts_with("E_IMPORT_MEMBERS"), "{refused}");
+        // The account file is refused even when it is named explicitly.
+        let account = run_import(
+            &fx.store,
+            &fx.gate,
+            lease,
+            CRED,
+            StartRequest {
+                provider: "claude",
+                path: &path,
+                source_token: &report.source_token,
+                members: Some(&["conversations.json".to_owned(), "users.json".to_owned()]),
+            },
+            &sink,
+            &AtomicBool::new(false),
+        )
+        .unwrap_err();
+        assert!(account.starts_with("E_IMPORT_MEMBERS"), "{account}");
     }
 
     #[test]

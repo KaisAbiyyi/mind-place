@@ -23,7 +23,7 @@ No real Claude export was read (repository rule). The layout below is the public
 | `claude-conversations` | `claude` | `conversations.json` or `conversations-*.json`, any depth | `claude-export-conversation` | projection or raw-only |
 | `claude-projects` | `claude` | `projects.json`, any depth | `claude-export-project` | always raw-only (a project is not a conversation) |
 
-- `users.json` (account name, e-mail, phone) is **never** a candidate member and is never staged. It is measured (hashed) as part of the source manifest like every other file, nothing more.
+- `users.json` (account name, e-mail, phone) is **never** a candidate member and is never staged. It is measured (hashed) as part of the source manifest like every other file, nothing more. Review round 1: account files (`users.json`, and ChatGPT's `user.json`, any depth, any case) are also refused when named explicitly, both by `member_extension_allowed`/`MemberKind::for_member` and at the job boundary (`E_MEMBERS`), whatever kind a caller claims.
 - Both kinds are top-level JSON arrays read through the same bounded stream (`stream_bounded_top_level_array_spanned`, 64 MiB per record) as ChatGPT, so every record is bound to `(member, offset, length, sha256)`.
 - Explicit members: a `.json` entry of the manifest; its kind comes from its file name (`projects.json` → projects, otherwise conversations). The Tauri layer now maps each member path to a kind instead of assuming one kind per provider.
 
@@ -31,8 +31,8 @@ No real Claude export was read (repository rule). The layout below is the public
 
 - **Identity.** `uuid` must be a UUID; otherwise raw-only. Duplicates in one job (across shards, case-insensitive) get a deterministic disambiguated UUID and the `mindplace-import://claude-export/<uuid>` source URL, exactly like ChatGPT. The first occurrence uses `https://claude.ai/chat/<uuid>`.
 - **Capture method** `export-import`, provider `claude`. `validate_historical_capture(.., "claude")` accepts only those two URL shapes and requires the identity to match. The stored-capture rule now accepts `export-import` for Claude; the ordinary `save` path still refuses it, and the keep-prior rule (an export never displaces a live capture) already covers `export-import`.
-- **Order and branches.** Messages are projected in `chat_messages` order. If any message has `parent_message_uuid`, the links must form exactly one chain in array order (one root whose parent is absent, the null-UUID sentinel, or not a message of the conversation; each next message's parent is the previous message). Anything else (a fork, a cycle, an out-of-order link, a duplicate message uuid) is **refused**: the record stays raw-only, because the active branch cannot be chosen without guessing. Without any parent links the projection is `partial` with the warning that branch structure is not proved by the export.
-- **Content.** With `content` present, `text` blocks are projected; every other block type (`thinking`, `tool_use`, `tool_result`, images, unknown) is not shown and makes the conversation `partial` with a bounded "Completeness not proved" warning; the block stays in raw evidence. `thinking` text is never shown as message text. Without `content`, `text` is projected. A message with neither is a gap.
+- **Order and branches.** Messages are projected in `chat_messages` order. If any message has `parent_message_uuid`, the links must form exactly one chain in array order (each next message's parent is the previous message). The history is proved complete only when the first message's parent is an explicit root (absent, `null`, the `00000000-0000-4000-8000-000000000000` sentinel or the nil UUID). A first parent that is any other value not in the conversation (for example a truncated export) keeps the order but makes the projection `partial` with the warning that earlier history may be missing (review round 1). Anything else (a fork, a cycle, an out-of-order link, a non-string link, a duplicate message uuid) is **refused**: the record stays raw-only, because the active branch cannot be chosen without guessing. Without any parent links the projection is `partial` with the warning that branch structure is not proved by the export.
+- **Content.** With `content` present, `text` blocks are projected; every other block type (`thinking`, `tool_use`, `tool_result`, images, unknown) is not shown and makes the conversation `partial` with a bounded "Completeness not proved" warning; the block stays in raw evidence. `thinking` text is never shown as message text. The top-level `text` is projected only when `content` is absent or empty (review round 1: with only non-text blocks it is not proved to be the shown answer). A message with neither is a gap.
 - **Roles.** `human` → `user`, `assistant` → `assistant`; anything else is shown as `tool` and is a gap.
 - **Model.** Always `None`: the export does not carry it.
 - **Timestamps.** Message `authored_at` is the message's own `created_at` when it parses as RFC 3339, else `None` plus a gap warning. Conversation created/updated come from the record. `captured_at` uses created, then updated, then import time with an explicit warning (same rule as ChatGPT).
@@ -67,7 +67,18 @@ The signed-off guide's Import dialog lists ChatGPT, Gemini (Takeout) and a trans
 
 `docs/qualification/MP-R1-WP01-import-trio-local-runbook.md` with the owner-run harness `crates/archive-core/examples/import_trio_local.rs`: real ChatGPT/Gemini/Claude exports (zip and folder) into a new, empty, disposable directory under a throwaway gate; import, re-import (idempotent), receipt and raw-blob hash checks; prints counts and content-free categories only; optional sanitizer pass to share structure. The in-app path cannot be qualified yet (no `G6` picker, so the commands refuse with `E_IMPORT_SELECTION`); the harness runs the same archive-core job the commands call. Result is owner-reported `PASS`/`FAIL`/`PARTIAL`/`BLOCKED`; until then the local gate is `NOT_RUN`.
 
-## 8. Residual risks
+## 8. Review round 1 (Antigravity, advisory, PR #219 comment) — decisions
+
+| Item | Decision |
+| --- | --- |
+| R1 unknown first parent marked `complete` | Fixed: only an explicit root proves completeness; other first parents give `partial` + warning. Test `a_first_parent_outside_the_export_is_not_a_proved_root` |
+| R2 explicit `users.json` could be staged | Fixed at both layers (see section 2). Tests in `import_trio.rs` and the Tauri Claude zip test |
+| R3 sanitizer `KEPT_STRUCTURAL` missed `users.json` | Fixed (`users?`). No duplicate-entry test: the sanitizer's zip reader and writer already refuse duplicate names, so the path is defense in depth |
+| N1 ID pronoun (`kamu` vs `Anda`) | Kept the guide's wording for now; reconcile with the Import dialog PR together with placement-matrix row 22 |
+| N2 fallback to top-level `text` | Tightened (section 3, Content) |
+| N3 reader label/date for `export-import` | Pre-existing, outside WP01 |
+
+## 9. Residual risks
 
 1. Real Claude export layout unverified (keys, sharding, presence of `parent_message_uuid`, extra files such as memories). The explicit member list is the escape hatch; unexpected keys stay in raw evidence.
 2. Most real Claude conversations will probably be `partial` (no parent links, tool/thinking blocks). That is the honest outcome, not a defect.

@@ -478,8 +478,20 @@ pub fn entry_matches_provider_layout(path: &str, provider: &str) -> bool {
     }
 }
 
+/// Account files of a provider export (name, e-mail, phone): `user.json` (ChatGPT) and
+/// `users.json` (Claude.ai), at any depth, case-insensitively. They are measured as part of the
+/// source but are never an import member, even when named explicitly.
+pub fn is_account_file(path: &str) -> bool {
+    let lower = path.rsplit('/').next().unwrap_or(path).to_ascii_lowercase();
+    matches!(lower.as_str(), "user.json" | "users.json")
+}
+
 /// The file extension a member of `provider` must have when the owner picks it explicitly.
+/// Account files are never allowed.
 pub fn member_extension_allowed(path: &str, provider: &str) -> bool {
+    if is_account_file(path) {
+        return false;
+    }
     let lower = path.rsplit('/').next().unwrap_or(path).to_ascii_lowercase();
     match provider {
         "chatgpt" | "claude" => lower.ends_with(".json"),

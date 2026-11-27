@@ -245,6 +245,46 @@ fn the_three_official_exports_import_raw_first_from_sanitized_fixtures() {
 }
 
 #[test]
+fn an_account_file_named_explicitly_is_refused_before_anything_is_staged() {
+    let fx = Fx::new();
+    let claude = fx.export("claude", &[("conversations.json", "claude-sanitized.json")]);
+    std::fs::write(
+        claude.join("users.json"),
+        br#"[{"uuid":"1b2c3d4e-0000-4000-8000-0000000000ff","full_name":"x","email_address":"x"}]"#,
+    )
+    .unwrap();
+    let manifest = SourceManifest::measure(&claude, ManifestLimits::default()).unwrap();
+    let lease = fx.gate.require_unlocked().unwrap();
+    let cap = fx
+        .gate
+        .authorize_import_session(
+            lease,
+            CRED,
+            "claude",
+            &claude,
+            *manifest.sha256(),
+            Duration::from_secs(300),
+        )
+        .unwrap();
+    // A caller that bypasses `for_member` and claims a conversations kind is still refused.
+    let members = [
+        ImportMember {
+            path: "conversations.json".into(),
+            kind: MemberKind::ClaudeConversations,
+        },
+        ImportMember {
+            path: "users.json".into(),
+            kind: MemberKind::ClaudeConversations,
+        },
+    ];
+    let request = SourceImportRequest::new(&fx.gate, lease, &cap, &members);
+    let error = fx.store.import_authorized_source(&request).unwrap_err();
+    assert!(error.to_string().starts_with("E_MEMBERS"), "{error}");
+    assert!(fx.files_under("imports/raw").is_empty());
+    assert!(fx.files_under("imports/evidence").is_empty());
+}
+
+#[test]
 fn an_explicit_claude_member_of_the_wrong_kind_is_refused_by_the_job() {
     let fx = Fx::new();
     let claude = fx.export("claude", &[("conversations.json", "claude-sanitized.json")]);
@@ -278,5 +318,14 @@ fn an_explicit_claude_member_of_the_wrong_kind_is_refused_by_the_job() {
         Some(MemberKind::ClaudeConversations)
     );
     assert_eq!(MemberKind::for_member("claude", "chat.html"), None);
+    // Account files are never members, under any provider or kind, at any depth or case.
+    for (provider, path) in [
+        ("claude", "users.json"),
+        ("claude", "nested/USERS.json"),
+        ("chatgpt", "user.json"),
+        ("chatgpt", "a/User.JSON"),
+    ] {
+        assert_eq!(MemberKind::for_member(provider, path), None, "{path}");
+    }
     assert_eq!(MemberKind::for_member("other", "conversations.json"), None);
 }

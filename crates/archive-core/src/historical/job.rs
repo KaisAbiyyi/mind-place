@@ -1679,6 +1679,16 @@ fn normalize_members(
             "An import member does not belong to the authorized provider",
         ));
     }
+    // Account files (name, e-mail, phone) are never staged, whatever kind a caller claims.
+    if members
+        .iter()
+        .any(|m| super::manifest::is_account_file(&m.path))
+    {
+        return Err(coded(
+            "E_MEMBERS",
+            "An account file is never an import member",
+        ));
+    }
     members.sort_by(|a, b| a.path.as_bytes().cmp(b.path.as_bytes()));
     if members.windows(2).any(|pair| pair[0].path == pair[1].path) {
         return Err(coded("E_MEMBERS", "An import member is listed twice"));

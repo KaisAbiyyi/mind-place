@@ -41,6 +41,8 @@ const MAX_SOURCE_IDENTIFIER_BYTES: usize = 256;
 const MAX_ATTACHMENTS_PER_MESSAGE: usize = 100;
 /// Parent of the first message in exports that use a sentinel instead of `null`.
 const ROOT_PARENT_SENTINEL: &str = "00000000-0000-4000-8000-000000000000";
+/// The standard nil UUID, accepted as a root marker too.
+const NIL_UUID: &str = "00000000-0000-0000-0000-000000000000";
 
 const STREAM_LIMITS: BoundedArrayLimits = BoundedArrayLimits {
     max_record_bytes: MAX_CLAUDE_RECORD_BYTES,
@@ -230,13 +232,25 @@ impl ClaudeExportParser {
                 "A Claude message has a missing, oversized or duplicate uuid; raw record preserved",
             ),
         };
+        // Order is proved only by a chain that starts at an explicit root.
+        let mut order_proved = has_parent_links;
         if has_parent_links {
-            if !linear_chain(messages, &message_ids) {
-                return refuse(
-                    raw,
-                    sha,
-                    "Claude message parent links do not form one linear chain; the active branch cannot be chosen without guessing. Raw record preserved",
-                );
+            match linear_chain(messages, &message_ids) {
+                Chain::Rooted => {}
+                Chain::Unrooted => {
+                    order_proved = false;
+                    warnings.push(
+                        "The first Claude message points to a parent that is not in the export; earlier history may be missing"
+                            .to_string(),
+                    );
+                }
+                Chain::Broken => {
+                    return refuse(
+                        raw,
+                        sha,
+                        "Claude message parent links do not form one linear chain; the active branch cannot be chosen without guessing. Raw record preserved",
+                    );
+                }
             }
         } else {
             warnings.push(
@@ -263,7 +277,7 @@ impl ClaudeExportParser {
                 "Claude conversation has no message with representable text; raw record preserved",
             );
         }
-        let completeness = if has_parent_links && gaps.is_empty() {
+        let completeness = if order_proved && gaps.is_empty() {
             "complete"
         } else {
             "partial"
@@ -406,27 +420,47 @@ fn message_identities(messages: &[Value]) -> Option<Vec<String>> {
     Some(ids)
 }
 
-/// Parent links prove order only when they form exactly one chain in array order: the first
-/// message has no parent (absent, null, the null-UUID sentinel, or an id outside this
-/// conversation) and every later message's parent is the message just before it.
-fn linear_chain(messages: &[Value], ids: &[String]) -> bool {
+/// What the parent links of one conversation prove.
+#[derive(Debug, PartialEq, Eq)]
+enum Chain {
+    /// One chain in array order from an explicit root (absent, null, the root sentinel or the
+    /// nil UUID): order and completeness of the history are proved.
+    Rooted,
+    /// One chain in array order, but the first message points to a parent that is not in the
+    /// conversation (for example a truncated export): order is proved, the prefix is not.
+    Unrooted,
+    /// A fork, cycle, out-of-order link or non-string link: nothing is proved.
+    Broken,
+}
+
+/// Parent links prove order only when they form exactly one chain in array order: every later
+/// message's parent is the message just before it, and the first message's parent is not a
+/// message of this conversation.
+fn linear_chain(messages: &[Value], ids: &[String]) -> Chain {
     let known: HashSet<String> = ids.iter().map(|id| id.to_ascii_lowercase()).collect();
-    messages.iter().enumerate().all(|(index, message)| {
-        let parent = message.get("parent_message_uuid");
-        let parent = match parent {
+    let mut rooted = true;
+    for (index, message) in messages.iter().enumerate() {
+        let parent = match message.get("parent_message_uuid") {
             None | Some(Value::Null) => None,
             Some(Value::String(parent)) => Some(parent.to_ascii_lowercase()),
-            Some(_) => return false,
+            Some(_) => return Chain::Broken,
         };
         if index == 0 {
             match parent {
-                None => true,
-                Some(parent) => parent == ROOT_PARENT_SENTINEL || !known.contains(&parent),
+                None => {}
+                Some(parent) if parent == ROOT_PARENT_SENTINEL || parent == NIL_UUID => {}
+                Some(parent) if known.contains(&parent) => return Chain::Broken,
+                Some(_) => rooted = false,
             }
-        } else {
-            parent.as_deref() == Some(ids[index - 1].to_ascii_lowercase().as_str())
+        } else if parent.as_deref() != Some(ids[index - 1].to_ascii_lowercase().as_str()) {
+            return Chain::Broken;
         }
-    })
+    }
+    if rooted {
+        Chain::Rooted
+    } else {
+        Chain::Unrooted
+    }
 }
 
 enum Converted {
@@ -483,10 +517,13 @@ fn convert_message(raw: &Value, id: &str) -> Converted {
             }
         }
     }
-    if text_blocks == 0 {
+    // The top-level `text` is used only when there are no content blocks at all. With blocks
+    // present (for example only `thinking` or `tool_use`), `text` is not proved to be the shown
+    // answer, so it is not projected; the blocks are completeness gaps and stay in raw evidence.
+    let has_blocks = content.is_some_and(|blocks| !blocks.is_empty());
+    if text_blocks == 0 && !has_blocks {
         match raw.get("text") {
             Some(Value::String(plain)) => text.push_str(plain),
-            _ if content.is_some_and(|blocks| !blocks.is_empty()) => {}
             _ => {
                 gap.get_or_insert_with(|| {
                     "A message has no content; its absence is not proved to be genuine emptiness"
@@ -793,6 +830,39 @@ mod tests {
     }
 
     #[test]
+    fn a_first_parent_outside_the_export_is_not_a_proved_root() {
+        for parent in ["1b2c3d4e-0000-4000-8000-0000000000ff", "", "not-a-uuid"] {
+            let capture = projected(conversation(vec![
+                message(M1, "human", Some(parent), text("a")),
+                message(M2, "assistant", Some(M1), text("b")),
+            ]));
+            assert_eq!(capture.completeness, "partial", "parent {parent:?}");
+            assert!(
+                capture
+                    .warnings
+                    .iter()
+                    .any(|w| w.contains("earlier history may be missing")),
+                "{:?}",
+                capture.warnings
+            );
+        }
+        for root in [ROOT_PARENT_SENTINEL, NIL_UUID] {
+            let capture = projected(conversation(vec![
+                message(M1, "human", Some(root), text("a")),
+                message(M2, "assistant", Some(M1), text("b")),
+            ]));
+            assert_eq!(capture.completeness, "complete", "root {root}");
+        }
+        let mut null_root = message(M1, "human", None, text("a"));
+        null_root["parent_message_uuid"] = Value::Null;
+        let capture = projected(conversation(vec![
+            null_root,
+            message(M2, "assistant", Some(M1), text("b")),
+        ]));
+        assert_eq!(capture.completeness, "complete");
+    }
+
+    #[test]
     fn identity_problems_stay_raw_only() {
         let mut bad_id = linked();
         bad_id["uuid"] = "not-a-uuid".into();
@@ -834,6 +904,30 @@ mod tests {
             .warnings
             .iter()
             .any(|w| w.starts_with("Completeness not proved: Content block type 'thinking'")));
+    }
+
+    #[test]
+    fn top_level_text_is_not_shown_when_only_non_text_blocks_exist() {
+        let mut only_tools = message(
+            M2,
+            "assistant",
+            Some(M1),
+            json!([{"type": "thinking", "thinking": "t"}, {"type": "tool_use", "name": "x", "input": {}}]),
+        );
+        only_tools["text"] = "placeholder canary".into();
+        let capture = projected(conversation(vec![
+            message(M1, "human", Some(ROOT_PARENT_SENTINEL), text("q")),
+            only_tools,
+        ]));
+        assert_eq!(capture.completeness, "partial");
+        assert_eq!(
+            capture.messages.len(),
+            1,
+            "the tools-only message is not shown"
+        );
+        assert!(!serde_json::to_string(&capture)
+            .unwrap()
+            .contains("placeholder canary"));
     }
 
     #[test]
