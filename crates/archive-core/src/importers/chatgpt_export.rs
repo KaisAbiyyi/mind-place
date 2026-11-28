@@ -368,11 +368,7 @@ impl ChatGptExportParser {
 
         let violated = dag_rule_violations(conv);
         if !violated.is_empty() {
-            let rules: Vec<&str> = violated.iter().map(|rule| rule.code()).collect();
-            return BranchProjection::BranchingRefused(format!(
-                "Inconsistent ChatGPT DAG (rules: {}); raw DAG preserved",
-                rules.join(", ")
-            ));
+            return BranchProjection::BranchingRefused(dag_refusal_reason(&violated));
         }
 
         // Case A: valid current_node chain
@@ -660,7 +656,8 @@ fn note_omitted_empty(warnings: &mut Vec<String>, count: usize) {
 }
 
 /// One structural rule of an export conversation DAG. Codes are stable, content-free and contain
-/// no digits or quotes, so they survive the local harness's category printing unchanged.
+/// no digits or quotes, so the local harness's `category()` prints them unchanged; the longest
+/// reachable reason (eight codes) fits its 256-character limit (see the unit test).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum DagRule {
     /// A `mapping` key differs from its node's own `id`.
@@ -673,7 +670,7 @@ pub(crate) enum DagRule {
     MultipleRoots,
     /// A `children` entry names no node in `mapping`.
     ChildMissing,
-    /// A `children` entry names a node whose `parent` is a different node.
+    /// A `children` entry names a node whose `parent` is not this node (another node or none).
     ChildParentMismatch,
     /// The same node is listed as a child more than once.
     ChildListedTwice,
@@ -681,8 +678,19 @@ pub(crate) enum DagRule {
     /// nodes carry no `children` field at all). Listed under another node is
     /// `ChildParentMismatch` instead.
     ChildNotListed,
-    /// Following `children` from the root revisits a node or leaves nodes unreached.
+    /// Following `children` from every parentless node reaches some node twice (a cycle, or a
+    /// node listed twice) or leaves nodes unreached. A consequence code: it always accompanies
+    /// `NoRoot`, and usually accompanies the other rules; read those as the cause.
     UnreachableOrCyclic,
+}
+
+/// The raw-only reason for a refused DAG: fixed text plus the violated codes, never a value.
+pub(crate) fn dag_refusal_reason(violated: &BTreeSet<DagRule>) -> String {
+    let rules: Vec<&str> = violated.iter().map(|rule| rule.code()).collect();
+    format!(
+        "Inconsistent ChatGPT DAG (rules: {}); raw DAG preserved",
+        rules.join(", ")
+    )
 }
 
 impl DagRule {
@@ -1209,6 +1217,15 @@ mod tests {
         m["z"] = dag_node("z", None, &[]);
         cases.push(("second root", m, "multiple-roots"));
 
+        let mut m = classic_mapping();
+        m["p"] = dag_node("p", Some("q"), &["q"]);
+        m["q"] = dag_node("q", Some("p"), &["p"]);
+        cases.push(("cycle away from the root", m, "unreachable-or-cyclic"));
+
+        let mut m = classic_mapping();
+        m["s"] = dag_node("s", Some("s"), &[]);
+        cases.push(("self-parent", m, "child-not-listed, unreachable-or-cyclic"));
+
         for (label, mapping, rules) in cases {
             let reason = dag_reason(mapping).unwrap_or_else(|| panic!("{label}: projected"));
             assert_eq!(
@@ -1234,6 +1251,146 @@ mod tests {
         for _ in 0..32 {
             assert_eq!(dag_reason(m.clone()).unwrap(), first);
         }
+    }
+
+    #[test]
+    fn the_longest_dag_refusal_reason_fits_the_harness_category_limit() {
+        // `no-root` and `multiple-roots` exclude each other: at most eight codes at once.
+        let all: BTreeSet<DagRule> = [
+            DagRule::NodeKeyMismatch,
+            DagRule::ParentMissing,
+            DagRule::MultipleRoots,
+            DagRule::ChildMissing,
+            DagRule::ChildParentMismatch,
+            DagRule::ChildListedTwice,
+            DagRule::ChildNotListed,
+            DagRule::UnreachableOrCyclic,
+        ]
+        .into();
+        let reason = dag_refusal_reason(&all);
+        assert!(reason.chars().count() <= 256, "{}", reason.len());
+        assert!(reason.ends_with("; raw DAG preserved"));
+    }
+
+    /// The predicate before rule codes, pinned verbatim: refusals must stay exactly the same.
+    fn pinned_old_valid_graph(conv: &ChatGptExportConversation) -> bool {
+        let mut roots = Vec::new();
+        let mut linked_children = HashSet::new();
+        for (id, node) in &conv.mapping {
+            if id != &node.id {
+                return false;
+            }
+            if let Some(parent_id) = &node.parent {
+                if !conv.mapping.contains_key(parent_id) {
+                    return false;
+                }
+            } else {
+                roots.push(id);
+            }
+            for child_id in &node.children {
+                if !linked_children.insert(child_id)
+                    || !conv
+                        .mapping
+                        .get(child_id)
+                        .is_some_and(|child| child.parent.as_ref() == Some(id))
+                {
+                    return false;
+                }
+            }
+        }
+        if roots.len() != 1 {
+            return false;
+        }
+        if conv
+            .mapping
+            .iter()
+            .any(|(id, node)| node.parent.is_some() && !linked_children.contains(id))
+        {
+            return false;
+        }
+        let mut pending = roots;
+        let mut visited = HashSet::new();
+        while let Some(id) = pending.pop() {
+            if !visited.insert(id) {
+                return false;
+            }
+            pending.extend(&conv.mapping[id].children);
+        }
+        visited.len() == conv.mapping.len()
+    }
+
+    #[test]
+    fn dag_rule_violations_refuse_exactly_what_the_old_predicate_refused() {
+        // Deterministic xorshift over small trees with random structural mutations.
+        let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut next = |n: u64| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state % n
+        };
+        let names = ["a", "b", "c", "d", "x"];
+        let (mut accepted, mut refused) = (0, 0);
+        for _ in 0..20_000 {
+            let count = 1 + next(4) as usize;
+            let parents: Vec<Option<usize>> = (0..count)
+                .map(|i| (i > 0).then(|| next(i as u64) as usize))
+                .collect();
+            let mut nodes: Vec<ChatGptNode> = (0..count)
+                .map(|i| ChatGptNode {
+                    id: names[i].into(),
+                    message: None,
+                    parent: parents[i].map(|p| names[p].to_string()),
+                    children: vec![],
+                })
+                .collect();
+            for (i, parent) in parents.iter().enumerate() {
+                if let Some(p) = parent {
+                    nodes[*p].children.push(names[i].into());
+                }
+            }
+            for _ in 0..next(3) {
+                let i = next(count as u64) as usize;
+                match next(7) {
+                    0 => nodes[i].id = names[next(5) as usize].into(),
+                    1 => nodes[i].parent = None,
+                    2 => nodes[i].parent = Some(names[next(5) as usize].into()),
+                    3 => nodes[i].children.push(names[next(5) as usize].into()),
+                    4 => nodes[i].children.clear(),
+                    5 => {
+                        let again = nodes[i].children.clone();
+                        nodes[i].children.extend(again);
+                    }
+                    _ => nodes[i].children.reverse(),
+                }
+            }
+            let mapping = nodes
+                .into_iter()
+                .enumerate()
+                .map(|(i, node)| (names[i].to_string(), node))
+                .collect();
+            let conv = ChatGptExportConversation {
+                id: ID.into(),
+                title: None,
+                create_time: None,
+                update_time: None,
+                current_node: None,
+                mapping,
+            };
+            let old = pinned_old_valid_graph(&conv);
+            assert_eq!(
+                dag_rule_violations(&conv).is_empty(),
+                old,
+                "{:?}",
+                conv.mapping
+            );
+            if old {
+                accepted += 1;
+            } else {
+                refused += 1;
+            }
+        }
+        assert!(accepted > 1000 && refused > 1000, "{accepted} / {refused}");
     }
 
     #[test]
