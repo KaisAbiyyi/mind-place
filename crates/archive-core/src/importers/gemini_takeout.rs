@@ -359,7 +359,8 @@ impl GeminiTakeoutParser {
     /// Diagnostic for the local qualification harness only (never stored, never shown in the
     /// app): when the card time of one Takeout card (the exact card bytes, as kept in raw
     /// evidence) is **not** read, the masked shape of its candidate time line; `None` when the
-    /// time is read. See `masked_line_shape` for what a shape can and cannot reveal.
+    /// time is read. See `masked_line_shape` for what a shape can and cannot reveal. Must never
+    /// be called from the app, MCP or any persisted path: it exists for the owner-run harness.
     #[doc(hidden)]
     pub fn unread_time_line_shape(card_bytes: &[u8]) -> Option<String> {
         let card_html = String::from_utf8_lossy(card_bytes);
@@ -427,14 +428,30 @@ fn masked_line_shape(line: &str) -> String {
         .collect()
 }
 
-/// Whether the text contains a clock: one or two digits, `:` or `.`, then two digits.
+/// Whether the text contains a full clock with seconds, as every Takeout card time has:
+/// `H:MM:SS` or `HH:MM:SS` (`.` also accepted as separator), with no digit directly before or
+/// after it. Prices, decimals, versions and IP addresses (`12.500`, `1.500.000`, `10.30`,
+/// `192.168.1.10`) do not match.
 fn has_clock(text: &str) -> bool {
     let chars: Vec<char> = text.chars().collect();
-    (1..chars.len().saturating_sub(2)).any(|i| {
-        matches!(chars[i], ':' | '.')
-            && chars[i - 1].is_ascii_digit()
-            && chars[i + 1].is_ascii_digit()
-            && chars[i + 2].is_ascii_digit()
+    let digit = |i: usize| chars.get(i).is_some_and(char::is_ascii_digit);
+    let sep = |i: usize| chars.get(i).is_some_and(|c| matches!(c, ':' | '.'));
+    (0..chars.len()).any(|start| {
+        if start > 0 && digit(start - 1) {
+            return false;
+        }
+        [1usize, 2].into_iter().any(|hour_digits| {
+            let h = start + hour_digits;
+            (start..h).all(digit)
+                && sep(h)
+                && digit(h + 1)
+                && digit(h + 2)
+                && sep(h + 3)
+                && digit(h + 4)
+                && digit(h + 5)
+                && !digit(h + 6)
+                && !sep(h + 6)
+        })
     })
 }
 
@@ -1330,13 +1347,24 @@ mod tests {
                 "we met at 10:30 and then talked for a very long while",
                 "long-line",
             ),
-            ("a b c d e f g h 10:30", "not-time-like"),
+            ("a b c d e f g h 10:30:00", "not-time-like"),
+            // Numbers that only resemble a clock: prices, decimals, short times, IPs.
+            ("Harga 12.500", "not-time-like"),
+            ("Rp 1.500.000 transfer", "not-time-like"),
+            ("jam 10.30 ketemu Budi", "not-time-like"),
+            ("IP 192.168.1.10", "not-time-like"),
+            ("PIN 1234.56", "not-time-like"),
+            ("v1.2.3.4", "not-time-like"),
             ("   ", "none"),
         ] {
             assert_eq!(masked_line_shape(line), expected, "{line}");
         }
         // Even a time-like line masks quotes, `@` and similar marks.
-        assert_eq!(masked_line_shape("\"at\" 10:30 @x"), "?aa? ##:## ?a");
+        assert_eq!(masked_line_shape("\"at\" 10:30:05 @x"), "?aa? ##:##:## ?a");
+        assert_eq!(
+            masked_line_shape("4 Nov 2026, 21.15.40 WIB"),
+            "# Aaa ####, ##.##.## AAA"
+        );
         // Every shape is short ASCII from a fixed alphabet, whatever the input.
         let alphabet = "#Aa ~,:.+-/?";
         let mut state: u64 = 0x2545_F491_4F6C_DD1D;

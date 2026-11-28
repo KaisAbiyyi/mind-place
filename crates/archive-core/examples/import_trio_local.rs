@@ -161,7 +161,7 @@ fn main() -> Result<(), BoxError> {
         const MIN_SHAPE_COUNT: u64 = 3;
         let shapes = unread_time_line_shapes(&scratch.join("archive-v1/imports/raw"))?;
         let mut other = 0u64;
-        println!("gemini_unread_time_line_shapes:");
+        println!("gemini_unread_time_line_shapes (distinct cards):");
         for (shape, count) in &shapes {
             if *count >= MIN_SHAPE_COUNT {
                 println!("  {count:>6}  {shape}");
