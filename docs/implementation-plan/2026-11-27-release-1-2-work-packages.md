@@ -91,7 +91,7 @@ one branch, one PR, tests included. Packages marked **IR** need an independent r
 | `MP-R1-WP07` | **Constellation.** Graph projection from accepted curated nodes (reuse MP-6 generations); bounded graph query (G1); Constellation page in the UI2 shell with node aside (evidence, revisions, superseded links) and "refresh this node"; review-by-exception screen for staged generations; EN/ID copy and design gap ledger | MP-UI2-07, MP-UI2-BG-01, review screen part of MP-UX-06 | MP-R1-WP03 | `ui-memory`, `graph-query` | C |
 | `MP-R1-WP08` | **Remote gateway.** ADR amending the Phase 3D no-public-endpoint rule; separate listener for the cloud tier only; OAuth 2.1 + PKCE (S256), discovery at the domain root, owner-pre-registered clients, rate limits, active only while unlocked with consent; Tailscale Funnel adapter; Streamable HTTP without SSE | MP-NET-01, MP-NET-02 | MP-SEC-10 | `remote-gateway` | C + L, IR |
 | `MP-R1-WP09` | **Remote read: Claude and Gemini.** Cloud-tier curated read tools (topics, nodes, edges, evidence excerpts with Secret-Shield-style masking of obvious secrets); setup guides for the claude.ai custom connector and the Gemini app; real qualification of read, revoke and lock on both; Parity Matrix hosted-read cells | read part of MP-NET-03, hosted read cells of MP-PAR-02, hosted Gemini part of MP-7MCP-06 | MP-R1-WP04, MP-R1-WP08 | `hosted-account` | C + L + O |
-| `MP-R1-WP10` | **R1 candidate.** Freeze one SHA, package, run one batched local runbook (import trio, Claude Code and Antigravity read and curated write, remote Claude and Gemini read, curation on one topic, Constellation on WebView2/DPI), owner acceptance | — | WP01–WP09 | `release` | C + L + O |
+| `MP-R1-WP10` | **R1 candidate** (the single Ready PR of the WP04..WP09 stack and its one 100K run, see §7 DRAFT). Freeze one SHA, package, run one batched local runbook (import trio, Claude Code and Antigravity read and curated write, remote Claude and Gemini read, curation on one topic, Constellation on WebView2/DPI), owner acceptance | — | WP01–WP09 | `release` | C + L + O |
 
 ### Release 2
 
@@ -124,3 +124,53 @@ Jangan merge; owner yang memutuskan.
 - **Up Next:** MP-R1-WP02 (after MP-7MCP-06), MP-R1-WP04 and MP-R1-WP07 (after MP-R1-WP03),
   MP-R1-WP08 (after MP-SEC-10), MP-R2-WP03 (after MP-R1-WP03).
 - Everything else waits on a predecessor outside Now and has no lane.
+
+## 7. One 100K qualification for MP-R1-WP04 through the end (owner request 2026-11-28) — DRAFT
+
+**Status: DRAFT.** Written by Claude Sonnet 5.5 at the owner's request. Under the 2026-11-27 model-role
+rule it is not part of the plan until a planner-class (Opus-tier) session adopts it.
+
+**Why.** The 100K document-scale job takes about 4.7 hours (historical 16 959 s). The effective-input
+fingerprint (`scripts/mp10c_ci_gate.py`, `excluded()`) covers every tracked path except `docs/`,
+`ci.yml`, other workflows and templates. So every code-changing PR that is Ready for Review starts its
+own full 100K run, and a proof is reusable only inside the same PR. A Draft PR skips the 100K job
+(`Draft development / qualification PENDING`) while still running the cheap checks.
+
+**Rule (no CI change needed).** WP04..WP10 land on `main` through **one** PR that becomes Ready once.
+
+1. After MP-R1-WP03 is merged, create one integration branch from `main`, for example
+   `integration/r1-curation`. It is a task branch, not `main`.
+2. Each package WP04..WP09 works on its own branch and opens a **Draft** PR whose base is the
+   integration branch. The gate records the base ref, so a non-`main` base is accepted; drafts run
+   fast feedback, Rust compile, SQLCipher, CodeQL and supply-chain checks, and skip the 100K.
+3. A package is accepted at the cloud-gate level when its exact-head cheap checks are green and, for
+   packages marked IR (WP04, WP05, WP08, WP09), the independent read-only review passes. It then enters
+   the integration branch by a normal `git merge --no-ff` (the same integration method used for
+   #129 into #127), only after the owner says so for that PR and SHA. Drafts are never marked Ready.
+   Packages that share a lock or files are merged one at a time.
+4. **MP-R1-WP10** is the only PR from the integration branch to `main`. It is marked Ready exactly
+   once, after the whole stack is frozen, cheap-green and reviewed, and after the batched local
+   runbook is prepared. That one transition runs native Windows Product and one 100K run on the final
+   head. The owner reviews and merges once.
+5. **Freeze before Ready.** After the PR is Ready, any change to a fingerprinted path (code, scripts,
+   tests, lockfiles, the scale workflow) invalidates the proof and costs another run. Fixes found
+   late go in before the transition, or the owner accepts the extra run.
+6. Do not dispatch `manual` or `final` qualification before native CI has passed on the exact head
+   (see `mp-ci-100k-01-qualification-gate.md`, operator sequence).
+
+**Consequences.** Nothing from WP04..WP09 reaches `main` until WP10, so partial value is not usable
+from `main` in between and a late defect holds the whole stack. WP01 and WP03 touch Rust production
+code, so under the normal gate each triggers its own 100K when Ready; the owner may fold them into the
+same integration branch if literally one run is wanted (decision open).
+
+**Alternative, not the default.** Move the 100K from per-PR to nightly plus on-demand final
+qualification. That is `MP-CI-QUAL-01` (Ready, currently after the work packages in order). It changes
+required-check semantics, so it needs independent review and an owner decision.
+
+**Prompt addition for WP04..WP09 agents.**
+
+```text
+Basis branch: integration/r1-curation (bukan main). Buka PR Draft dengan base itu dan biarkan Draft.
+Jangan tandai Ready dan jangan dispatch qualification 100K. Merge ke integration branch hanya
+setelah owner setuju untuk PR dan SHA tersebut.
+```
