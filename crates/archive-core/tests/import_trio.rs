@@ -610,6 +610,8 @@ fn an_explicit_claude_member_of_the_wrong_kind_is_refused_by_the_job() {
     for (provider, path) in [
         ("claude", "users.json"),
         ("claude", "nested/USERS.json"),
+        ("claude", "light_metadata/login_history.json"),
+        ("claude", "Login_History.JSON"),
         ("chatgpt", "user.json"),
         ("chatgpt", "a/User.JSON"),
     ] {

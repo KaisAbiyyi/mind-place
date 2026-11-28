@@ -518,12 +518,16 @@ pub fn is_claude_project_file(path: &str) -> bool {
         })
 }
 
-/// Account files of a provider export (name, e-mail, phone): `user.json` (ChatGPT) and
-/// `users.json` (Claude.ai), at any depth, case-insensitively. They are measured as part of the
+/// Account files of a provider export (name, e-mail, phone, login history): `user.json`
+/// (ChatGPT), `users.json` and `login_history.json` (Claude.ai, the latter in the split export's
+/// `light_metadata` part), at any depth, case-insensitively. They are measured as part of the
 /// source but are never an import member, even when named explicitly.
 pub fn is_account_file(path: &str) -> bool {
     let lower = path.rsplit('/').next().unwrap_or(path).to_ascii_lowercase();
-    matches!(lower.as_str(), "user.json" | "users.json")
+    matches!(
+        lower.as_str(),
+        "user.json" | "users.json" | "login_history.json"
+    )
 }
 
 /// The file extension a member of `provider` must have when the owner picks it explicitly.
