@@ -32,7 +32,8 @@ pub fn parse_takeout_timestamp(s: &str) -> Option<String> {
         "jun" | "juni" | "june" => 6,
         "jul" | "juli" | "july" => 7,
         "aug" | "agu" | "agustus" | "august" => 8,
-        "sep" | "september" => 9,
+        // `Sept` is the en-GB abbreviation Takeout writes (local gate: 38 cards were unread).
+        "sep" | "sept" | "september" => 9,
         "oct" | "okt" | "oktober" | "october" => 10,
         "nov" | "november" => 11,
         "dec" | "des" | "desember" | "december" => 12,
@@ -297,12 +298,10 @@ fn is_content_cell(tag: &html5gum::StartTag<usize>) -> bool {
 /// when that line is exactly a five-word Takeout timestamp. So a date in the response, the
 /// Details caption, a link or a script, or a prompt line that happens to be a date, is never
 /// taken; a card whose time is missing or in an unknown format yields `None` (never a guess).
-fn card_event_time(card_html: &str) -> Option<String> {
-    let card_time = |line: &str| {
-        (line.split_whitespace().take(6).count() == 5)
-            .then(|| parse_takeout_timestamp(line))
-            .flatten()
-    };
+///
+/// This returns that last line (empty when there is none); `card_time` decides whether it is a
+/// time.
+fn card_time_line(card_html: &str) -> String {
     let has_cell = html_tokens(card_html)
         .any(|token| matches!(&token, Token::StartTag(tag) if is_content_cell(tag)));
     let mut in_cell = !has_cell;
@@ -340,13 +339,120 @@ fn card_event_time(card_html: &str) -> Option<String> {
         }
         run.clear();
         if stop {
-            return card_time(&last_line);
+            return last_line;
         }
     }
     if !run.trim().is_empty() {
         last_line = run;
     }
-    card_time(&last_line)
+    last_line
+}
+
+/// A card time line must be exactly a five-word Takeout timestamp.
+fn card_time(line: &str) -> Option<String> {
+    (line.split_whitespace().take(6).count() == 5)
+        .then(|| parse_takeout_timestamp(line))
+        .flatten()
+}
+
+impl GeminiTakeoutParser {
+    /// Diagnostic for the local qualification harness only (never stored, never shown in the
+    /// app): when the card time of one Takeout card (the exact card bytes, as kept in raw
+    /// evidence) is **not** read, the masked shape of its candidate time line; `None` when the
+    /// time is read. See `masked_line_shape` for what a shape can and cannot reveal. Must never
+    /// be called from the app, MCP or any persisted path: it exists for the owner-run harness.
+    #[doc(hidden)]
+    pub fn unread_time_line_shape(card_bytes: &[u8]) -> Option<String> {
+        let card_html = String::from_utf8_lossy(card_bytes);
+        let line = card_time_line(&card_html);
+        card_time(&line).is_none().then(|| masked_line_shape(&line))
+    }
+}
+
+/// Punctuation that a time line plausibly contains; any other is masked as `?` so e-mail
+/// addresses, URLs and quotes are not recognisable in a shape.
+const TIME_PUNCTUATION: &[char] = &[',', ':', '.', '+', '-', '/'];
+/// Longest shaped line after whitespace runs are collapsed. Real Takeout time lines are at most
+/// about 38 characters (`Nov 4, 2026, 9:15:40 PM GMT+07:00`).
+const MAX_SHAPED_LINE_CHARS: usize = 40;
+/// Most whitespace-separated tokens in a shaped line.
+const MAX_SHAPED_LINE_TOKENS: usize = 8;
+
+/// A masked shape of the line that should have held a card time, so an unread time format can be
+/// diagnosed without reading it. Only a line that **looks like a time** is shaped: it must contain
+/// a clock (`H:MM` or `H.MM`), have at most 8 tokens and at most 40 characters after whitespace
+/// runs are collapsed; any other line is `not-time-like` (or `none`, `prompt-line`, `long-line`),
+/// so a private prompt or response line is never shaped. In a shape digits become `#`, letters
+/// `A`/`a`, an ASCII space stays a space, any other whitespace (such as the narrow no-break space
+/// some locales put before `PM`) becomes `~`, `, : . + - /` stay, and anything else becomes `?`.
+fn masked_line_shape(line: &str) -> String {
+    // Each whitespace run becomes one character: an ASCII space, unless the run holds non-ASCII
+    // whitespace, which is kept (it is shaped as `~` and is diagnostic, e.g. U+202F before `PM`).
+    let mut collapsed = String::new();
+    for c in line.trim().chars() {
+        if !c.is_whitespace() {
+            collapsed.push(c);
+            continue;
+        }
+        let in_run = collapsed.ends_with(|last: char| last.is_whitespace());
+        if !in_run {
+            collapsed.push(if c.is_ascii() { ' ' } else { c });
+        } else if !c.is_ascii() {
+            collapsed.pop();
+            collapsed.push(c);
+        }
+    }
+    if collapsed.is_empty() {
+        return "none".into();
+    }
+    if collapsed.starts_with("Prompted") {
+        return "prompt-line".into();
+    }
+    if collapsed.chars().count() > MAX_SHAPED_LINE_CHARS {
+        return "long-line".into();
+    }
+    if collapsed.split_whitespace().count() > MAX_SHAPED_LINE_TOKENS || !has_clock(&collapsed) {
+        return "not-time-like".into();
+    }
+    collapsed
+        .chars()
+        .map(|c| match c {
+            c if c.is_ascii_digit() => '#',
+            c if c.is_alphabetic() && c.is_uppercase() => 'A',
+            c if c.is_alphabetic() => 'a',
+            ' ' => ' ',
+            c if c.is_whitespace() => '~',
+            c if TIME_PUNCTUATION.contains(&c) => c,
+            _ => '?',
+        })
+        .collect()
+}
+
+/// Whether the text contains a full clock with seconds, as every Takeout card time has:
+/// `H:MM:SS` or `HH:MM:SS` (`.` also accepted as separator), with no digit directly before or
+/// after it. Prices, decimals, versions and IP addresses (`12.500`, `1.500.000`, `10.30`,
+/// `192.168.1.10`) do not match.
+fn has_clock(text: &str) -> bool {
+    let chars: Vec<char> = text.chars().collect();
+    let digit = |i: usize| chars.get(i).is_some_and(char::is_ascii_digit);
+    let sep = |i: usize| chars.get(i).is_some_and(|c| matches!(c, ':' | '.'));
+    (0..chars.len()).any(|start| {
+        if start > 0 && digit(start - 1) {
+            return false;
+        }
+        [1usize, 2].into_iter().any(|hour_digits| {
+            let h = start + hour_digits;
+            (start..h).all(digit)
+                && sep(h)
+                && digit(h + 1)
+                && digit(h + 2)
+                && sep(h + 3)
+                && digit(h + 4)
+                && digit(h + 5)
+                && !digit(h + 6)
+                && !sep(h + 6)
+        })
+    })
 }
 
 fn prompt_text(html: &str) -> String {
@@ -503,7 +609,7 @@ impl GeminiTakeoutParser {
         };
 
         // 3. Structure-aware timestamp extraction
-        let timestamp = card_event_time(card_html);
+        let timestamp = card_time(&card_time_line(card_html));
 
         // The card time is an activity-log event. It is kept as separate source metadata and
         // is never promoted to a message or conversation timestamp.
@@ -753,6 +859,18 @@ mod tests {
     fn test_parse_takeout_timestamp_indonesian_wib() {
         let ts = parse_takeout_timestamp("4 Nov 2026, 21:15:40 WIB").unwrap();
         assert_eq!(ts, "2026-11-04T21:15:40+07:00");
+    }
+
+    #[test]
+    fn test_parse_takeout_timestamp_en_gb_sept() {
+        assert_eq!(
+            parse_takeout_timestamp("4 Sept 2026, 21:15:40 WIB").as_deref(),
+            Some("2026-09-04T21:15:40+07:00")
+        );
+        assert_eq!(
+            parse_takeout_timestamp("14 Sept 2025, 09:05:01 GMT").as_deref(),
+            Some("2025-09-14T09:05:01+00:00")
+        );
     }
 
     #[test]
@@ -1157,6 +1275,121 @@ mod tests {
         // ...and when the real time is unreadable, the dated prompt line is not used instead.
         let unreadable = r#"<div class="outer-cell"><div class="content-cell">Prompted Q<br>1 Jan 2020, 00:00:00 UTC<br>Nov 4, 2026, 9:15:40 PM WIB<br><p>A</p></div></div>"#;
         assert_eq!(event_time(unreadable), None);
+    }
+
+    /// The harness diagnostic, computed from the exact card bytes (as kept in raw evidence).
+    fn time_line_shape(html: &str) -> Option<String> {
+        let items = GeminiTakeoutParser::parse_cards_html(html.as_bytes()).unwrap();
+        let evidence = match &items[0] {
+            ReconciledItem::Conversation { raw_evidence, .. } => raw_evidence,
+            ReconciledItem::PreservedRawOnly { evidence, .. } => evidence,
+        };
+        // The diagnostic never reaches the evidence record (byte-identical across versions).
+        let metadata: serde_json::Value = serde_json::from_str(&evidence.metadata_json).unwrap();
+        assert_eq!(
+            metadata.as_object().unwrap().keys().collect::<Vec<_>>(),
+            ["occurrence_index", "provider_event_time"]
+        );
+        GeminiTakeoutParser::unread_time_line_shape(&evidence.payload_bytes)
+    }
+
+    fn card_with(line: &str) -> String {
+        format!(
+            r#"<div class="outer-cell"><div class="content-cell">Prompted secret words<br>{line}<br><p>A</p></div></div>"#
+        )
+    }
+
+    #[test]
+    fn an_unread_card_time_is_shaped_only_when_the_line_looks_like_a_time() {
+        // A read time (including en-GB `Sept`, through the full card path) leaves no shape.
+        assert_eq!(
+            time_line_shape(&card_with("4 Nov 2026, 21:15:40 WIB")),
+            None
+        );
+        assert_eq!(
+            time_line_shape(&card_with("4 Sept 2026, 21:15:40 WIB")),
+            None
+        );
+        assert_eq!(
+            event_time(&card_with("4 Sept 2026, 21:15:40 WIB")).as_deref(),
+            Some("2026-09-04T21:15:40+07:00")
+        );
+        // An unread time keeps only its structure: digits `#`, letters `A`/`a`, other spaces `~`;
+        // pretty-printed whitespace runs are collapsed first.
+        assert_eq!(
+            time_line_shape(&card_with("Nov 4, 2026, 9:15:40\u{202F}PM WIB")).as_deref(),
+            Some("Aaa #, ####, #:##:##~AA AAA")
+        );
+        assert_eq!(
+            time_line_shape(&card_with("Nov 4, 2026,\n        9:15:40 PM GMT+07:00")).as_deref(),
+            Some("Aaa #, ####, #:##:## AA AAA+##:##")
+        );
+        // No time line: the prompt label is never shaped.
+        assert_eq!(
+            time_line_shape(
+                r#"<div class="outer-cell"><div class="content-cell">Prompted secret words<br><p>A</p></div></div>"#
+            )
+            .as_deref(),
+            Some("prompt-line")
+        );
+    }
+
+    #[test]
+    fn private_lines_are_never_shaped() {
+        // Lines that are not time-like (no clock, too many words, too long) reveal nothing.
+        for (line, expected) in [
+            ("my secret PIN 4821", "not-time-like"),
+            ("Answer: call 555-1234", "not-time-like"),
+            ("pak.budi@mail.co.id", "not-time-like"),
+            ("Perintah: halo apa kabar", "not-time-like"),
+            ("我的密码", "not-time-like"),
+            (
+                "we met at 10:30 and then talked for a very long while",
+                "long-line",
+            ),
+            ("a b c d e f g h 10:30:00", "not-time-like"),
+            // Numbers that only resemble a clock: prices, decimals, short times, IPs.
+            ("Harga 12.500", "not-time-like"),
+            ("Rp 1.500.000 transfer", "not-time-like"),
+            ("jam 10.30 ketemu Budi", "not-time-like"),
+            ("IP 192.168.1.10", "not-time-like"),
+            ("PIN 1234.56", "not-time-like"),
+            ("v1.2.3.4", "not-time-like"),
+            ("   ", "none"),
+        ] {
+            assert_eq!(masked_line_shape(line), expected, "{line}");
+        }
+        // Even a time-like line masks quotes, `@` and similar marks.
+        assert_eq!(masked_line_shape("\"at\" 10:30:05 @x"), "?aa? ##:##:## ?a");
+        assert_eq!(
+            masked_line_shape("4 Nov 2026, 21.15.40 WIB"),
+            "# Aaa ####, ##.##.## AAA"
+        );
+        // Every shape is short ASCII from a fixed alphabet, whatever the input.
+        let alphabet = "#Aa ~,:.+-/?";
+        let mut state: u64 = 0x2545_F491_4F6C_DD1D;
+        let pool: Vec<char> = "0123456789 :.,+-/@\"'aZéß\u{202F}\u{00A0}我😀\n\t"
+            .chars()
+            .collect();
+        for _ in 0..5_000 {
+            let len = (state % 50) as usize;
+            let line: String = (0..len)
+                .map(|_| {
+                    state ^= state << 13;
+                    state ^= state >> 7;
+                    state ^= state << 17;
+                    pool[(state % pool.len() as u64) as usize]
+                })
+                .collect();
+            let shape = masked_line_shape(&line);
+            let fixed = ["none", "prompt-line", "long-line", "not-time-like"];
+            assert!(
+                fixed.contains(&shape.as_str())
+                    || (shape.chars().count() <= MAX_SHAPED_LINE_CHARS
+                        && shape.chars().all(|c| alphabet.contains(c))),
+                "{line:?} -> {shape:?}"
+            );
+        }
     }
 
     #[test]

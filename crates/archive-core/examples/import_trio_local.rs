@@ -15,6 +15,7 @@ use mind_place_archive::historical::{
     ImportJobLimits, ImportMember, ManifestLimits, MemberKind, NoProgress, SourceImportRequest,
     SourceManifest,
 };
+use mind_place_archive::importers::gemini_takeout::GeminiTakeoutParser;
 use mind_place_archive::ArchiveStore;
 use mind_place_security::SecurityGate;
 use sha2::{Digest, Sha256};
@@ -152,6 +153,26 @@ fn main() -> Result<(), BoxError> {
     }
     let (blobs, corrupt) = verify_raw_blobs(&scratch.join("archive-v1/imports/raw"))?;
     println!("raw_blobs={blobs} raw_blobs_hash_mismatch={corrupt}");
+    if provider == "gemini" {
+        // Masked shapes of card-time lines that were not read, computed here from this run's own
+        // raw blobs (never stored). Only time-like lines are shaped (see `masked_line_shape`), and
+        // a shape seen fewer than MIN_SHAPE_COUNT times is folded into `other`: a real format
+        // problem repeats across cards, a one-off line could be private.
+        const MIN_SHAPE_COUNT: u64 = 3;
+        let shapes = unread_time_line_shapes(&scratch.join("archive-v1/imports/raw"))?;
+        let mut other = 0u64;
+        println!("gemini_unread_time_line_shapes (distinct cards):");
+        for (shape, count) in &shapes {
+            if *count >= MIN_SHAPE_COUNT {
+                println!("  {count:>6}  {shape}");
+            } else {
+                other += count;
+            }
+        }
+        if other > 0 {
+            println!("  {other:>6}  other (shapes seen fewer than {MIN_SHAPE_COUNT} times)");
+        }
+    }
 
     let pass = corrupt == 0
         && receipts[1].already_complete
@@ -192,6 +213,30 @@ fn refuse_unless_disposable(scratch: &Path, source: &Path) -> Result<(), BoxErro
         }
     }
     Ok(())
+}
+
+/// Tallies the unread card-time line shapes of every Gemini card blob in this run's disposable
+/// archive (each raw blob is the exact bytes of one card).
+fn unread_time_line_shapes(root: &Path) -> Result<BTreeMap<String, u64>, BoxError> {
+    let mut tally = BTreeMap::new();
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(dir) = pending.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries {
+            let path = entry?.path();
+            if path.is_dir() {
+                pending.push(path);
+                continue;
+            }
+            let card = std::fs::read(&path)?;
+            if let Some(shape) = GeminiTakeoutParser::unread_time_line_shape(&card) {
+                *tally.entry(shape).or_default() += 1;
+            }
+        }
+    }
+    Ok(tally)
 }
 
 /// Every raw blob's content hashes to its own name.
