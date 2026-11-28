@@ -104,7 +104,7 @@ jobs:
         WINDOWS_PRODUCT_APP_ID: ${{ vars.WINDOWS_PRODUCT_APP_ID }}
       run: python scripts/windows_product_gate.py slot
     - name: Setup Node.js
-      uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
       with:
         node-version: 24
         cache: npm
