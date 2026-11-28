@@ -297,12 +297,10 @@ fn is_content_cell(tag: &html5gum::StartTag<usize>) -> bool {
 /// when that line is exactly a five-word Takeout timestamp. So a date in the response, the
 /// Details caption, a link or a script, or a prompt line that happens to be a date, is never
 /// taken; a card whose time is missing or in an unknown format yields `None` (never a guess).
-fn card_event_time(card_html: &str) -> Option<String> {
-    let card_time = |line: &str| {
-        (line.split_whitespace().take(6).count() == 5)
-            .then(|| parse_takeout_timestamp(line))
-            .flatten()
-    };
+///
+/// This returns that last line (empty when there is none); `card_time` decides whether it is a
+/// time.
+fn card_time_line(card_html: &str) -> String {
     let has_cell = html_tokens(card_html)
         .any(|token| matches!(&token, Token::StartTag(tag) if is_content_cell(tag)));
     let mut in_cell = !has_cell;
@@ -340,13 +338,50 @@ fn card_event_time(card_html: &str) -> Option<String> {
         }
         run.clear();
         if stop {
-            return card_time(&last_line);
+            return last_line;
         }
     }
     if !run.trim().is_empty() {
         last_line = run;
     }
-    card_time(&last_line)
+    last_line
+}
+
+/// A card time line must be exactly a five-word Takeout timestamp.
+fn card_time(line: &str) -> Option<String> {
+    (line.split_whitespace().take(6).count() == 5)
+        .then(|| parse_takeout_timestamp(line))
+        .flatten()
+}
+
+/// A content-free shape of the line that should have held a card time, for diagnosing exports
+/// whose time format is not read: digits become `#`, letters `A`/`a`, an ASCII space stays a
+/// space, any other whitespace (for example the narrow no-break space some locales put before
+/// `PM`) becomes `~`, ASCII punctuation stays, anything else becomes `?`. A prompt label line is
+/// never shaped (`prompt-line`), nor is a line too long to be a time (`long-line`), so prompt
+/// text cannot leak through word lengths. Stored only in raw-evidence metadata.
+fn masked_line_shape(line: &str) -> String {
+    let line = line.trim();
+    if line.is_empty() {
+        return "none".into();
+    }
+    if line.starts_with("Prompted") {
+        return "prompt-line".into();
+    }
+    if line.chars().count() > 48 {
+        return "long-line".into();
+    }
+    line.chars()
+        .map(|c| match c {
+            c if c.is_ascii_digit() => '#',
+            c if c.is_alphabetic() && c.is_uppercase() => 'A',
+            c if c.is_alphabetic() => 'a',
+            ' ' => ' ',
+            c if c.is_whitespace() => '~',
+            c if c.is_ascii_punctuation() => c,
+            _ => '?',
+        })
+        .collect()
 }
 
 fn prompt_text(html: &str) -> String {
@@ -503,7 +538,10 @@ impl GeminiTakeoutParser {
         };
 
         // 3. Structure-aware timestamp extraction
-        let timestamp = card_event_time(card_html);
+        let time_line = card_time_line(card_html);
+        let timestamp = card_time(&time_line);
+        // Content-free diagnostic for a time that was not read (raw-evidence metadata only).
+        let time_line_shape = timestamp.is_none().then(|| masked_line_shape(&time_line));
 
         // The card time is an activity-log event. It is kept as separate source metadata and
         // is never promoted to a message or conversation timestamp.
@@ -535,6 +573,7 @@ impl GeminiTakeoutParser {
                 metadata_json: serde_json::json!({
                     "occurrence_index": occurrence_index,
                     "provider_event_time": event_time,
+                    "event_time_line_shape": time_line_shape,
                 })
                 .to_string(),
             };
@@ -571,6 +610,7 @@ impl GeminiTakeoutParser {
             metadata_json: serde_json::json!({
                 "occurrence_index": occurrence_index,
                 "provider_event_time": event_time,
+                "event_time_line_shape": time_line_shape,
             })
             .to_string(),
         };
@@ -1157,6 +1197,41 @@ mod tests {
         // ...and when the real time is unreadable, the dated prompt line is not used instead.
         let unreadable = r#"<div class="outer-cell"><div class="content-cell">Prompted Q<br>1 Jan 2020, 00:00:00 UTC<br>Nov 4, 2026, 9:15:40 PM WIB<br><p>A</p></div></div>"#;
         assert_eq!(event_time(unreadable), None);
+    }
+
+    fn time_line_shape(html: &str) -> serde_json::Value {
+        let items = GeminiTakeoutParser::parse_cards_html(html.as_bytes()).unwrap();
+        let evidence = match &items[0] {
+            ReconciledItem::Conversation { raw_evidence, .. } => raw_evidence,
+            ReconciledItem::PreservedRawOnly { evidence, .. } => evidence,
+        };
+        let metadata: serde_json::Value = serde_json::from_str(&evidence.metadata_json).unwrap();
+        metadata["event_time_line_shape"].clone()
+    }
+
+    #[test]
+    fn an_unread_card_time_leaves_only_a_content_free_line_shape() {
+        let card = |line: &str| {
+            format!(
+                r#"<div class="outer-cell"><div class="content-cell">Prompted secret words<br>{line}<br><p>A</p></div></div>"#
+            )
+        };
+        // A read time leaves no shape.
+        assert!(time_line_shape(&card("4 Nov 2026, 21:15:40 WIB")).is_null());
+        // An unread time keeps only its structure: digits `#`, letters `A`/`a`, other spaces `~`.
+        assert_eq!(
+            time_line_shape(&card("Nov 4, 2026, 9:15:40\u{202F}PM WIB")),
+            "Aaa #, ####, #:##:##~AA AAA"
+        );
+        // No time line: the prompt label is the last line and is never shaped.
+        assert_eq!(
+            time_line_shape(
+                r#"<div class="outer-cell"><div class="content-cell">Prompted secret words<br><p>A</p></div></div>"#
+            ),
+            "prompt-line"
+        );
+        assert_eq!(time_line_shape(&card(&"x".repeat(60))), "long-line");
+        assert_eq!(masked_line_shape("  "), "none");
     }
 
     #[test]

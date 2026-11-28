@@ -152,6 +152,17 @@ fn main() -> Result<(), BoxError> {
     }
     let (blobs, corrupt) = verify_raw_blobs(&scratch.join("archive-v1/imports/raw"))?;
     println!("raw_blobs={blobs} raw_blobs_hash_mismatch={corrupt}");
+    if provider == "gemini" {
+        // Content-free shapes of card-time lines that were not read (digits `#`, letters `A`/`a`).
+        let shapes = metadata_tally(
+            &scratch.join("archive-v1/imports/evidence"),
+            "event_time_line_shape",
+        )?;
+        println!("gemini_unread_time_line_shapes:");
+        for (shape, count) in &shapes {
+            println!("  {count:>6}  {}", category(shape));
+        }
+    }
 
     let pass = corrupt == 0
         && receipts[1].already_complete
@@ -192,6 +203,33 @@ fn refuse_unless_disposable(scratch: &Path, source: &Path) -> Result<(), BoxErro
         }
     }
     Ok(())
+}
+
+/// Counts the string values of one key of every evidence record's `metadata_json` (non-null only).
+fn metadata_tally(root: &Path, key: &str) -> Result<BTreeMap<String, u64>, BoxError> {
+    let mut tally = BTreeMap::new();
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(dir) = pending.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries {
+            let path = entry?.path();
+            if path.is_dir() {
+                pending.push(path);
+                continue;
+            }
+            let record: serde_json::Value = serde_json::from_slice(&std::fs::read(&path)?)?;
+            let metadata: serde_json::Value = record["metadata_json"]
+                .as_str()
+                .and_then(|text| serde_json::from_str(text).ok())
+                .unwrap_or_default();
+            if let Some(value) = metadata[key].as_str() {
+                *tally.entry(value.to_owned()).or_default() += 1;
+            }
+        }
+    }
+    Ok(tally)
 }
 
 /// Every raw blob's content hashes to its own name.
