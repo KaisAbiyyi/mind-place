@@ -113,7 +113,7 @@ Claim di Notion (Status=Claimed, Claim Owner, lock), buat branch dan draft PR le
 Kerjakan seluruh scope paket dalam satu PR, termasuk tes dan migrasi.
 Jalankan baseline verifikasi AGENTS.md. Laporkan PASS/FAIL/NOT_RUN apa adanya.
 Paket bertanda IR: minta review independen read-only (Sonnet-class) sebelum acceptance.
-Jangan merge; owner yang memutuskan.
+Jangan merge: kamu implementor. Reviewer yang ditunjuk owner yang merge setelah review lolos.
 ```
 
 ## 6. Board projection at adoption (2026-11-27)
@@ -150,13 +150,14 @@ own full 100K run, and a proof is reusable only inside the same PR. A Draft PR s
    fast feedback, Rust compile, SQLCipher, CodeQL and supply-chain checks, and skip the 100K.
 3. A package is accepted at the cloud-gate level when its exact-head cheap checks are green and, for
    packages marked IR (WP04, WP05, WP08, WP09), the independent read-only review passes. It then enters
-   the integration branch by a normal `git merge --no-ff` (the same integration method used for
-   #129 into #127), only after the owner says so for that PR and SHA. Drafts are never marked Ready.
+   the integration branch by a normal `git merge --no-ff` of the reviewed SHA (the same integration
+   method used for #129 into #127), performed by the assigned reviewer under the reviewer-merge rule
+   in `AGENTS.md`; the implementor never merges. Drafts are never marked Ready.
    Packages that share a lock or files are merged one at a time.
 4. **MP-R1-WP10** is the only PR from the integration branch to `main`. It is marked Ready exactly
    once, after the whole stack is frozen, cheap-green and reviewed, and after the batched local
    runbook is prepared. That one transition runs native Windows Product and one 100K run on the final
-   head. The owner reviews and merges once.
+   head. The assigned reviewer reviews that head and merges once under the reviewer-merge rule; the owner keeps acceptance of the local runbook and can veto.
 5. **Freeze before Ready.** After the PR is Ready, any change to a fingerprinted path (code, scripts,
    tests, lockfiles, the scale workflow) invalidates the proof and costs another run. Fixes found
    late go in before the transition, or the owner accepts the extra run.
@@ -192,6 +193,6 @@ required-check semantics, so it needs independent review and an owner decision.
 
 ```text
 Basis branch: integration/r1-curation (bukan main). Buka PR Draft dengan base itu dan biarkan Draft.
-Jangan tandai Ready dan jangan dispatch qualification 100K. Merge ke integration branch hanya
-setelah owner setuju untuk PR dan SHA tersebut.
+Jangan tandai Ready dan jangan dispatch qualification 100K. Implementor tidak merge; reviewer yang
+ditunjuk yang merge SHA yang direview ke integration branch.
 ```

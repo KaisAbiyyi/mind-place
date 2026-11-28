@@ -14,6 +14,7 @@ The canonical rules are in `AGENTS.md` ("UI work rules") and `docs/ui/UI-PRINCIP
 
 ## Working agreements for this repository
 
-- GitHub is the source of truth; local Windows checkouts are qualification targets unless the owner authorizes local implementation. Do not commit, push or merge unless asked.
+- GitHub is the source of truth; local Windows checkouts are qualification targets unless the owner authorizes local implementation. Do not commit or push unless asked.
+- **Merge (owner decision 2026-11-28):** a session the owner gave review authority may merge the PR it reviewed, under the reviewer-merge rule in `AGENTS.md` ("Repository merge authority"): verdict on the exact head SHA, all required checks green, merge pinned with `--match-head-commit`. A session that implemented or changed any commit in a PR never merges it, and never reviews it.
 - Do not read, list or copy private archive/corpus contents; folder names and sizes are fine when needed.
 - Report verification honestly: a test that was not run is `NOT_RUN`, a partial result is `PARTIAL`.
