@@ -32,7 +32,8 @@ pub fn parse_takeout_timestamp(s: &str) -> Option<String> {
         "jun" | "juni" | "june" => 6,
         "jul" | "juli" | "july" => 7,
         "aug" | "agu" | "agustus" | "august" => 8,
-        "sep" | "september" => 9,
+        // `Sept` is the en-GB abbreviation Takeout writes (local gate: 38 cards were unread).
+        "sep" | "sept" | "september" => 9,
         "oct" | "okt" | "oktober" | "october" => 10,
         "nov" | "november" => 11,
         "dec" | "des" | "desember" | "december" => 12,
@@ -793,6 +794,18 @@ mod tests {
     fn test_parse_takeout_timestamp_indonesian_wib() {
         let ts = parse_takeout_timestamp("4 Nov 2026, 21:15:40 WIB").unwrap();
         assert_eq!(ts, "2026-11-04T21:15:40+07:00");
+    }
+
+    #[test]
+    fn test_parse_takeout_timestamp_en_gb_sept() {
+        assert_eq!(
+            parse_takeout_timestamp("4 Sept 2026, 21:15:40 WIB").as_deref(),
+            Some("2026-09-04T21:15:40+07:00")
+        );
+        assert_eq!(
+            parse_takeout_timestamp("14 Sept 2025, 09:05:01 GMT").as_deref(),
+            Some("2025-09-14T09:05:01+00:00")
+        );
     }
 
     #[test]
