@@ -12,6 +12,7 @@
 use super::manifest::{coded, hex, unhex32, HashingReader, ManifestLimits, SourceManifest};
 use super::zip::archive_error_from_io;
 use crate::importers::chatgpt_export::{ChatGptExportParser, ConversationIdTracker};
+use crate::importers::claude_export::ClaudeExportParser;
 use crate::importers::gemini_takeout::{GeminiTakeoutParser, MAX_TAKEOUT_HTML_BYTES};
 use crate::importers::{BoundedArrayLimits, ReconciledItem, RecordSpan};
 use crate::store::{
@@ -50,25 +51,55 @@ pub enum MemberKind {
     ChatgptConversations,
     /// A Gemini Takeout activity HTML file.
     GeminiTakeoutHtml,
+    /// A Claude.ai export `conversations.json`: a top-level JSON array of conversations.
+    ClaudeConversations,
+    /// A Claude.ai export `projects.json`: a top-level JSON array of projects (raw-only).
+    ClaudeProjects,
 }
 
 impl MemberKind {
-    fn provider(self) -> &'static str {
+    pub fn provider(self) -> &'static str {
         match self {
             Self::ChatgptConversations => "chatgpt",
             Self::GeminiTakeoutHtml => "gemini",
+            Self::ClaudeConversations | Self::ClaudeProjects => "claude",
         }
     }
     fn domain(self) -> &'static str {
         match self {
             Self::ChatgptConversations => "chatgpt-export-dag",
             Self::GeminiTakeoutHtml => "gemini-takeout-html",
+            Self::ClaudeConversations => crate::importers::claude_export::CONVERSATION_DOMAIN,
+            Self::ClaudeProjects => crate::importers::claude_export::PROJECT_DOMAIN,
         }
     }
     fn label(self) -> &'static str {
         match self {
             Self::ChatgptConversations => "chatgpt-conversations",
             Self::GeminiTakeoutHtml => "gemini-takeout-html",
+            Self::ClaudeConversations => "claude-conversations",
+            Self::ClaudeProjects => "claude-projects",
+        }
+    }
+
+    /// The kind of a member of `provider`, chosen from its file name; `None` when the provider is
+    /// unknown or the file cannot be a member of it (wrong extension).
+    pub fn for_member(provider: &str, path: &str) -> Option<Self> {
+        if !super::manifest::member_extension_allowed(path, provider) {
+            return None;
+        }
+        match provider {
+            "chatgpt" => Some(Self::ChatgptConversations),
+            "gemini" => Some(Self::GeminiTakeoutHtml),
+            "claude" => {
+                let name = path.rsplit('/').next().unwrap_or(path);
+                Some(if name.eq_ignore_ascii_case("projects.json") {
+                    Self::ClaudeProjects
+                } else {
+                    Self::ClaudeConversations
+                })
+            }
+            _ => None,
         }
     }
 }
@@ -89,6 +120,7 @@ pub struct ImportJobLimits {
     pub max_items: usize,
     /// Most raw bytes one job stages.
     pub max_staged_raw_bytes: u64,
+    /// Bounded JSON array limits for ChatGPT and Claude conversation/project members.
     pub chatgpt_stream: BoundedArrayLimits,
     pub max_takeout_html_bytes: u64,
 }
@@ -1040,6 +1072,7 @@ impl ArchiveStore {
             };
             let mut records = 0u64;
             let mut record_bytes = 0u64;
+            let mut shapes = ShapeTally::default();
             match member.kind {
                 MemberKind::ChatgptConversations => {
                     let mut tracker = std::mem::take(&mut stager.tracker);
@@ -1050,6 +1083,7 @@ impl ArchiveStore {
                         |span, item| {
                             records += 1;
                             record_bytes += span.length;
+                            shapes.observe(member.kind, &item);
                             stager
                                 .add(&ctx, span, item, records - 1)
                                 .map_err(|error| Box::new(error) as Box<dyn std::error::Error>)
@@ -1059,6 +1093,41 @@ impl ArchiveStore {
                     if let Err(error) = result {
                         return Err(map_stream_error(error));
                     }
+                }
+                MemberKind::ClaudeConversations => {
+                    let mut tracker = std::mem::take(&mut stager.tracker);
+                    // Same bounded array reader and limits as ChatGPT conversations.
+                    let result = ClaudeExportParser::stream_conversations_json_tracked(
+                        &mut reader,
+                        request.limits.chatgpt_stream,
+                        &mut tracker,
+                        |span, item| {
+                            records += 1;
+                            record_bytes += span.length;
+                            shapes.observe(member.kind, &item);
+                            stager
+                                .add(&ctx, span, item, records - 1)
+                                .map_err(|error| Box::new(error) as Box<dyn std::error::Error>)
+                        },
+                    );
+                    stager.tracker = tracker;
+                    if let Err(error) = result {
+                        return Err(map_stream_error(error));
+                    }
+                }
+                MemberKind::ClaudeProjects => {
+                    ClaudeExportParser::stream_projects_json_spanned(
+                        &mut reader,
+                        request.limits.chatgpt_stream,
+                        |span, item| {
+                            records += 1;
+                            record_bytes += span.length;
+                            stager
+                                .add(&ctx, span, item, records - 1)
+                                .map_err(|error| Box::new(error) as Box<dyn std::error::Error>)
+                        },
+                    )
+                    .map_err(map_stream_error)?;
                 }
                 MemberKind::GeminiTakeoutHtml => {
                     let cards = GeminiTakeoutParser::parse_cards_html_spanned(
@@ -1073,6 +1142,15 @@ impl ArchiveStore {
                         stager.add(&ctx, span, item, records - 1)?;
                     }
                 }
+            }
+            // A conversations file of another provider (ChatGPT and Claude both name it
+            // `conversations.json`) would be stored as raw evidence under the wrong provider
+            // label, permanently. Refuse before anything is published.
+            if shapes.foreign_only() {
+                return Err(coded(
+                    "E_PROVIDER_MISMATCH",
+                    "This export looks like it belongs to a different provider",
+                ));
             }
             let (bytes, digest) = reader
                 .finish_to_eof()
@@ -1457,6 +1535,43 @@ fn tally(receipt: &mut ImportJobReceipt, done: &ItemReceipt) {
 
 const ROOT_DOMAIN: &[u8] = b"mind-place/import-staged-root/v1\0";
 
+/// Counts, per conversations member, records that have this provider's record shape and records
+/// that have the other provider's shape. Only a member with foreign records and none of its own
+/// is refused; unrecognisable records stay raw-only evidence as before.
+#[derive(Default)]
+struct ShapeTally {
+    own: u64,
+    foreign: u64,
+}
+
+impl ShapeTally {
+    fn observe(&mut self, kind: MemberKind, item: &ReconciledItem) {
+        use crate::importers::{conversation_record_shape, RecordShape};
+        let payload = match item {
+            // A projection always has its own provider's shape.
+            ReconciledItem::Conversation { .. } => {
+                self.own += 1;
+                return;
+            }
+            ReconciledItem::PreservedRawOnly { evidence, .. } => &evidence.payload_bytes,
+        };
+        let own = match kind {
+            MemberKind::ChatgptConversations => RecordShape::ChatGpt,
+            MemberKind::ClaudeConversations => RecordShape::Claude,
+            _ => return,
+        };
+        match conversation_record_shape(payload) {
+            shape if shape == own => self.own += 1,
+            RecordShape::Unknown => {}
+            _ => self.foreign += 1,
+        }
+    }
+
+    fn foreign_only(&self) -> bool {
+        self.foreign > 0 && self.own == 0
+    }
+}
+
 struct MemberCtx {
     index: u32,
     path: String,
@@ -1611,6 +1726,28 @@ fn normalize_members(
         return Err(coded(
             "E_MEMBERS",
             "An import member does not belong to the authorized provider",
+        ));
+    }
+    // Account files (name, e-mail, phone) are never staged, whatever kind a caller claims.
+    // Checked first so the refusal names the real reason.
+    if members
+        .iter()
+        .any(|m| super::manifest::is_account_file(&m.path))
+    {
+        return Err(coded(
+            "E_MEMBERS",
+            "An account file is never an import member",
+        ));
+    }
+    // Each member's kind must be the one its file name implies (for example `projects.json` is
+    // never parsed as conversations).
+    if members
+        .iter()
+        .any(|m| MemberKind::for_member(provider, &m.path) != Some(m.kind))
+    {
+        return Err(coded(
+            "E_MEMBERS",
+            "An import member's kind does not match its file",
         ));
     }
     members.sort_by(|a, b| a.path.as_bytes().cmp(b.path.as_bytes()));

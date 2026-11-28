@@ -50,11 +50,12 @@ export function neutralizeText(text) {
   }).join('\n');
 }
 
-export const KEEP_HOSTS = new Set(['gemini.google.com', 'chatgpt.com', 'chat.openai.com', 'www.google.com',
+export const KEEP_HOSTS = new Set(['gemini.google.com', 'chatgpt.com', 'chat.openai.com', 'claude.ai', 'www.google.com',
   'myactivity.google.com', 'policies.google.com', 'support.google.com', 'files.oaiusercontent.com']);
 const KEEP_SCHEMES = new Set(['http', 'https', 'file-service', 'sediment', 'mindplace-import', 'data']);
 const KEEP_PATH_SEGMENTS = new Set(['app', 'c', 'share', 'g', 'gem', 'gems', 'chat', 'files', 'download', 'u', 'backend-api',
-  'conversation', 'gemini', 'activity', 'myactivity', 'canvas', 'gemini-takeout', 'gemini-canvas', 'chatgpt-export']);
+  'conversation', 'gemini', 'activity', 'myactivity', 'canvas', 'gemini-takeout', 'gemini-canvas', 'chatgpt-export',
+  'project', 'claude-export']);
 
 // Enumerated structural values. DEFAULT-DENY: a value is kept only when it is in the provider
 // vocabulary below, never merely because it looks like an enum. Anything else (including a private
@@ -70,7 +71,14 @@ const ENUM_VOCABULARY = new Map(Object.entries({
     'done', 'success', 'error', 'cancelled'],
   recipient: ['all', ...TOOL_NAMES],
   channel: ['final', 'analysis', 'commentary'],
-  type: ['stop', 'max_tokens', 'interrupted', 'unknown', 'text', 'image', 'file'],
+  type: ['stop', 'max_tokens', 'interrupted', 'unknown', 'text', 'image', 'file',
+    // Claude.ai export content block types
+    'thinking', 'redacted_thinking', 'tool_use', 'tool_result', 'document', 'token_budget'],
+  // Claude.ai export
+  sender: ['human', 'assistant'],
+  file_type: ['txt', 'text', 'md', 'markdown', 'csv', 'json', 'pdf', 'html', 'png', 'jpg', 'jpeg', 'gif', 'webp',
+    'docx', 'xlsx', 'pptx', 'text/plain', 'text/markdown', 'text/csv', 'application/json', 'application/pdf',
+    'image/png', 'image/jpeg', 'image/gif', 'image/webp'],
   language: ['python', 'javascript', 'typescript', 'json', 'html', 'css', 'bash', 'shell', 'sql', 'java', 'c', 'cpp',
     'csharp', 'go', 'rust', 'ruby', 'php', 'swift', 'kotlin', 'markdown', 'yaml', 'xml', 'text', 'unknown'],
   mime_type: ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml', 'application/pdf', 'application/json',
@@ -98,10 +106,16 @@ const HTML_ATTR_VOCABULARY = new Map([
 const ID_KEYS = new Set(['id', 'parent', 'children', 'current_node', 'conversation_id', 'message_id', 'parent_id',
   'root', 'async_task_id', 'request_id', 'turn_exchange_id', 'file_id', 'asset_pointer', 'gizmo_id',
   'conversation_template_id', 'plugin_ids', 'sugar_item_id', 'pointer', 'parent_message_id', 'msg_id', 'share_id',
-  'link_id', 'user_id', 'workspace_id', 'account_id', 'org_id', 'project_id', 'sharing_id']);
+  'link_id', 'user_id', 'workspace_id', 'account_id', 'org_id', 'project_id', 'sharing_id',
+  // Claude.ai export
+  'uuid', 'parent_message_uuid', 'file_uuid', 'project_uuid']);
 const ID_CONTAINER_KEYS = new Set(['mapping']);
-const KEEP_ID_LITERALS = new Set(['client-created-root', 'root']);
-const TIMESTAMP_KEY = /(time|timestamp|created|updated|date)$/i;
+// Root parents of a Claude export's first message (the sentinel and the nil UUID) are structure, not identifiers.
+const KEEP_ID_LITERALS = new Set(['client-created-root', 'root', '00000000-0000-4000-8000-000000000000',
+  '00000000-0000-0000-0000-000000000000']);
+const TIMESTAMP_KEY = /(time|timestamp|created|updated|date|_at)$/i;
+// ISO 8601 date-time strings (Claude.ai export `created_at`, `start_timestamp`, ...).
+const ISO_TIMESTAMP = /^(\d{4}-\d{2}-\d{2})([Tt ])(\d{2}):(\d{2}):(\d{2})(\.\d{1,9})?(Z|z|[+-]\d{2}:?\d{2})?$/;
 
 const UUID = /^([0-9a-fA-F]{8})-([0-9a-fA-F]{4})-([0-9a-fA-F])([0-9a-fA-F]{3})-([0-9a-fA-F])([0-9a-fA-F]{3})-([0-9a-fA-F]{12})$/;
 const URL_SHAPE = /^([A-Za-z][A-Za-z0-9+.-]*):(?:\/\/([^/?#]*))?([^?#]*)(\?[^#]*)?(#[\s\S]*)?$/;
@@ -130,7 +144,7 @@ export const HTML_MEMBER = /\.(?:html?|xhtml)$/i;
 const STRUCTURAL_NAMES = new Set(['conversations.json', 'user.json', 'message_feedback.json', 'shared_conversations.json',
   'export_manifest.json', 'model_comparisons.json', 'chat.html', 'library.json', 'projects.json', 'gizmos.json',
   'Takeout', 'My Activity', 'Gemini Apps', 'MyActivity.html', 'archive_browser.html', 'index.html', 'dalle-generations',
-  'Gemini']);
+  'Gemini', 'users.json']);
 const STRUCTURAL_NAME_PATTERN = /^(?:conversations(?:-\d{1,6})?\.json|(?:user|message_feedback|shared_conversations|export_manifest)\.jsonl?)$/;
 
 export function isIdKey(key) {
@@ -365,6 +379,10 @@ export class Rules {
       return this.replaceText(value);
     }
     if (KEEP_ID_LITERALS.has(value) && (this.isIdKey(key) || ctx.inIdContext)) return this.kept(value);
+    if (TIMESTAMP_KEY.test(key)) {
+      const time = this.isoTimestamp(value);
+      if (time !== null) return time;
+    }
     const url = this.neutralizeUrl(value);
     if (url !== null) return url;
     if (UUID.test(value) || this.isIdKey(key) || ctx.inIdContext) {
@@ -378,6 +396,17 @@ export class Rules {
     this.leak.protect(value);
     this.counters.stringsReplaced++;
     return neutralizeText(value);
+  }
+
+  /** ISO 8601 strings under time-like keys keep their representation but lose time-of-day. */
+  isoTimestamp(value) {
+    const m = ISO_TIMESTAMP.exec(value);
+    if (!m) return null;
+    this.leak.protect(value);
+    if (this.timestamps !== 'day') return this.kept(value);
+    const [, date, separator, , , , fraction = '', zone = ''] = m;
+    this.counters.timestampsCoarsened++;
+    return this.kept(`${date}${separator}00:00:00${fraction ? `.${'0'.repeat(fraction.length - 1)}` : ''}${zone}`);
   }
 
   /** Numbers under time-like keys keep their representation but lose time-of-day. */

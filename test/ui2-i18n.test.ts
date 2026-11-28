@@ -70,8 +70,8 @@ test("MP-UI2-02: Canonical UI-PRINCIPLES glossary and honest MP-UI2-00 import co
   assert.ok(EN_CATALOG["sources.revokeConfirmBody"].includes("Your files are never deleted."));
   assert.ok(ID_CATALOG["sources.revokeConfirmBody"].includes("File Anda tidak pernah dihapus."));
 
-  // Signed-off MP-UI2-00 / MP-IMPORT-APP-01 contract: only ChatGPT & Gemini export folders/zips
-  // on unencrypted (legacy_archive) vaults; standalone transcript files are deferred.
+  // MP-UI2-00 / MP-IMPORT-APP-01 contract, extended by MP-R1-WP01: ChatGPT, Claude and Gemini
+  // export folders/zips on unencrypted (legacy_archive) vaults; standalone transcript files are deferred.
   for (const locale of ["en", "id"] as const) {
     const subtitle = t(locale, "import.subtitle");
     const chooseFile = t(locale, "import.chooseFile");
@@ -80,11 +80,21 @@ test("MP-UI2-02: Canonical UI-PRINCIPLES glossary and honest MP-UI2-00 import co
 
     assert.match(subtitle, /ChatGPT/);
     assert.match(subtitle, /Gemini/);
+    assert.match(subtitle, /Claude/);
     assert.match(subtitle, /\.zip/);
-    assert.doesNotMatch(subtitle, /\b(?:Claude|JSON|HTML|Markdown)\b/);
+    assert.doesNotMatch(subtitle, /\b(?:JSON|HTML|Markdown)\b/);
 
     assert.match(chooseFile, /ChatGPT/);
     assert.match(chooseFile, /Gemini/);
+    assert.match(chooseFile, /Claude/);
+
+    // Import kind list (MP-R1-WP01 design gap ledger): one row per supported export.
+    for (const kind of ["chatgpt", "claude", "gemini"] as const) {
+      assert.ok(t(locale, `import.kind.${kind}`).length > 0);
+      assert.match(t(locale, `import.kind.${kind}Hint`), /\.zip/);
+    }
+    // The Claude note is honest about what the export lacks.
+    assert.match(t(locale, "import.kind.claudeNote"), /(never invented|tidak pernah dikarang)/);
 
     assert.match(transcriptLine, /(coming later|hadir nanti)/i);
     assert.doesNotMatch(transcriptLine, /^(Paste|Tempel)/i);

@@ -5,6 +5,7 @@ use std::marker::PhantomData;
 use std::path::PathBuf;
 
 pub mod chatgpt_export;
+pub mod claude_export;
 pub mod gemini_takeout;
 
 use crate::Capture;
@@ -69,6 +70,62 @@ impl RecordSpan {
             length: bytes.len() as u64,
             sha256: format!("{:x}", Sha256::digest(bytes)),
         }
+    }
+}
+
+/// Deterministic UUIDv4-shaped identity for the `count`-th (>= 2) occurrence of a conversation id
+/// within one export, so duplicates never collide with each other or with the first occurrence.
+pub(crate) fn disambiguated_uuid(id: &str, count: usize) -> String {
+    use sha2::{Digest, Sha256};
+    let hash = Sha256::digest(format!("{id}:dup:{count}").as_bytes());
+    let mut b = [0u8; 16];
+    b.copy_from_slice(&hash[..16]);
+    b[6] = (b[6] & 0x0f) | 0x40; // Version 4
+    b[8] = (b[8] & 0x3f) | 0x80; // Variant 1
+    let hex: String = b.iter().map(|byte| format!("{byte:02x}")).collect();
+    format!(
+        "{}-{}-{}-{}-{}",
+        &hex[0..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..32]
+    )
+}
+
+/// Which provider's conversation record a JSON record looks like, from its top-level keys only.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RecordShape {
+    /// A ChatGPT export conversation: has `mapping` and no `chat_messages`.
+    ChatGpt,
+    /// A Claude.ai export conversation: has `chat_messages`.
+    Claude,
+    Unknown,
+}
+
+/// Classifies one record without building a value tree (`IgnoredAny`). Used to refuse an export
+/// imported under the wrong provider before it is stored with a wrong provenance label.
+pub fn conversation_record_shape(raw: &[u8]) -> RecordShape {
+    #[derive(Deserialize)]
+    struct Keys {
+        #[serde(default)]
+        mapping: Option<de::IgnoredAny>,
+        #[serde(default)]
+        chat_messages: Option<de::IgnoredAny>,
+    }
+    // A derived struct also accepts a JSON array (by position); only objects have a shape.
+    if raw.iter().find(|byte| !byte.is_ascii_whitespace()) != Some(&b'{') {
+        return RecordShape::Unknown;
+    }
+    match serde_json::from_slice::<Keys>(raw) {
+        Ok(Keys {
+            chat_messages: Some(_),
+            ..
+        }) => RecordShape::Claude,
+        Ok(Keys {
+            mapping: Some(_), ..
+        }) => RecordShape::ChatGpt,
+        _ => RecordShape::Unknown,
     }
 }
 
@@ -580,6 +637,28 @@ mod tests {
     fn bounded_stream_propagates_callback_errors() {
         let result = stream_bounded_top_level_array(&b"[1,2]"[..], LIMITS, |_| Err("stop".into()));
         assert_eq!(result.unwrap_err().to_string(), "stop");
+    }
+
+    #[test]
+    fn record_shapes_are_told_apart_by_top_level_keys_only() {
+        assert_eq!(
+            conversation_record_shape(br#"{"id":"x","mapping":{},"current_node":null}"#),
+            RecordShape::ChatGpt
+        );
+        assert_eq!(
+            conversation_record_shape(br#"{"uuid":"x","chat_messages":[]}"#),
+            RecordShape::Claude
+        );
+        // A nested key does not count, null is absence, and non-objects are unknown.
+        for raw in [
+            &br#"{"x":{"chat_messages":[]}}"#[..],
+            br#"{"mapping":null}"#,
+            b"[1]",
+            b"7",
+            b"not json",
+        ] {
+            assert_eq!(conversation_record_shape(raw), RecordShape::Unknown);
+        }
     }
 
     #[test]

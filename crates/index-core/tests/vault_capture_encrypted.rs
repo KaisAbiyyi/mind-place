@@ -327,6 +327,7 @@ fn ordinary_vault_save_rejects_every_historical_and_generic_method() {
 
     for (provider, method) in [
         ("chatgpt", "export-import"),
+        ("claude", "export-import"),
         ("chatgpt", "legacy-import"),
         ("gemini", "takeout-import"),
         ("generic", "generic-import"),

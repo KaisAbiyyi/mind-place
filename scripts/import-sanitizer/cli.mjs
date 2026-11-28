@@ -15,7 +15,7 @@ Usage:
                         Gemini Takeout .html file, directory or .zip
   --output <path>       Sanitized copy (zip -> zip, directory -> directory, file -> file). Must not exist.
   --dry-run             Run every check and print the inventory; keep no output
-  --provider <name>     chatgpt | gemini | auto (default auto; only labels the report)
+  --provider <name>     chatgpt | gemini | claude | auto (default auto; only labels the report)
   --timestamps <mode>   day (default: keep the date, drop time of day) | keep
   --keep-label <text>   Also keep this structural HTML label (repeatable), e.g. a localized "Prompted"
   --keep-class <name>   Also keep this reviewed HTML class token (repeatable); unknown class names are replaced by default
@@ -60,7 +60,7 @@ try {
 if (args.help) { process.stdout.write(HELP); process.exit(0); }
 if (!args.input) fail(`--input is required\n\n${HELP}`);
 if (!args.output && !args['dry-run']) fail('--output (or --dry-run) is required');
-if (args.provider && !['chatgpt', 'gemini', 'auto'].includes(args.provider)) fail('--provider must be chatgpt, gemini or auto');
+if (args.provider && !['chatgpt', 'gemini', 'claude', 'auto'].includes(args.provider)) fail('--provider must be chatgpt, gemini, claude or auto');
 
 let salt = process.env.MIND_PLACE_SANITIZER_SALT || undefined;
 if (args['salt-file']) {

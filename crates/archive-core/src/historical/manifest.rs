@@ -452,13 +452,20 @@ impl SourceManifest {
 }
 
 /// ChatGPT: `conversations.json` or `conversations-*.json` at any depth. Gemini: an `.html` file
-/// with a path component that names Gemini (case-insensitive), at any depth.
+/// with a path component that names Gemini (case-insensitive), at any depth. Claude:
+/// `conversations.json`, `conversations-*.json` or `projects.json` at any depth; account files
+/// such as `users.json` are never candidates.
 pub fn entry_matches_provider_layout(path: &str, provider: &str) -> bool {
     let file_name = path.rsplit('/').next().unwrap_or(path);
     let lower = file_name.to_ascii_lowercase();
     match provider {
         "chatgpt" => {
             lower == "conversations.json"
+                || (lower.starts_with("conversations-") && lower.ends_with(".json"))
+        }
+        "claude" => {
+            lower == "conversations.json"
+                || lower == "projects.json"
                 || (lower.starts_with("conversations-") && lower.ends_with(".json"))
         }
         "gemini" => {
@@ -471,11 +478,23 @@ pub fn entry_matches_provider_layout(path: &str, provider: &str) -> bool {
     }
 }
 
+/// Account files of a provider export (name, e-mail, phone): `user.json` (ChatGPT) and
+/// `users.json` (Claude.ai), at any depth, case-insensitively. They are measured as part of the
+/// source but are never an import member, even when named explicitly.
+pub fn is_account_file(path: &str) -> bool {
+    let lower = path.rsplit('/').next().unwrap_or(path).to_ascii_lowercase();
+    matches!(lower.as_str(), "user.json" | "users.json")
+}
+
 /// The file extension a member of `provider` must have when the owner picks it explicitly.
+/// Account files are never allowed.
 pub fn member_extension_allowed(path: &str, provider: &str) -> bool {
+    if is_account_file(path) {
+        return false;
+    }
     let lower = path.rsplit('/').next().unwrap_or(path).to_ascii_lowercase();
     match provider {
-        "chatgpt" => lower.ends_with(".json"),
+        "chatgpt" | "claude" => lower.ends_with(".json"),
         "gemini" => lower.ends_with(".html") || lower.ends_with(".htm"),
         _ => false,
     }

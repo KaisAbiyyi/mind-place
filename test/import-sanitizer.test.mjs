@@ -17,7 +17,7 @@ import { boundedLines } from '../scripts/import-sanitizer/text-stream.mjs';
 import { rewriteJson } from '../scripts/import-sanitizer/json-stream.mjs';
 import { lengthClass, neutralizeText, Rules } from '../scripts/import-sanitizer/rules.mjs';
 import { openZip, ZipWriter } from '../scripts/import-sanitizer/zip.mjs';
-import { readTree, writeChatGptExport, writeGeminiTakeout, zipDirectory } from './fixtures/import-sanitizer/synthetic-exports.mjs';
+import { readTree, writeChatGptExport, writeClaudeExport, writeGeminiTakeout, zipDirectory } from './fixtures/import-sanitizer/synthetic-exports.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const cli = path.join(root, 'scripts', 'import-sanitizer', 'cli.mjs');
@@ -322,6 +322,47 @@ test('property: across many random synthetic exports no input string of 8+ chara
   }
 });
 
+// ------------------------------------------------------------------ Claude.ai export (MP-R1-WP01)
+
+test('Claude.ai export zip: structure, references, enums and day-only times survive; text and account data do not', async () => {
+  const t = scratch('claude');
+  try {
+    const { secrets, conversations } = writeClaudeExport(path.join(t.dir, 'in'), { seed: 41, conversations: 6 });
+    await zipDirectory(path.join(t.dir, 'in'), path.join(t.dir, 'claude-export.zip'));
+    const result = await sanitize({ input: path.join(t.dir, 'claude-export.zip'), output: path.join(t.dir, 'out.zip') });
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.report.provider, 'claude');
+    const names = result.report.members.map(member => member.name).sort();
+    assert.deepEqual(names, ['conversations.json', 'projects.json', 'users.json']);
+    const outDir = path.join(t.dir, 'out-dir');
+    await sanitize({ input: path.join(t.dir, 'in'), output: outDir });
+    const tree = readTree(outDir);
+    const text = [...tree.values()].map(bytes => bytes.toString('utf8')).join(' ');
+    for (const secret of secrets) assert.ok(!text.includes(secret), 'a planted private string survived');
+    assert.doesNotMatch(text, /privatemail|example\.net|\+1555/);
+    const out = JSON.parse(tree.get('conversations.json').toString('utf8'));
+    assert.equal(out.length, conversations.length);
+    for (const [index, conversation] of out.entries()) {
+      const original = conversations[index];
+      assert.equal(conversation.chat_messages.length, original.chat_messages.length);
+      assert.deepEqual(conversation.chat_messages.map(m => m.sender), original.chat_messages.map(m => m.sender), 'sender enum kept');
+      // parent links still point at the previous message (pseudonyms are consistent), or at the kept root sentinel
+      const ids = conversation.chat_messages.map(m => m.uuid);
+      const originalIds = original.chat_messages.map(m => m.uuid);
+      conversation.chat_messages.forEach((message, i) => {
+        const parent = original.chat_messages[i].parent_message_uuid;
+        if (parent === undefined) assert.equal(message.parent_message_uuid, undefined);
+        else if (parent === '00000000-0000-4000-8000-000000000000') assert.equal(message.parent_message_uuid, parent);
+        else assert.equal(message.parent_message_uuid, ids[originalIds.indexOf(parent)]);
+      });
+      assert.match(conversation.created_at, /^\d{4}-\d{2}-\d{2}T00:00:00\.000000Z$/, 'ISO time keeps its format, minus time of day');
+      assert.notEqual(conversation.uuid, original.uuid);
+    }
+    const blockTypes = out.flatMap(c => c.chat_messages.flatMap(m => (m.content ?? []).map(block => block.type)));
+    for (const type of ['text', 'thinking', 'tool_use', 'tool_result']) assert.ok(blockTypes.includes(type), type);
+  } finally { t.done(); }
+});
+
 // ------------------------------------------------------------------ Gemini Takeout
 
 test('Gemini Takeout folder: cards, quoting quirks, labels and duplicates survive; text does not', async () => {
@@ -577,7 +618,8 @@ test('committed parser-compatibility fixtures are exactly what the tool produces
   const t = scratch('compat');
   try {
     await buildParserCompatFixtures(t.dir);
-    for (const name of ['chatgpt-synthetic.json', 'chatgpt-sanitized.json', 'gemini-synthetic.html', 'gemini-sanitized.html']) {
+    for (const name of ['chatgpt-synthetic.json', 'chatgpt-sanitized.json', 'gemini-synthetic.html', 'gemini-sanitized.html',
+      'claude-synthetic.json', 'claude-sanitized.json', 'claude-projects-synthetic.json', 'claude-projects-sanitized.json']) {
       assert.ok(fs.readFileSync(path.join(t.dir, name)).equals(fs.readFileSync(path.join(FIXTURE_DIR, name))),
         `${name} differs; regenerate with: node test/fixtures/import-sanitizer/generate-parser-compat.mjs`);
     }

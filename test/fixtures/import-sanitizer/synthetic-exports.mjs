@@ -1,4 +1,4 @@
-// Synthetic (invented) ChatGPT-export and Gemini-Takeout shaped data for sanitizer tests.
+// Synthetic (invented) ChatGPT-export, Gemini-Takeout and Claude.ai-export shaped data for sanitizer tests.
 // Every conversation embeds distinctive "private" strings; the builders return them so tests
 // can assert none survives sanitization. Nothing here comes from a real export.
 import fs from 'node:fs';
@@ -161,6 +161,95 @@ export function writeGeminiTakeout(dir, { seed = 7, cards = 5 } = {}) {
   fs.writeFileSync(path.join(activity, `${WORDS[2]}-attachment-${seed}.jpg`), Buffer.from('\xff\xd8\xff private jpeg bytes'));
   secrets.add(`${WORDS[2]}-attachment-${seed}`);
   return { secrets, html };
+}
+
+const CLAUDE_ROOT_PARENT = '00000000-0000-4000-8000-000000000000';
+
+function isoTime(base, offsetSeconds) {
+  return new Date((base + offsetSeconds) * 1000).toISOString().replace('Z', '000Z');
+}
+
+/**
+ * One Claude.ai-export shaped conversation (invented). Quirks: `no-links` (no parent links, the
+ * publicly described older shape), `thinking`/`tool` blocks, `files`, `legacy-text` (text field
+ * only), `fork` (two children of one message: must stay raw-only).
+ */
+export function claudeConversation(rand, secrets, { quirks = [] } = {}) {
+  const id = uuid(rand);
+  const base = 1767322800 + Math.floor(rand() * 1000);
+  const messages = [];
+  const count = 2 + 2 * Math.floor(1 + rand() * 2);
+  let parent = CLAUDE_ROOT_PARENT;
+  for (let i = 0; i < count; i++) {
+    const messageId = uuid(rand);
+    const sender = i % 2 ? 'assistant' : 'human';
+    const text = sentence(rand, secrets, `c${i}`);
+    const content = [{ start_timestamp: isoTime(base, i * 30), stop_timestamp: isoTime(base, i * 30 + 2), type: 'text', text, citations: [] }];
+    if (sender === 'assistant' && quirks.includes('thinking') && i === 1) {
+      content.unshift({ type: 'thinking', thinking: sentence(rand, secrets, 'th'), summaries: [] });
+    }
+    if (sender === 'assistant' && quirks.includes('tool') && i === 3) {
+      content.unshift({ type: 'tool_use', name: 'web_search', input: { query: sentence(rand, secrets, 'tq') } },
+        { type: 'tool_result', name: 'web_search', content: [{ type: 'text', text: sentence(rand, secrets, 'tr') }], is_error: false });
+    }
+    const message = {
+      uuid: messageId,
+      text,
+      content,
+      sender,
+      created_at: isoTime(base, i * 30),
+      updated_at: isoTime(base, i * 30 + 1),
+      attachments: [],
+      files: [],
+    };
+    if (quirks.includes('legacy-text')) delete message.content;
+    if (quirks.includes('files') && i === 0) {
+      message.attachments = [{ file_name: `${WORDS[4]}-budget.txt`, file_size: 4096, file_type: 'txt', extracted_content: sentence(rand, secrets, 'ex') }];
+      message.files = [{ file_name: `${WORDS[7]}-photo.png` }];
+      secrets.add(`${WORDS[4]}-budget`);
+      secrets.add(`${WORDS[7]}-photo`);
+    }
+    if (!quirks.includes('no-links')) message.parent_message_uuid = parent;
+    messages.push(message);
+    parent = messageId;
+  }
+  if (quirks.includes('fork')) {
+    messages.push({ ...messages[messages.length - 1], uuid: uuid(rand), parent_message_uuid: messages[messages.length - 3].uuid, text: sentence(rand, secrets, 'fork') });
+  }
+  const name = `Plans for ${WORDS[Math.floor(rand() * WORDS.length)]} ${Math.floor(rand() * 1e5)}`;
+  secrets.add(name);
+  return {
+    uuid: id,
+    name,
+    summary: '',
+    created_at: isoTime(base, 0),
+    updated_at: isoTime(base, count * 30),
+    account: { uuid: uuid(rand) },
+    chat_messages: messages,
+  };
+}
+
+/** Writes a Claude.ai data export into `dir`: conversations.json, projects.json, users.json. */
+export function writeClaudeExport(dir, { seed = 11, conversations = 6 } = {}) {
+  const rand = seeded(seed);
+  const secrets = new Set();
+  const quirkSets = [[], ['thinking', 'tool'], ['files'], ['no-links'], ['legacy-text'], ['fork']];
+  const all = Array.from({ length: conversations }, (_, i) => claudeConversation(rand, secrets, { quirks: quirkSets[i % quirkSets.length] }));
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'conversations.json'), JSON.stringify(all));
+  const projects = [{
+    uuid: uuid(rand), name: `Project ${WORDS[9]}`, description: sentence(rand, secrets, 'pd'), is_private: true,
+    is_starter_project: false, prompt_template: sentence(rand, secrets, 'pt'), created_at: isoTime(1767322800, 0),
+    updated_at: isoTime(1767322800, 60), creator: { uuid: uuid(rand), full_name: `Owner ${WORDS[10]}` },
+    docs: [{ uuid: uuid(rand), filename: `${WORDS[11]}-spec.md`, content: sentence(rand, secrets, 'doc'), created_at: isoTime(1767322800, 5) }],
+  }];
+  secrets.add(`Project ${WORDS[9]}`);
+  fs.writeFileSync(path.join(dir, 'projects.json'), JSON.stringify(projects));
+  const email = `owner.${seed}@privatemail.test`;
+  secrets.add(email);
+  fs.writeFileSync(path.join(dir, 'users.json'), JSON.stringify([{ uuid: uuid(rand), full_name: `Owner ${WORDS[12]}`, email_address: email, verified_phone_number: '+15557654321' }]));
+  secrets.add('+15557654321');
+  return { secrets, conversations: all, projects };
 }
 
 export function readTree(dir) {

@@ -448,8 +448,8 @@ class ZipSink {
 
 const coverageError = () => new SanitizerError('E_LEAK_COVERAGE', 'Leak tracking overflowed; verification is incomplete and the output was not published', 3);
 const OUTPUT_MARKER = '.mp-sanitizer-output';
-// Kept structural names (conversations.json, user.json, ...) are never renamed: a repeat is a real duplicate.
-const KEPT_STRUCTURAL = /(?:^|\/)(?:conversations(?:-\d{1,6})?\.json|(?:user|message_feedback|shared_conversations|export_manifest|model_comparisons|library|projects|gizmos)\.jsonl?|chat\.html|MyActivity\.html|archive_browser\.html|index\.html)$/
+// Kept structural names (conversations.json, user.json, users.json, ...) are never renamed: a repeat is a real duplicate.
+const KEPT_STRUCTURAL = /(?:^|\/)(?:conversations(?:-\d{1,6})?\.json|(?:users?|message_feedback|shared_conversations|export_manifest|model_comparisons|library|projects|gizmos)\.jsonl?|chat\.html|MyActivity\.html|archive_browser\.html|index\.html)$/
 const fold = value => (process.platform === 'win32' || process.platform === 'darwin' ? value.toLowerCase() : value);
 
 /** Canonical path of something that may not exist yet: real path of the nearest existing ancestor + the rest. */
@@ -781,7 +781,9 @@ function buildReport({ rules, leak, members, checks, source, provider, written, 
       structure: summary,
     };
   });
+  // A Claude.ai export names its account file `users.json`; a ChatGPT export names it `user.json`.
   const detected = provider !== 'auto' ? provider
+    : members.some(m => /(?:^|\/)users\.json$/.test(m.name)) && members.some(m => /conversations(-\d+)?\.json$/.test(m.name)) ? 'claude'
     : members.some(m => /conversations(-\d+)?\.json$/.test(m.name)) ? 'chatgpt'
       : members.some(m => m.kind === 'html') ? 'gemini' : 'unknown';
   return {

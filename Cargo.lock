@@ -1986,6 +1986,7 @@ dependencies = [
  "base64 0.22.1",
  "flate2",
  "fs2",
+ "getrandom 0.4.3",
  "html5gum",
  "mind-place-security",
  "serde",
