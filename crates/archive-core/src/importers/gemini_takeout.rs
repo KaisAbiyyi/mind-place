@@ -279,6 +279,46 @@ fn prompt_markers(html: &str) -> (Vec<usize>, bool) {
     (markers, ambiguous)
 }
 
+/// The card's activity-log time: the first run of text, between two tags, that is on its own a
+/// Takeout timestamp. Runs are delimited by markup (`<br>`, `<p>`, ...), never by source line
+/// breaks, so a minified card (Takeout writes a whole card on one physical line) reads the same
+/// as a pretty-printed one. Text inside `script`/`style` is ignored, and a date that only appears
+/// inside other text (a prompt that mentions a date) is never taken as the card time.
+fn card_event_time(card_html: &str) -> Option<String> {
+    // `parse_takeout_timestamp` tolerates trailing words; a card time must be the whole run.
+    let alone = |run: &str| {
+        if run.split_whitespace().count() <= 5 {
+            parse_takeout_timestamp(run)
+        } else {
+            None
+        }
+    };
+    let mut ignored = 0usize;
+    let mut run = String::new();
+    for token in html_tokens(card_html) {
+        match token {
+            Token::String(text) => {
+                if ignored == 0 {
+                    run.push_str(&String::from_utf8_lossy(&text));
+                }
+                continue;
+            }
+            Token::StartTag(tag) if matches!(tag.name.as_ref(), b"script" | b"style") => {
+                ignored += 1
+            }
+            Token::EndTag(tag) if matches!(tag.name.as_ref(), b"script" | b"style") => {
+                ignored = ignored.saturating_sub(1)
+            }
+            _ => {}
+        }
+        if let Some(time) = alone(&run) {
+            return Some(time);
+        }
+        run.clear();
+    }
+    alone(&run)
+}
+
 fn prompt_text(html: &str) -> String {
     let mut text = String::new();
     for token in html_tokens(html) {
@@ -433,14 +473,7 @@ impl GeminiTakeoutParser {
         };
 
         // 3. Structure-aware timestamp extraction
-        let mut timestamp = None;
-        for line in card_html.lines() {
-            let clean = strip_html_tags(line);
-            if let Some(ts) = parse_takeout_timestamp(&clean) {
-                timestamp = Some(ts);
-                break;
-            }
-        }
+        let timestamp = card_event_time(card_html);
 
         // The card time is an activity-log event. It is kept as separate source metadata and
         // is never promoted to a message or conversation timestamp.
@@ -1008,6 +1041,51 @@ mod tests {
             .warnings
             .iter()
             .any(|w| w.contains("timestamp unavailable")));
+    }
+
+    fn event_time(html: &str) -> Option<String> {
+        let items = GeminiTakeoutParser::parse_cards_html(html.as_bytes()).unwrap();
+        let ReconciledItem::Conversation { raw_evidence, .. } = &items[0] else {
+            panic!("expected a conversation")
+        };
+        let metadata: serde_json::Value =
+            serde_json::from_str(&raw_evidence.metadata_json).unwrap();
+        metadata["provider_event_time"].as_str().map(str::to_owned)
+    }
+
+    #[test]
+    fn card_event_time_is_found_in_a_minified_one_line_card() {
+        // Takeout writes a whole card on one physical line: prompt, time and response are
+        // separated by markup only. The time must not depend on source line breaks.
+        let one_line = TIMED_CARD.replace('\n', "");
+        assert!(!one_line.contains('\n'));
+        assert_eq!(
+            event_time(&one_line).as_deref(),
+            Some("2026-11-04T21:15:40+07:00")
+        );
+        // The pretty-printed layout keeps working.
+        assert_eq!(
+            event_time(TIMED_CARD).as_deref(),
+            Some("2026-11-04T21:15:40+07:00")
+        );
+    }
+
+    #[test]
+    fn card_event_time_reads_entity_spaces_and_ignores_scripts_and_embedded_dates() {
+        let nbsp = r#"<div class="outer-cell"><div class="content-cell">Prompted Q<br>4&nbsp;Nov 2026, 21:15:40&nbsp;WIB<br><p>A</p></div></div>"#;
+        assert_eq!(
+            event_time(nbsp).as_deref(),
+            Some("2026-11-04T21:15:40+07:00")
+        );
+        // A date that is only part of the prompt, of a longer sentence, or inside a script is
+        // never the card time.
+        for html in [
+            r#"<div class="outer-cell"><div class="content-cell">Prompted 4 Nov 2026, 21:15:40 WIB<br><p>A</p></div></div>"#,
+            r#"<div class="outer-cell"><div class="content-cell">Prompted Q<br><p>4 Nov 2026, 21:15:40 WIB was the deadline</p></div></div>"#,
+            r#"<div class="outer-cell"><div class="content-cell">Prompted Q<br><script>4 Nov 2026, 21:15:40 WIB</script><p>A</p></div></div>"#,
+        ] {
+            assert_eq!(event_time(html), None, "{html}");
+        }
     }
 
     #[test]

@@ -159,6 +159,20 @@ fn sanitized_gemini_takeout_parses_with_the_same_shape_as_the_original() {
         )),
         "non-official identity expected"
     );
+    // Both fixtures keep each card on one source line, like Takeout does: every card's activity
+    // time must still be read (MP-R1-WP01 local gate found it lost on every real card).
+    for item in original.iter().chain(&sanitized) {
+        if let ReconciledItem::Conversation { capture, .. } = item {
+            assert!(
+                !capture
+                    .warnings
+                    .iter()
+                    .any(|w| w.contains("timestamp unavailable")),
+                "{:?}",
+                capture.warnings
+            );
+        }
+    }
 }
 
 #[test]
