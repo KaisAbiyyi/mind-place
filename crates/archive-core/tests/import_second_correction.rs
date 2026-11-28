@@ -328,11 +328,27 @@ fn expired_capability_and_unrelated_owner_profile_cannot_write() {
 #[test]
 fn chatgpt_other_inconsistent_edges_and_node_ids_preserve_raw_only() {
     let original: serde_json::Value = serde_json::from_slice(DUPLICATE).unwrap();
-    for case in 0..5 {
+    // A child that is simply not listed (empty `children`) is no longer a contradiction: 2026
+    // exports list no children, and the parent links alone define the tree (MP-R1-WP01 local
+    // gate). It is projected with an explicit derivation warning; contradictions stay raw-only.
+    let mut unlisted = original.clone();
+    unlisted[0]["mapping"]["leaf"]["message"]["id"] = "m-leaf".into();
+    unlisted[0]["mapping"]["root"]["children"] = serde_json::json!([]);
+    let bytes = serde_json::to_vec(&unlisted).unwrap();
+    let items = ChatGptExportParser::parse_conversations_json(bytes.as_slice()).unwrap();
+    let ReconciledItem::Conversation { capture, .. } = &items[0] else {
+        panic!("an unlisted child with a valid parent link must be projected")
+    };
+    assert!(capture
+        .warnings
+        .iter()
+        .any(|w| w.contains("derived from parent links")));
+    validate_historical_capture(&mut capture.clone(), "chatgpt").unwrap();
+
+    for case in 1..5 {
         let mut record = original.clone();
         record[0]["mapping"]["leaf"]["message"]["id"] = "m-leaf".into();
         match case {
-            0 => record[0]["mapping"]["root"]["children"] = serde_json::json!([]),
             1 => record[0]["mapping"]["leaf"]["id"] = "wrong-key".into(),
             2 => record[0]["mapping"]["root"]["children"] = serde_json::json!(["leaf", "missing"]),
             3 => record[0]["mapping"]["root"]["children"] = serde_json::json!(["leaf", "leaf"]),

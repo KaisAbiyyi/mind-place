@@ -368,7 +368,16 @@ impl ChatGptExportParser {
 
         let violated = dag_rule_violations(conv);
         if !violated.is_empty() {
-            return BranchProjection::BranchingRefused(dag_refusal_reason(&violated));
+            // 2026 exports list no (or not all) children; the parent links alone still define
+            // the tree. Accepted only when nothing else is wrong and the parent links provably
+            // form one acyclic tree; every listed child already agrees with them.
+            if !children_derivable_from_parents(conv, &violated) {
+                return BranchProjection::BranchingRefused(dag_refusal_reason(&violated));
+            }
+            warnings.push(
+                "Export nodes do not list all their children; branch structure was derived from parent links"
+                    .into(),
+            );
         }
 
         // Case A: valid current_node chain
@@ -428,15 +437,29 @@ impl ChatGptExportParser {
         }
 
         // Case B: missing or invalid current_node
-        // Check if graph is strictly linear (single root, every node has <= 1 child)
+        // Check if graph is strictly linear (single root, every node has <= 1 child). Children
+        // come from the parent links: for a fully valid DAG they are exactly the listed children
+        // (links are reciprocal and each child is listed once), and they stay correct when the
+        // export lists none.
         let roots: Vec<_> = conv
             .mapping
             .values()
             .filter(|n| n.parent.is_none())
             .collect();
+        let mut derived_children: HashMap<&str, Vec<&ChatGptNode>> = HashMap::new();
+        for node in conv.mapping.values() {
+            if let Some(parent_id) = &node.parent {
+                derived_children
+                    .entry(parent_id.as_str())
+                    .or_default()
+                    .push(node);
+            }
+        }
 
-        let is_strictly_linear =
-            roots.len() == 1 && conv.mapping.values().all(|n| n.children.len() <= 1);
+        let is_strictly_linear = roots.len() == 1
+            && derived_children
+                .values()
+                .all(|children| children.len() <= 1);
 
         if is_strictly_linear {
             let mut curr = Some(roots[0]);
@@ -450,10 +473,9 @@ impl ChatGptExportParser {
                 if let Some(msg) = &node.message {
                     projected.push(Self::convert_message(msg));
                 }
-                curr = node
-                    .children
-                    .first()
-                    .and_then(|c_id| conv.mapping.get(c_id));
+                curr = derived_children
+                    .get(node.id.as_str())
+                    .and_then(|children| children.first().copied());
             }
 
             let ProjectedBranch {
@@ -778,6 +800,47 @@ pub(crate) fn dag_rule_violations(conv: &ChatGptExportConversation) -> BTreeSet<
         violated.insert(DagRule::UnreachableOrCyclic);
     }
     violated
+}
+
+/// Whether a DAG that broke only the `children`-listing rules can be read from its parent links
+/// alone: the violations are exclusively `child-not-listed` / `unreachable-or-cyclic` (so keys
+/// match ids, every parent exists, there is exactly one root, and every child that *is* listed
+/// exists, is listed once and names this node as its parent), and following `parent` from every
+/// node reaches that root without a cycle. Linear in the node count.
+pub(crate) fn children_derivable_from_parents(
+    conv: &ChatGptExportConversation,
+    violated: &BTreeSet<DagRule>,
+) -> bool {
+    if !violated
+        .iter()
+        .all(|rule| matches!(rule, DagRule::ChildNotListed | DagRule::UnreachableOrCyclic))
+    {
+        return false;
+    }
+    // Per node: reaches the root (true) or is on the walk being checked (false).
+    let mut state: HashMap<&str, bool> = HashMap::with_capacity(conv.mapping.len());
+    for start in conv.mapping.keys() {
+        let mut path: Vec<&str> = Vec::new();
+        let mut current = start.as_str();
+        loop {
+            match state.get(current) {
+                Some(true) => break,
+                Some(false) => return false, // revisited on this walk: a parent cycle
+                None => {}
+            }
+            state.insert(current, false);
+            path.push(current);
+            match conv.mapping.get(current).map(|node| &node.parent) {
+                Some(Some(parent)) => current = parent.as_str(),
+                Some(None) => break, // the single root
+                None => return false,
+            }
+        }
+        for id in path {
+            state.insert(id, true);
+        }
+    }
+    true
 }
 
 pub(crate) fn clip(value: &str) -> String {
@@ -1168,16 +1231,6 @@ mod tests {
         let mut cases: Vec<(&str, serde_json::Value, &str)> = Vec::new();
 
         let mut m = classic_mapping();
-        for key in ["root", "u", "a"] {
-            m[key].as_object_mut().unwrap().remove("children");
-        }
-        cases.push((
-            "children field absent",
-            m,
-            "child-not-listed, unreachable-or-cyclic",
-        ));
-
-        let mut m = classic_mapping();
         m.as_object_mut().unwrap().remove("root");
         cases.push((
             "root node pruned",
@@ -1188,14 +1241,6 @@ mod tests {
         let mut m = classic_mapping();
         m["u"]["children"] = serde_json::json!(["a", "pruned"]);
         cases.push(("dangling child", m, "child-missing"));
-
-        let mut m = classic_mapping();
-        m["x"] = dag_node("x", Some("u"), &[]);
-        cases.push((
-            "sibling not listed",
-            m,
-            "child-not-listed, unreachable-or-cyclic",
-        ));
 
         let mut m = classic_mapping();
         m["u"]["id"] = "renamed".into();
@@ -1251,6 +1296,171 @@ mod tests {
         for _ in 0..32 {
             assert_eq!(dag_reason(m.clone()).unwrap(), first);
         }
+    }
+
+    /// Like `classic_mapping`, but every node lists no children (the 2026 export shape).
+    fn without_children(mut mapping: serde_json::Value) -> serde_json::Value {
+        for node in mapping.as_object_mut().unwrap().values_mut() {
+            node.as_object_mut().unwrap().remove("children");
+        }
+        mapping
+    }
+
+    fn parse_one(mapping: serde_json::Value, current: Option<&str>) -> ReconciledItem {
+        let mut conv = serde_json::json!({"id": ID, "title": "S", "create_time": 1700000000.0,
+            "mapping": mapping});
+        if let Some(current) = current {
+            conv["current_node"] = current.into();
+        }
+        let bytes = serde_json::to_vec(&serde_json::json!([conv])).unwrap();
+        ChatGptExportParser::parse_conversations_json(&bytes[..])
+            .unwrap()
+            .remove(0)
+    }
+
+    const DERIVED: &str = "branch structure was derived from parent links";
+
+    #[test]
+    fn a_dag_without_children_projects_its_active_branch_from_parent_links() {
+        // Absent and empty `children` read the same.
+        let mut empty = classic_mapping();
+        for key in ["root", "u", "a"] {
+            empty[key]["children"] = serde_json::json!([]);
+        }
+        for mapping in [without_children(classic_mapping()), empty] {
+            let ReconciledItem::Conversation { capture, .. } = parse_one(mapping, Some("a")) else {
+                panic!("expected a projection")
+            };
+            assert_eq!(
+                capture
+                    .messages
+                    .iter()
+                    .map(|m| m.id.as_str())
+                    .collect::<Vec<_>>(),
+                ["m-root", "m-u", "m-a"]
+            );
+            // The active branch comes from `current_node` and `parent` alone, exactly as for a
+            // classic export, so completeness is not lowered; the derivation is never silent.
+            assert_eq!(capture.completeness, "complete");
+            assert!(warned(&capture, DERIVED), "{:?}", capture.warnings);
+        }
+    }
+
+    #[test]
+    fn a_branching_dag_without_children_still_needs_current_node() {
+        let mut m = classic_mapping();
+        m["b"] = dag_node("b", Some("u"), &[]);
+        let m = without_children(m);
+        // With current_node: the active branch only, alternate branch noted.
+        let ReconciledItem::Conversation { capture, .. } = parse_one(m.clone(), Some("b")) else {
+            panic!("expected a projection")
+        };
+        assert_eq!(capture.messages.last().unwrap().id, "m-b");
+        assert_eq!(capture.messages.len(), 3);
+        assert!(warned(&capture, "alternate branches"));
+        assert!(warned(&capture, DERIVED));
+        // Without it: never guessed.
+        match parse_one(m, None) {
+            ReconciledItem::PreservedRawOnly {
+                disposition_reason, ..
+            } => assert!(disposition_reason.contains("active branch cannot be authoritatively")),
+            other => panic!("expected raw-only, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_linear_dag_without_children_or_current_node_is_partial() {
+        let ReconciledItem::Conversation { capture, .. } =
+            parse_one(without_children(classic_mapping()), None)
+        else {
+            panic!("expected a projection")
+        };
+        assert_eq!(capture.completeness, "partial");
+        assert_eq!(capture.messages.len(), 3);
+        assert!(warned(&capture, "current_node pointer missing"));
+    }
+
+    #[test]
+    fn parent_derivation_never_accepts_anything_else_that_is_broken() {
+        let cases: Vec<(&str, serde_json::Value, &str)> = vec![
+            (
+                "parent cycle",
+                {
+                    let mut m = without_children(classic_mapping());
+                    m["p"] = dag_node("p", Some("q"), &[]);
+                    m["q"] = dag_node("q", Some("p"), &[]);
+                    without_children(m)
+                },
+                "child-not-listed, unreachable-or-cyclic",
+            ),
+            (
+                "self-parent",
+                {
+                    let mut m = without_children(classic_mapping());
+                    m["s"] = dag_node("s", Some("s"), &[]);
+                    without_children(m)
+                },
+                "child-not-listed, unreachable-or-cyclic",
+            ),
+            (
+                "listed child disagrees with its parent link",
+                {
+                    let mut m = without_children(classic_mapping());
+                    m["root"]["children"] = serde_json::json!(["a"]);
+                    m
+                },
+                "child-parent-mismatch, child-not-listed, unreachable-or-cyclic",
+            ),
+            (
+                "listed child is missing",
+                {
+                    let mut m = without_children(classic_mapping());
+                    m["u"]["children"] = serde_json::json!(["gone"]);
+                    m
+                },
+                "child-missing, child-not-listed, unreachable-or-cyclic",
+            ),
+            (
+                "parent is missing",
+                {
+                    let mut m = without_children(classic_mapping());
+                    m["a"]["parent"] = "gone".into();
+                    m
+                },
+                "parent-missing, child-not-listed, unreachable-or-cyclic",
+            ),
+            (
+                "second root",
+                {
+                    let mut m = without_children(classic_mapping());
+                    m["z"] = dag_node("z", None, &[]);
+                    without_children(m)
+                },
+                "multiple-roots, child-not-listed, unreachable-or-cyclic",
+            ),
+        ];
+        for (label, mapping, rules) in cases {
+            match parse_one(mapping, Some("a")) {
+                ReconciledItem::PreservedRawOnly {
+                    disposition_reason, ..
+                } => assert_eq!(
+                    disposition_reason,
+                    format!("Inconsistent ChatGPT DAG (rules: {rules}); raw DAG preserved"),
+                    "{label}"
+                ),
+                other => panic!("{label}: expected raw-only, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn a_classic_export_never_carries_the_derivation_warning() {
+        let ReconciledItem::Conversation { capture, .. } = parse_one(classic_mapping(), Some("a"))
+        else {
+            panic!("expected a projection")
+        };
+        assert_eq!(capture.completeness, "complete");
+        assert!(!warned(&capture, DERIVED));
     }
 
     #[test]
@@ -1320,7 +1530,7 @@ mod tests {
     }
 
     #[test]
-    fn dag_rule_violations_refuse_exactly_what_the_old_predicate_refused() {
+    fn dag_acceptance_is_the_old_predicate_plus_parent_derived_children() {
         // Deterministic xorshift over small trees with random structural mutations.
         let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
         let mut next = |n: u64| {
@@ -1330,7 +1540,7 @@ mod tests {
             state % n
         };
         let names = ["a", "b", "c", "d", "x"];
-        let (mut accepted, mut refused) = (0, 0);
+        let (mut accepted, mut derived, mut refused) = (0, 0, 0);
         for _ in 0..20_000 {
             let count = 1 + next(4) as usize;
             let parents: Vec<Option<usize>> = (0..count)
@@ -1378,19 +1588,45 @@ mod tests {
                 mapping,
             };
             let old = pinned_old_valid_graph(&conv);
+            let violated = dag_rule_violations(&conv);
+            assert_eq!(violated.is_empty(), old, "{:?}", conv.mapping);
+            // The only intended widening: a DAG that breaks nothing but the children-listing
+            // rules, and whose children rebuilt from the parent links pass the old predicate.
+            let only_listing = violated
+                .iter()
+                .all(|r| matches!(r, DagRule::ChildNotListed | DagRule::UnreachableOrCyclic));
+            let mut rebuilt = conv.clone();
+            for node in rebuilt.mapping.values_mut() {
+                node.children.clear();
+            }
+            let mut ids: Vec<String> = conv.mapping.keys().cloned().collect();
+            ids.sort();
+            for id in &ids {
+                if let Some(parent) = conv.mapping[id].parent.clone() {
+                    if let Some(parent_node) = rebuilt.mapping.get_mut(&parent) {
+                        parent_node.children.push(id.clone());
+                    }
+                }
+            }
+            let expected = !old && only_listing && pinned_old_valid_graph(&rebuilt);
             assert_eq!(
-                dag_rule_violations(&conv).is_empty(),
-                old,
+                !old && children_derivable_from_parents(&conv, &violated),
+                expected,
                 "{:?}",
                 conv.mapping
             );
             if old {
                 accepted += 1;
+            } else if expected {
+                derived += 1;
             } else {
                 refused += 1;
             }
         }
-        assert!(accepted > 1000 && refused > 1000, "{accepted} / {refused}");
+        assert!(
+            accepted > 1000 && refused > 1000 && derived > 500,
+            "{accepted} / {derived} / {refused}"
+        );
     }
 
     #[test]
