@@ -467,6 +467,7 @@ pub fn entry_matches_provider_layout(path: &str, provider: &str) -> bool {
             lower == "conversations.json"
                 || lower == "projects.json"
                 || (lower.starts_with("conversations-") && lower.ends_with(".json"))
+                || is_claude_project_file(path)
         }
         "gemini" => {
             lower.ends_with(".html")
@@ -476,6 +477,20 @@ pub fn entry_matches_provider_layout(path: &str, provider: &str) -> bool {
         }
         _ => false,
     }
+}
+
+/// A project file of the Claude.ai split export: a `.json` file whose **direct** parent folder is
+/// `projects` (case-insensitive), at any depth, for example `projects/<id>.json` inside
+/// `projects-000.zip`. Other split-export folders (`memories/`, `artifacts/`,
+/// `claude_code_cloud/`) never match.
+pub fn is_claude_project_file(path: &str) -> bool {
+    let mut parts = path.rsplit('/');
+    let name = parts.next().unwrap_or(path);
+    let parent = parts.next();
+    name.to_ascii_lowercase().ends_with(".json")
+        && name.len() > ".json".len()
+        && parent.is_some_and(|folder| folder.eq_ignore_ascii_case("projects"))
+        && !is_account_file(path)
 }
 
 /// Account files of a provider export (name, e-mail, phone): `user.json` (ChatGPT) and

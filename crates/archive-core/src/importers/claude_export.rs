@@ -1,9 +1,12 @@
 //! Claude.ai official data export (MP-R1-WP01).
 //!
 //! The export is a `.zip` (or extracted folder) with `conversations.json` (a top-level array of
-//! conversations) and `projects.json` (a top-level array of projects). The layout is the publicly
-//! described one and is **not verified against a real export** in this repository (see the
-//! MP-R1-WP01 design note and runbook). Every rule here fails towards "raw evidence only":
+//! conversations) and projects, either as `projects.json` (a top-level array, the earlier layout)
+//! or, in the split export observed in 2026 (one `<category>-NNN.zip` per category, listed by a
+//! `manifest-*.json`), as `projects/<id>.json` files holding one project object each. Other
+//! categories of the split export (memories, frames/artifacts, claude_code_cloud, light_metadata
+//! with the `users.json` account file) are not import members. Every rule here fails towards
+//! "raw evidence only":
 //!
 //! - the exact record bytes are always kept as raw evidence;
 //! - a projection is made only when message order is either unproved (no parent links: `partial`)
@@ -87,6 +90,27 @@ impl ClaudeExportParser {
             let span = RecordSpan::of(offset, record);
             callback(span, Self::reconcile_project_raw(record.to_vec()))
         })
+    }
+
+    /// Reads one `projects/<id>.json` file of the split (2026) export: the whole file is one
+    /// project object, preserved byte for byte as raw evidence only. The read is capped at
+    /// `max_bytes` plus one byte, so an oversized file is refused before it is buffered whole.
+    pub fn read_project_file_spanned<
+        R: Read,
+        F: FnMut(RecordSpan, ReconciledItem) -> Result<(), BoxError>,
+    >(
+        reader: R,
+        max_bytes: usize,
+        mut callback: F,
+    ) -> Result<usize, BoxError> {
+        let mut raw = Vec::new();
+        reader.take(max_bytes as u64 + 1).read_to_end(&mut raw)?;
+        if raw.len() > max_bytes {
+            return Err(format!("Import record exceeds the {max_bytes} byte limit").into());
+        }
+        let span = RecordSpan::of(0, &raw);
+        callback(span, Self::reconcile_project_raw(raw))?;
+        Ok(1)
     }
 
     /// In-memory convenience for small inputs (tests, tools). Bounded by count and bytes.

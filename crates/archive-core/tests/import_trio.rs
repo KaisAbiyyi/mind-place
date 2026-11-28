@@ -13,6 +13,7 @@ use mind_place_archive::importers::{
 };
 use mind_place_archive::ArchiveStore;
 use mind_place_security::SecurityGate;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -328,6 +329,104 @@ fn duplicate_claude_conversations_across_shards_get_distinct_identities() {
     assert_eq!(conversations, 2 * projected);
 }
 
+/// The Claude.ai split export observed in 2026: one zip per category (`projects-000.zip`,
+/// `memories-000.zip`, ...). Only `projects/<id>.json` files of a projects part are members;
+/// memories, artifacts, Claude Code cloud data and account files never are. Synthetic content.
+#[test]
+fn a_claude_split_export_projects_part_imports_each_project_file_raw_only() {
+    let fx = Fx::new();
+    let root = fx.home.path().join("claude-split");
+    let files: [(&str, &[u8]); 9] = [
+        (
+            "projects/0199aaaa-0000-7000-8000-000000000001.json",
+            br#"{"uuid":"0199aaaa-0000-7000-8000-000000000001","name":"Synthetic A","docs":[]}"#,
+        ),
+        (
+            "projects/0199aaaa-0000-7000-8000-000000000002.json",
+            b"{\n  \"uuid\": \"0199aaaa-0000-7000-8000-000000000002\",\n  \"prompt_template\": \"x\"\n}\n",
+        ),
+        ("projects/not-an-object.json", b"[1, 2]"),
+        ("memories/0199bbbb.json", br#"{"memory":"synthetic"}"#),
+        ("claude_code_cloud/routines.json", b"[]"),
+        ("artifacts/0199cccc/artifact.json", b"{}"),
+        ("projects/nested/deeper.json", b"{}"),
+        ("users.json", br#"[{"email":"someone@example.test"}]"#),
+        ("login_history.json", b"[]"),
+    ];
+    for (relative, bytes) in files {
+        let target = root.join(relative);
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::fs::write(target, bytes).unwrap();
+    }
+    let manifest = SourceManifest::measure(&root, ManifestLimits::default()).unwrap();
+    let mut candidates: Vec<&str> = manifest
+        .candidate_members("claude")
+        .into_iter()
+        .map(|entry| entry.path.as_str())
+        .collect();
+    candidates.sort();
+    assert_eq!(
+        candidates,
+        [
+            "projects/0199aaaa-0000-7000-8000-000000000001.json",
+            "projects/0199aaaa-0000-7000-8000-000000000002.json",
+            "projects/not-an-object.json",
+        ]
+    );
+    assert!(manifest.candidate_members("chatgpt").is_empty());
+
+    let receipt = fx.import("claude", &root);
+    assert_eq!(receipt.records_scanned, 3);
+    assert_eq!(
+        (receipt.imported, receipt.raw_only, receipt.rejected),
+        (0, 3, 0)
+    );
+    assert!(receipt
+        .members
+        .iter()
+        .all(|m| m.records == 1 && m.unpreserved_bytes == 0));
+    let reasons: Vec<&str> = receipt
+        .exceptions
+        .iter()
+        .filter_map(|item| item.reason.as_deref())
+        .collect();
+    assert_eq!(
+        reasons
+            .iter()
+            .filter(|r| r.contains("projects are not conversations"))
+            .count(),
+        2
+    );
+    assert!(reasons.iter().any(|r| r.contains("is not a JSON object")));
+    assert_raw_equals_source(&fx, "claude", &root);
+    // Idempotent.
+    assert!(fx.import("claude", &root).already_complete);
+
+    // A project file is never parsed as conversations, and an oversized one is refused.
+    let members = [ImportMember {
+        path: "projects/not-an-object.json".into(),
+        kind: MemberKind::ClaudeConversations,
+    }];
+    let error = import_error(&fx, "claude", &root, &members);
+    assert!(error.starts_with("E_MEMBERS"), "{error}");
+}
+
+#[test]
+fn an_oversized_claude_project_file_is_refused_before_it_is_buffered() {
+    let mut seen = 0;
+    let error = ClaudeExportParser::read_project_file_spanned(
+        std::io::repeat(b' ').take(1024),
+        64,
+        |_, _| {
+            seen += 1;
+            Ok(())
+        },
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("byte limit"), "{error}");
+    assert_eq!(seen, 0);
+}
+
 #[test]
 fn a_member_kind_that_does_not_match_its_file_is_refused() {
     let fx = Fx::new();
@@ -425,6 +524,14 @@ fn an_explicit_claude_member_of_the_wrong_kind_is_refused_by_the_job() {
         Some(MemberKind::ClaudeConversations)
     );
     assert_eq!(MemberKind::for_member("claude", "chat.html"), None);
+    // Split export (2026): one project object per `projects/<id>.json`.
+    for path in ["projects/0199-a.json", "export/Projects/x.JSON"] {
+        assert_eq!(
+            MemberKind::for_member("claude", path),
+            Some(MemberKind::ClaudeProjectFile),
+            "{path}"
+        );
+    }
     // Account files are never members, under any provider or kind, at any depth or case.
     for (provider, path) in [
         ("claude", "users.json"),

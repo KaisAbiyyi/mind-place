@@ -294,7 +294,7 @@ fn choose_members(
     // that projects nothing.
     if members
         .iter()
-        .all(|member| member.kind == MemberKind::ClaudeProjects)
+        .all(|member| member.kind.is_claude_projects())
     {
         return Err(coded(
             "E_IMPORT_NO_MEMBERS",
