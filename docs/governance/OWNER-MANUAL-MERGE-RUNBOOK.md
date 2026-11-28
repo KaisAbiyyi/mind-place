@@ -6,6 +6,8 @@
 **Target:** main  
 **Baseline:** 2026-10-31, commit efe91155d37d8b1ca0608fe3bd862be311fed004
 
+> **Owner update 2026-11-28:** the owner-assigned reviewer holds standing authorization to merge the PR it reviewed (exact head SHA, all required checks green, merge pinned to that SHA); the implementor never merges. Where this runbook says only the owner merges or that agents must not merge, read the reviewer-merge rule in `AGENTS.md` instead. Everything else here (no Auto-merge, no merge queue, no bypass actors, no settings change by agents) is unchanged.
+
 This runbook is a configuration proposal and owner handoff. MP-GOV-01 did not change branch protection, rulesets, repository settings, Apps, credentials, permissions, or any PR merge state.
 
 ## Current owner policy — 6 November 2026
