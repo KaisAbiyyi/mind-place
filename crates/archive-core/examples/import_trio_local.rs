@@ -15,6 +15,7 @@ use mind_place_archive::historical::{
     ImportJobLimits, ImportMember, ManifestLimits, MemberKind, NoProgress, SourceImportRequest,
     SourceManifest,
 };
+use mind_place_archive::importers::gemini_takeout::GeminiTakeoutParser;
 use mind_place_archive::ArchiveStore;
 use mind_place_security::SecurityGate;
 use sha2::{Digest, Sha256};
@@ -153,14 +154,23 @@ fn main() -> Result<(), BoxError> {
     let (blobs, corrupt) = verify_raw_blobs(&scratch.join("archive-v1/imports/raw"))?;
     println!("raw_blobs={blobs} raw_blobs_hash_mismatch={corrupt}");
     if provider == "gemini" {
-        // Content-free shapes of card-time lines that were not read (digits `#`, letters `A`/`a`).
-        let shapes = metadata_tally(
-            &scratch.join("archive-v1/imports/evidence"),
-            "event_time_line_shape",
-        )?;
+        // Masked shapes of card-time lines that were not read, computed here from this run's own
+        // raw blobs (never stored). Only time-like lines are shaped (see `masked_line_shape`), and
+        // a shape seen fewer than MIN_SHAPE_COUNT times is folded into `other`: a real format
+        // problem repeats across cards, a one-off line could be private.
+        const MIN_SHAPE_COUNT: u64 = 3;
+        let shapes = unread_time_line_shapes(&scratch.join("archive-v1/imports/raw"))?;
+        let mut other = 0u64;
         println!("gemini_unread_time_line_shapes:");
         for (shape, count) in &shapes {
-            println!("  {count:>6}  {}", category(shape));
+            if *count >= MIN_SHAPE_COUNT {
+                println!("  {count:>6}  {shape}");
+            } else {
+                other += count;
+            }
+        }
+        if other > 0 {
+            println!("  {other:>6}  other (shapes seen fewer than {MIN_SHAPE_COUNT} times)");
         }
     }
 
@@ -205,8 +215,9 @@ fn refuse_unless_disposable(scratch: &Path, source: &Path) -> Result<(), BoxErro
     Ok(())
 }
 
-/// Counts the string values of one key of every evidence record's `metadata_json` (non-null only).
-fn metadata_tally(root: &Path, key: &str) -> Result<BTreeMap<String, u64>, BoxError> {
+/// Tallies the unread card-time line shapes of every Gemini card blob in this run's disposable
+/// archive (each raw blob is the exact bytes of one card).
+fn unread_time_line_shapes(root: &Path) -> Result<BTreeMap<String, u64>, BoxError> {
     let mut tally = BTreeMap::new();
     let mut pending = vec![root.to_path_buf()];
     while let Some(dir) = pending.pop() {
@@ -219,13 +230,9 @@ fn metadata_tally(root: &Path, key: &str) -> Result<BTreeMap<String, u64>, BoxEr
                 pending.push(path);
                 continue;
             }
-            let record: serde_json::Value = serde_json::from_slice(&std::fs::read(&path)?)?;
-            let metadata: serde_json::Value = record["metadata_json"]
-                .as_str()
-                .and_then(|text| serde_json::from_str(text).ok())
-                .unwrap_or_default();
-            if let Some(value) = metadata[key].as_str() {
-                *tally.entry(value.to_owned()).or_default() += 1;
+            let card = std::fs::read(&path)?;
+            if let Some(shape) = GeminiTakeoutParser::unread_time_line_shape(&card) {
+                *tally.entry(shape).or_default() += 1;
             }
         }
     }
