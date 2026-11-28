@@ -242,7 +242,9 @@ impl ChatGptExportParser {
             Ok(conv) => conv,
             Err(error) => {
                 // The bytes are in hand: keep them. The reason never echoes record content.
-                let disposition_reason = if error.to_string().contains(DUPLICATE_NODE_KEY) {
+                // A custom error displays as "<msg> at line L column C"; type errors start with
+                // "invalid type" and may echo record strings, so only a prefix match is ours.
+                let disposition_reason = if error.to_string().starts_with(DUPLICATE_NODE_KEY) {
                     "ChatGPT conversation mapping repeats a node key; raw record preserved"
                 } else {
                     "ChatGPT record is not a valid conversation object; raw record preserved"
@@ -1522,6 +1524,23 @@ mod tests {
                     );
                     assert_eq!(evidence.payload_bytes, record.as_bytes());
                 }
+                other => panic!("expected raw-only, got {other:?}"),
+            }
+        }
+        // Record content that merely spells the error text is a plain parse failure.
+        for spoof in [
+            r#""create_time":"ChatGPT mapping repeats a node key","mapping":{}"#,
+            r#""mapping":{"r":{"id":"r","parent":null,"children":"ChatGPT mapping repeats a node key"}}"#,
+        ] {
+            let record = format!(r#"[{{"id":"{ID}",{spoof}}}]"#);
+            match &ChatGptExportParser::parse_conversations_json(record.as_bytes()).unwrap()[0] {
+                ReconciledItem::PreservedRawOnly {
+                    disposition_reason, ..
+                } => assert_eq!(
+                    disposition_reason,
+                    "ChatGPT record is not a valid conversation object; raw record preserved",
+                    "{spoof}"
+                ),
                 other => panic!("expected raw-only, got {other:?}"),
             }
         }
