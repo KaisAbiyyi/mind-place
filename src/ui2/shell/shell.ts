@@ -5,7 +5,7 @@ import {
   createUi2Icon, createUi2Segmented, ensureUi2IconSprite,
 } from "../ui-kit/index.js";
 import { UI2_SHELL_DESTINATIONS, readUi2Hash, ui2HashForPath, resolveUi2Route, type Ui2ResolvedRoute } from "./routes.js";
-import type { Ui2PageHandle, Ui2PageMap } from "./page.js";
+import type { Ui2PageDetail, Ui2PageHandle, Ui2PageMap } from "./page.js";
 
 export interface Ui2ShellOptions {
   onLock(): void | Promise<void>;
@@ -51,10 +51,19 @@ export function mountUi2Shell(root: HTMLElement, options: Ui2ShellOptions): Ui2S
   // At most one live page: the one for the destination the owner is on.
   // Leaving the destination destroys it, so secrets a page holds never outlive it.
   let livePage: { destination: string; handle: Ui2PageHandle } | undefined;
+  // The open record of the live page (a chat, for example), if the page set one.
+  let pageDetail: Ui2PageDetail | null = null;
 
   function destroyLivePage(): void {
+    pageDetail = null;
     livePage?.handle.destroy();
     livePage = undefined;
+  }
+
+  function setPageDetail(detail: Ui2PageDetail | null): void {
+    if (disposed || !livePage) return;
+    pageDetail = detail;
+    render();
   }
 
   function pageForRoute(): Ui2PageHandle | undefined {
@@ -65,7 +74,12 @@ export function mountUi2Shell(root: HTMLElement, options: Ui2ShellOptions): Ui2S
       return undefined;
     }
     if (livePage && livePage.destination !== route.destination) destroyLivePage();
-    if (!livePage) livePage = { destination: route.destination, handle: factory({ doc, i18n }) };
+    if (!livePage) {
+      livePage = {
+        destination: route.destination,
+        handle: factory({ doc, i18n, setDetail: setPageDetail, navigate }),
+      };
+    }
     return livePage.handle;
   }
 
@@ -104,6 +118,12 @@ export function mountUi2Shell(root: HTMLElement, options: Ui2ShellOptions): Ui2S
     if (disposed) return;
     const next = resolveUi2Route(path);
     if (!next.recognized) return;
+    // Choosing the destination you are already on, while one of its records is
+    // open, returns to the destination's own page.
+    if (pageDetail && next.path === route.path) {
+      pageDetail.onBack();
+      return;
+    }
     route = next;
     const hash = ui2HashForPath(next.path);
     if (win.location.hash !== hash) win.location.hash = hash;
@@ -261,14 +281,19 @@ export function mountUi2Shell(root: HTMLElement, options: Ui2ShellOptions): Ui2S
     aside.id = "ui2-sidebar";
     bar.append(toggle);
 
-    const breadcrumb = createUi2Breadcrumb(doc, {
-      ariaLabel: i18n.t("breadcrumb.ariaLabel"),
-      items: route.breadcrumbs.map((step) => ({
-        id: step.path,
-        label: i18n.t(step.labelKey),
-        onClick: () => navigate(step.path),
-      })),
-    });
+    // Resolve the page first: a page's open record (detail) changes both the
+    // breadcrumb and who owns the heading.
+    const page = pageForRoute();
+    const detail = page ? pageDetail : null;
+    const crumbSteps = route.breadcrumbs.map((step, index) => ({
+      id: step.path,
+      label: i18n.t(step.labelKey),
+      onClick: detail && index === route.breadcrumbs.length - 1
+        ? () => detail.onBack()
+        : () => navigate(step.path),
+    }));
+    if (detail) crumbSteps.push({ id: "detail", label: detail.title, onClick: () => detail.onBack() });
+    const breadcrumb = createUi2Breadcrumb(doc, { ariaLabel: i18n.t("breadcrumb.ariaLabel"), items: crumbSteps });
     bar.append(breadcrumb);
 
     const search = createUi2Button(doc, {
@@ -321,8 +346,10 @@ export function mountUi2Shell(root: HTMLElement, options: Ui2ShellOptions): Ui2S
     const last = route.breadcrumbs[route.breadcrumbs.length - 1];
     heading.textContent = route.recognized ? i18n.t(last.labelKey) : i18n.t("shell.invalidTitle");
     header.append(heading);
-    const page = pageForRoute();
-    if (page) {
+    if (page && detail) {
+      // An open record (a chat): the page renders its own heading and actions.
+      main.append(page.element);
+    } else if (page) {
       // The page owns everything below the heading, including its lead.
       main.append(header, page.element);
     } else {
@@ -353,8 +380,10 @@ export function mountUi2Shell(root: HTMLElement, options: Ui2ShellOptions): Ui2S
       body: i18n.t("shell.searchUnavailableBody"),
     }));
     shell.append(searchDialog.backdrop);
-    if (focus === "heading") heading.focus();
-    else if (focus === "language" || activeControl === "language") {
+    if (focus === "heading") {
+      if (page && detail) main.focus();
+      else heading.focus();
+    } else if (focus === "language" || activeControl === "language") {
       focusAfterRender('[data-ui2-seg-value="' + i18n.getLocale() + '"]');
     }
   }

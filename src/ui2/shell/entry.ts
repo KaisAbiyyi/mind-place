@@ -6,6 +6,7 @@ export async function ensureUi2Styles(): Promise<void> {
       import("../ui-kit/primitives.css"),
       import("./shell.css"),
       import("../connections/connections.css"),
+      import("../chats/chats.css"),
     ]);
   }
 }

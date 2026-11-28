@@ -1,0 +1,347 @@
+/* MP-UI2-06: Archive page and chat reader. Layout only, tokens only. */
+
+.ui2-chats-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--s4);
+}
+
+.ui2-chats-head .ui2-lead {
+  flex: 1 1 280px;
+  max-width: 56ch;
+}
+
+.ui2-chats-note {
+  margin: var(--s0);
+  font-size: var(--t-sm);
+  color: var(--fg-2);
+  overflow-wrap: anywhere;
+}
+
+.ui2-chats-note-warn:empty {
+  display: none;
+}
+
+.ui2-chats-note-warn {
+  color: var(--warn-fg);
+}
+
+/* Pager (list and thread) */
+.ui2-chats-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--s3);
+}
+
+.ui2-chats-range {
+  font-size: var(--t-sm);
+  color: var(--fg-2);
+}
+
+/* Reader */
+.ui2-chats-reader {
+  width: 100%;
+  max-width: var(--w-narrow);
+  margin: var(--s0) auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s5);
+}
+
+.ui2-chats-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s3);
+}
+
+.ui2-chats-back {
+  flex: 0 0 auto;
+}
+
+.ui2-chats-title {
+  flex: 1 1 200px;
+  min-width: 0;
+  margin: var(--s0);
+  font-size: var(--t-lg);
+  font-weight: var(--w-semibold);
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+
+.ui2-chats-thread-host {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s5);
+}
+
+.ui2-chats-thread {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s5);
+}
+
+.ui2-chats-msg {
+  min-width: 0;
+}
+
+.ui2-chats-msg:focus-visible {
+  outline-offset: var(--s1);
+}
+
+.ui2-chats-user {
+  align-self: flex-end;
+  max-width: 78%;
+  background: var(--sunken);
+  padding: var(--s3) var(--s4);
+  border-radius: var(--r-lg);
+}
+
+.ui2-chats-ai {
+  display: flex;
+  gap: var(--s3);
+  font-size: var(--t-md);
+  line-height: 1.7;
+}
+
+.ui2-chats-avatar {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  margin-top: var(--s1);
+  display: grid;
+  place-items: center;
+  border: var(--hairline) solid var(--line-strong);
+  border-radius: var(--r-pill);
+  font-size: var(--t-xs);
+  font-weight: var(--w-semibold);
+  line-height: 1;
+  color: var(--fg);
+}
+
+.ui2-chats-ai-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.ui2-chats-aux {
+  font-size: var(--t-base);
+  color: var(--fg-2);
+  line-height: 1.6;
+}
+
+.ui2-chats-role {
+  margin: var(--s0) var(--s0) var(--s1);
+  font-size: var(--t-xs);
+  font-weight: var(--w-medium);
+  color: var(--fg-3);
+}
+
+.ui2-chats-sr {
+  position: absolute;
+  width: var(--hairline);
+  height: var(--hairline);
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Message text produced by the shared sanitized renderer */
+.ui2-chats-content {
+  overflow-wrap: anywhere;
+}
+
+.ui2-chats-content p {
+  margin: var(--s0);
+}
+
+.ui2-chats-content > * + * {
+  margin-top: var(--s3);
+}
+
+.ui2-chats-content ul,
+.ui2-chats-content ol {
+  padding-left: var(--s5);
+}
+
+.ui2-chats-content pre {
+  overflow-x: auto;
+  padding: var(--s3);
+  background: var(--sunken);
+  border-radius: var(--r-sm);
+  font-family: var(--font-mono);
+  font-size: var(--t-sm);
+  line-height: 1.5;
+}
+
+.ui2-chats-content code {
+  font-family: var(--font-mono);
+  font-size: var(--t-sm);
+}
+
+.ui2-chats-content blockquote {
+  padding-left: var(--s3);
+  border-left: var(--ring-w) solid var(--line-strong);
+  color: var(--fg-2);
+}
+
+.ui2-chats-content table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+.ui2-chats-content th,
+.ui2-chats-content td {
+  padding: var(--s1) var(--s3);
+  border: var(--hairline) solid var(--line);
+  text-align: left;
+}
+
+.ui2-chats-content a {
+  color: inherit;
+  text-decoration: underline;
+}
+
+/* Attachments */
+.ui2-chats-attachment {
+  margin: var(--s3) var(--s0) var(--s0);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+}
+
+.ui2-chats-image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--r-sm);
+  border: var(--hairline) solid var(--line);
+}
+
+.ui2-chats-slot-note {
+  padding: var(--s3);
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+  font-size: var(--t-sm);
+  color: var(--fg-2);
+}
+
+.ui2-chats-caption {
+  font-size: var(--t-xs);
+  color: var(--fg-3);
+  overflow-wrap: anywhere;
+}
+
+/* Info and Export asides: a floating layer on the right (the one place a shadow is allowed) */
+.ui2-aside.ui2-chats-aside {
+  position: fixed;
+  top: var(--s0);
+  right: var(--s0);
+  bottom: var(--s0);
+  z-index: 30;
+  width: min(var(--w-aside), 100%);
+  max-width: 100%;
+  overflow-y: auto;
+  border-radius: 0;
+  border-width: 0 0 0 var(--hairline);
+  box-shadow: var(--shadow);
+  padding: var(--s5);
+  gap: var(--s5);
+}
+
+.ui2-chats-info {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s5);
+}
+
+.ui2-chats-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+
+.ui2-chats-group-title {
+  margin: var(--s0);
+  font-size: var(--t-xs);
+  font-weight: var(--w-semibold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+
+.ui2-chats-facts {
+  margin: var(--s0);
+}
+
+.ui2-chats-kv {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s4);
+  padding: var(--s2) var(--s0);
+  border-top: var(--hairline) solid var(--line);
+  font-size: var(--t-sm);
+}
+
+.ui2-chats-kv:first-child {
+  border-top: 0;
+}
+
+.ui2-chats-kv dt {
+  color: var(--fg-2);
+}
+
+.ui2-chats-kv dd {
+  margin: var(--s0);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.ui2-chats-copies {
+  margin: var(--s0);
+  padding: var(--s0);
+  list-style: none;
+}
+
+.ui2-chats-copy {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  padding: var(--s2) var(--s0);
+  border-top: var(--hairline) solid var(--line);
+}
+
+.ui2-chats-copy:first-child {
+  border-top: 0;
+}
+
+.ui2-chats-copy-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.ui2-chats-copy-title {
+  font-size: var(--t-sm);
+  font-weight: var(--w-medium);
+}
+
+.ui2-chats-copy-meta {
+  font-size: var(--t-xs);
+  color: var(--fg-2);
+}
+
+@media (max-width: 780px) {
+  .ui2-chats-user {
+    max-width: 92%;
+  }
+}

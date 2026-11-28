@@ -13,9 +13,23 @@ export interface Ui2PageHandle {
   destroy(): void;
 }
 
+/**
+ * A page that opens one record (for example a chat) tells the shell its title
+ * so the breadcrumb reads `Home > Archive > title`. The page then owns the
+ * heading. `onBack` runs when the owner picks the destination crumb.
+ */
+export interface Ui2PageDetail {
+  readonly title: string;
+  onBack(): void;
+}
+
 export interface Ui2PageContext {
   readonly doc: Document;
   readonly i18n: Ui2I18nController;
+  /** Optional: only pages with a detail view use it. Passing null returns to the destination root. */
+  setDetail?(detail: Ui2PageDetail | null): void;
+  /** Optional: go to another destination by its static path. */
+  navigate?(path: string): void;
 }
 
 export type Ui2PageFactory = (context: Ui2PageContext) => Ui2PageHandle;
