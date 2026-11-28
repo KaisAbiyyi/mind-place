@@ -83,29 +83,6 @@ pub fn parse_takeout_timestamp(s: &str) -> Option<String> {
     }
 }
 
-pub fn strip_html_tags(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut in_tag = false;
-    for c in s.chars() {
-        if c == '<' {
-            in_tag = true;
-        } else if c == '>' {
-            in_tag = false;
-        } else if !in_tag {
-            out.push(c);
-        }
-    }
-    // Decode common HTML entities
-    out.replace("&quot;", "\"")
-        .replace("&apos;", "'")
-        .replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&#39;", "'")
-        .trim()
-        .to_string()
-}
-
 // HTML5 tokenization supplies decoded attributes and byte spans; evidence is
 // always sliced from the original input, never serialized from parsed markup.
 fn html_tokens(html: &str) -> impl Iterator<Item = Token<usize>> + '_ {
@@ -279,6 +256,99 @@ fn prompt_markers(html: &str) -> (Vec<usize>, bool) {
     (markers, ambiguous)
 }
 
+/// Elements whose text is never a card time: raw-text elements (their content is one opaque
+/// token under `naively_switch_states`) and links.
+const NOT_CARD_TIME_TEXT: &[&[u8]] = &[
+    b"script",
+    b"style",
+    b"textarea",
+    b"title",
+    b"iframe",
+    b"xmp",
+    b"noembed",
+    b"noscript",
+    b"plaintext",
+    b"a",
+];
+/// The only elements that may appear between the prompt's lines and the card time. Any other
+/// start tag in the searched cell begins the response (or other content) and ends the search.
+const CARD_LINE_TAGS: &[&[u8]] = &[b"br", b"wbr", b"span"];
+
+fn is_content_cell(tag: &html5gum::StartTag<usize>) -> bool {
+    tag.name == b"div"
+        && tag
+            .attributes
+            .get(b"class".as_slice())
+            .is_some_and(|value| {
+                value
+                    .split(|byte| byte.is_ascii_whitespace())
+                    .any(|class| class == b"content-cell")
+            })
+}
+
+/// The card's activity-log time. Takeout writes it as its own line of the first content cell,
+/// after the prompt and before the response: `Prompted …<br>4 Nov 2026, 21:15:40 WIB<br><p>…`.
+///
+/// Lines are runs of text between two tags, never source lines, so a minified card (Takeout
+/// writes a whole card on one physical line) reads the same as a pretty-printed one. The search
+/// covers the first content cell (the whole card when it has none) and ends at the first start
+/// tag that is not a line break or inline `span` (the response, an image, a nested block) or at
+/// the end of the cell. The card time is the **last non-empty line before that point**, and only
+/// when that line is exactly a five-word Takeout timestamp. So a date in the response, the
+/// Details caption, a link or a script, or a prompt line that happens to be a date, is never
+/// taken; a card whose time is missing or in an unknown format yields `None` (never a guess).
+fn card_event_time(card_html: &str) -> Option<String> {
+    let card_time = |line: &str| {
+        (line.split_whitespace().take(6).count() == 5)
+            .then(|| parse_takeout_timestamp(line))
+            .flatten()
+    };
+    let has_cell = html_tokens(card_html)
+        .any(|token| matches!(&token, Token::StartTag(tag) if is_content_cell(tag)));
+    let mut in_cell = !has_cell;
+    let mut skipped = 0usize;
+    let mut run = String::new();
+    let mut last_line = String::new();
+    for token in html_tokens(card_html) {
+        let stop = match &token {
+            Token::String(text) => {
+                if skipped == 0 && in_cell {
+                    run.push_str(&String::from_utf8_lossy(text));
+                }
+                continue;
+            }
+            Token::StartTag(tag) if NOT_CARD_TIME_TEXT.contains(&tag.name.as_ref()) => {
+                skipped += 1;
+                false
+            }
+            Token::EndTag(tag) if NOT_CARD_TIME_TEXT.contains(&tag.name.as_ref()) => {
+                skipped = skipped.saturating_sub(1);
+                false
+            }
+            Token::StartTag(tag) if !in_cell => {
+                in_cell = is_content_cell(tag);
+                false
+            }
+            // Without a content cell, `div`s are the card's own wrappers.
+            Token::StartTag(tag) if !has_cell && tag.name == b"div" => false,
+            Token::StartTag(tag) => skipped == 0 && !CARD_LINE_TAGS.contains(&tag.name.as_ref()),
+            Token::EndTag(tag) => has_cell && in_cell && tag.name == b"div",
+            _ => false,
+        };
+        if !run.trim().is_empty() {
+            std::mem::swap(&mut last_line, &mut run);
+        }
+        run.clear();
+        if stop {
+            return card_time(&last_line);
+        }
+    }
+    if !run.trim().is_empty() {
+        last_line = run;
+    }
+    card_time(&last_line)
+}
+
 fn prompt_text(html: &str) -> String {
     let mut text = String::new();
     for token in html_tokens(html) {
@@ -433,14 +503,7 @@ impl GeminiTakeoutParser {
         };
 
         // 3. Structure-aware timestamp extraction
-        let mut timestamp = None;
-        for line in card_html.lines() {
-            let clean = strip_html_tags(line);
-            if let Some(ts) = parse_takeout_timestamp(&clean) {
-                timestamp = Some(ts);
-                break;
-            }
-        }
+        let timestamp = card_event_time(card_html);
 
         // The card time is an activity-log event. It is kept as separate source metadata and
         // is never promoted to a message or conversation timestamp.
@@ -1008,6 +1071,113 @@ mod tests {
             .warnings
             .iter()
             .any(|w| w.contains("timestamp unavailable")));
+    }
+
+    fn event_time(html: &str) -> Option<String> {
+        let items = GeminiTakeoutParser::parse_cards_html(html.as_bytes()).unwrap();
+        let ReconciledItem::Conversation { raw_evidence, .. } = &items[0] else {
+            panic!("expected a conversation")
+        };
+        let metadata: serde_json::Value =
+            serde_json::from_str(&raw_evidence.metadata_json).unwrap();
+        metadata["provider_event_time"].as_str().map(str::to_owned)
+    }
+
+    #[test]
+    fn card_event_time_is_found_in_a_minified_one_line_card() {
+        // Takeout writes a whole card on one physical line: prompt, time and response are
+        // separated by markup only. The time must not depend on source line breaks.
+        let one_line = TIMED_CARD.replace('\n', "");
+        assert!(!one_line.contains('\n'));
+        assert_eq!(
+            event_time(&one_line).as_deref(),
+            Some("2026-11-04T21:15:40+07:00")
+        );
+        // The pretty-printed layout keeps working.
+        assert_eq!(
+            event_time(TIMED_CARD).as_deref(),
+            Some("2026-11-04T21:15:40+07:00")
+        );
+    }
+
+    #[test]
+    fn card_event_time_reads_entity_spaces_and_ignores_scripts_and_embedded_dates() {
+        let nbsp = r#"<div class="outer-cell"><div class="content-cell">Prompted Q<br>4&nbsp;Nov 2026, 21:15:40&nbsp;WIB<br><p>A</p></div></div>"#;
+        assert_eq!(
+            event_time(nbsp).as_deref(),
+            Some("2026-11-04T21:15:40+07:00")
+        );
+        // A date that is only part of the prompt, of a longer sentence, or inside a script is
+        // never the card time.
+        for html in [
+            r#"<div class="outer-cell"><div class="content-cell">Prompted 4 Nov 2026, 21:15:40 WIB<br><p>A</p></div></div>"#,
+            r#"<div class="outer-cell"><div class="content-cell">Prompted Q<br><p>4 Nov 2026, 21:15:40 WIB was the deadline</p></div></div>"#,
+            r#"<div class="outer-cell"><div class="content-cell">Prompted Q<br><script>4 Nov 2026, 21:15:40 WIB</script><p>A</p></div></div>"#,
+            r#"<div class="outer-cell"><div class="content-cell">Prompted Q<br><textarea>4 Nov 2026, 21:15:40 WIB</textarea><p>A</p></div></div>"#,
+            r#"<div class="outer-cell"><div class="content-cell">Prompted Q<br><a href="https://gemini.google.com/app">4 Nov 2026, 21:15:40 WIB</a><p>A</p></div></div>"#,
+        ] {
+            assert_eq!(event_time(html), None, "{html}");
+        }
+    }
+
+    #[test]
+    fn card_time_is_never_taken_from_the_response_or_caption_when_the_real_time_is_unreadable() {
+        // The card time is in a format the parser does not know. A date elsewhere in the card
+        // must not stand in for it: no time is better than a fabricated one.
+        for html in [
+            // RFC 3339 in a response code block (Takeout never writes card times this way).
+            r#"<div class="outer-cell"><div class="content-cell">Prompted Q<br>Nov 4, 2026, 9:15:40 PM WIB<br><p>A</p><pre><code>2024-01-01T00:00:00Z</code></pre></div></div>"#,
+            // A Takeout-shaped date as a response list item.
+            r#"<div class="outer-cell"><div class="content-cell">Prompted Q<br>4 Nov 2026, 21.15.40 WIB<br><p>A</p><ul><li>5 Jan 2020, 10:00:00 UTC</li></ul></div></div>"#,
+            // A response paragraph that is exactly a date.
+            r#"<div class="outer-cell"><div class="content-cell">Prompted Q<br><p>A</p><p>5 Jan 2020, 10:00:00 UTC</p></div></div>"#,
+            // A date only in the Details caption cell.
+            r#"<div class="outer-cell"><div class="content-cell">Prompted Q<br><p>A</p></div><div class="content-cell mdl-typography--caption">5 Jan 2020, 10:00:00 UTC</div></div>"#,
+            // No content cell: the response still ends the search.
+            r#"<div class="outer-cell">Prompted Q<br><p>A</p><p>5 Jan 2020, 10:00:00 UTC</p></div>"#,
+        ] {
+            assert_eq!(event_time(html), None, "{html}");
+        }
+    }
+
+    #[test]
+    fn card_time_is_read_after_a_header_cell_and_after_a_dated_prompt_line() {
+        // A header cell with its own paragraph comes before the content cell.
+        let header = r#"<div class="outer-cell"><div class="header-cell"><p class="mdl-typography--title">Gemini Apps<br></p></div><div class="content-cell mdl-typography--body-1">Prompted Q<br>4 Nov 2026, 21:15:40 WIB<br><p>A</p></div></div>"#;
+        assert_eq!(
+            event_time(header).as_deref(),
+            Some("2026-11-04T21:15:40+07:00")
+        );
+        // A prompt line that is itself a date does not shadow the card time after it.
+        let dated_prompt = r#"<div class="outer-cell"><div class="content-cell">Prompted Q<br>1 Jan 2020, 00:00:00 UTC<br>4 Nov 2026, 21:15:40 WIB<br><p>A</p></div></div>"#;
+        assert_eq!(
+            event_time(dated_prompt).as_deref(),
+            Some("2026-11-04T21:15:40+07:00")
+        );
+        // ...and when the real time is unreadable, the dated prompt line is not used instead.
+        let unreadable = r#"<div class="outer-cell"><div class="content-cell">Prompted Q<br>1 Jan 2020, 00:00:00 UTC<br>Nov 4, 2026, 9:15:40 PM WIB<br><p>A</p></div></div>"#;
+        assert_eq!(event_time(unreadable), None);
+    }
+
+    #[test]
+    fn a_date_in_the_response_never_overrides_the_card_time() {
+        // Responses that do not open with a paragraph still end the search.
+        for response in [
+            "<div>5 Jan 2020, 10:00:00 UTC</div>",
+            "<hr>5 Jan 2020, 10:00:00 UTC<br>",
+            "<strong>Answer</strong><br>5 Jan 2020, 10:00:00 UTC<br>",
+            "<img src=x>5 Jan 2020, 10:00:00 UTC",
+            "<dl><dd>5 Jan 2020, 10:00:00 UTC</dd></dl>",
+        ] {
+            let html = format!(
+                r#"<div class="outer-cell"><div class="content-cell">Prompted Q<br>4 Nov 2026, 21:15:40 WIB<br>{response}</div></div>"#
+            );
+            assert_eq!(
+                event_time(&html).as_deref(),
+                Some("2026-11-04T21:15:40+07:00"),
+                "{response}"
+            );
+        }
     }
 
     #[test]
