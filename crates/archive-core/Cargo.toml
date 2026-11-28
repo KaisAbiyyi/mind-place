@@ -16,7 +16,7 @@ time.workspace = true
 url.workspace = true
 fs2.workspace = true
 tempfile.workspace = true
-flate2 = "=1.1.10"
+flate2 = "=1.1.11"
 thiserror.workspace = true
 
 
