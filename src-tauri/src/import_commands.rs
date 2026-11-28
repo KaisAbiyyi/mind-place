@@ -901,6 +901,44 @@ mod tests {
     }
 
     #[test]
+    fn a_claude_split_export_projects_part_alone_is_not_an_import_of_conversations() {
+        let fx = Fx::new();
+        let project = br#"{"uuid":"1b2c3d4e-0000-4000-8000-0000000000b2","name":"P","docs":[]}"#;
+        let path = fx.write_zip(&[(
+            "projects/1b2c3d4e-0000-4000-8000-0000000000b2.json",
+            project,
+        )]);
+        let lease = fx.gate.require_unlocked().unwrap();
+        let report =
+            inspect_source(&fx.gate, lease, &AtomicBool::new(false), "claude", &path).unwrap();
+        let candidates: Vec<_> = report.candidates.iter().map(|c| c.path.as_str()).collect();
+        assert_eq!(
+            candidates,
+            ["projects/1b2c3d4e-0000-4000-8000-0000000000b2.json"]
+        );
+        let sink = |_: ProgressEvent| {};
+        let refused = run_import(
+            &fx.store,
+            &fx.gate,
+            lease,
+            CRED,
+            StartRequest {
+                provider: "claude",
+                path: &path,
+                source_token: &report.source_token,
+                members: None,
+            },
+            &sink,
+            &AtomicBool::new(false),
+        )
+        .unwrap_err();
+        assert!(
+            refused.starts_with("E_IMPORT_NO_MEMBERS"),
+            "unexpected refusal code"
+        );
+    }
+
+    #[test]
     fn inspect_then_start_imports_a_zip_and_reports_count_only_progress() {
         let fx = Fx::new();
         let json = export(3);

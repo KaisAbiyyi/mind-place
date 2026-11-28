@@ -1142,6 +1142,13 @@ impl ArchiveStore {
                     .map_err(map_stream_error)?;
                 }
                 MemberKind::ClaudeProjectFile => {
+                    // The measured size is known: refuse an oversized file before reading it.
+                    if entry.size > request.limits.chatgpt_stream.max_record_bytes as u64 {
+                        return Err(coded(
+                            "E_SOURCE_LIMIT",
+                            "Import source exceeds a safety limit",
+                        ));
+                    }
                     ClaudeExportParser::read_project_file_spanned(
                         &mut reader,
                         request.limits.chatgpt_stream.max_record_bytes,

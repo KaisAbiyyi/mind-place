@@ -4,8 +4,8 @@
 //! read here; real exports are the owner's local runbook (`docs/qualification/MP-R1-WP01-import-trio-local-runbook.md`).
 
 use mind_place_archive::historical::{
-    ImportJobLimits, ImportJobReceipt, ImportMember, ManifestLimits, MemberKind, NoProgress,
-    SourceImportRequest, SourceManifest,
+    entry_matches_provider_layout, ImportJobLimits, ImportJobReceipt, ImportMember, ManifestLimits,
+    MemberKind, NoProgress, SourceImportRequest, SourceManifest,
 };
 use mind_place_archive::importers::{
     chatgpt_export::ChatGptExportParser, claude_export::ClaudeExportParser,
@@ -402,13 +402,54 @@ fn a_claude_split_export_projects_part_imports_each_project_file_raw_only() {
     // Idempotent.
     assert!(fx.import("claude", &root).already_complete);
 
-    // A project file is never parsed as conversations, and an oversized one is refused.
+    // A project file is never parsed as conversations.
     let members = [ImportMember {
         path: "projects/not-an-object.json".into(),
         kind: MemberKind::ClaudeConversations,
     }];
     let error = import_error(&fx, "claude", &root, &members);
     assert!(error.starts_with("E_MEMBERS"), "{error}");
+}
+
+#[test]
+fn claude_project_files_through_the_job_empty_is_raw_only_and_oversized_is_refused() {
+    let fx = Fx::new();
+    let root = fx.home.path().join("claude-projects-edge");
+    std::fs::create_dir_all(root.join("projects")).unwrap();
+    std::fs::write(root.join("projects/empty.json"), b"").unwrap();
+    let receipt = fx.import("claude", &root);
+    assert_eq!((receipt.records_scanned, receipt.raw_only), (1, 1));
+    assert!(receipt.exceptions[0]
+        .reason
+        .as_deref()
+        .is_some_and(|r| r.contains("is not a JSON object")));
+
+    let big = fx.home.path().join("claude-projects-big");
+    std::fs::create_dir_all(big.join("projects")).unwrap();
+    std::fs::write(big.join("projects/big.json"), vec![b' '; 2048]).unwrap();
+    let manifest = SourceManifest::measure(&big, ManifestLimits::default()).unwrap();
+    let members = [ImportMember {
+        path: "projects/big.json".into(),
+        kind: MemberKind::ClaudeProjectFile,
+    }];
+    let lease = fx.gate.require_unlocked().unwrap();
+    let cap = fx
+        .gate
+        .authorize_import_session(
+            lease,
+            CRED,
+            "claude",
+            &big,
+            *manifest.sha256(),
+            Duration::from_secs(300),
+        )
+        .unwrap();
+    let mut request = SourceImportRequest::new(&fx.gate, lease, &cap, &members);
+    request.progress = &NoProgress;
+    request.limits = ImportJobLimits::default();
+    request.limits.chatgpt_stream.max_record_bytes = 1024;
+    let error = fx.store.import_authorized_source(&request).unwrap_err();
+    assert!(error.to_string().starts_with("E_SOURCE_LIMIT"), "{error}");
 }
 
 #[test]
@@ -524,9 +565,42 @@ fn an_explicit_claude_member_of_the_wrong_kind_is_refused_by_the_job() {
         Some(MemberKind::ClaudeConversations)
     );
     assert_eq!(MemberKind::for_member("claude", "chat.html"), None);
-    // Split export (2026): one project object per `projects/<id>.json`.
+    // Split export (2026): one project object per `projects/<id>.json`, the `projects` folder at
+    // the root or under one wrapper folder.
     for path in ["projects/0199-a.json", "export/Projects/x.JSON"] {
         assert_eq!(
+            MemberKind::for_member("claude", path),
+            Some(MemberKind::ClaudeProjectFile),
+            "{path}"
+        );
+        assert!(entry_matches_provider_layout(path, "claude"), "{path}");
+    }
+    // Names owned by other kinds keep their kind even inside a `projects` folder.
+    for (path, kind) in [
+        (
+            "projects/conversations.json",
+            MemberKind::ClaudeConversations,
+        ),
+        (
+            "Projects/conversations-001.json",
+            MemberKind::ClaudeConversations,
+        ),
+        ("projects/projects.json", MemberKind::ClaudeProjects),
+    ] {
+        assert_eq!(MemberKind::for_member("claude", path), Some(kind), "{path}");
+    }
+    // Other split-export categories, and deeper nesting, are never project files.
+    for path in [
+        "claude_code_cloud/projects/x.json",
+        "memories/projects/x.json",
+        "frames/projects/a.json",
+        "artifacts/projects/a.json",
+        "a/b/projects/x.json",
+        "projects/USERS.json",
+        "projects/.json",
+    ] {
+        assert!(!entry_matches_provider_layout(path, "claude"), "{path}");
+        assert_ne!(
             MemberKind::for_member("claude", path),
             Some(MemberKind::ClaudeProjectFile),
             "{path}"
