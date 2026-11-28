@@ -270,23 +270,9 @@ const NOT_CARD_TIME_TEXT: &[&[u8]] = &[
     b"plaintext",
     b"a",
 ];
-/// Start of the response (or of other prose) in a content cell: the card time comes before it.
-const RESPONSE_START: &[&[u8]] = &[
-    b"p",
-    b"pre",
-    b"code",
-    b"ul",
-    b"ol",
-    b"li",
-    b"table",
-    b"blockquote",
-    b"h1",
-    b"h2",
-    b"h3",
-    b"h4",
-    b"h5",
-    b"h6",
-];
+/// The only elements that may appear between the prompt's lines and the card time. Any other
+/// start tag in the searched cell begins the response (or other content) and ends the search.
+const CARD_LINE_TAGS: &[&[u8]] = &[b"br", b"wbr", b"span"];
 
 fn is_content_cell(tag: &html5gum::StartTag<usize>) -> bool {
     tag.name == b"div"
@@ -304,61 +290,63 @@ fn is_content_cell(tag: &html5gum::StartTag<usize>) -> bool {
 /// after the prompt and before the response: `Prompted …<br>4 Nov 2026, 21:15:40 WIB<br><p>…`.
 ///
 /// Lines are runs of text between two tags, never source lines, so a minified card (Takeout
-/// writes a whole card on one physical line) reads the same as a pretty-printed one. Only the
-/// first content cell (the whole card when it has none) up to its first response block is
-/// searched, so a date in the response, the Details caption, a link or a script is never taken.
-/// A run qualifies only when it is exactly a five-word Takeout timestamp; the last such run wins,
-/// so a prompt line that happens to be a date does not shadow the real time after it. A card
-/// whose time is missing or in an unknown format yields `None` (never a guess).
+/// writes a whole card on one physical line) reads the same as a pretty-printed one. The search
+/// covers the first content cell (the whole card when it has none) and ends at the first start
+/// tag that is not a line break or inline `span` (the response, an image, a nested block) or at
+/// the end of the cell. The card time is the **last non-empty line before that point**, and only
+/// when that line is exactly a five-word Takeout timestamp. So a date in the response, the
+/// Details caption, a link or a script, or a prompt line that happens to be a date, is never
+/// taken; a card whose time is missing or in an unknown format yields `None` (never a guess).
 fn card_event_time(card_html: &str) -> Option<String> {
-    let card_time = |run: &str| {
-        (run.split_whitespace().take(6).count() == 5)
-            .then(|| parse_takeout_timestamp(run))
+    let card_time = |line: &str| {
+        (line.split_whitespace().take(6).count() == 5)
+            .then(|| parse_takeout_timestamp(line))
             .flatten()
     };
     let has_cell = html_tokens(card_html)
         .any(|token| matches!(&token, Token::StartTag(tag) if is_content_cell(tag)));
-    // Open `div`s of the searched cell, counting the cell itself; `None` before it is entered.
-    let mut cell_depth = (!has_cell).then_some(0usize);
+    let mut in_cell = !has_cell;
     let mut skipped = 0usize;
     let mut run = String::new();
-    let mut found = None;
+    let mut last_line = String::new();
     for token in html_tokens(card_html) {
-        let mut stop = false;
-        match &token {
+        let stop = match &token {
             Token::String(text) => {
-                if skipped == 0 && cell_depth.is_some() {
+                if skipped == 0 && in_cell {
                     run.push_str(&String::from_utf8_lossy(text));
                 }
                 continue;
             }
-            Token::StartTag(tag) if NOT_CARD_TIME_TEXT.contains(&tag.name.as_ref()) => skipped += 1,
+            Token::StartTag(tag) if NOT_CARD_TIME_TEXT.contains(&tag.name.as_ref()) => {
+                skipped += 1;
+                false
+            }
             Token::EndTag(tag) if NOT_CARD_TIME_TEXT.contains(&tag.name.as_ref()) => {
-                skipped = skipped.saturating_sub(1)
+                skipped = skipped.saturating_sub(1);
+                false
             }
-            Token::StartTag(tag) => match &mut cell_depth {
-                None if is_content_cell(tag) => cell_depth = Some(1),
-                None => {}
-                Some(depth) if tag.name == b"div" => *depth += 1,
-                Some(_) => stop = RESPONSE_START.contains(&tag.name.as_ref()),
-            },
-            Token::EndTag(tag) if tag.name == b"div" => {
-                if let Some(depth) = &mut cell_depth {
-                    *depth = depth.saturating_sub(1);
-                    stop = has_cell && *depth == 0;
-                }
+            Token::StartTag(tag) if !in_cell => {
+                in_cell = is_content_cell(tag);
+                false
             }
-            _ => {}
-        }
-        if let Some(time) = card_time(&run) {
-            found = Some(time);
+            // Without a content cell, `div`s are the card's own wrappers.
+            Token::StartTag(tag) if !has_cell && tag.name == b"div" => false,
+            Token::StartTag(tag) => skipped == 0 && !CARD_LINE_TAGS.contains(&tag.name.as_ref()),
+            Token::EndTag(tag) => has_cell && in_cell && tag.name == b"div",
+            _ => false,
+        };
+        if !run.trim().is_empty() {
+            std::mem::swap(&mut last_line, &mut run);
         }
         run.clear();
         if stop {
-            return found;
+            return card_time(&last_line);
         }
     }
-    card_time(&run).or(found)
+    if !run.trim().is_empty() {
+        last_line = run;
+    }
+    card_time(&last_line)
 }
 
 fn prompt_text(html: &str) -> String {
@@ -1166,6 +1154,30 @@ mod tests {
             event_time(dated_prompt).as_deref(),
             Some("2026-11-04T21:15:40+07:00")
         );
+        // ...and when the real time is unreadable, the dated prompt line is not used instead.
+        let unreadable = r#"<div class="outer-cell"><div class="content-cell">Prompted Q<br>1 Jan 2020, 00:00:00 UTC<br>Nov 4, 2026, 9:15:40 PM WIB<br><p>A</p></div></div>"#;
+        assert_eq!(event_time(unreadable), None);
+    }
+
+    #[test]
+    fn a_date_in_the_response_never_overrides_the_card_time() {
+        // Responses that do not open with a paragraph still end the search.
+        for response in [
+            "<div>5 Jan 2020, 10:00:00 UTC</div>",
+            "<hr>5 Jan 2020, 10:00:00 UTC<br>",
+            "<strong>Answer</strong><br>5 Jan 2020, 10:00:00 UTC<br>",
+            "<img src=x>5 Jan 2020, 10:00:00 UTC",
+            "<dl><dd>5 Jan 2020, 10:00:00 UTC</dd></dl>",
+        ] {
+            let html = format!(
+                r#"<div class="outer-cell"><div class="content-cell">Prompted Q<br>4 Nov 2026, 21:15:40 WIB<br>{response}</div></div>"#
+            );
+            assert_eq!(
+                event_time(&html).as_deref(),
+                Some("2026-11-04T21:15:40+07:00"),
+                "{response}"
+            );
+        }
     }
 
     #[test]
