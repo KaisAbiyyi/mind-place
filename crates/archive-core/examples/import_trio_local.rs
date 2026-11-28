@@ -268,7 +268,8 @@ fn verify_raw_blobs(root: &Path) -> Result<(u64, u64), BoxError> {
 /// written by the importers; only their fixed prefix is printed.
 fn category(text: &str) -> String {
     let mut out = String::new();
-    for c in text.chars().take(160) {
+    // 256 keeps the longest fixed reason whole (a ChatGPT DAG refusal naming eight rules).
+    for c in text.chars().take(256) {
         match c {
             '\'' | '"' | '`' => {
                 out.push('…');
