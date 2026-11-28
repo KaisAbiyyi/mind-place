@@ -159,18 +159,27 @@ fn sanitized_gemini_takeout_parses_with_the_same_shape_as_the_original() {
         )),
         "non-official identity expected"
     );
-    // Both fixtures keep each card on one source line, like Takeout does: every card's activity
-    // time must still be read (MP-R1-WP01 local gate found it lost on every real card).
-    for item in original.iter().chain(&sanitized) {
-        if let ReconciledItem::Conversation { capture, .. } = item {
-            assert!(
-                !capture
-                    .warnings
-                    .iter()
-                    .any(|w| w.contains("timestamp unavailable")),
-                "{:?}",
-                capture.warnings
-            );
+    // Both fixtures keep each card on one source line, like Takeout does: every card's own
+    // activity time must still be read (MP-R1-WP01 local gate found it lost on every real card).
+    // The sanitizer keeps the date and zeroes the clock.
+    for (items, clock) in [(&original, None), (&sanitized, Some("T00:00:00+07:00"))] {
+        for item in items.iter() {
+            let ReconciledItem::Conversation { raw_evidence, .. } = item else {
+                continue;
+            };
+            let metadata: serde_json::Value =
+                serde_json::from_str(&raw_evidence.metadata_json).unwrap();
+            let time = metadata["provider_event_time"]
+                .as_str()
+                .unwrap_or_else(|| panic!("card time lost: {metadata}"));
+            assert!(time.starts_with("2026-11-0"), "{time}");
+            match clock {
+                Some(clock) => assert!(time.ends_with(clock), "{time}"),
+                None => assert!(
+                    time.ends_with(":40+07:00") && &time[10..14] == "T21:",
+                    "{time}"
+                ),
+            }
         }
     }
 }
