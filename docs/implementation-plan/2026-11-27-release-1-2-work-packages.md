@@ -91,7 +91,7 @@ one branch, one PR, tests included. Packages marked **IR** need an independent r
 | `MP-R1-WP07` | **Constellation.** Graph projection from accepted curated nodes (reuse MP-6 generations); bounded graph query (G1); Constellation page in the UI2 shell with node aside (evidence, revisions, superseded links) and "refresh this node"; review-by-exception screen for staged generations; EN/ID copy and design gap ledger | MP-UI2-07, MP-UI2-BG-01, review screen part of MP-UX-06 | MP-R1-WP03 | `ui-memory`, `graph-query` | C |
 | `MP-R1-WP08` | **Remote gateway.** ADR amending the Phase 3D no-public-endpoint rule; separate listener for the cloud tier only; OAuth 2.1 + PKCE (S256), discovery at the domain root, owner-pre-registered clients, rate limits, active only while unlocked with consent; Tailscale Funnel adapter; Streamable HTTP without SSE | MP-NET-01, MP-NET-02 | MP-SEC-10 | `remote-gateway` | C + L, IR |
 | `MP-R1-WP09` | **Remote read: Claude and Gemini.** Cloud-tier curated read tools (topics, nodes, edges, evidence excerpts with Secret-Shield-style masking of obvious secrets); setup guides for the claude.ai custom connector and the Gemini app; real qualification of read, revoke and lock on both; Parity Matrix hosted-read cells | read part of MP-NET-03, hosted read cells of MP-PAR-02, hosted Gemini part of MP-7MCP-06 | MP-R1-WP04, MP-R1-WP08 | `hosted-account` | C + L + O |
-| `MP-R1-WP10` | **R1 candidate** (the single Ready PR of the WP04..WP09 stack and its one 100K run, see §7 DRAFT). Freeze one SHA, package, run one batched local runbook (import trio, Claude Code and Antigravity read and curated write, remote Claude and Gemini read, curation on one topic, Constellation on WebView2/DPI), owner acceptance | — | WP01–WP09 | `release` | C + L + O |
+| `MP-R1-WP10` | **R1 candidate** (the single Ready PR of the WP04..WP09 stack and its one 100K run, see §7). Freeze one SHA, package, run one batched local runbook (import trio, Claude Code and Antigravity read and curated write, remote Claude and Gemini read, curation on one topic, Constellation on WebView2/DPI), owner acceptance | — | WP01–WP09 | `release` | C + L + O |
 
 ### Release 2
 
@@ -101,7 +101,7 @@ one branch, one PR, tests included. Packages marked **IR** need an independent r
 | `MP-R2-WP02` | **Remote write qualification.** claude.ai connector and Gemini app: curate one topic, curate the active chat, revoke and lock tests; Parity Matrix hosted-write cells | write part of MP-NET-03, hosted write cells of MP-PAR-02 | MP-R2-WP01 | `hosted-account` | L + O |
 | `MP-R2-WP03` | **Workspace board.** Workspace ADR; read mirror of GitHub issues, PRs and plan files; Last Done / Now / Up Next computed from the dependency graph (no manual Focus Lane); task ↔ topic ↔ curated node links; always behind authentication | MP-WS-00, MP-WS-01 | MP-R1-WP03 | `workspace` | C |
 | `MP-R2-WP04` | **Claims, locks and hand-off.** Atomic claims with lease and fencing token; engine-enforced resource locks; status-dependent "hand to agent" action that generates a brief for Claude Code or Antigravity (task text passed as data, allowlisted runner templates) | MP-WS-02, MP-WS-03 | MP-R2-WP03 | `workspace` | C + L, IR |
-| `MP-R2-WP05` | **R2 candidate** (the single Ready PR of the R2-WP01..WP04 stack and its one 100K run, see §7 DRAFT). Freeze, package, batched local runbook, owner acceptance | — | WP01–WP04 | `release` | C + L + O |
+| `MP-R2-WP05` | **R2 candidate** (the single Ready PR of the R2-WP01..WP04 stack and its one 100K run, see §7). Freeze, package, batched local runbook, owner acceptance | — | WP01–WP04 | `release` | C + L + O |
 
 ## 5. Prompt shape for one work package
 
@@ -125,10 +125,10 @@ Jangan merge; owner yang memutuskan.
   MP-R1-WP08 (after MP-SEC-10), MP-R2-WP03 (after MP-R1-WP03).
 - Everything else waits on a predecessor outside Now and has no lane.
 
-## 7. One 100K qualification per release, from MP-R1-WP04 on (owner decision 2026-11-28) — DRAFT
+## 7. One 100K qualification per release, from MP-R1-WP04 on (owner decision 2026-11-28)
 
-**Status: DRAFT.** Written by Claude Sonnet 5.5 at the owner's request. Under the 2026-11-27 model-role
-rule it is not part of the plan until a planner-class (Opus-tier) session adopts it.
+**Status: ADOPTED 2026-11-28** by a planner-class session (Claude Opus 5.5) at the owner's request.
+Drafted by Claude Sonnet 5.5; the adoption review added steps 7–9.
 
 **Scope (owner choice 2026-11-28): R1 once, R2 once.** `MP-R1-WP04` through `MP-R1-WP10` share one
 100K run. `MP-R2-WP01` through `MP-R2-WP05` share a second one. R1 can be released without waiting for R2.
@@ -162,6 +162,16 @@ own full 100K run, and a proof is reusable only inside the same PR. A Draft PR s
    late go in before the transition, or the owner accepts the extra run.
 6. Do not dispatch `manual` or `final` qualification before native CI has passed on the exact head
    (see `mp-ci-100k-01-qualification-gate.md`, operator sequence).
+7. **Native Windows feedback per package.** Drafts skip Windows Product. A package that touches
+   Windows-native behaviour (`src-tauri/`, `crates/security-core`, storage or file-system code) may
+   dispatch the native CI workflow (`ci.yml`, with `pr_number`, `head_sha`, `base_sha`) on its own head
+   before it enters the integration branch. This is cheap relative to the 100K and catches native
+   failures early. Never dispatch the 100K for a package.
+8. **Status in Notion.** A package merged into the integration branch stays `Review` with the note
+   "integrated into <branch> at <SHA>". It becomes `Done` only when its release candidate PR is merged
+   to `main`. Independent review verdicts are recorded per package at the time they are given.
+9. **Keep the branch current.** Merge `main` into the integration branch whenever `main` moves and
+   always once right before the freeze, so the single Ready run tests what will actually land.
 
 **R2.** After MP-R1-WP10 is merged, create `integration/r2-remote-workspace` from `main`.
 `MP-R2-WP01`..`WP04` use Draft PRs into it, with the same acceptance and merge rules as above.
