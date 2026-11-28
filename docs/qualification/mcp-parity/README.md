@@ -11,6 +11,7 @@ Scope: **read only** (`memory_search`, `memory_fetch`, `context_build`). No writ
 | `receipts/` | Scrubbed receipts the matrix cites, with sha256 in `matrix.json` |
 | `static-cells.json` | Cells that cannot be run from here, each with its reason or vendor blocker |
 | `OWNER-TEST-CARDS.md`, `owner-result-template.json` | Executable cards for clients that need the owner's account or network |
+| `LOCAL-READ-WP02.md` | MP-R1-WP02: one setup source for Claude Code and Antigravity, and the local-read cells (`run.mjs local-read`) |
 
 ## Honesty rules
 
@@ -48,6 +49,7 @@ node scripts/mcp-conformance/run.mjs synthetic
 node scripts/mcp-conformance/run.mjs real claude-code
 node scripts/mcp-conformance/run.mjs real codex
 node scripts/mcp-conformance/run.mjs real antigravity
+node scripts/mcp-conformance/run.mjs local-read
 node scripts/mcp-conformance/run.mjs matrix
 ```
 

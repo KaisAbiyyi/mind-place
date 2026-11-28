@@ -3,6 +3,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { verifyUiRules } from './verify-ui-rules.mjs';
+import { guideDrift } from './mcp-local-read-setup.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const readJson = (relativePath) => JSON.parse(fs.readFileSync(path.join(root, relativePath), 'utf8'));
@@ -59,6 +60,10 @@ const forbidden = trackedFiles.filter((file) =>
   file === 'THIRD-PARTY-NOTICES.txt'
 );
 if (forbidden.length) throw new Error(`Repository contains generated or legacy tracked paths: ${forbidden.join(', ')}`);
+
+// MP-R1-WP02: the local read setup guides must match the single setup source.
+const staleGuides = guideDrift(root);
+if (staleGuides.length) throw new Error(`Setup guides out of date (${staleGuides.join(', ')}); run: node scripts/mcp-local-read-setup.mjs guides`);
 
 const uiRules = verifyUiRules({ rootDir: root });
 if (!uiRules.ok) {

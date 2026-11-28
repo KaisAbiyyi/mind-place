@@ -3,6 +3,7 @@
  *
  *   node scripts/mcp-conformance/run.mjs synthetic            # server reference (synthetic HTTP client)
  *   node scripts/mcp-conformance/run.mjs real claude-code     # a real provider client behind the recording proxy
+ *   node scripts/mcp-conformance/run.mjs local-read         # MP-R1-WP02: Claude Code + Antigravity on one SHA
  *   node scripts/mcp-conformance/run.mjs matrix               # merge receipts into the Parity Matrix
  *
  * Needs the packaged app (npm run build -> release/win32-x64) and the MCP port free.
@@ -23,6 +24,8 @@ import { formatSafeJson, formatSafeLine, safePreview, sanitizeBlocked } from './
 import { runSyntheticSuite } from './suite.mjs';
 import { createWire } from './wire.mjs';
 import { runRealClient } from './real.mjs';
+import { DRIVERS, UPDATE_PAUSE_ENV } from './clients.mjs';
+import { LOCAL_READ_CELL_CLIENTS, localReadVerdict } from './local-read.mjs';
 import { startRecordingProxy } from './recording-proxy.mjs';
 import { CLAIMS, CLIENTS, STORE_MODE, renderMatrixMarkdown, validateMatrix } from './matrix.mjs';
 
@@ -323,6 +326,38 @@ async function servePhase(useProxy = false) {
   });
 }
 
+/**
+ * MP-R1-WP02: both local-read cells on one SHA. Probes client versions before and after, runs the two real
+ * clients back to back, and writes local-read-summary.json. The owner states the Antigravity update state with
+ * MP_ANTIGRAVITY_AUTO_UPDATE=paused|recorded (defaults to recorded: the versions are always probed).
+ */
+async function localReadPhase() {
+  const source = sourceIdentity();
+  if (source.dirty) {
+    console.error('local-read needs a clean, committed tree (the cells must bind one exact SHA).');
+    process.exitCode = 2;
+    return;
+  }
+  const versions = () => Object.fromEntries(LOCAL_READ_CELL_CLIENTS.map((id) => [id, DRIVERS[id].detect()?.version ?? null]));
+  const versionsBefore = versions();
+  const runs = {};
+  for (const id of LOCAL_READ_CELL_CLIENTS) runs[id] = await realPhase(id);
+  const versionsAfter = versions();
+  const verdict = localReadVerdict({ sha: source.sha, dirty: sourceIdentity().dirty, runs, versionsBefore, versionsAfter });
+  const declared = process.env.MP_ANTIGRAVITY_AUTO_UPDATE;
+  const outDir = path.join(repoRoot, 'outputs', 'mcp-conformance', source.sha.slice(0, 12));
+  const receipt = writeReceipt(outDir, 'local-read-summary.json', {
+    kind: 'MP-R1-WP02 local-read cells (Claude Code, Antigravity) on one SHA; per-client evidence is in the cited real-*.json receipts.',
+    source,
+    executable_sha256: sha256File(productPaths().exe),
+    antigravity_auto_update: declared === 'paused' ? 'paused (owner declared)' : 'recorded (version probed before and after)',
+    update_pause_requested_env: Object.fromEntries(LOCAL_READ_CELL_CLIENTS.map((id) => [id, Object.keys(UPDATE_PAUSE_ENV[id])])),
+    ...verdict,
+  }, []);
+  console.log(formatSafeJson({ receipt: receipt.file, sha256: receipt.sha256, result: verdict.result, cells: Object.fromEntries(Object.entries(verdict.cells).map(([k, v]) => [k, v.result])), problems: verdict.problems }, []));
+  process.exitCode = verdict.result === 'PASS' ? 0 : 1;
+}
+
 async function realPhase(clientId) {
   const source = sourceIdentity();
   const outDir = path.join(repoRoot, 'outputs', 'mcp-conformance', source.sha.slice(0, 12));
@@ -343,7 +378,7 @@ async function realPhase(clientId) {
     const blockedReceipt = writeReceipt(outDir, `blocked-${clientId}.json`, { source, clientId, installed: rest.installed, store_mode: rest.store_mode ?? null, blocked: safeBlocked }, activeSecrets);
     console.log(formatSafeJson({ clientId, blocked: safeBlocked, receipt: blockedReceipt.file }, activeSecrets));
     process.exitCode = 3;
-    return;
+    return { source, blocked: safeBlocked, receipt: path.basename(blockedReceipt.file), receipt_sha256: blockedReceipt.sha256 };
   }
   const body = {
     kind: 'REAL_CLIENT run: the actual provider client behind a recording proxy against the packaged app (disposable synthetic corpus). Verdicts come from the wire log, not the model transcript.',
@@ -359,16 +394,18 @@ async function realPhase(clientId) {
     for (const check of claim.checks.filter((c) => !c.ok)) console.log(formatSafeLine(`FAIL ${claim.id} ${check.name} :: ${check.detail}`, activeSecrets));
   }
   process.exitCode = Object.values(summary).every((r) => r === 'PASS') ? 0 : 1;
+  return { source, claims: rest.claims, harness_failure: rest.harness_failure ?? null, receipt: path.basename(receipt.file), receipt_sha256: receipt.sha256 };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [phase] = process.argv.slice(2);
   if (phase === 'synthetic') await syntheticPhase();
   else if (phase === 'real') await realPhase(process.argv[3]);
+  else if (phase === 'local-read') await localReadPhase();
   else if (phase === 'matrix') await matrixPhase();
   else if (phase === 'serve') await servePhase(process.argv.includes('--proxy'));
   else {
-    console.error('Usage: run.mjs synthetic | real <client> | matrix | serve [--proxy]');
+    console.error('Usage: run.mjs synthetic | real <client> | local-read | matrix | serve [--proxy]');
     process.exitCode = 2;
   }
 }
