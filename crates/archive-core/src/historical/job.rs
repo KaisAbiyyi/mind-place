@@ -55,6 +55,8 @@ pub enum MemberKind {
     ClaudeConversations,
     /// A Claude.ai export `projects.json`: a top-level JSON array of projects (raw-only).
     ClaudeProjects,
+    /// A Claude.ai split export `projects/<id>.json`: one project object per file (raw-only).
+    ClaudeProjectFile,
 }
 
 impl MemberKind {
@@ -62,7 +64,7 @@ impl MemberKind {
         match self {
             Self::ChatgptConversations => "chatgpt",
             Self::GeminiTakeoutHtml => "gemini",
-            Self::ClaudeConversations | Self::ClaudeProjects => "claude",
+            Self::ClaudeConversations | Self::ClaudeProjects | Self::ClaudeProjectFile => "claude",
         }
     }
     fn domain(self) -> &'static str {
@@ -70,7 +72,9 @@ impl MemberKind {
             Self::ChatgptConversations => "chatgpt-export-dag",
             Self::GeminiTakeoutHtml => "gemini-takeout-html",
             Self::ClaudeConversations => crate::importers::claude_export::CONVERSATION_DOMAIN,
-            Self::ClaudeProjects => crate::importers::claude_export::PROJECT_DOMAIN,
+            Self::ClaudeProjects | Self::ClaudeProjectFile => {
+                crate::importers::claude_export::PROJECT_DOMAIN
+            }
         }
     }
     fn label(self) -> &'static str {
@@ -79,7 +83,13 @@ impl MemberKind {
             Self::GeminiTakeoutHtml => "gemini-takeout-html",
             Self::ClaudeConversations => "claude-conversations",
             Self::ClaudeProjects => "claude-projects",
+            Self::ClaudeProjectFile => "claude-project-file",
         }
+    }
+
+    /// Whether this kind holds projects only (never a conversation).
+    pub fn is_claude_projects(self) -> bool {
+        matches!(self, Self::ClaudeProjects | Self::ClaudeProjectFile)
     }
 
     /// The kind of a member of `provider`, chosen from its file name; `None` when the provider is
@@ -95,6 +105,8 @@ impl MemberKind {
                 let name = path.rsplit('/').next().unwrap_or(path);
                 Some(if name.eq_ignore_ascii_case("projects.json") {
                     Self::ClaudeProjects
+                } else if super::manifest::is_claude_project_file(path) {
+                    Self::ClaudeProjectFile
                 } else {
                     Self::ClaudeConversations
                 })
@@ -1119,6 +1131,27 @@ impl ArchiveStore {
                     ClaudeExportParser::stream_projects_json_spanned(
                         &mut reader,
                         request.limits.chatgpt_stream,
+                        |span, item| {
+                            records += 1;
+                            record_bytes += span.length;
+                            stager
+                                .add(&ctx, span, item, records - 1)
+                                .map_err(|error| Box::new(error) as Box<dyn std::error::Error>)
+                        },
+                    )
+                    .map_err(map_stream_error)?;
+                }
+                MemberKind::ClaudeProjectFile => {
+                    // The measured size is known: refuse an oversized file before reading it.
+                    if entry.size > request.limits.chatgpt_stream.max_record_bytes as u64 {
+                        return Err(coded(
+                            "E_SOURCE_LIMIT",
+                            "Import source exceeds a safety limit",
+                        ));
+                    }
+                    ClaudeExportParser::read_project_file_spanned(
+                        &mut reader,
+                        request.limits.chatgpt_stream.max_record_bytes,
                         |span, item| {
                             records += 1;
                             record_bytes += span.length;

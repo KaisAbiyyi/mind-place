@@ -14,7 +14,7 @@ Owner-run, on Windows x64, on **real** exports, into a **disposable** archive. A
 2. Download fresh exports (do not edit or unzip-and-rezip them):
    - ChatGPT: Settings → Data controls → Export data (a `.zip` by e-mail).
    - Gemini: Google Takeout → "My Activity", Gemini Apps only (a `.zip`).
-   - Claude.ai: Settings → Privacy → Export data (a `.zip` by e-mail).
+   - Claude.ai: Settings → Privacy → Export data (a `.zip` by e-mail). Since 2026 the export can arrive **split**: a `manifest-*.json` plus one zip per category and part (`conversations-000.zip`, `projects-000.zip`, `memories-000.zip`, `frames-000.zip`, `claude_code_cloud-000.zip`, `light_metadata-000.zip`). Run the harness once per `conversations-NNN.zip` and once per `projects-NNN.zip` (each into a new run directory); the other categories are not import members. A memory export (`claude-memory-*.zip`, Markdown) is not the account export.
 3. Put the exports somewhere outside the repository, for example `D:\mp-import-l1\exports\`.
 4. Pick a **new** directory for each run, for example `D:\mp-import-l1\run-claude-1`. The harness refuses a directory that is not empty, that is inside the export, or that is inside the real Mind Place data directory.
 5. Optional: pause antivirus scanning of `D:\mp-import-l1\` only if a run fails with a sharing violation, and record that you did.
@@ -45,7 +45,7 @@ The harness prints counts, member names of the export (for example `conversation
 
 | Line | Expect |
 | --- | --- |
-| `candidate_members` | ChatGPT: `conversations.json` (or `conversations-NNN.json` shards). Gemini: the `My Activity/Gemini Apps/MyActivity.html` path (localized folder names are fine). Claude: `conversations.json` and `projects.json`; **never** `users.json`. `RESULT=BLOCKED` means no member was found: record the folder names (only) and report. |
+| `candidate_members` | ChatGPT: `conversations.json` (or `conversations-NNN.json` shards). Gemini: the `My Activity/Gemini Apps/MyActivity.html` path (localized folder names are fine). Claude: `conversations.json` and `projects.json`, or in a split export `conversations.json` (conversations part) or `projects/<id>.json` files (projects part, kind `ClaudeProjectFile`, one project per file, always raw-only; the `projects` folder must be at the source root or under one wrapper folder, and no ancestor may be `memories`, `frames`, `artifacts`, `claude_code_cloud` or `light_metadata`; one job takes at most 1000 members, so a projects part with more files fails with `E_MEMBERS`: report it); **never** `users.json`, and nothing under `memories/`, `frames/`, `artifacts/`, `claude_code_cloud/` or `light_metadata/`. `RESULT=BLOCKED` means no member was found: record the folder names (only) and report. |
 | `run=1` | `scanned = imported + deduplicated + raw_only + rejected`. `rejected` should be 0 or very small. |
 | `run=2` | `already_complete=true`, same counts: re-import is idempotent. |
 | `member_receipt` | `unpreserved_bytes` is small (array framing, whitespace, Takeout page chrome). A large value means records were not found where expected: report it. |

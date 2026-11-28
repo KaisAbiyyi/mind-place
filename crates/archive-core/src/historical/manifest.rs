@@ -467,6 +467,7 @@ pub fn entry_matches_provider_layout(path: &str, provider: &str) -> bool {
             lower == "conversations.json"
                 || lower == "projects.json"
                 || (lower.starts_with("conversations-") && lower.ends_with(".json"))
+                || is_claude_project_file(path)
         }
         "gemini" => {
             lower.ends_with(".html")
@@ -478,12 +479,55 @@ pub fn entry_matches_provider_layout(path: &str, provider: &str) -> bool {
     }
 }
 
-/// Account files of a provider export (name, e-mail, phone): `user.json` (ChatGPT) and
-/// `users.json` (Claude.ai), at any depth, case-insensitively. They are measured as part of the
+/// Split-export category folders that never hold Claude.ai projects, even in a nested
+/// `projects/` folder.
+const NON_PROJECT_CATEGORIES: &[&str] = &[
+    "memories",
+    "frames",
+    "artifacts",
+    "claude_code_cloud",
+    "light_metadata",
+];
+
+/// A project file of the Claude.ai split export: a `.json` file whose **direct** parent folder is
+/// `projects` (case-insensitive), with that folder at the source root or under one wrapper folder
+/// (for example `projects/<id>.json` inside `projects-000.zip`, or `projects-000/projects/<id>.json`
+/// in an extracted export), and no ancestor that is another split-export category (`memories`,
+/// `frames`, `artifacts`, `claude_code_cloud`, `light_metadata`). Names owned by other kinds
+/// (`conversations.json`, `conversations-*.json`, `projects.json`) and account files never match.
+pub fn is_claude_project_file(path: &str) -> bool {
+    let parts: Vec<&str> = path.split('/').collect();
+    let Some((name, folders)) = parts.split_last() else {
+        return false;
+    };
+    let lower = name.to_ascii_lowercase();
+    lower.ends_with(".json")
+        && lower.len() > ".json".len()
+        && lower != "conversations.json"
+        && lower != "projects.json"
+        && !lower.starts_with("conversations-")
+        && !is_account_file(path)
+        && matches!(folders.len(), 1 | 2)
+        && folders
+            .last()
+            .is_some_and(|folder| folder.eq_ignore_ascii_case("projects"))
+        && !folders.iter().any(|folder| {
+            NON_PROJECT_CATEGORIES
+                .iter()
+                .any(|category| folder.eq_ignore_ascii_case(category))
+        })
+}
+
+/// Account files of a provider export (name, e-mail, phone, login history): `user.json`
+/// (ChatGPT), `users.json` and `login_history.json` (Claude.ai, the latter in the split export's
+/// `light_metadata` part), at any depth, case-insensitively. They are measured as part of the
 /// source but are never an import member, even when named explicitly.
 pub fn is_account_file(path: &str) -> bool {
     let lower = path.rsplit('/').next().unwrap_or(path).to_ascii_lowercase();
-    matches!(lower.as_str(), "user.json" | "users.json")
+    matches!(
+        lower.as_str(),
+        "user.json" | "users.json" | "login_history.json"
+    )
 }
 
 /// The file extension a member of `provider` must have when the owner picks it explicitly.

@@ -102,7 +102,7 @@ The signed-off guide's Import dialog lists ChatGPT, Gemini (Takeout) and a trans
 
 ## 9. Residual risks
 
-1. Real Claude export layout unverified (keys, sharding, presence of `parent_message_uuid`, extra files such as memories). The explicit member list is the escape hatch; unexpected keys stay in raw evidence.
+1. Real Claude export layout: the owner's 2026-11-28 export (local gate) is **split** — a `manifest-*.json` (version 1.0) lists one zip per category and part: `conversations-000.zip` (`conversations.json`, imports as before), `projects-000.zip` (`projects/<id>.json`, one project object per file, now member kind `ClaudeProjectFile`, raw-only), and `memories`, `frames` (artifacts), `claude_code_cloud`, `light_metadata` (`users.json`, `login_history.json`), which are not members. Each zip is a separate import source; the app still refuses a projects-only source with `E_IMPORT_NO_MEMBERS`. An extracted folder holding all parts (`conversations-000/conversations.json`, `projects-000/projects/<id>.json`, …) also works as one combined source, since it is not projects-only. Choosing the folder of the still-zipped parts as one source needs nested-zip support and is a follow-up. `login_history.json` is treated as an account file (never a member). Keys inside records remain unverified beyond what the projection checks; unexpected keys stay in raw evidence.
 2. Most real Claude conversations will probably be `partial` (no parent links, tool/thinking blocks). That is the honest outcome, not a defect.
 3. `projects.json` documents (`docs[].content`) are preserved only as raw evidence, not shown in the reader.
 4. Windows-native behaviour (antivirus sharing violations, long paths) stays NOT_RUN until the runbook.
