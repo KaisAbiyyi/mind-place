@@ -101,7 +101,7 @@ one branch, one PR, tests included. Packages marked **IR** need an independent r
 | `MP-R2-WP02` | **Remote write qualification.** claude.ai connector and Gemini app: curate one topic, curate the active chat, revoke and lock tests; Parity Matrix hosted-write cells | write part of MP-NET-03, hosted write cells of MP-PAR-02 | MP-R2-WP01 | `hosted-account` | L + O |
 | `MP-R2-WP03` | **Workspace board.** Workspace ADR; read mirror of GitHub issues, PRs and plan files; Last Done / Now / Up Next computed from the dependency graph (no manual Focus Lane); task ↔ topic ↔ curated node links; always behind authentication | MP-WS-00, MP-WS-01 | MP-R1-WP03 | `workspace` | C |
 | `MP-R2-WP04` | **Claims, locks and hand-off.** Atomic claims with lease and fencing token; engine-enforced resource locks; status-dependent "hand to agent" action that generates a brief for Claude Code or Antigravity (task text passed as data, allowlisted runner templates) | MP-WS-02, MP-WS-03 | MP-R2-WP03 | `workspace` | C + L, IR |
-| `MP-R2-WP05` | **R2 candidate.** Freeze, package, batched local runbook, owner acceptance | — | WP01–WP04 | `release` | C + L + O |
+| `MP-R2-WP05` | **R2 candidate** (the single Ready PR of the R2-WP01..WP04 stack and its one 100K run, see §7 DRAFT). Freeze, package, batched local runbook, owner acceptance | — | WP01–WP04 | `release` | C + L + O |
 
 ## 5. Prompt shape for one work package
 
@@ -125,10 +125,15 @@ Jangan merge; owner yang memutuskan.
   MP-R1-WP08 (after MP-SEC-10), MP-R2-WP03 (after MP-R1-WP03).
 - Everything else waits on a predecessor outside Now and has no lane.
 
-## 7. One 100K qualification for MP-R1-WP04 through the end (owner request 2026-11-28) — DRAFT
+## 7. One 100K qualification per release, from MP-R1-WP04 on (owner decision 2026-11-28) — DRAFT
 
 **Status: DRAFT.** Written by Claude Sonnet 5.5 at the owner's request. Under the 2026-11-27 model-role
 rule it is not part of the plan until a planner-class (Opus-tier) session adopts it.
+
+**Scope (owner choice 2026-11-28): R1 once, R2 once.** `MP-R1-WP04` through `MP-R1-WP10` share one
+100K run. `MP-R2-WP01` through `MP-R2-WP05` share a second one. R1 can be released without waiting for R2.
+`MP-R1-WP01`..`WP03` are outside this rule and follow the normal gate. The steps below are written
+for R1; R2 uses the same steps with its own branch (see "R2" below).
 
 **Why.** The 100K document-scale job takes about 4.7 hours (historical 16 959 s). The effective-input
 fingerprint (`scripts/mp10c_ci_gate.py`, `excluded()`) covers every tracked path except `docs/`,
@@ -158,16 +163,22 @@ own full 100K run, and a proof is reusable only inside the same PR. A Draft PR s
 6. Do not dispatch `manual` or `final` qualification before native CI has passed on the exact head
    (see `mp-ci-100k-01-qualification-gate.md`, operator sequence).
 
-**Consequences.** Nothing from WP04..WP09 reaches `main` until WP10, so partial value is not usable
-from `main` in between and a late defect holds the whole stack. WP01 and WP03 touch Rust production
-code, so under the normal gate each triggers its own 100K when Ready; the owner may fold them into the
-same integration branch if literally one run is wanted (decision open).
+**R2.** After MP-R1-WP10 is merged, create `integration/r2-remote-workspace` from `main`.
+`MP-R2-WP01`..`WP04` use Draft PRs into it, with the same acceptance and merge rules as above.
+`MP-R2-WP05` (R2 candidate) is the only Ready PR to `main` and carries the second 100K run. R2-WP03
+and R2-WP04 (Workspace) have no code dependency on R2-WP01/WP02, so they can be developed in
+parallel on the same branch when their locks differ.
+
+**Consequences.** Nothing from R1-WP04..WP09 reaches `main` until R1-WP10, and nothing from
+R2-WP01..WP04 until R2-WP05, so partial value is not usable from `main` in between and a late defect
+holds the whole stack. R1-WP01..WP03 touch production code, so under the normal gate each triggers
+its own 100K when Ready (three runs in addition to the two stack runs, five at most).
 
 **Alternative, not the default.** Move the 100K from per-PR to nightly plus on-demand final
 qualification. That is `MP-CI-QUAL-01` (Ready, currently after the work packages in order). It changes
 required-check semantics, so it needs independent review and an owner decision.
 
-**Prompt addition for WP04..WP09 agents.**
+**Prompt addition for R1-WP04..WP09 agents** (R2-WP01..WP04: use `integration/r2-remote-workspace`).
 
 ```text
 Basis branch: integration/r1-curation (bukan main). Buka PR Draft dengan base itu dan biarkan Draft.
