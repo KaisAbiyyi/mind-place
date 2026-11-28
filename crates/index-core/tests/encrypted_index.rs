@@ -42,3 +42,13 @@ fn document_fts_is_ciphered() {
     assert!(DocumentIndex::open_encrypted(&db, [0x8bu8; 32], &gate, lease).is_err());
     DocumentIndex::open_encrypted(&db, key, &gate, lease).unwrap();
 }
+
+#[test]
+fn index_error_preserves_state_migration_required_code() {
+    let err =
+        mind_place_index::IndexError::State(mind_place_state::StateError::MigrationRequired {
+            current: 9,
+            target: 10,
+        });
+    assert_eq!(err.code(), "MP_STATE_MIGRATION_REQUIRED");
+}

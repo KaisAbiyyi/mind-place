@@ -3,8 +3,10 @@ use mind_place_security::vault_fence::VaultWriterFence;
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension, TransactionBehavior};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
+#[cfg(any(unix, feature = "sqlcipher-preview"))]
+use std::fs::File;
 use std::{
-    fs::{self, File, OpenOptions},
+    fs::{self, OpenOptions},
     ops::{Deref, DerefMut},
     path::{Path, PathBuf},
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -12,6 +14,8 @@ use std::{
 mod cipher;
 mod client_read_grants;
 mod clients;
+mod curated;
+mod curated_export;
 mod document_objects;
 mod document_roots;
 mod document_scanner;
@@ -25,10 +29,22 @@ mod ntfs;
 mod private_scopes;
 mod source_forget;
 mod source_redaction;
+mod topics;
 #[cfg(feature = "sqlcipher-preview")]
 pub mod vault_bootstrap;
 pub use client_read_grants::{ClientReadScope, MAX_READ_GRANTS_PER_CLIENT};
 pub use clients::{ClientAuditEvent, ClientCapability, ClientRecord};
+pub use curated::{
+    curated_edge_id, curated_node_id_for_key, AttrValue, CnfRecord, CuratedEdge, CuratedEdgeRel,
+    CuratedEdgeStatus, CuratedIntegrityReport, CuratedKey, CuratedNode, CuratedNodeKind,
+    CuratedNodeRevision, CuratedNodeStatus, CuratedRebuildReceipt, CurationGeneration,
+    CurationProfile, EvidenceSpan, GenerationStatus, NewCurationGeneration,
+    PublishedGenerationReceipt, RecordedCuratedOp, MAX_CNF_RECORD_BYTES, MAX_EVIDENCE_QUOTE_BYTES,
+    MAX_EVIDENCE_SPANS_PER_RECORD, MAX_NODE_ALIASES, MAX_NODE_ATTRS, MAX_NODE_BODY_BYTES,
+    MAX_NODE_SUMMARY_CHARS, MAX_NODE_TITLE_CHARS, MAX_RECORDS_PER_APPEND, MAX_RECORDS_PER_SHARD,
+    MAX_SHARDS_PER_GENERATION,
+};
+pub use curated_export::TopicMarkdownExport;
 pub use document_objects::{
     DocumentMetadata, DocumentObjectStore, DocumentPreserveReceipt, DocumentVersion,
     MAX_DOCUMENT_OBJECT_BYTES,
@@ -49,9 +65,13 @@ pub use model_writes::{
 pub use private_scopes::PrivateScope;
 pub use source_forget::{SourceForgetPreview, SourceForgetProgress};
 pub use source_redaction::SourceRedactionReceipt;
+pub use topics::{
+    valid_cnf_slug, AssertionSource, MembershipStatus, NewTopic, NewTopicMembership, Topic,
+    TopicMemberKind, TopicMemberRole, TopicMembership, TopicWorkStatus,
+};
 
 pub const APPLICATION_ID: i64 = 0x4D504C43;
-pub const SCHEMA_VERSION: i64 = 9;
+pub const SCHEMA_VERSION: i64 = 10;
 const MIN_SQLITE_NUMBER: i32 = 3_053_002;
 const MIGRATION_V1: &str = include_str!("schema_v1.sql");
 const MIGRATION_V2: &str = include_str!("schema_v2.sql");
@@ -62,6 +82,7 @@ const MIGRATION_V6: &str = include_str!("schema_v6.sql");
 const MIGRATION_V7: &str = include_str!("schema_v7.sql");
 const MIGRATION_V8: &str = include_str!("schema_v8.sql");
 const MIGRATION_V9: &str = include_str!("schema_v9.sql");
+const MIGRATION_V10: &str = include_str!("schema_v10.sql");
 pub use cipher::CipherKey;
 pub type Result<T> = std::result::Result<T, StateError>;
 
@@ -97,6 +118,12 @@ pub enum StateError {
     InvalidValue,
     #[error("source redaction requires the encrypted vault")]
     VaultRequired,
+    #[error("curated revision conflict")]
+    RevisionConflict,
+    #[error("curated record limit exceeded")]
+    CuratedLimit,
+    #[error("encrypted authoritative state schema v{current} requires explicit backed-up migration to v{target}")]
+    MigrationRequired { current: i64, target: i64 },
 }
 impl StateError {
     pub fn code(&self) -> &'static str {
@@ -116,6 +143,9 @@ impl StateError {
             Self::SqliteTooOld => "MP_STATE_SQLITE_TOO_OLD",
             Self::InvalidValue => "MP_STATE_INVALID_VALUE",
             Self::VaultRequired => "MP_PRIVACY_REQUIRES_VAULT",
+            Self::RevisionConflict => "MP_CURATED_REVISION_CONFLICT",
+            Self::CuratedLimit => "MP_CURATED_LIMIT",
+            Self::MigrationRequired { .. } => "MP_STATE_MIGRATION_REQUIRED",
         }
     }
 }
@@ -292,86 +322,149 @@ impl StateStore {
         let previous_version = user_version(&db)?;
         if previous_version < SCHEMA_VERSION {
             if existed && cipher_key.is_some() {
-                // Encrypted schema migrations require separately consented staging;
-                // ordinary snapshots would leak plaintext.
-                return Err(StateError::Corrupt);
+                // Encrypted schema migrations require separately consented staging
+                // (`migrate_encrypted_with_backup`); ordinary snapshots would leak plaintext.
+                if previous_version == 0 {
+                    return Err(StateError::Corrupt);
+                }
+                return Err(StateError::MigrationRequired {
+                    current: previous_version,
+                    target: SCHEMA_VERSION,
+                });
             }
             if existed {
                 backup(&db, parent, previous_version)?;
             }
             // Every pending schema step commits as one transaction. A failed
-            // v2 rebuild leaves the entire original v0/v1 state intact.
+            // rebuild leaves the entire original state intact.
             let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
-            if previous_version < 1 {
-                tx.execute_batch(MIGRATION_V1)?;
-                tx.execute(
-                    "INSERT INTO schema_migrations(version,checksum) VALUES(1,?1)",
-                    [checksum(MIGRATION_V1)],
-                )?;
+            apply_pending_migrations_tx(&tx, previous_version)?;
+            tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+            tx.commit()?;
+            validate(&db)?;
+        } else if !existed {
+            validate(&db)?;
+        }
+        drop(db);
+        FileExt::unlock(&lock)?;
+        Ok(Self { path, cipher_key })
+    }
+
+    /// Explicitly migrates an existing SQLCipher-encrypted state database forward
+    /// to `SCHEMA_VERSION`, first writing and verifying an encrypted backup
+    /// outside the vault directory so plaintext never touches disk and vault
+    /// backup inventories stay intact.
+    #[cfg(feature = "sqlcipher-preview")]
+    pub fn migrate_encrypted_with_backup(
+        path: impl AsRef<Path>,
+        raw_key: [u8; 32],
+        gate: &mind_place_security::SecurityGate,
+        lease: mind_place_security::UnlockLease,
+        backup_destination: impl AsRef<Path>,
+    ) -> Result<Self> {
+        use rusqlite::backup::Backup;
+        use std::io::Read;
+
+        if rusqlite::version_number() < MIN_SQLITE_NUMBER {
+            return Err(StateError::SqliteTooOld);
+        }
+        let path = path.as_ref().to_owned();
+        let parent = path.parent().ok_or(StateError::UnsafePath)?;
+        let backup_destination = backup_destination.as_ref();
+        let backup_parent = backup_destination.parent().ok_or(StateError::UnsafePath)?;
+        safe_path(parent)?;
+        safe_path(&path)?;
+        safe_path(backup_parent)?;
+        safe_path(backup_destination)?;
+        if backup_destination.starts_with(parent)
+            || parent.starts_with(backup_destination)
+            || !backup_parent.is_dir()
+        {
+            return Err(StateError::UnsafePath);
+        }
+        let key = CipherKey::new(raw_key, gate, lease);
+        let _writer_guard = if parent.join("vault-v1.json").exists() {
+            Some(VaultWriterFence::writer(parent).map_err(|_| StateError::Corrupt)?)
+        } else {
+            None
+        };
+        let lock_path = parent.join(".state-schema.lock");
+        safe_path(&lock_path)?;
+        let lock = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .open(lock_path)?;
+        lock.try_lock_exclusive().map_err(|_| StateError::Busy)?;
+
+        if fs::symlink_metadata(&path).is_err() {
+            return Err(StateError::InvalidValue);
+        }
+        let mut db = Connection::open_with_flags(
+            &path,
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+        )?;
+        key.unlock(&db)?;
+        db.busy_timeout(Duration::from_secs(5))?;
+        db.pragma_update(None, "foreign_keys", "ON")?;
+        db.pragma_update(None, "journal_mode", "WAL")?;
+        db.pragma_update(None, "synchronous", "FULL")?;
+        identity(&db)?;
+        let previous_version = user_version(&db)?;
+        if previous_version > SCHEMA_VERSION {
+            return Err(StateError::FutureSchema(previous_version));
+        }
+        if previous_version == 0 {
+            health(&db)?;
+        } else {
+            validate_version(&db, previous_version)?;
+        }
+        if previous_version < SCHEMA_VERSION {
+            let placeholder = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(backup_destination)?;
+            placeholder.sync_all()?;
+            drop(placeholder);
+            let mut target = Connection::open_with_flags(
+                backup_destination,
+                OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+            )?;
+            key.unlock(&target)?;
+            {
+                let b = Backup::new(&db, &mut target)?;
+                b.run_to_completion(64, Duration::from_millis(50), None)?;
             }
-            if previous_version < 2 {
-                tx.execute_batch(MIGRATION_V2)?;
-                tx.execute(
-                    "INSERT INTO schema_migrations(version,checksum) VALUES(2,?1)",
-                    [checksum(MIGRATION_V2)],
-                )?;
+            key.unlock(&target)?;
+            if previous_version == 0 {
+                identity(&target)?;
+                health(&target)?;
+            } else {
+                validate_version(&target, previous_version)?;
             }
-            if previous_version < 3 {
-                tx.execute_batch(MIGRATION_V3)?;
-                tx.execute(
-                    "INSERT INTO schema_migrations(version,checksum) VALUES(3,?1)",
-                    [checksum(MIGRATION_V3)],
-                )?;
+            drop(target);
+            let mut first = [0u8; 16];
+            File::open(backup_destination)?.read_exact(&mut first)?;
+            if &first == b"SQLite format 3\0" {
+                return Err(StateError::Corrupt);
             }
-            if previous_version < 4 {
-                tx.execute_batch(MIGRATION_V4)?;
-                tx.execute(
-                    "INSERT INTO schema_migrations(version,checksum) VALUES(4,?1)",
-                    [checksum(MIGRATION_V4)],
-                )?;
-            }
-            if previous_version < 5 {
-                tx.execute_batch(MIGRATION_V5)?;
-                tx.execute(
-                    "INSERT INTO schema_migrations(version,checksum) VALUES(5,?1)",
-                    [checksum(MIGRATION_V5)],
-                )?;
-            }
-            if previous_version < 6 {
-                tx.execute_batch(MIGRATION_V6)?;
-                tx.execute(
-                    "INSERT INTO schema_migrations(version,checksum) VALUES(6,?1)",
-                    [checksum(MIGRATION_V6)],
-                )?;
-            }
-            if previous_version < 7 {
-                tx.execute_batch(MIGRATION_V7)?;
-                tx.execute(
-                    "INSERT INTO schema_migrations(version,checksum) VALUES(7,?1)",
-                    [checksum(MIGRATION_V7)],
-                )?;
-            }
-            if previous_version < 8 {
-                tx.execute_batch(MIGRATION_V8)?;
-                tx.execute(
-                    "INSERT INTO schema_migrations(version,checksum) VALUES(8,?1)",
-                    [checksum(MIGRATION_V8)],
-                )?;
-            }
-            if previous_version < 9 {
-                tx.execute_batch(MIGRATION_V9)?;
-                tx.execute(
-                    "INSERT INTO schema_migrations(version,checksum) VALUES(9,?1)",
-                    [checksum(MIGRATION_V9)],
-                )?;
-            }
+            OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(backup_destination)?
+                .sync_all()?;
+
+            let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            apply_pending_migrations_tx(&tx, previous_version)?;
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             tx.commit()?;
         }
         validate(&db)?;
         drop(db);
         FileExt::unlock(&lock)?;
-        Ok(Self { path, cipher_key })
+        Ok(Self {
+            path,
+            cipher_key: Some(key),
+        })
     }
     /// Create a consistent, still-encrypted snapshot of the authoritative state,
     /// including committed WAL content, using SQLite's Online Backup API.
@@ -582,22 +675,37 @@ impl StateStore {
     pub fn create_project(&self, id: &str, name: &str) -> Result<()> {
         valid_id(id)?;
         valid_text(name)?;
-        self.connection()?.execute(
-            "INSERT INTO projects(id,name) VALUES(?1,?2)",
-            params![id, name],
-        )?;
+        let mut db = self.connection()?;
+        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        topics::create_legacy_project_tx(&tx, id, name)?;
+        tx.commit()?;
         Ok(())
     }
     pub fn get_project(&self, id: &str) -> Result<Option<Project>> {
         valid_id(id)?;
-        Ok(self
-            .connection()?
+        let db = self.read_connection()?;
+        if let Some(project) = db
             .query_row("SELECT id,name FROM projects WHERE id=?1", [id], |r| {
                 Ok(Project {
                     id: r.get(0)?,
                     name: r.get(1)?,
                 })
             })
+            .optional()?
+        {
+            return Ok(Some(project));
+        }
+        Ok(db
+            .query_row(
+                "SELECT id,name FROM topics WHERE id=?1 AND is_project=1",
+                [id],
+                |r| {
+                    Ok(Project {
+                        id: r.get(0)?,
+                        name: r.get(1)?,
+                    })
+                },
+            )
             .optional()?)
     }
     pub fn create_memory_claim(&self, claim: &MemoryClaim) -> Result<()> {
@@ -703,6 +811,36 @@ fn health(db: &Connection) -> Result<()> {
 fn checksum(sql: &str) -> String {
     format!("{:x}", Sha256::digest(sql.as_bytes()))
 }
+fn apply_pending_migrations_tx(
+    tx: &rusqlite::Transaction<'_>,
+    previous_version: i64,
+) -> Result<()> {
+    for (step, sql) in [
+        (1, MIGRATION_V1),
+        (2, MIGRATION_V2),
+        (3, MIGRATION_V3),
+        (4, MIGRATION_V4),
+        (5, MIGRATION_V5),
+        (6, MIGRATION_V6),
+        (7, MIGRATION_V7),
+        (8, MIGRATION_V8),
+        (9, MIGRATION_V9),
+        (10, MIGRATION_V10),
+    ] {
+        if previous_version < step {
+            tx.execute_batch(sql)?;
+            tx.execute(
+                "INSERT INTO schema_migrations(version,checksum) VALUES(?1,?2)",
+                params![step, checksum(sql)],
+            )?;
+            if step == 10 {
+                topics::backfill_v10_topics_and_projects(tx)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn validate(db: &Connection) -> Result<()> {
     validate_version(db, SCHEMA_VERSION)
 }
@@ -722,6 +860,7 @@ fn validate_version(db: &Connection, version: i64) -> Result<()> {
         (7, MIGRATION_V7),
         (8, MIGRATION_V8),
         (9, MIGRATION_V9),
+        (10, MIGRATION_V10),
     ] {
         if step > version {
             break;
@@ -760,6 +899,9 @@ fn validate_version(db: &Connection, version: i64) -> Result<()> {
         for record in records {
             verify_source_record(&record.map_err(|_| StateError::Corrupt)?)?;
         }
+    }
+    if version >= 10 {
+        curated::verify_curated_invariants_connection(db).map_err(|_| StateError::Corrupt)?;
     }
     Ok(())
 }

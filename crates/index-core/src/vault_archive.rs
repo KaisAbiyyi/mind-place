@@ -141,12 +141,23 @@ impl VaultCaptureStore {
     }
 
     pub fn open_state_store(&self) -> Result<StateStore> {
-        Ok(StateStore::open_encrypted(
-            self.root.join("state.sqlite3"),
-            self.derived_sqlcipher_key(b"state/sqlcipher/v1")?,
-            &self.gate,
-            self.lease,
-        )?)
+        const STATE_OPEN_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+        const STATE_OPEN_POLL: std::time::Duration = std::time::Duration::from_millis(20);
+        let key = self.derived_sqlcipher_key(b"state/sqlcipher/v1")?;
+        let state_path = self.root.join("state.sqlite3");
+        let started = std::time::Instant::now();
+        loop {
+            self.gate
+                .validate_lease(self.lease)
+                .map_err(|_| IndexError::Revoked)?;
+            match StateStore::open_encrypted(&state_path, key, &self.gate, self.lease) {
+                Ok(store) => return Ok(store),
+                Err(mind_place_state::StateError::Busy) if started.elapsed() < STATE_OPEN_WAIT => {
+                    std::thread::sleep(STATE_OPEN_POLL);
+                }
+                Err(err) => return Err(err.into()),
+            }
+        }
     }
 
     pub fn open_index_store(&self) -> Result<IndexStore> {
