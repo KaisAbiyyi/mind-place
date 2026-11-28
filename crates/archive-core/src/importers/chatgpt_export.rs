@@ -78,8 +78,38 @@ pub struct ChatGptExportConversation {
     pub create_time: Option<f64>,
     pub update_time: Option<f64>,
     pub current_node: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "unique_node_map")]
     pub mapping: HashMap<String, ChatGptNode>,
+}
+
+/// Error text for a `mapping` that repeats a key. Fixed and content-free: the key is never echoed.
+const DUPLICATE_NODE_KEY: &str = "ChatGPT mapping repeats a node key";
+
+/// Deserializes `mapping`, refusing a repeated key instead of silently keeping the last entry
+/// (which would drop a raw node from the projection without a trace).
+fn unique_node_map<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<HashMap<String, ChatGptNode>, D::Error> {
+    struct NodeMap;
+    impl<'de> serde::de::Visitor<'de> for NodeMap {
+        type Value = HashMap<String, ChatGptNode>;
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str("a map of conversation nodes")
+        }
+        fn visit_map<A: serde::de::MapAccess<'de>>(
+            self,
+            mut map: A,
+        ) -> Result<Self::Value, A::Error> {
+            let mut nodes = HashMap::new();
+            while let Some((key, node)) = map.next_entry::<String, ChatGptNode>()? {
+                if nodes.insert(key, node).is_some() {
+                    return Err(serde::de::Error::custom(DUPLICATE_NODE_KEY));
+                }
+            }
+            Ok(nodes)
+        }
+    }
+    deserializer.deserialize_map(NodeMap)
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -210,8 +240,13 @@ impl ChatGptExportParser {
         let raw_sha256 = format!("{:x}", Sha256::digest(&raw_bytes));
         let conv: ChatGptExportConversation = match serde_json::from_slice(&raw_bytes) {
             Ok(conv) => conv,
-            Err(_) => {
+            Err(error) => {
                 // The bytes are in hand: keep them. The reason never echoes record content.
+                let disposition_reason = if error.to_string().contains(DUPLICATE_NODE_KEY) {
+                    "ChatGPT conversation mapping repeats a node key; raw record preserved"
+                } else {
+                    "ChatGPT record is not a valid conversation object; raw record preserved"
+                };
                 return Ok(ReconciledItem::PreservedRawOnly {
                     evidence: RawEvidenceEnvelope {
                         provider: "chatgpt".into(),
@@ -221,9 +256,7 @@ impl ChatGptExportParser {
                         payload_sha256: raw_sha256,
                         metadata_json: serde_json::json!({"parse_failed": true}).to_string(),
                     },
-                    disposition_reason:
-                        "ChatGPT record is not a valid conversation object; raw record preserved"
-                            .into(),
+                    disposition_reason: disposition_reason.into(),
                     assets: vec![],
                 });
             }
@@ -368,14 +401,14 @@ impl ChatGptExportParser {
 
         let violated = dag_rule_violations(conv);
         if !violated.is_empty() {
-            // 2026 exports list no (or not all) children; the parent links alone still define
-            // the tree. Accepted only when nothing else is wrong and the parent links provably
-            // form one acyclic tree; every listed child already agrees with them.
+            // 2026 exports list no children at all; the parent links alone still define the
+            // tree. Accepted only when no node lists any child, nothing else is wrong, and the
+            // parent links provably form one acyclic tree.
             if !children_derivable_from_parents(conv, &violated) {
                 return BranchProjection::BranchingRefused(dag_refusal_reason(&violated));
             }
             warnings.push(
-                "Export nodes do not list all their children; branch structure was derived from parent links"
+                "Export nodes list no children; branch structure was derived from parent links"
                     .into(),
             );
         }
@@ -487,7 +520,9 @@ impl ChatGptExportParser {
                 return BranchProjection::Empty;
             }
 
-            warnings.push("current_node pointer missing from export; projection unverified".into());
+            warnings.push(
+                "current_node pointer missing or unusable in export; projection unverified".into(),
+            );
             note_omitted_empty(warnings, omitted_empty);
             record_completeness_gaps(warnings, gaps);
             return BranchProjection::PartialUnverified(ordered_messages);
@@ -802,11 +837,12 @@ pub(crate) fn dag_rule_violations(conv: &ChatGptExportConversation) -> BTreeSet<
     violated
 }
 
-/// Whether a DAG that broke only the `children`-listing rules can be read from its parent links
-/// alone: the violations are exclusively `child-not-listed` / `unreachable-or-cyclic` (so keys
-/// match ids, every parent exists, there is exactly one root, and every child that *is* listed
-/// exists, is listed once and names this node as its parent), and following `parent` from every
-/// node reaches that root without a cycle. Linear in the node count.
+/// Whether a DAG can be read from its parent links alone, as the 2026 export requires: **no node
+/// lists any child** (absent or empty `children` everywhere; a mixed export, where some parents
+/// list children and leave others out, contradicts itself and stays raw-only), the violations are
+/// exclusively `child-not-listed` / `unreachable-or-cyclic` (so keys match ids, every parent
+/// exists and there is exactly one root), and following `parent` from every node reaches that
+/// root without a cycle. Linear in the node count.
 pub(crate) fn children_derivable_from_parents(
     conv: &ChatGptExportConversation,
     violated: &BTreeSet<DagRule>,
@@ -814,6 +850,7 @@ pub(crate) fn children_derivable_from_parents(
     if !violated
         .iter()
         .all(|rule| matches!(rule, DagRule::ChildNotListed | DagRule::UnreachableOrCyclic))
+        || conv.mapping.values().any(|node| !node.children.is_empty())
     {
         return false;
     }
@@ -1271,6 +1308,16 @@ mod tests {
         m["s"] = dag_node("s", Some("s"), &[]);
         cases.push(("self-parent", m, "child-not-listed, unreachable-or-cyclic"));
 
+        // A mixed export: parents list children but leave a sibling out. That contradicts
+        // itself; only the uniform 2026 shape (no node lists any child) is derived.
+        let mut m = classic_mapping();
+        m["x"] = dag_node("x", Some("u"), &[]);
+        cases.push((
+            "mixed listing (sibling not listed)",
+            m,
+            "child-not-listed, unreachable-or-cyclic",
+        ));
+
         for (label, mapping, rules) in cases {
             let reason = dag_reason(mapping).unwrap_or_else(|| panic!("{label}: projected"));
             assert_eq!(
@@ -1454,6 +1501,33 @@ mod tests {
     }
 
     #[test]
+    fn a_repeated_mapping_key_is_never_resolved_silently() {
+        // serde_json::Value cannot hold a duplicate key, so the record is written by hand.
+        for children in ["", r#","children":["x"]"#] {
+            let record = format!(
+                r#"{{"id":"{ID}","current_node":"x","mapping":{{"root":{{"id":"root","parent":null{children},"message":null}},"x":{{"id":"x","parent":"root","children":[],"message":{{"id":"m1","author":{{"role":"user"}},"content":{{"content_type":"text","parts":["first"]}}}}}},"x":{{"id":"x","parent":"root","children":[],"message":{{"id":"m2","author":{{"role":"user"}},"content":{{"content_type":"text","parts":["second"]}}}}}}}}}}"#
+            );
+            let items =
+                ChatGptExportParser::parse_conversations_json(format!("[{record}]").as_bytes())
+                    .unwrap();
+            match &items[0] {
+                ReconciledItem::PreservedRawOnly {
+                    disposition_reason,
+                    evidence,
+                    ..
+                } => {
+                    assert_eq!(
+                        disposition_reason,
+                        "ChatGPT conversation mapping repeats a node key; raw record preserved"
+                    );
+                    assert_eq!(evidence.payload_bytes, record.as_bytes());
+                }
+                other => panic!("expected raw-only, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
     fn a_classic_export_never_carries_the_derivation_warning() {
         let ReconciledItem::Conversation { capture, .. } = parse_one(classic_mapping(), Some("a"))
         else {
@@ -1561,7 +1635,7 @@ mod tests {
             }
             for _ in 0..next(3) {
                 let i = next(count as u64) as usize;
-                match next(7) {
+                match next(8) {
                     0 => nodes[i].id = names[next(5) as usize].into(),
                     1 => nodes[i].parent = None,
                     2 => nodes[i].parent = Some(names[next(5) as usize].into()),
@@ -1571,7 +1645,9 @@ mod tests {
                         let again = nodes[i].children.clone();
                         nodes[i].children.extend(again);
                     }
-                    _ => nodes[i].children.reverse(),
+                    6 => nodes[i].children.reverse(),
+                    // The 2026 export shape: no node lists any child.
+                    _ => nodes.iter_mut().for_each(|node| node.children.clear()),
                 }
             }
             let mapping = nodes
@@ -1590,11 +1666,9 @@ mod tests {
             let old = pinned_old_valid_graph(&conv);
             let violated = dag_rule_violations(&conv);
             assert_eq!(violated.is_empty(), old, "{:?}", conv.mapping);
-            // The only intended widening: a DAG that breaks nothing but the children-listing
-            // rules, and whose children rebuilt from the parent links pass the old predicate.
-            let only_listing = violated
-                .iter()
-                .all(|r| matches!(r, DagRule::ChildNotListed | DagRule::UnreachableOrCyclic));
+            // The only intended widening, computed independently of the rule code: no node lists
+            // any child, and children rebuilt from the parent links pass the old predicate.
+            let uniform = conv.mapping.values().all(|node| node.children.is_empty());
             let mut rebuilt = conv.clone();
             for node in rebuilt.mapping.values_mut() {
                 node.children.clear();
@@ -1608,7 +1682,7 @@ mod tests {
                     }
                 }
             }
-            let expected = !old && only_listing && pinned_old_valid_graph(&rebuilt);
+            let expected = !old && uniform && pinned_old_valid_graph(&rebuilt);
             assert_eq!(
                 !old && children_derivable_from_parents(&conv, &violated),
                 expected,
